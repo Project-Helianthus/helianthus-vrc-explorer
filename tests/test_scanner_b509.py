@@ -44,6 +44,37 @@ class _HybridTransport(TransportInterface):
         raise TransportError("unmapped register")
 
 
+class _UnsupportedB524HybridTransport(TransportInterface):
+    def __init__(self) -> None:
+        self._send_calls = 0
+
+    def send(self, dst: int, payload: bytes) -> bytes:  # noqa: ARG002
+        self._send_calls += 1
+        if payload == bytes((0x00, 0x00, 0x00)):
+            return bytes.fromhex("00")
+        raise TransportError(f"unexpected b524 payload: {payload.hex()}")
+
+    def send_proto(
+        self,
+        dst: int,
+        primary: int,
+        secondary: int,
+        payload: bytes,
+        *,
+        expect_response: bool = True,
+    ) -> bytes:
+        _ = dst
+        _ = expect_response
+        if primary != 0xB5 or secondary != 0x09:
+            raise TransportError("unexpected proto selector")
+        if len(payload) != 3 or payload[0] != 0x0D:
+            raise TransportError("unexpected b509 payload")
+        register = (payload[1] << 8) | payload[2]
+        if register == 0x2700:
+            return bytes.fromhex("00")
+        raise TransportError("unmapped register")
+
+
 def _write_fixture_group_02(tmp_path: Path) -> Path:
     fixture = {
         "meta": {"dummy_transport": {"directory_terminator_group": "0x05"}},
@@ -85,3 +116,21 @@ def test_scan_vrc_adds_b509_dump_section(tmp_path: Path) -> None:
     assert regs["0x2700"]["reply_hex"] == "00"
     assert regs["0x2701"]["reply_hex"] == "004574616a00"
     assert regs["0x2702"]["error"] == "timeout"
+
+
+def test_scan_vrc_keeps_b509_when_b524_is_unsupported() -> None:
+    artifact = scan_vrc(
+        _UnsupportedB524HybridTransport(),
+        dst=0x15,
+        b509_ranges=[(0x2700, 0x2700)],
+    )
+
+    assert artifact["meta"]["b524_supported"] is False
+    assert artifact["meta"]["b524_skip_reason"] == "first_directory_probe_no_data"
+    assert artifact["groups"] == {}
+    assert artifact["meta"]["incomplete"] is False
+
+    b509_dump = artifact.get("b509_dump")
+    assert isinstance(b509_dump, dict)
+    devices = b509_dump["devices"]
+    assert devices["0x15"]["registers"]["0x2700"]["reply_hex"] == "00"

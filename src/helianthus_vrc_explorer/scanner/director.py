@@ -55,6 +55,10 @@ class ClassifiedGroup:
     descriptor_mismatch: bool
 
 
+class B524UnsupportedError(RuntimeError):
+    """Raised when directory probing indicates B524 is unsupported on target."""
+
+
 def _parse_directory_descriptor(resp: bytes, group: int) -> float:
     if len(resp) < 4:
         # A short response isn't evidence of a terminator (NaN). Treat it as a transient
@@ -106,6 +110,11 @@ def discover_groups(
                     level="warn",
                 )
             continue
+
+        if gg == 0x00 and resp == b"\x00":
+            raise B524UnsupportedError(
+                "B524 unsupported: directory probe GG=0x00 returned status-only 0x00"
+            )
 
         try:
             descriptor = _parse_directory_descriptor(resp, gg)

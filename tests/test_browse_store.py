@@ -106,3 +106,31 @@ def test_browse_store_prefers_register_class_over_tt_kind_for_tab() -> None:
     row = store.rows[0]
     assert row.register_key == "0x0021"
     assert row.tab == "state"
+
+
+def test_browse_store_hides_b524_protocol_when_no_groups_present() -> None:
+    artifact = {
+        "meta": {"destination_address": "0x15", "scan_timestamp": "2026-02-11T12:00:00Z"},
+        "groups": {},
+        "b509_dump": {
+            "meta": {"ranges": ["0x2700..0x2700"]},
+            "devices": {
+                "0x15": {
+                    "registers": {
+                        "0x2700": {
+                            "addr": "0x2700",
+                            "reply_hex": "00",
+                            "raw_hex": "",
+                            "value": None,
+                            "error": None,
+                        }
+                    }
+                }
+            },
+        },
+    }
+
+    store = BrowseStore.from_artifact(artifact)
+    node_ids = {node.node_id for node in store.tree_nodes}
+    assert "proto:b524" not in node_ids
+    assert "proto:b509" in node_ids

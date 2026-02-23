@@ -173,16 +173,18 @@ class BrowseStore:
                 _row_by_id={},
             )
 
-        tree_nodes.append(
-            TreeNodeRef(
-                node_id="proto:b524",
-                label="B524",
-                level="protocol",
-                protocol="b524",
+        group_keys = sorted((k for k in groups if isinstance(k, str)), key=_safe_int_hex)
+        if group_keys:
+            tree_nodes.append(
+                TreeNodeRef(
+                    node_id="proto:b524",
+                    label="B524",
+                    level="protocol",
+                    protocol="b524",
+                )
             )
-        )
 
-        for group_key in sorted((k for k in groups if isinstance(k, str)), key=_safe_int_hex):
+        for group_key in group_keys:
             group_obj = groups.get(group_key)
             if not isinstance(group_obj, dict):
                 continue
