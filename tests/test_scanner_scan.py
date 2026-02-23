@@ -66,6 +66,18 @@ class ConstraintAwareTransport(TransportInterface):
         return self._inner.send(dst, payload)
 
 
+class _B524UnsupportedTransport(TransportInterface):
+    def __init__(self) -> None:
+        self.calls: list[bytes] = []
+
+    def send(self, dst: int, payload: bytes) -> bytes:  # noqa: ARG002
+        self.calls.append(payload)
+        if payload == bytes((0x00, 0x00, 0x00)):
+            # status-only "no data" on first directory probe => unsupported B524
+            return b"\x00"
+        raise AssertionError(f"Unexpected payload after unsupported probe: {payload.hex()}")
+
+
 def _write_fixture_group_02(tmp_path: Path) -> Path:
     fixture = {
         "meta": {"dummy_transport": {"directory_terminator_group": "0x05"}},
@@ -219,6 +231,36 @@ def test_scan_b524_scans_all_instances_and_register_range(tmp_path: Path) -> Non
         rr for (gg, ii, rr) in transport.register_reads if gg == 0x02 and ii == 0x00
     }
     assert scanned_registers == set(range(0x25 + 1))
+
+
+def test_scan_b524_skips_flow_when_first_directory_probe_is_status_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sys
+
+    import helianthus_vrc_explorer.scanner.scan as scan_mod
+
+    transport = _B524UnsupportedTransport()
+
+    def _unexpected_planner(*_args, **_kwargs):
+        raise AssertionError("planner should not run when B524 is unsupported")
+
+    monkeypatch.setattr(scan_mod, "prompt_scan_plan", _unexpected_planner)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
+    artifact = scan_b524(
+        transport,
+        dst=0x15,
+        observer=_NoopObserver(),
+        console=Console(force_terminal=True),
+        planner_ui="classic",
+    )
+
+    assert artifact["meta"]["incomplete"] is False
+    assert artifact["meta"]["b524_supported"] is False
+    assert artifact["meta"]["b524_skip_reason"] == "first_directory_probe_no_data"
+    assert artifact["groups"] == {}
+    assert transport.calls == [bytes((0x00, 0x00, 0x00))]
 
 
 def test_scan_b524_collects_constraint_dictionary_entries(tmp_path: Path) -> None:
