@@ -1,6 +1,25 @@
-# HELIANTHUS VRC EXPLORER - MASTER PROMPT
+# AGENTS
 
-## PROJECT OVERVIEW
+This repository is part of the **Helianthus Multi-Protocol HVAC Gateway Platform**.
+
+## Dual-AI Operating Model
+
+All development follows the dual-AI orchestrator protocol defined in the workspace-root [`AGENTS.md`](../AGENTS.md):
+
+- **Orchestrator:** Claude Code — orchestration, hard dev (complexity 7–10), angry tester, deep consultant
+- **Co-Pilot:** Codex — adversarial planning, easy dev (complexity 1–6), code review, second opinions
+- Phases: Adversarial Planning → Smart Routing → Dual Code Review
+- Hard rules: one issue/PR per repo, squash+merge only, doc-gate, transport-gate, MCP-first
+
+See the root AGENTS.md for the full protocol, routing tables, system prompts, and invariants.
+
+---
+
+## Repo-Specific Rules
+
+## HELIANTHUS VRC EXPLORER - MASTER PROMPT
+
+### PROJECT OVERVIEW
 
 You are building `helianthus-vrc-explorer`, a professional CLI tool for scanning Vaillant VRC heating regulators via eBUS protocol (command B5 24 / B524 GetExtendedRegisters). The tool produces:
 
@@ -11,11 +30,11 @@ You are building `helianthus-vrc-explorer`, a professional CLI tool for scanning
 
 ---
 
-## OPERATING MODEL (ORCHESTRATOR + SUB-AGENTS)
+### OPERATING MODEL (ORCHESTRATOR + SUB-AGENTS)
 
 This repository is operated by an orchestrator that delegates every issue to a sub-agent to protect context and keep work resumable.
 
-### Core rules
+#### Core rules
 
 - One issue at a time. All non-bootstrap work happens on a branch via a PR.
 - Every issue is executed by a sub-agent (coder). Testing is executed by a separate sub-agent (tester).
@@ -23,13 +42,13 @@ This repository is operated by an orchestrator that delegates every issue to a s
 - Every new step is a new agent. Do not keep agents around "just in case".
 - End-of-milestone checkpoint: review all open issues for relevance and update scope/wording before starting the next milestone.
 
-### Merge gate (mandatory)
+#### Merge gate (mandatory)
 
 - Wait for CI to be green and for the GitHub review bot feedback on the PR.
 - If the bot requests changes, implement fixes and wait for feedback again.
 - Squash-merge only when everything is green and the maintainer explicitly says OK.
 
-### State persistence (mandatory)
+#### State persistence (mandatory)
 
 When a sub-agent starts working on an issue or PR, it must immediately add or update an **Agent State** section in the GitHub Issue or PR description (or a comment if the description is already busy).
 
@@ -50,21 +69,21 @@ Next steps:
 Notes (no secrets, no private infra):
 ```
 
-### Privacy / audit constraints (mandatory)
+#### Privacy / audit constraints (mandatory)
 
 - Do not commit or post private identifiers (IPs other than `127.0.0.1`, serial numbers, hostnames, internal repo names).
 - Local-only secrets and infrastructure details live in `AGENTS-local.md` (gitignored). This file must never be committed.
 
-### External references
+#### External references
 
 - Example data representations (myVaillant): https://github.com/signalkraft/myPyllant/tree/main/src/myPyllant/tests/data
 - Naming should follow myVaillant where applicable. Do not merge logically split registers (for example date + time).
 
 ---
 
-## PRODUCT REQUIREMENTS
+### PRODUCT REQUIREMENTS
 
-### Core Functionality
+#### Core Functionality
 
 **Scan VRC regulators using B524 protocol:**
 - Auto-discover register groups (GG) via directory probe
@@ -75,7 +94,7 @@ Notes (no secrets, no private infra):
 - Resolve enum values to human-readable strings
 - Handle errors gracefully (timeouts, missing registers, partial scans)
 
-### User Experience
+#### User Experience
 
 **Terminal output must be polished and informative:**
 - Header with device info (model, serial, firmware, hardware version)
@@ -85,7 +104,7 @@ Notes (no secrets, no private infra):
 - JSON file path printed at the end
 - Support for non-TTY environments (CI/CD pipelines)
 
-### Data Management
+#### Data Management
 
 **All configuration data is CSV-based (not embedded in code):**
 - `data/field_mappings.csv` - Register names, types, enums (auto-downloaded from GitHub)
@@ -140,9 +159,9 @@ model_number,marketing_name,ebus_model,notes
 
 ---
 
-## TECHNICAL REQUIREMENTS
+### TECHNICAL REQUIREMENTS
 
-### Architecture
+#### Architecture
 
 **Project structure:**
 
@@ -194,7 +213,7 @@ model_number,marketing_name,ebus_model,notes
         └── workflows/
             └── ci.yml                   # Linting + tests
 
-### Transport Layer
+#### Transport Layer
 
 **EbusdTcpTransport implementation:**
 
@@ -344,7 +363,7 @@ More examples proving weekday encoding:
 
 ---
 
-#### Protocol Family Summary Table
+##### Protocol Family Summary Table
 
     Opcode | Family Name       | Payload Len | Structure                         | Status
     -------|-------------------|-------------|-----------------------------------|----------
@@ -373,7 +392,7 @@ Observed TT tags (decoded today):
 
 ---
 
-### Implications for Tooling
+#### Implications for Tooling
 
 **Critical design decisions:**
 
@@ -437,7 +456,7 @@ def parse_b524_id(id_hex: str) -> dict:
 
 ---
 
-### Group Configuration
+#### Group Configuration
 
 **Known groups (hardcoded reference, validated against CSV):**
 
@@ -476,7 +495,7 @@ def parse_b524_id(id_hex: str) -> dict:
 
 **Scan all instances from 0x00 to ii_max** (do not stop at gaps, they are legitimate holes).
 
-### Schema Loading
+#### Schema Loading
 
 **CSV source:**
 
@@ -524,7 +543,7 @@ Extract enums from `divisor/values` column:
 
 **Fallback:** If register not in CSV, use type inference from response length.
 
-### CLI Interface
+#### CLI Interface
 
 The CLI is canonicalized via `--help` output. This prevents drift between:
 - README (user docs)
@@ -639,7 +658,7 @@ CI enforces this via `python scripts/check_docs_sync.py`.
 
 <!-- END CLI HELP:discover -->
 
-### Terminal UI
+#### Terminal UI
 
 **Session preface (printed once at start in TTY mode):**
 
@@ -698,7 +717,7 @@ Detect via `sys.stdout.isatty()`. If false:
 - a small preface + summary are printed to stderr,
 - stdout prints the JSON artifact path only (stable for scripting).
 
-### Browse UI (fullscreen Textual)
+#### Browse UI (fullscreen Textual)
 
 The project includes a fullscreen Textual browser for scan artifacts:
 - Launch directly: `python -m helianthus_vrc_explorer browse --file <artifact.json>`
@@ -714,7 +733,7 @@ Core UX:
 Notes:
 - P0 uses `--file` mode only (offline artifact). `--live` is planned.
 
-### JSON Output
+#### JSON Output
 
 **File path:**
 
@@ -790,7 +809,7 @@ Example: `./out/b524_scan_0x15_2026-02-06T194424Z.json`
       "scan_duration_seconds": 45.2
     }
 
-### Error Handling
+#### Error Handling
 
 **Transport setup (startup failures):**
 - If connecting to the **default** transport (`tcp://127.0.0.1:8888`) fails in an interactive TTY,
@@ -814,7 +833,7 @@ Example: `./out/b524_scan_0x15_2026-02-06T194424Z.json`
 - Add `"enum_resolved": "UNKNOWN_0x42"`
 - In final summary, suggest: "Found unknown enum values. Please report at https://github.com/user/helianthus-vrc-explorer/issues"
 
-### Field Mappings (Schema)
+#### Field Mappings (Schema)
 
 **Register-to-semantic-name mappings (from CSV):**
 
@@ -886,7 +905,7 @@ Example: `./out/b524_scan_0x15_2026-02-06T194424Z.json`
     GG=0x03, RR=0x001C (zone index/presence):
       0xFF -> "ABSENT_SLOT"
 
-### Testing Requirements
+#### Testing Requirements
 
 **Unit tests (pytest):**
 - `test_transport.py` - EbusdTcpTransport parsing, retry logic, error handling
@@ -924,7 +943,7 @@ Example: `./out/b524_scan_0x15_2026-02-06T194424Z.json`
           - run: pytest --cov --cov-report=xml
           - uses: codecov/codecov-action@v3
 
-### Development Workflow
+#### Development Workflow
 
 **Issue-driven development:**
 1. Each feature/bugfix gets a GitHub issue
@@ -951,7 +970,7 @@ Example: `./out/b524_scan_0x15_2026-02-06T194424Z.json`
 - No CSV parsing logic in PRs that modify CSV structure
 - Model database updates can be contributed by non-programmers
 
-### Code Quality Standards
+#### Code Quality Standards
 
 **Python version:** 3.12+
 
@@ -998,7 +1017,7 @@ Example: `./out/b524_scan_0x15_2026-02-06T194424Z.json`
 
 **Logging:** Use Python `logging` module, not print statements (except for final output)
 
-### README.md Structure
+#### README.md Structure
 
 **Include:**
 1. Project description (1-2 paragraphs)
@@ -1013,11 +1032,11 @@ Example: `./out/b524_scan_0x15_2026-02-06T194424Z.json`
 
 **Example:**
 
-    # Helianthus VRC Explorer
+    ## Helianthus VRC Explorer
 
     Professional CLI tool for scanning Vaillant VRC heating regulators via eBUS protocol.
 
-    ## Features
+    ### Features
 
     - Auto-discover register groups and instances
     - Parse typed values (float32, u16, u8, strings, dates, times)
@@ -1026,24 +1045,24 @@ Example: `./out/b524_scan_0x15_2026-02-06T194424Z.json`
     - JSON output for integration
     - CSV-based schema (contribute without coding)
 
-    ## Installation
+    ### Installation
 
         pip install helianthus-vrc-explorer
 
-    ## Quick Start
+    ### Quick Start
 
-        # Scan VRC at address 0x15
+        ## Scan VRC at address 0x15
         helianthus-vrc-explorer scan --dst 0x15
 
-    ## Contributing
+    ### Contributing
 
     See CONTRIBUTING.md
 
-    ## License
+    ### License
 
     GPLv3 - see LICENSE
 
-### AGENTS.md (For Codex Orchestration)
+#### AGENTS.md (For Codex Orchestration)
 
 **Include:**
 1. Project goals and architecture overview
@@ -1056,9 +1075,9 @@ Example: `./out/b524_scan_0x15_2026-02-06T194424Z.json`
 
 **Example structure:**
 
-    # Agent Orchestration Guide
+    ## Agent Orchestration Guide
 
-    ## Workflow
+    ### Workflow
 
     1. Pick next issue from milestone
     2. Create branch: `issue-<N>-<description>`
@@ -1069,23 +1088,23 @@ Example: `./out/b524_scan_0x15_2026-02-06T194424Z.json`
     7. Address feedback, push updates
     8. When approved + CI green -> squash merge
 
-    ## Quality Gates
+    ### Quality Gates
 
     - Linting: ruff + mypy (no warnings)
     - Tests: pytest coverage >80%
     - CI: All checks green
     - Review: @codex approval required
 
-    ## Data File Updates
+    ### Data File Updates
 
     CSV/JSON files in data/ and fixtures/ are edited via separate PRs.
     Do not mix code changes with data changes.
 
-    ## B524 Protocol Family (Reverse Engineering Notes)
+    ### B524 Protocol Family (Reverse Engineering Notes)
 
     [Full B524 protocol documentation from "B524 Protocol Family" section above]
 
-    ### Protocol Discovery Process
+    #### Protocol Discovery Process
 
     If you discover new B524 opcode families during development:
 
@@ -1117,22 +1136,22 @@ Example: `./out/b524_scan_0x15_2026-02-06T194424Z.json`
 
 ---
 
-## SCAN ALGORITHM
+### SCAN ALGORITHM
 
-### Phase: Group Discovery
+#### Phase: Group Discovery
 
 **Objective:** Identify all register groups (GG) supported by the device.
 
 **Method:**
 
     for GG in range(0x00, 0xFF):
-        # Build directory probe: opcode=0x00, GG, padding
+        ## Build directory probe: opcode=0x00, GG, padding
         payload = bytes([0x00, GG, 0x00])
         response = transport.send(B524Frame(dst=0x15, payload=payload))
         descriptor = struct.unpack('<f', response)[0]
 
         if descriptor == 0.0:
-            # Hole, skip
+            ## Hole, skip
             continue
 
         if math.isnan(descriptor):
@@ -1151,7 +1170,7 @@ Example: `./out/b524_scan_0x15_2026-02-06T194424Z.json`
       ...
       Terminator at GG=0x0D (NaN)
 
-### Sub-step: Group Classification (no progress bar)
+#### Sub-step: Group Classification (no progress bar)
 
 **Objective:** Map discovered groups to known names and warn about unknown types.
 
@@ -1167,7 +1186,7 @@ Example: `./out/b524_scan_0x15_2026-02-06T194424Z.json`
                 warn(f"Found group in unknown format type 6.0: GG={hex(GG)}")
             print(f"Group {hex(GG)} - Unknown (Type {descriptor})")
 
-### Phase: Constraint Probe (optional)
+#### Phase: Constraint Probe (optional)
 
 **Objective:** Probe the B524 constraint dictionary (`01 GG RR`) to discover min/max/step domains.
 
@@ -1177,14 +1196,14 @@ Example: `./out/b524_scan_0x15_2026-02-06T194424Z.json`
 - Some BASV2 setups return noisy/unreliable replies for opcode `0x01`; this is why it is off by default.
 - Only a subset of response type tags (TT) are currently supported (u8/u16/f32/date ranges).
 
-### Phase: Instance Discovery
+#### Phase: Instance Discovery
 
 **Objective:** For instanced groups (desc==1.0), identify which instance slots are populated.
 
 **Method (per group GG):**
 
     if descriptor != 1.0:
-        # Singleton or Type 6, no instance enumeration
+        ## Singleton or Type 6, no instance enumeration
         return
 
     ii_max = GROUP_CONFIG[GG]["ii_max"]
@@ -1204,7 +1223,7 @@ Presence is determined by group-specific heuristics in `src/helianthus_vrc_explo
 
 **Scan ALL instances 0x00..ii_max** (do not stop at gaps, they are legitimate holes).
 
-### Sub-step: Planner (preset + interactive overrides)
+#### Sub-step: Planner (preset + interactive overrides)
 
 **Objective:** Build a scan plan (enabled groups, instances, RR_max overrides) from a preset, then
 optionally allow the user to tweak the plan interactively (TTY only).
@@ -1214,7 +1233,7 @@ optionally allow the user to tweak the plan interactively (TTY only).
 - Interactive planner opens based on `--planner-ui` and TTY detection.
 - During Register Scan, `p` can reopen the planner to replan remaining work.
 
-### Phase: Register Scan
+#### Phase: Register Scan
 
 **Objective:** Read all registers within defined ranges for each present instance.
 
@@ -1222,16 +1241,16 @@ optionally allow the user to tweak the plan interactively (TTY only).
 
     rr_max = GROUP_CONFIG[GG]["rr_max"]
 
-    # Determine opcode based on group
+    ## Determine opcode based on group
     opcode = 0x06 if GG in {0x09, 0x0A, 0x0C} else 0x02
 
     for RR in range(0x00, rr_max + 1):
         try:
-            # Build payload: opcode, optype=0x00 (read), GG, II, RR (LE)
+            ## Build payload: opcode, optype=0x00 (read), GG, II, RR (LE)
             payload = struct.pack('<BBBBH', opcode, 0x00, GG, II, RR)
             raw_response = transport.send(B524Frame(dst=0x15, payload=payload))
 
-            # Strip 4-byte echo header
+            ## Strip 4-byte echo header
             value_bytes = raw_response[4:]
 
             parsed = parse_value(value_bytes, GG, II, RR)
@@ -1247,7 +1266,7 @@ optionally allow the user to tweak the plan interactively (TTY only).
 
 **Do NOT spam scrollback with every register read.** Only update live status line.
 
-### Phase: B509 Dump (post-scan)
+#### Phase: B509 Dump (post-scan)
 
 **Objective:** Dump a small range of B509 registers (proto `send_proto(dst, 0xB5, 0x09, ...)`) for
 supplementary identity/config coverage.
@@ -1255,7 +1274,7 @@ supplementary identity/config coverage.
 **Defaults:** If the B524 scan completes, the tool performs a B509 dump for `0x0000..0x00FF`.
 Override/extend via repeatable `--b509-range 0x0000..0x00FF` flags.
 
-### Final Summary
+#### Final Summary
 
 **Print to scrollback:**
 
@@ -1276,7 +1295,7 @@ Override/extend via repeatable `--b509-range 0x0000..0x00FF` flags.
 
 ---
 
-## EXAMPLE SESSION
+### EXAMPLE SESSION
 
 **Command:**
 
@@ -1360,7 +1379,7 @@ Override/extend via repeatable `--b509-range 0x0000..0x00FF` flags.
 
 ---
 
-## DELIVERABLES CHECKLIST
+### DELIVERABLES CHECKLIST
 
 **For Issue #1 Bootstrap:**
 
@@ -1389,7 +1408,7 @@ Override/extend via repeatable `--b509-range 0x0000..0x00FF` flags.
 
 ---
 
-## CRITICAL REMINDERS
+### CRITICAL REMINDERS
 
 1. **B524 is a protocol FAMILY, not a single opcode** - dispatch by first byte, parse accordingly
 2. **Use opcode 0x02 for local registers** (GG 0x00-0x04) and **opcode 0x06 for remote sensors** (GG 0x09, 0x0A, 0x0C)
@@ -1407,7 +1426,7 @@ Override/extend via repeatable `--b509-range 0x0000..0x00FF` flags.
 
 ---
 
-## NOTES FOR AGENT
+### NOTES FOR AGENT
 
 - Read this entire prompt carefully before starting
 - Clarify ambiguities before implementing
