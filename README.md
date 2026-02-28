@@ -1,6 +1,6 @@
 # helianthus-vrc-explorer
 
-[![CI](https://github.com/d3vi1/helianthus-vrc-explorer/actions/workflows/ci.yml/badge.svg)](https://github.com/d3vi1/helianthus-vrc-explorer/actions/workflows/ci.yml)
+[![CI](https://github.com/Project-Helianthus/helianthus-vrc-explorer/actions/workflows/ci.yml/badge.svg)](https://github.com/Project-Helianthus/helianthus-vrc-explorer/actions/workflows/ci.yml)
 
 Helianthus VRC Explorer is a professional CLI tool for scanning **Vaillant VRC-series heating regulators/controllers** (e.g. VRC 700/720) via eBUS (B5 24 / B524 GetExtendedRegisters). It focuses on safe, read-oriented discovery and produces a high-quality JSON artifact.
 
