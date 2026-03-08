@@ -246,7 +246,7 @@ def _entry_has_valid_value(entry: RegisterEntry) -> bool:
 
     if entry.get("error") is not None:
         return False
-    if entry.get("tt_kind") == "no_data":
+    if entry.get("flags_access") == "absent":
         return False
     raw_hex = entry.get("raw_hex")
     if raw_hex in (None, ""):

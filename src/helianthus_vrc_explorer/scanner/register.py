@@ -25,12 +25,12 @@ class RegisterEntry(TypedDict):
     # B524 register read opcode family used for this entry: 0x02 (local) or 0x06 (remote).
     read_opcode: str
     # Full raw reply payload (after ebusd length-prefix stripping), if available.
-    # For register reads this is typically: <TT> <GG> <RR_LO> <RR_HI> <VALUE_BYTES...>
+    # For register reads this is typically: <FLAGS> <GG> <RR_LO> <RR_HI> <VALUE_BYTES...>
     reply_hex: str | None
-    # TT byte extracted from the reply, if present.
-    tt: int | None
-    # Interpretation of TT (see user-observed semantics).
-    tt_kind: str | None
+    # FLAGS byte extracted from the reply, if present.
+    flags: int | None
+    # Access semantics derived from FLAGS and payload shape.
+    flags_access: str | None
     # Optional register name annotations.
     ebusd_name: str | None
     myvaillant_name: str | None
@@ -56,25 +56,23 @@ def opcode_for_group(group: int) -> RegisterOpcode:
     return 0x06 if group in _REMOTE_GROUPS else 0x02
 
 
-def _interpret_tt(tt: int) -> str:
-    """Interpret the leading TT byte of a B524 register reply.
+def _interpret_flags(flags: int, *, response_len: int) -> str:
+    """Interpret the leading FLAGS byte of a B524 register reply."""
 
-    User-observed semantics:
-    - 0x00: no data / not present / invalid
-    - 0x01: live/operational value
-    - 0x02: parameter/limit
-    - 0x03: parameter/config
-    """
+    if response_len == 1:
+        if flags == 0x00:
+            return "absent"
+        return "unknown_status"
 
-    match tt:
+    match flags:
         case 0x00:
-            return "no_data"
+            return "volatile_ro"
         case 0x01:
-            return "live"
+            return "stable_ro"
         case 0x02:
-            return "parameter_limit"
+            return "technical_rw"
         case 0x03:
-            return "parameter_config"
+            return "user_rw"
         case _:
             return "unknown"
 
@@ -212,8 +210,8 @@ def read_register(
         return {
             "read_opcode": read_opcode,
             "reply_hex": None,
-            "tt": None,
-            "tt_kind": None,
+            "flags": None,
+            "flags_access": None,
             "ebusd_name": None,
             "myvaillant_name": None,
             "raw_hex": None,
@@ -227,8 +225,8 @@ def read_register(
         return {
             "read_opcode": read_opcode,
             "reply_hex": None,
-            "tt": None,
-            "tt_kind": None,
+            "flags": None,
+            "flags_access": None,
             "ebusd_name": None,
             "myvaillant_name": None,
             "raw_hex": None,
@@ -238,17 +236,19 @@ def read_register(
         }
 
     reply_hex = response.hex()
-    tt: int | None = response[0] if response else None
-    tt_kind: str | None = _interpret_tt(tt) if tt is not None else None
+    flags: int | None = response[0] if response else None
+    flags_access: str | None = (
+        _interpret_flags(flags, response_len=len(response)) if flags is not None else None
+    )
 
     # Some registers respond with a single status byte (no GG/RR echo and no value bytes).
-    # We treat this as a valid "no data" reply rather than a decoder bug.
+    # We treat this as a valid "absent register" reply rather than a decoder bug.
     if len(response) == 1:
         return {
             "read_opcode": read_opcode,
             "reply_hex": reply_hex,
-            "tt": tt,
-            "tt_kind": tt_kind,
+            "flags": flags,
+            "flags_access": flags_access,
             "ebusd_name": None,
             "myvaillant_name": None,
             "raw_hex": None,
@@ -263,8 +263,8 @@ def read_register(
         return {
             "read_opcode": read_opcode,
             "reply_hex": reply_hex,
-            "tt": tt,
-            "tt_kind": tt_kind,
+            "flags": flags,
+            "flags_access": flags_access,
             "ebusd_name": None,
             "myvaillant_name": None,
             "raw_hex": None,
@@ -280,8 +280,8 @@ def read_register(
             return {
                 "read_opcode": read_opcode,
                 "reply_hex": reply_hex,
-                "tt": tt,
-                "tt_kind": tt_kind,
+                "flags": flags,
+                "flags_access": flags_access,
                 "ebusd_name": None,
                 "myvaillant_name": None,
                 "raw_hex": raw_hex,
@@ -293,8 +293,8 @@ def read_register(
             return {
                 "read_opcode": read_opcode,
                 "reply_hex": reply_hex,
-                "tt": tt,
-                "tt_kind": tt_kind,
+                "flags": flags,
+                "flags_access": flags_access,
                 "ebusd_name": None,
                 "myvaillant_name": None,
                 "raw_hex": raw_hex,
@@ -307,8 +307,8 @@ def read_register(
     return {
         "read_opcode": read_opcode,
         "reply_hex": reply_hex,
-        "tt": tt,
-        "tt_kind": tt_kind,
+        "flags": flags,
+        "flags_access": flags_access,
         "ebusd_name": None,
         "myvaillant_name": None,
         "raw_hex": raw_hex,
@@ -332,7 +332,7 @@ def is_instance_present(transport: TransportInterface, dst: int, group: int, ins
         )
         if entry["error"] is not None:
             return False
-        if entry.get("tt_kind") == "no_data":
+        if entry.get("flags_access") == "absent":
             return False
         value = entry["value"]
         if value is None:
@@ -347,7 +347,7 @@ def is_instance_present(transport: TransportInterface, dst: int, group: int, ins
         )
         if entry["error"] is not None:
             return False
-        if entry.get("tt_kind") == "no_data":
+        if entry.get("flags_access") == "absent":
             return False
         value = entry["value"]
         if not isinstance(value, int) or isinstance(value, bool):
@@ -361,7 +361,7 @@ def is_instance_present(transport: TransportInterface, dst: int, group: int, ins
         value_1 = entry_1["value"]
         if (
             entry_1["error"] is None
-            and entry_1.get("tt_kind") != "no_data"
+            and entry_1.get("flags_access") != "absent"
             and value_1 is not None
             and not (isinstance(value_1, float) and math.isnan(value_1))
         ):
@@ -372,7 +372,7 @@ def is_instance_present(transport: TransportInterface, dst: int, group: int, ins
         value_2 = entry_2["value"]
         return (
             entry_2["error"] is None
-            and entry_2.get("tt_kind") != "no_data"
+            and entry_2.get("flags_access") != "absent"
             and value_2 is not None
             and not (isinstance(value_2, float) and math.isnan(value_2))
         )
@@ -380,7 +380,7 @@ def is_instance_present(transport: TransportInterface, dst: int, group: int, ins
     if group == 0x0C:
         for rr in (0x0002, 0x0007, 0x000F, 0x0016):
             entry = read_register(transport, dst, 0x06, group=group, instance=instance, register=rr)
-            if entry["error"] is None and entry.get("tt_kind") != "no_data":
+            if entry["error"] is None and entry.get("flags_access") != "absent":
                 return True
         return False
 

@@ -45,10 +45,10 @@ def _tab_from_entry(entry: dict[str, Any]) -> BrowseTab:
     if register_class == "state":
         return "state"
 
-    tt_kind = entry.get("tt_kind")
-    if tt_kind == "parameter_config":
+    flags_access = entry.get("flags_access")
+    if flags_access == "user_rw":
         return "config"
-    if tt_kind == "parameter_limit":
+    if flags_access == "technical_rw":
         return "config_limits"
     return "state"
 

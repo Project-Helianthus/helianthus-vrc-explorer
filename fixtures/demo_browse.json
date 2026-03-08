@@ -34,8 +34,8 @@
               "raw_hex": "122109",
               "read_opcode": "0x02",
               "reply_hex": null,
-              "tt": 1,
-              "tt_kind": "live",
+              "flags": 1,
+              "flags_access": "stable_ro",
               "type": "HTI",
               "value": "12:21:09"
             },
@@ -46,8 +46,8 @@
               "raw_hex": "01",
               "read_opcode": "0x02",
               "reply_hex": null,
-              "tt": 3,
-              "tt_kind": "parameter_config",
+              "flags": 3,
+              "flags_access": "user_rw",
               "type": "BOOL",
               "value": true
             },
@@ -58,8 +58,8 @@
               "raw_hex": "010113",
               "read_opcode": "0x02",
               "reply_hex": null,
-              "tt": 3,
-              "tt_kind": "parameter_config",
+              "flags": 3,
+              "flags_access": "user_rw",
               "type": "HDA:3",
               "value": "2013-01-01"
             }
@@ -81,8 +81,8 @@
               "raw_hex": "01",
               "read_opcode": "0x02",
               "reply_hex": null,
-              "tt": 3,
-              "tt_kind": "parameter_config",
+              "flags": 3,
+              "flags_access": "user_rw",
               "type": "UCH",
               "value": 1
             },
@@ -93,8 +93,8 @@
               "raw_hex": "00004842",
               "read_opcode": "0x02",
               "reply_hex": null,
-              "tt": 2,
-              "tt_kind": "parameter_limit",
+              "flags": 2,
+              "flags_access": "technical_rw",
               "type": "EXP",
               "value": 50.0
             },
@@ -105,8 +105,8 @@
               "raw_hex": "00004242",
               "read_opcode": "0x02",
               "reply_hex": null,
-              "tt": 1,
-              "tt_kind": "live",
+              "flags": 1,
+              "flags_access": "stable_ro",
               "type": "EXP",
               "value": 48.5
             }
@@ -128,8 +128,8 @@
               "raw_hex": "00003642",
               "read_opcode": "0x02",
               "reply_hex": null,
-              "tt": 1,
-              "tt_kind": "live",
+              "flags": 1,
+              "flags_access": "stable_ro",
               "type": "EXP",
               "value": 45.5
             },
@@ -140,8 +140,8 @@
               "raw_hex": "9a99d93f",
               "read_opcode": "0x02",
               "reply_hex": null,
-              "tt": 3,
-              "tt_kind": "parameter_config",
+              "flags": 3,
+              "flags_access": "user_rw",
               "type": "EXP",
               "value": 1.7
             },
@@ -152,8 +152,8 @@
               "raw_hex": "00008c42",
               "read_opcode": "0x02",
               "reply_hex": null,
-              "tt": 2,
-              "tt_kind": "parameter_limit",
+              "flags": 2,
+              "flags_access": "technical_rw",
               "type": "EXP",
               "value": 70.0
             }
@@ -175,8 +175,8 @@
               "raw_hex": "0000b041",
               "read_opcode": "0x02",
               "reply_hex": null,
-              "tt": 2,
-              "tt_kind": "parameter_limit",
+              "flags": 2,
+              "flags_access": "technical_rw",
               "type": "EXP",
               "value": 22.0
             },
@@ -187,8 +187,8 @@
               "raw_hex": "0000a841",
               "read_opcode": "0x02",
               "reply_hex": null,
-              "tt": 1,
-              "tt_kind": "live",
+              "flags": 1,
+              "flags_access": "stable_ro",
               "type": "EXP",
               "value": 21.0
             },
@@ -199,8 +199,8 @@
               "raw_hex": "5a6f6e65203100",
               "read_opcode": "0x02",
               "reply_hex": null,
-              "tt": 3,
-              "tt_kind": "parameter_config",
+              "flags": 3,
+              "flags_access": "user_rw",
               "type": "STR:*",
               "value": "Zone 1"
             }

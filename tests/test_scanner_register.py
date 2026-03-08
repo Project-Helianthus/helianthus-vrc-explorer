@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from helianthus_vrc_explorer.scanner.register import is_instance_present, read_register
+from helianthus_vrc_explorer.scanner.register import (
+    _interpret_flags,
+    is_instance_present,
+    read_register,
+)
 from helianthus_vrc_explorer.transport.base import (
     TransportCommandNotEnabled,
     TransportError,
@@ -144,12 +148,23 @@ def test_read_register_status_only_response_is_not_decode_error() -> None:
     )
 
     assert entry["reply_hex"] == "00"
-    assert entry["tt"] == 0x00
-    assert entry["tt_kind"] == "no_data"
+    assert entry["flags"] == 0x00
+    assert entry["flags_access"] == "absent"
     assert entry["raw_hex"] is None
     assert entry["type"] is None
     assert entry["value"] is None
     assert entry["error"] is None
+
+
+def test_flags_interpretation_single_byte() -> None:
+    assert _interpret_flags(0x00, response_len=1) == "absent"
+
+
+def test_flags_interpretation_multi_byte() -> None:
+    assert _interpret_flags(0x00, response_len=7) == "volatile_ro"
+    assert _interpret_flags(0x01, response_len=7) == "stable_ro"
+    assert _interpret_flags(0x02, response_len=7) == "technical_rw"
+    assert _interpret_flags(0x03, response_len=7) == "user_rw"
 
 
 def test_read_register_infers_hex_for_unparseable_u24_values() -> None:
@@ -165,8 +180,8 @@ def test_read_register_infers_hex_for_unparseable_u24_values() -> None:
     )
 
     assert entry["reply_hex"] == "030035000e3803"
-    assert entry["tt"] == 0x03
-    assert entry["tt_kind"] == "parameter_config"
+    assert entry["flags"] == 0x03
+    assert entry["flags_access"] == "user_rw"
     assert entry["raw_hex"] == "0e3803"
     assert entry["type"] == "HEX:3"
     assert entry["value"] == "0x0e3803"

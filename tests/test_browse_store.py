@@ -18,7 +18,7 @@ def _sample_artifact() -> dict[str, object]:
                             "0x0001": {
                                 "value": 1.0,
                                 "raw_hex": "00",
-                                "tt_kind": "parameter_config",
+                                "flags_access": "user_rw",
                                 "read_opcode": "0x02",
                                 "ebusd_name": "regulator_param_1",
                             },
@@ -26,14 +26,14 @@ def _sample_artifact() -> dict[str, object]:
                                 "value": 2.0,
                                 "value_display": "HEATING_OR_COOLING (HEATING)",
                                 "raw_hex": "0102",
-                                "tt_kind": "parameter_limit",
+                                "flags_access": "technical_rw",
                                 "read_opcode": "0x06",
                                 "myvaillant_name": "limit_value",
                             },
                             "0x0003": {
                                 "value": 3.0,
                                 "raw_hex": "03",
-                                "tt_kind": "live_operational",
+                                "flags_access": "stable_ro",
                                 "read_opcode": "0x02",
                             },
                         }
@@ -81,7 +81,7 @@ def test_browse_store_filters_rows_for_tree_selection() -> None:
     assert len(store.rows_for_selection(group_node, tab="state")) == 1
 
 
-def test_browse_store_prefers_register_class_over_tt_kind_for_tab() -> None:
+def test_browse_store_prefers_register_class_over_flags_access_for_tab() -> None:
     artifact = {
         "meta": {"destination_address": "0x15", "scan_timestamp": "2026-02-11T12:00:00Z"},
         "groups": {
@@ -93,7 +93,7 @@ def test_browse_store_prefers_register_class_over_tt_kind_for_tab() -> None:
                             "0x0021": {
                                 "value": 37,
                                 "raw_hex": "25",
-                                "tt_kind": "parameter_limit",
+                                "flags_access": "technical_rw",
                                 "register_class": "state",
                             }
                         }

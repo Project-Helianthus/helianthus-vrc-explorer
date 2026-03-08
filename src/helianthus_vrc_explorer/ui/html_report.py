@@ -931,7 +931,8 @@ __ARTIFACT_JSON__
             }
 
             const tipParts = [];
-            if (entry.tt_kind) tipParts.push(`tt_kind=${entry.tt_kind}`);
+            if (typeof entry.flags !== "undefined" && entry.flags !== null) tipParts.push(`flags=${entry.flags}`);
+            if (entry.flags_access) tipParts.push(`flags_access=${entry.flags_access}`);
             if (entry.reply_hex) tipParts.push(`reply_hex=${entry.reply_hex}`);
             if (entry.type) tipParts.push(`original_type=${entry.type}`);
             if (typeof entry.value !== "undefined") tipParts.push(`original_value=${formatValue(entry.value)}`);
