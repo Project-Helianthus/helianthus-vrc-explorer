@@ -14,6 +14,7 @@ from helianthus_vrc_explorer.cli import (
     _format_fw,
     _load_default_dry_run_fixture_text,
     _load_ebus_model_name_map,
+    _probe_group_descriptor,
     _probe_scan_identity,
     _resolve_scan_destination,
     app,
@@ -556,3 +557,24 @@ def test_resolve_scan_destination_auto_retries_0704_probe_once() -> None:
     assert _resolve_scan_destination(transport, dst="auto") == 0x15
     # 1 wake-up + 2 probe attempts.
     assert transport.send_proto_calls == 3
+
+
+def test_probe_group_descriptor_returns_zero() -> None:
+    transport = _AutoResolveTransport(
+        info_lines=[],
+        ident_payloads={},
+        descriptors={0x15: struct.pack("<f", 0.0)},
+    )
+
+    assert _probe_group_descriptor(transport, dst=0x15, group=0x00) == 0.0
+
+
+def test_resolve_scan_destination_accepts_zero_descriptor() -> None:
+    vaillant_ident = bytes.fromhex("b556524320373230662f3205071704")
+    transport = _AutoResolveTransport(
+        info_lines=[f"address 15: {_ROLE_TARGET_TOKEN}, scanned Vaillant;XYZ"],
+        ident_payloads={0x15: vaillant_ident},
+        descriptors={0x15: struct.pack("<f", 0.0)},
+    )
+
+    assert _resolve_scan_destination(transport, dst="auto") == 0x15

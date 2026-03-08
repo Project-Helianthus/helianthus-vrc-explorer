@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 class GroupConfig(TypedDict):
+    # Informational: last-observed descriptor value. NOT a structural authority.
     desc: float
     name: str
     ii_max: int
@@ -38,6 +39,7 @@ GROUP_CONFIG: Final[dict[int, GroupConfig]] = {
     0x0A: {"desc": 1.0, "name": "Radio Sensors VR92", "ii_max": 0x0A, "rr_max": 0x3F},
     0x0C: {"desc": 1.0, "name": "Remote Accessories / FM5 Slots", "ii_max": 0x0A, "rr_max": 0x2F},
 }
+KNOWN_CORE_GROUPS: Final[frozenset[int]] = frozenset({0x02, 0x03})
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,7 +81,7 @@ def discover_groups(
     """Phase A: Probe GG=0x00..0xFF via directory probe (opcode 0x00).
 
     Terminator logic: stop on the first NaN descriptor.
-    Holes (descriptor==0.0) are skipped.
+    Descriptor `0.0` is a weak negative hint only: known core groups remain candidates.
     """
 
     discovered: list[DiscoveredGroup] = []
@@ -125,7 +127,18 @@ def discover_groups(
             continue
 
         if descriptor == 0.0:
-            # Hole: skip without changing terminator logic.
+            if gg in KNOWN_CORE_GROUPS:
+                discovered.append(DiscoveredGroup(group=gg, descriptor=descriptor))
+                if observer is not None:
+                    observer.log(
+                        f"GG=0x{gg:02X} descriptor=0.0 but known core group - included",
+                        level="info",
+                    )
+            elif observer is not None:
+                observer.log(
+                    f"GG=0x{gg:02X} descriptor=0.0, non-core group - skipped (weak hint)",
+                    level="info",
+                )
             continue
 
         if math.isnan(descriptor):
@@ -151,7 +164,7 @@ def classify_groups(
 ) -> list[ClassifiedGroup]:
     """Phase C (per issue wording): Map discovered groups using GROUP_CONFIG.
 
-    Emits a warning when a known group's descriptor doesn't match `GROUP_CONFIG`.
+    Descriptors are opaque hints, not structural authority.
     """
 
     classified: list[ClassifiedGroup] = []
@@ -172,7 +185,7 @@ def classify_groups(
         expected = config["desc"]
         mismatch = expected != group.descriptor
         if mismatch:
-            logger.warning(
+            logger.info(
                 "Descriptor mismatch for GG=0x%02X: expected %s, got %s",
                 group.group,
                 expected,
@@ -182,7 +195,7 @@ def classify_groups(
                 observer.log(
                     f"Descriptor mismatch for GG=0x{group.group:02X}: "
                     f"expected {expected}, got {group.descriptor}",
-                    level="warn",
+                    level="info",
                 )
         classified.append(
             ClassifiedGroup(

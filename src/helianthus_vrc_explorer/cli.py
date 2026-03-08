@@ -431,8 +431,9 @@ def _probe_group_descriptor(
         if len(response) < 4:
             continue
         descriptor = struct.unpack("<f", response[:4])[0]
-        if math.isnan(descriptor) or descriptor == 0.0:
+        if math.isnan(descriptor):
             continue
+        # Any valid 4-byte directory reply is transport-level evidence that B524 is supported.
         return descriptor
     return None
 

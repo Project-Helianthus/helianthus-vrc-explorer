@@ -8,6 +8,7 @@ import pytest
 
 from helianthus_vrc_explorer.scanner.director import (
     GROUP_CONFIG,
+    KNOWN_CORE_GROUPS,
     DiscoveredGroup,
     classify_groups,
     discover_groups,
@@ -32,15 +33,24 @@ class RecordingTransport(TransportInterface):
         return self._inner.send(dst, payload)
 
 
-def _write_directory_fixture(tmp_path: Path) -> Path:
+def _write_directory_fixture(
+    tmp_path: Path,
+    *,
+    groups: dict[str, dict[str, object]] | None = None,
+    terminator_group: str | None = "0x05",
+) -> Path:
     fixture = {
-        "meta": {"dummy_transport": {"directory_terminator_group": "0x05"}},
-        "groups": {
+        "meta": {"dummy_transport": {}},
+        "groups": groups
+        if groups is not None
+        else {
             "0x00": {"descriptor_type": 3.0, "instances": {}},
             # Intentional hole at 0x01/0x02 (unknown groups => descriptor==0.0)
             "0x03": {"descriptor_type": 1.0, "instances": {}},
         },
     }
+    if terminator_group is not None:
+        fixture["meta"]["dummy_transport"]["directory_terminator_group"] = terminator_group
     fixture_path = tmp_path / "fixture.json"
     fixture_path.write_text(json.dumps(fixture), encoding="utf-8")
     return fixture_path
@@ -51,11 +61,65 @@ def test_discover_groups_stops_after_first_nan_and_skips_holes(tmp_path: Path) -
 
     discovered = discover_groups(transport, dst=0x15)
 
-    # Holes (descriptor==0.0) should not be recorded as discovered groups.
-    assert [group.group for group in discovered] == [0x00, 0x03]
+    # Known core groups remain scan candidates even when descriptor==0.0.
+    assert [group.group for group in discovered] == [0x00, 0x02, 0x03]
 
     # Terminator is triggered by the first NaN (GG=0x05), so probing stops there.
     assert transport.probed_groups == [0x00, 0x01, 0x02, 0x03, 0x04, 0x05]
+
+
+def test_discover_groups_includes_core_with_zero_descriptor(tmp_path: Path) -> None:
+    fixture_path = _write_directory_fixture(
+        tmp_path,
+        groups={
+            "0x00": {"descriptor_type": 3.0, "instances": {}},
+            "0x02": {"descriptor_type": 0.0, "instances": {}},
+        },
+        terminator_group="0x04",
+    )
+    transport = RecordingTransport(DummyTransport(fixture_path))
+
+    discovered = discover_groups(transport, dst=0x15)
+
+    assert frozenset({0x02, 0x03}) == KNOWN_CORE_GROUPS
+    assert [group.group for group in discovered] == [0x00, 0x02, 0x03]
+
+
+def test_discover_groups_skips_non_core_known_with_zero_descriptor(tmp_path: Path) -> None:
+    fixture_path = _write_directory_fixture(
+        tmp_path,
+        groups={
+            "0x00": {"descriptor_type": 3.0, "instances": {}},
+            "0x09": {"descriptor_type": 0.0, "instances": {}},
+        },
+        terminator_group="0x0A",
+    )
+    transport = RecordingTransport(DummyTransport(fixture_path))
+
+    discovered = discover_groups(transport, dst=0x15)
+
+    assert [group.group for group in discovered] == [0x00, 0x02, 0x03]
+    assert 0x09 in transport.probed_groups
+
+
+def test_discover_groups_skips_unknown_with_zero_descriptor(tmp_path: Path) -> None:
+    fixture_path = _write_directory_fixture(tmp_path, groups={}, terminator_group=None)
+    transport = RecordingTransport(DummyTransport(fixture_path))
+
+    discovered = discover_groups(transport, dst=0x15)
+
+    assert [group.group for group in discovered] == [0x02, 0x03]
+    assert transport.probed_groups[0] == 0x00
+    assert transport.probed_groups[-1] == 0xFF
+    assert 0xFF not in [group.group for group in discovered]
+
+
+def test_discover_groups_still_terminates_on_nan(tmp_path: Path) -> None:
+    transport = RecordingTransport(DummyTransport(_write_directory_fixture(tmp_path)))
+
+    discover_groups(transport, dst=0x15)
+
+    assert transport.probed_groups[-1] == 0x05
 
 
 class FlakyDirectoryTransport(TransportInterface):
@@ -102,21 +166,24 @@ def test_discover_groups_does_not_terminate_on_transient_transport_failures(tmp_
 
     discovered = discover_groups(transport, dst=0x15)
 
-    assert [group.group for group in discovered] == [0x00, 0x03]
+    assert [group.group for group in discovered] == [0x00, 0x02, 0x03]
     # Failures at 0x04/0x05/0x06 must not terminate discovery early.
     assert transport.probed_groups == [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]
 
 
-def test_classify_groups_warns_on_descriptor_mismatch(
+def test_classify_groups_logs_descriptor_mismatch_at_info(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    caplog.set_level(logging.WARNING, logger="helianthus_vrc_explorer.scanner.director")
+    caplog.set_level(logging.INFO, logger="helianthus_vrc_explorer.scanner.director")
 
     classified = classify_groups([DiscoveredGroup(group=0x02, descriptor=3.0)])
 
     assert classified[0].descriptor_mismatch is True
     assert classified[0].expected_descriptor == 1.0
-    assert any("Descriptor mismatch for GG=0x02" in record.message for record in caplog.records)
+    assert any(
+        record.levelno == logging.INFO and "Descriptor mismatch for GG=0x02" in record.message
+        for record in caplog.records
+    )
 
 
 def test_group_00_rr_max_is_0x00ff() -> None:
