@@ -68,7 +68,13 @@ def _ensure_type_overrides_dict(meta: dict[str, Any]) -> dict[str, Any]:
     return overrides
 
 
-def get_row_type_override(artifact: dict[str, Any], *, group_key: str, rr_key: str) -> str | None:
+def get_row_type_override(
+    artifact: dict[str, Any],
+    *,
+    group_key: str,
+    rr_key: str,
+    namespace_key: str | None = None,
+) -> str | None:
     meta = artifact.get("meta")
     if not isinstance(meta, dict):
         return None
@@ -78,6 +84,14 @@ def get_row_type_override(artifact: dict[str, Any], *, group_key: str, rr_key: s
     group_overrides = overrides.get(group_key)
     if not isinstance(group_overrides, dict):
         return None
+    if namespace_key is not None:
+        namespaces = group_overrides.get("namespaces")
+        if isinstance(namespaces, dict):
+            namespace_overrides = namespaces.get(namespace_key)
+            if isinstance(namespace_overrides, dict):
+                value = namespace_overrides.get(rr_key)
+                if isinstance(value, str):
+                    return value
     value = group_overrides.get(rr_key)
     return value if isinstance(value, str) else None
 
@@ -88,6 +102,7 @@ def set_row_type_override(
     group_key: str,
     rr_key: str,
     type_spec: str,
+    namespace_key: str | None = None,
 ) -> None:
     meta = _ensure_meta_dict(artifact)
     overrides = _ensure_type_overrides_dict(meta)
@@ -95,11 +110,40 @@ def set_row_type_override(
     if not isinstance(group_overrides, dict):
         group_overrides = {}
         overrides[group_key] = group_overrides
-    group_overrides[rr_key] = type_spec
+    if namespace_key is None:
+        group_overrides[rr_key] = type_spec
+        return
+    namespaces = group_overrides.get("namespaces")
+    if not isinstance(namespaces, dict):
+        namespaces = {}
+        group_overrides["namespaces"] = namespaces
+    namespace_overrides = namespaces.get(namespace_key)
+    if not isinstance(namespace_overrides, dict):
+        namespace_overrides = {}
+        namespaces[namespace_key] = namespace_overrides
+    namespace_overrides[rr_key] = type_spec
+
+
+def _group_instances(group_obj: dict[str, Any], *, namespace_key: str | None) -> dict[str, Any]:
+    if namespace_key is not None and bool(group_obj.get("dual_namespace")):
+        namespaces = group_obj.get("namespaces")
+        if not isinstance(namespaces, dict):
+            return {}
+        namespace_obj = namespaces.get(namespace_key)
+        if not isinstance(namespace_obj, dict):
+            return {}
+        instances = namespace_obj.get("instances")
+        return instances if isinstance(instances, dict) else {}
+    instances = group_obj.get("instances")
+    return instances if isinstance(instances, dict) else {}
 
 
 def _iter_row_entries(
-    artifact: dict[str, Any], *, group_key: str, rr_key: str
+    artifact: dict[str, Any],
+    *,
+    group_key: str,
+    rr_key: str,
+    namespace_key: str | None = None,
 ) -> Iterator[dict[str, Any]]:
     groups = artifact.get("groups")
     if not isinstance(groups, dict):
@@ -107,9 +151,7 @@ def _iter_row_entries(
     group_obj = groups.get(group_key)
     if not isinstance(group_obj, dict):
         return
-    instances = group_obj.get("instances")
-    if not isinstance(instances, dict):
-        return
+    instances = _group_instances(group_obj, namespace_key=namespace_key)
     for instance_obj in instances.values():
         if not isinstance(instance_obj, dict):
             continue
@@ -137,11 +179,23 @@ def apply_row_type_override(
     group_key: str,
     rr_key: str,
     type_spec: str,
+    namespace_key: str | None = None,
 ) -> None:
     """Apply a per-row override and recompute values/errors for all instances in that row."""
 
-    set_row_type_override(artifact, group_key=group_key, rr_key=rr_key, type_spec=type_spec)
-    for entry in _iter_row_entries(artifact, group_key=group_key, rr_key=rr_key):
+    set_row_type_override(
+        artifact,
+        group_key=group_key,
+        rr_key=rr_key,
+        type_spec=type_spec,
+        namespace_key=namespace_key,
+    )
+    for entry in _iter_row_entries(
+        artifact,
+        group_key=group_key,
+        rr_key=rr_key,
+        namespace_key=namespace_key,
+    ):
         raw_hex = entry.get("raw_hex")
         if not isinstance(raw_hex, str) or not raw_hex:
             continue
@@ -178,6 +232,8 @@ def _sorted_hex_keys(keys: Sequence[str]) -> list[str]:
 class _Sheet:
     group_key: str
     name: str
+    namespace_key: str | None
+    namespace_label: str | None
     descriptor: float | None
     instance_keys: list[str]
     rr_keys: list[str]
@@ -192,24 +248,6 @@ def _build_sheets(artifact: dict[str, Any]) -> list[_Sheet]:
     for group_key, group_obj in groups.items():
         if not isinstance(group_key, str) or not isinstance(group_obj, dict):
             continue
-        instances = group_obj.get("instances")
-        if not isinstance(instances, dict):
-            continue
-        instance_keys = _sorted_hex_keys([k for k in instances if isinstance(k, str)])
-
-        rr_key_set: set[str] = set()
-        for instance_obj in instances.values():
-            if not isinstance(instance_obj, dict):
-                continue
-            registers = instance_obj.get("registers")
-            if not isinstance(registers, dict):
-                continue
-            for rr_key in registers:
-                if isinstance(rr_key, str):
-                    rr_key_set.add(rr_key)
-
-        rr_keys = _sorted_hex_keys(sorted(rr_key_set))
-
         descriptor_obj = group_obj.get(
             "descriptor_observed",
             group_obj.get("descriptor_type"),
@@ -220,15 +258,55 @@ def _build_sheets(artifact: dict[str, Any]) -> list[_Sheet]:
         else:
             descriptor = None
 
-        sheets.append(
-            _Sheet(
-                group_key=group_key,
-                name=str(group_obj.get("name") or "Unknown"),
-                descriptor=descriptor,
-                instance_keys=instance_keys,
-                rr_keys=rr_keys,
+        namespace_views: list[tuple[str | None, str | None, dict[str, Any]]]
+        if bool(group_obj.get("dual_namespace")):
+            namespaces = group_obj.get("namespaces")
+            if not isinstance(namespaces, dict):
+                continue
+            namespace_views = []
+            for namespace_key in _sorted_hex_keys([k for k in namespaces if isinstance(k, str)]):
+                namespace_obj = namespaces.get(namespace_key)
+                if not isinstance(namespace_obj, dict):
+                    continue
+                label_obj = namespace_obj.get("label")
+                namespace_label = label_obj if isinstance(label_obj, str) else namespace_key
+                namespace_views.append(
+                    (
+                        namespace_key,
+                        namespace_label,
+                        _group_instances(group_obj, namespace_key=namespace_key),
+                    )
+                )
+        else:
+            namespace_views = [(None, None, _group_instances(group_obj, namespace_key=None))]
+
+        for ns_key, ns_label, instances in namespace_views:
+            instance_keys = _sorted_hex_keys([k for k in instances if isinstance(k, str)])
+
+            rr_key_set: set[str] = set()
+            for instance_obj in instances.values():
+                if not isinstance(instance_obj, dict):
+                    continue
+                registers = instance_obj.get("registers")
+                if not isinstance(registers, dict):
+                    continue
+                for rr_key in registers:
+                    if isinstance(rr_key, str):
+                        rr_key_set.add(rr_key)
+
+            rr_keys = _sorted_hex_keys(sorted(rr_key_set))
+
+            sheets.append(
+                _Sheet(
+                    group_key=group_key,
+                    name=str(group_obj.get("name") or "Unknown"),
+                    namespace_key=ns_key,
+                    namespace_label=ns_label,
+                    descriptor=descriptor,
+                    instance_keys=instance_keys,
+                    rr_keys=rr_keys,
+                )
             )
-        )
 
     sheets.sort(key=lambda s: int(s.group_key, 0))
     return sheets
@@ -283,7 +361,12 @@ def _cell_text(entry: dict[str, Any] | None, *, selected: bool) -> Text:
 
 
 def _get_entry(
-    artifact: dict[str, Any], *, group_key: str, instance_key: str, rr_key: str
+    artifact: dict[str, Any],
+    *,
+    group_key: str,
+    instance_key: str,
+    rr_key: str,
+    namespace_key: str | None = None,
 ) -> dict[str, Any] | None:
     groups = artifact.get("groups")
     if not isinstance(groups, dict):
@@ -291,9 +374,7 @@ def _get_entry(
     group_obj = groups.get(group_key)
     if not isinstance(group_obj, dict):
         return None
-    instances = group_obj.get("instances")
-    if not isinstance(instances, dict):
-        return None
+    instances = _group_instances(group_obj, namespace_key=namespace_key)
     instance_obj = instances.get(instance_key)
     if not isinstance(instance_obj, dict):
         return None
@@ -311,6 +392,7 @@ def _render(
 ) -> RenderableType:
     sheet = state.sheets[state.sheet_idx]
     group_key = sheet.group_key
+    namespace_key = sheet.namespace_key
 
     # Viewport sizing.
     term_w = console.size.width
@@ -346,6 +428,11 @@ def _render(
         ("  ", ""),
         (sheet.name, "white"),
         ("  ", ""),
+        (
+            sheet.namespace_label if isinstance(sheet.namespace_label, str) else "single namespace",
+            "magenta",
+        ),
+        ("  ", ""),
         (f"desc={sheet.descriptor:g}" if sheet.descriptor is not None else "desc=?"),
         ("  ", ""),
         (f"[{state.sheet_idx + 1}/{len(state.sheets)}]", "dim"),
@@ -355,10 +442,19 @@ def _render(
         style="dim",
     )
 
-    override = get_row_type_override(artifact, group_key=group_key, rr_key=selected_rr_key)
+    override = get_row_type_override(
+        artifact,
+        group_key=group_key,
+        rr_key=selected_rr_key,
+        namespace_key=namespace_key,
+    )
     selected_entry = (
         _get_entry(
-            artifact, group_key=group_key, instance_key=selected_ii_key, rr_key=selected_rr_key
+            artifact,
+            group_key=group_key,
+            instance_key=selected_ii_key,
+            rr_key=selected_rr_key,
+            namespace_key=namespace_key,
         )
         if selected_rr_key and selected_ii_key
         else None
@@ -367,7 +463,9 @@ def _render(
     raw_len = _value_len_bytes(selected_entry) if isinstance(selected_entry, dict) else None
 
     details_lines: list[str] = []
-    details_lines.append(f"Selected: RR={selected_rr_key} II={selected_ii_key}")
+    details_lines.append(
+        f"Selected: NS={sheet.namespace_label or '-'} RR={selected_rr_key} II={selected_ii_key}"
+    )
     details_lines.append(
         f"type={selected_entry.get('type') if selected_entry else None} override={override}"
     )
@@ -383,7 +481,13 @@ def _render(
     for rr in visible_rr:
         row_cells: list[RenderableType] = [Text(rr, style="magenta")]
         for ii in visible_ii:
-            entry = _get_entry(artifact, group_key=group_key, instance_key=ii, rr_key=rr)
+            entry = _get_entry(
+                artifact,
+                group_key=group_key,
+                instance_key=ii,
+                rr_key=rr,
+                namespace_key=namespace_key,
+            )
             selected = (ii == selected_ii_key) and (rr == selected_rr_key)
             row_cells.append(_cell_text(entry, selected=selected))
         table.add_row(*row_cells)
@@ -533,7 +637,10 @@ def run_results_viewer(console: Console, artifact: dict[str, Any]) -> bool:
 
                     # Use an existing override, or fall back to the first cell's type.
                     current = get_row_type_override(
-                        artifact, group_key=sheet.group_key, rr_key=rr_key
+                        artifact,
+                        group_key=sheet.group_key,
+                        rr_key=rr_key,
+                        namespace_key=sheet.namespace_key,
                     )
                     if current is None:
                         first_entry = _get_entry(
@@ -541,13 +648,17 @@ def run_results_viewer(console: Console, artifact: dict[str, Any]) -> bool:
                             group_key=sheet.group_key,
                             instance_key=sheet.instance_keys[state.col_idx],
                             rr_key=rr_key,
+                            namespace_key=sheet.namespace_key,
                         )
                         current = first_entry.get("type") if isinstance(first_entry, dict) else None
 
                     # Determine byte length from the first entry in the row with raw bytes.
                     row_len: int | None = None
                     for entry in _iter_row_entries(
-                        artifact, group_key=sheet.group_key, rr_key=rr_key
+                        artifact,
+                        group_key=sheet.group_key,
+                        rr_key=rr_key,
+                        namespace_key=sheet.namespace_key,
                     ):
                         row_len = _value_len_bytes(entry)
                         if row_len is not None:
@@ -561,6 +672,7 @@ def run_results_viewer(console: Console, artifact: dict[str, Any]) -> bool:
                                 group_key=sheet.group_key,
                                 rr_key=rr_key,
                                 type_spec=next_type,
+                                namespace_key=sheet.namespace_key,
                             )
                             state.dirty = True
 

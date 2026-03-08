@@ -44,6 +44,59 @@ def _sample_artifact() -> dict[str, object]:
     }
 
 
+def _dual_namespace_artifact() -> dict[str, object]:
+    return {
+        "meta": {
+            "destination_address": "0x15",
+            "scan_timestamp": "2026-02-11T12:00:00Z",
+        },
+        "groups": {
+            "0x09": {
+                "name": "Radio Sensors VRC7xx",
+                "dual_namespace": True,
+                "namespaces": {
+                    "0x02": {
+                        "label": "local",
+                        "instances": {
+                            "0x00": {
+                                "present": True,
+                                "registers": {
+                                    "0x0001": {
+                                        "value": 20.5,
+                                        "raw_hex": "0000a441",
+                                        "flags_access": "stable_ro",
+                                        "read_opcode": "0x02",
+                                        "read_opcode_label": "local",
+                                        "myvaillant_name": "temperature_local",
+                                    }
+                                },
+                            }
+                        },
+                    },
+                    "0x06": {
+                        "label": "remote",
+                        "instances": {
+                            "0x00": {
+                                "present": True,
+                                "registers": {
+                                    "0x0001": {
+                                        "value": 21.0,
+                                        "raw_hex": "0000a841",
+                                        "flags_access": "user_rw",
+                                        "read_opcode": "0x06",
+                                        "read_opcode_label": "remote",
+                                        "myvaillant_name": "temperature_remote",
+                                    }
+                                },
+                            }
+                        },
+                    },
+                },
+            }
+        },
+    }
+
+
 def test_browse_store_builds_rows_and_left_tree_uses_only_myvaillant_name() -> None:
     store = BrowseStore.from_artifact(_sample_artifact())
     assert store.device_label == "Device 0x15"
@@ -61,6 +114,7 @@ def test_browse_store_builds_rows_and_left_tree_uses_only_myvaillant_name() -> N
     assert by_register["0x0001"].ebusd_name == "regulator_param_1"
     assert by_register["0x0002"].myvaillant_name == "limit_value"
     assert by_register["0x0002"].ebusd_name == ""
+    assert by_register["0x0001"].access_flags == "user_rw"
 
     by_node_id = {node.node_id: node for node in store.tree_nodes}
     assert by_node_id["proto:b524"].label == "B524"
@@ -79,6 +133,40 @@ def test_browse_store_filters_rows_for_tree_selection() -> None:
     assert len(store.rows_for_selection(protocol_node, tab="config")) == 1
     assert len(store.rows_for_selection(group_node, tab="config_limits")) == 1
     assert len(store.rows_for_selection(group_node, tab="state")) == 1
+
+
+def test_browse_store_builds_namespace_nodes_for_dual_namespace_groups() -> None:
+    store = BrowseStore.from_artifact(_dual_namespace_artifact())
+
+    by_node_id = {node.node_id: node for node in store.tree_nodes}
+    assert by_node_id["b524:group:0x09"].label == "Radio Sensors VRC7xx (0x09)"
+    assert by_node_id["b524:ns:0x09:0x02"].label == "Local (0x02)"
+    assert by_node_id["b524:ns:0x09:0x06"].label == "Remote (0x06)"
+
+    row_ids = {row.row_id for row in store.rows}
+    assert row_ids == {
+        "0x09:0x02:0x00:0x0001",
+        "0x09:0x06:0x00:0x0001",
+    }
+
+    local_row = next(row for row in store.rows if row.namespace_key == "0x02")
+    remote_row = next(row for row in store.rows if row.namespace_key == "0x06")
+    assert local_row.namespace_label == "local"
+    assert remote_row.namespace_label == "remote"
+    assert local_row.access_flags == "stable_ro"
+    assert remote_row.access_flags == "user_rw"
+
+
+def test_browse_store_filters_rows_for_namespace_selection() -> None:
+    store = BrowseStore.from_artifact(_dual_namespace_artifact())
+    local_node = next(node for node in store.tree_nodes if node.node_id == "b524:ns:0x09:0x02")
+    remote_node = next(node for node in store.tree_nodes if node.node_id == "b524:ns:0x09:0x06")
+
+    local_rows = store.rows_for_selection(local_node, tab="state")
+    remote_rows = store.rows_for_selection(remote_node, tab="config")
+
+    assert [row.namespace_key for row in local_rows] == ["0x02"]
+    assert [row.namespace_key for row in remote_rows] == ["0x06"]
 
 
 def test_browse_store_prefers_register_class_over_flags_access_for_tab() -> None:

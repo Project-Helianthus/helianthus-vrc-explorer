@@ -38,3 +38,63 @@ def test_html_report_supports_b509_tab_and_dual_naming() -> None:
     assert "B509 Dump" in html
     assert "Hide timeouts" in html
     assert "ebusd: " in html
+
+
+def test_html_report_renders_namespace_totals_and_flags_access_for_dual_namespace_groups() -> None:
+    artifact = {
+        "meta": {"destination_address": "0x15", "scan_timestamp": "2026-02-11T00:00:00Z"},
+        "groups": {
+            "0x09": {
+                "name": "Radio Sensors VRC7xx",
+                "dual_namespace": True,
+                "namespaces": {
+                    "0x02": {
+                        "label": "local",
+                        "instances": {
+                            "0x00": {
+                                "registers": {
+                                    "0x0001": {
+                                        "raw_hex": "0000a441",
+                                        "type": "EXP",
+                                        "value": 20.5,
+                                        "error": None,
+                                        "flags_access": "stable_ro",
+                                        "read_opcode": "0x02",
+                                        "read_opcode_label": "local",
+                                        "myvaillant_name": "temperature_local",
+                                    }
+                                }
+                            }
+                        },
+                    },
+                    "0x06": {
+                        "label": "remote",
+                        "instances": {
+                            "0x00": {
+                                "registers": {
+                                    "0x0001": {
+                                        "raw_hex": "0000a841",
+                                        "type": "EXP",
+                                        "value": 21.0,
+                                        "error": None,
+                                        "flags_access": "user_rw",
+                                        "read_opcode": "0x06",
+                                        "read_opcode_label": "remote",
+                                        "myvaillant_name": "temperature_remote",
+                                    }
+                                }
+                            }
+                        },
+                    },
+                },
+            }
+        },
+    }
+
+    html = render_html_report(artifact, title="test")
+
+    assert "Namespace Totals" in html
+    assert "FLAGS Access" in html
+    assert "Radio Sensors VRC7xx" in html
+    assert '"label":"local"' in html
+    assert '"label":"remote"' in html

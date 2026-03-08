@@ -11,6 +11,8 @@ ProtocolKey = Literal["b524", "b509"]
 class RegisterAddress:
     protocol: ProtocolKey
     group_key: str | None
+    namespace_key: str | None
+    namespace_label: str | None
     instance_key: str | None
     register_key: str
     read_opcode: str | None
@@ -30,6 +32,8 @@ class RegisterRow:
     row_id: str
     protocol: ProtocolKey
     group_key: str | None
+    namespace_key: str | None
+    namespace_label: str | None
     group_name: str
     instance_key: str | None
     register_key: str
@@ -49,7 +53,7 @@ class RegisterRow:
     search_blob: str
 
 
-TreeNodeLevel = Literal["root", "protocol", "group", "instance", "range"]
+TreeNodeLevel = Literal["root", "protocol", "group", "namespace", "instance", "range"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,5 +63,7 @@ class TreeNodeRef:
     level: TreeNodeLevel
     protocol: ProtocolKey | None = None
     group_key: str | None = None
+    namespace_key: str | None = None
+    namespace_label: str | None = None
     instance_key: str | None = None
     range_key: str | None = None

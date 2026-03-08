@@ -359,7 +359,7 @@ def run_browse_from_artifact(
                 "Value",
                 "Raw",
                 "Unit",
-                "Access",
+                "FLAGS Access",
                 "Last Update",
                 "Age",
                 "Δ",
@@ -391,6 +391,7 @@ def run_browse_from_artifact(
             self._tree_node_by_ref = {"root": root}
             protocols: dict[str, Any] = {}
             groups: dict[tuple[str, str], Any] = {}
+            namespaces: dict[tuple[str, str, str], Any] = {}
             for node in self._store.tree_nodes:
                 if node.level == "root":
                     continue
@@ -412,11 +413,28 @@ def run_browse_from_artifact(
                     self._tree_node_by_ref[node.node_id] = group_node
                     continue
                 if (
+                    node.level == "namespace"
+                    and node.protocol is not None
+                    and node.group_key is not None
+                    and node.namespace_key is not None
+                ):
+                    parent = groups.get((node.protocol, node.group_key))
+                    if parent is None:
+                        continue
+                    namespace_node = parent.add(node.label, data=node.node_id)
+                    namespaces[(node.protocol, node.group_key, node.namespace_key)] = namespace_node
+                    self._tree_node_by_ref[node.node_id] = namespace_node
+                    continue
+                if (
                     node.level == "instance"
                     and node.group_key is not None
                     and node.protocol is not None
                 ):
-                    parent = groups.get((node.protocol, node.group_key))
+                    parent = (
+                        namespaces.get((node.protocol, node.group_key, node.namespace_key))
+                        if node.namespace_key is not None
+                        else groups.get((node.protocol, node.group_key))
+                    )
                     if parent is None:
                         continue
                     instance_node = parent.add(node.label, data=node.node_id)
@@ -434,6 +452,18 @@ def run_browse_from_artifact(
 
         def _current_node(self) -> TreeNodeRef | None:
             return self._node_by_id.get(self._selected_node_id)
+
+        def _selection_label(self, node: TreeNodeRef | None) -> str:
+            if node is None:
+                return "root"
+            return node.label
+
+        def _selection_namespace_label(self, node: TreeNodeRef | None) -> str:
+            if node is None:
+                return "all"
+            if node.namespace_label:
+                return node.namespace_label
+            return "all"
 
         def _refresh_table(self) -> None:
             table = self.query_one("#browse-table", DataTable)
@@ -472,8 +502,8 @@ def run_browse_from_artifact(
             if self._table_rows:
                 table.move_cursor(row=min(cursor, len(self._table_rows) - 1))
             status_text = (
-                f"Rows: {len(self._table_rows)} | Selection: {self._selected_node_id} | "
-                f"Tab: {self._active_tab}"
+                f"Rows: {len(self._table_rows)} | Selection: {self._selection_label(selected)} | "
+                f"Namespace: {self._selection_namespace_label(selected)} | Tab: {self._active_tab}"
             )
             self._set_status(status_text)
 
@@ -762,7 +792,16 @@ def run_browse_from_artifact(
             group_obj = groups.get(row.group_key)
             if not isinstance(group_obj, dict):
                 return None
-            instances = group_obj.get("instances")
+            if row.namespace_key is not None and bool(group_obj.get("dual_namespace")):
+                namespaces = group_obj.get("namespaces")
+                if not isinstance(namespaces, dict):
+                    return None
+                namespace_obj = namespaces.get(row.namespace_key)
+                if not isinstance(namespace_obj, dict):
+                    return None
+                instances = namespace_obj.get("instances")
+            else:
+                instances = group_obj.get("instances")
             if not isinstance(instances, dict):
                 return None
             instance_obj = instances.get(row.instance_key)

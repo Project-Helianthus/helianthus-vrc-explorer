@@ -279,6 +279,67 @@ _TEMPLATE = """<!doctype html>
         font-family: var(--sans);
       }
 
+      .section-title {
+        font-size: 16px;
+        font-weight: 650;
+      }
+
+      .summary-grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .summary-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        font-size: 12px;
+      }
+
+      .summary-chip strong {
+        color: var(--ink);
+      }
+
+      .table-title {
+        margin: 8px 0 6px;
+        font-size: 14px;
+        font-weight: 650;
+        color: var(--ink);
+      }
+
+      .access-chip {
+        display: inline-flex;
+        align-items: center;
+        padding: 2px 7px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-family: var(--mono);
+        border: 1px solid transparent;
+      }
+
+      .access-ro {
+        color: #c7ffd9;
+        background: rgba(78, 194, 116, 0.18);
+        border-color: rgba(78, 194, 116, 0.32);
+      }
+
+      .access-rw {
+        color: #ffd9a6;
+        background: rgba(255, 166, 77, 0.18);
+        border-color: rgba(255, 166, 77, 0.32);
+      }
+
+      .access-other {
+        color: var(--muted);
+        background: rgba(255, 255, 255, 0.05);
+        border-color: rgba(255, 255, 255, 0.08);
+      }
+
       @media (max-width: 860px) {
         .page {
           padding: 22px 14px 54px;
@@ -303,6 +364,11 @@ _TEMPLATE = """<!doctype html>
           <span class="pill" id="metaIncomplete" style="display: none"></span>
         </div>
       </header>
+
+      <section class="sheet-card">
+        <div class="section-title">Namespace Totals</div>
+        <div class="summary-grid" id="summaryChips"></div>
+      </section>
 
       <section class="sheet-card">
         <div class="tabs" id="tabs"></div>
@@ -360,8 +426,13 @@ __ARTIFACT_JSON__
 
       function getGroupObject(groupObj) {
         if (!groupObj || typeof groupObj !== "object") return { name: "Unknown", instances: {} };
-        // New schema: { name, descriptor_observed, instances: { "0x00": { present, registers: {...} } } }
-        if (groupObj.instances && typeof groupObj.instances === "object") return groupObj;
+        // Artifact v2: groups may be single-namespace via `instances` or dual-namespace via `namespaces`.
+        if (
+          (groupObj.instances && typeof groupObj.instances === "object") ||
+          (groupObj.namespaces && typeof groupObj.namespaces === "object")
+        ) {
+          return groupObj;
+        }
         // Legacy-ish: groupObj might itself be an instances map.
         return { name: "Unknown", instances: groupObj };
       }
@@ -526,16 +597,117 @@ __ARTIFACT_JSON__
 
       const tabsEl = document.getElementById("tabs");
       const sheetArea = document.getElementById("sheetArea");
+      const summaryChips = document.getElementById("summaryChips");
 
-      function getRowOverride(groupKey, rrKey) {
+      function getRowOverride(groupKey, rrKey, namespaceKey = null) {
         const g = state.overrides && state.overrides[groupKey];
-        return g && typeof g === "object" ? g[rrKey] : null;
+        if (!g || typeof g !== "object") return null;
+        if (namespaceKey && g.namespaces && typeof g.namespaces === "object") {
+          const ns = g.namespaces[namespaceKey];
+          if (ns && typeof ns === "object" && typeof ns[rrKey] === "string") return ns[rrKey];
+        }
+        return typeof g[rrKey] === "string" ? g[rrKey] : null;
       }
 
-      function setRowOverride(groupKey, rrKey, typeSpec) {
+      function setRowOverride(groupKey, rrKey, typeSpec, namespaceKey = null) {
         if (!state.overrides || typeof state.overrides !== "object") state.overrides = {};
         if (!state.overrides[groupKey] || typeof state.overrides[groupKey] !== "object") state.overrides[groupKey] = {};
+        if (namespaceKey) {
+          if (!state.overrides[groupKey].namespaces || typeof state.overrides[groupKey].namespaces !== "object") {
+            state.overrides[groupKey].namespaces = {};
+          }
+          if (!state.overrides[groupKey].namespaces[namespaceKey] || typeof state.overrides[groupKey].namespaces[namespaceKey] !== "object") {
+            state.overrides[groupKey].namespaces[namespaceKey] = {};
+          }
+          state.overrides[groupKey].namespaces[namespaceKey][rrKey] = typeSpec;
+          return;
+        }
         state.overrides[groupKey][rrKey] = typeSpec;
+      }
+
+      function namespaceLabel(namespaceKey, label) {
+        const raw = typeof label === "string" && label ? label : (namespaceKey || "single");
+        if (!namespaceKey) return raw;
+        if (raw.startsWith("0x")) return raw;
+        return `${raw.charAt(0).toUpperCase()}${raw.slice(1)} (${namespaceKey})`;
+      }
+
+      function accessChipClass(accessValue) {
+        const text = String(accessValue || "").trim();
+        if (text === "stable_ro" || text === "volatile_ro") return "access-chip access-ro";
+        if (text === "technical_rw" || text === "user_rw") return "access-chip access-rw";
+        return "access-chip access-other";
+      }
+
+      function appendAccessBadges(cell, accessValues) {
+        if (!accessValues.length) {
+          cell.innerHTML = "<div class='cell-missing'>—</div>";
+          return;
+        }
+        for (const accessValue of accessValues) {
+          const badge = document.createElement("span");
+          badge.className = accessChipClass(accessValue);
+          badge.textContent = accessValue;
+          cell.appendChild(badge);
+        }
+      }
+
+      function countRegisters(instancesObj) {
+        let count = 0;
+        if (!instancesObj || typeof instancesObj !== "object") return 0;
+        for (const instanceObj of Object.values(instancesObj)) {
+          if (!instanceObj || typeof instanceObj !== "object") continue;
+          const registers = instanceObj.registers;
+          if (!registers || typeof registers !== "object") continue;
+          count += Object.keys(registers).length;
+        }
+        return count;
+      }
+
+      function renderSummaryChips(groupsRoot) {
+        summaryChips.innerHTML = "";
+        const totals = new Map();
+        let totalRegisters = 0;
+
+        for (const groupKey of sortedHexKeys(Object.keys(groupsRoot || {}))) {
+          const groupObj = getGroupObject(groupsRoot[groupKey]);
+          if (groupObj.dual_namespace && groupObj.namespaces && typeof groupObj.namespaces === "object") {
+            for (const namespaceKey of sortedHexKeys(Object.keys(groupObj.namespaces))) {
+              const namespaceObj = groupObj.namespaces[namespaceKey];
+              if (!namespaceObj || typeof namespaceObj !== "object") continue;
+              const label = typeof namespaceObj.label === "string" ? namespaceObj.label : namespaceKey;
+              const count = countRegisters(namespaceObj.instances);
+              totalRegisters += count;
+              totals.set(label, (totals.get(label) || 0) + count);
+            }
+            continue;
+          }
+
+          const instances = groupObj.instances && typeof groupObj.instances === "object" ? groupObj.instances : {};
+          for (const instanceObj of Object.values(instances)) {
+            if (!instanceObj || typeof instanceObj !== "object") continue;
+            const registers = instanceObj.registers && typeof instanceObj.registers === "object" ? instanceObj.registers : {};
+            for (const entry of Object.values(registers)) {
+              if (!entry || typeof entry !== "object") continue;
+              const label = typeof entry.read_opcode_label === "string" && entry.read_opcode_label
+                ? entry.read_opcode_label
+                : (typeof entry.read_opcode === "string" && entry.read_opcode ? entry.read_opcode : "single");
+              totalRegisters += 1;
+              totals.set(label, (totals.get(label) || 0) + 1);
+            }
+          }
+        }
+
+        const chips = [["total", totalRegisters], ...Array.from(totals.entries())];
+        for (const [label, count] of chips) {
+          const chip = document.createElement("div");
+          chip.className = "summary-chip";
+          const strong = document.createElement("strong");
+          strong.textContent = label;
+          chip.appendChild(strong);
+          chip.appendChild(document.createTextNode(` ${count}`));
+          summaryChips.appendChild(chip);
+        }
       }
 
       function _isB509Tab(tabId) {
@@ -767,94 +939,110 @@ __ARTIFACT_JSON__
         }
 
         const groupObj = getGroupObject(groupsRoot[groupKey]);
-        const instancesObj = groupObj.instances || {};
-        const instanceKeys = sortedHexKeys(Object.keys(instancesObj));
-
-        let rrSet = new Set();
-        for (const iiKey of instanceKeys) {
-          const inst = getInstanceObject(instancesObj[iiKey]);
-          const regs = inst.registers || {};
-          for (const rrKey of Object.keys(regs)) rrSet.add(rrKey);
-        }
-        const rrKeys = sortedHexKeys(Array.from(rrSet));
-
-        const wrap = document.createElement("div");
-        wrap.className = "table-wrap";
-
-        const table = document.createElement("table");
-        const thead = document.createElement("thead");
-        const trHead = document.createElement("tr");
-        const th0 = document.createElement("th");
-        th0.className = "offset-cell";
         const groupName = typeof groupObj.name === "string" && groupObj.name ? groupObj.name : "Unknown";
-        th0.innerHTML = `Register <span style="opacity:.7;font-weight:500">(${groupKey} · ${groupName})</span>`;
-        trHead.appendChild(th0);
-        for (const iiKey of instanceKeys) {
-          const th = document.createElement("th");
-          const inst = getInstanceObject(instancesObj[iiKey]);
-          const present = inst.present === false ? " (absent)" : "";
-          th.textContent = `${iiKey}${present}`;
-          trHead.appendChild(th);
-        }
-        thead.appendChild(trHead);
-        table.appendChild(thead);
 
-        const tbody = document.createElement("tbody");
-
-        for (const rrKey of rrKeys) {
-          // Pick a row label/name from any instance that has an entry.
-          let rowMyvaillantName = "";
-          let rowEbusdNames = new Set();
-          let rowTypeDefault = null;
-          let rowLen = null;
+        function buildGroupTable(title, instancesObj, namespaceKey = null) {
+          const instanceKeys = sortedHexKeys(Object.keys(instancesObj || {}));
+          let rrSet = new Set();
           for (const iiKey of instanceKeys) {
             const inst = getInstanceObject(instancesObj[iiKey]);
             const regs = inst.registers || {};
-            const entry = regs && typeof regs === "object" ? regs[rrKey] : null;
-            if (!entry || typeof entry !== "object") continue;
-            if (!rowMyvaillantName && typeof entry.myvaillant_name === "string" && entry.myvaillant_name) {
-              rowMyvaillantName = entry.myvaillant_name;
-            }
-            if (typeof entry.ebusd_name === "string" && entry.ebusd_name) {
-              rowEbusdNames.add(entry.ebusd_name);
-            }
-            if (!rowTypeDefault && typeof entry.type === "string" && entry.type) rowTypeDefault = entry.type;
-            if (rowLen === null && typeof entry.raw_hex === "string" && entry.raw_hex) {
-              const b = bytesFromHex(entry.raw_hex);
-              if (b) rowLen = b.length;
-            }
+            for (const rrKey of Object.keys(regs)) rrSet.add(rrKey);
+          }
+          const rrKeys = sortedHexKeys(Array.from(rrSet));
+
+          const fragment = document.createElement("div");
+          const heading = document.createElement("div");
+          heading.className = "table-title";
+          heading.textContent = title;
+          fragment.appendChild(heading);
+
+          if (!rrKeys.length) {
+            const empty = document.createElement("div");
+            empty.className = "subtitle";
+            empty.textContent = "No registers scanned.";
+            fragment.appendChild(empty);
+            return fragment;
           }
 
-          const ebusdNameList = Array.from(rowEbusdNames);
-          ebusdNameList.sort();
+          const wrap = document.createElement("div");
+          wrap.className = "table-wrap";
 
-          const override = getRowOverride(groupKey, rrKey);
-          const rowType = override || rowTypeDefault;
-          const candidates = candidateTypeSpecsForLength(rowLen || 0);
-          const selectedType = rowType || (candidates[0] || null);
+          const table = document.createElement("table");
+          const thead = document.createElement("thead");
+          const trHead = document.createElement("tr");
+          const th0 = document.createElement("th");
+          th0.className = "offset-cell";
+          th0.innerHTML = `Register <span style="opacity:.7;font-weight:500">(${groupKey} · ${groupName})</span>`;
+          trHead.appendChild(th0);
 
-          const tr = document.createElement("tr");
+          const flagsTh = document.createElement("th");
+          flagsTh.textContent = "FLAGS Access";
+          trHead.appendChild(flagsTh);
 
-          const td0 = document.createElement("td");
-          td0.className = "offset-cell";
-          const label = document.createElement("div");
-          label.className = "offset-label";
-          label.textContent = rrKey;
-          td0.appendChild(label);
+          for (const iiKey of instanceKeys) {
+            const th = document.createElement("th");
+            const inst = getInstanceObject(instancesObj[iiKey]);
+            const present = inst.present === false ? " (absent)" : "";
+            th.textContent = `${iiKey}${present}`;
+            trHead.appendChild(th);
+          }
+          thead.appendChild(trHead);
+          table.appendChild(thead);
 
-          const hasNames = rowMyvaillantName || ebusdNameList.length;
-          if (hasNames) {
+          const tbody = document.createElement("tbody");
+          for (const rrKey of rrKeys) {
+            let rowMyvaillantName = "";
+            let rowEbusdNames = new Set();
+            let rowTypeDefault = null;
+            let rowLen = null;
+            let rowFlagsAccess = new Set();
+
+            for (const iiKey of instanceKeys) {
+              const inst = getInstanceObject(instancesObj[iiKey]);
+              const regs = inst.registers || {};
+              const entry = regs && typeof regs === "object" ? regs[rrKey] : null;
+              if (!entry || typeof entry !== "object") continue;
+              if (!rowMyvaillantName && typeof entry.myvaillant_name === "string" && entry.myvaillant_name) {
+                rowMyvaillantName = entry.myvaillant_name;
+              }
+              if (typeof entry.ebusd_name === "string" && entry.ebusd_name) {
+                rowEbusdNames.add(entry.ebusd_name);
+              }
+              if (!rowTypeDefault && typeof entry.type === "string" && entry.type) rowTypeDefault = entry.type;
+              if (rowLen === null && typeof entry.raw_hex === "string" && entry.raw_hex) {
+                const b = bytesFromHex(entry.raw_hex);
+                if (b) rowLen = b.length;
+              }
+              if (typeof entry.flags_access === "string" && entry.flags_access) {
+                rowFlagsAccess.add(entry.flags_access);
+              }
+            }
+
+            const ebusdNameList = Array.from(rowEbusdNames).sort();
+            const accessValues = Array.from(rowFlagsAccess).sort();
+            const override = getRowOverride(groupKey, rrKey, namespaceKey);
+            const rowType = override || rowTypeDefault;
+            const candidates = candidateTypeSpecsForLength(rowLen || 0);
+            const selectedType = rowType || (candidates[0] || null);
+
+            const tr = document.createElement("tr");
+            const td0 = document.createElement("td");
+            td0.className = "offset-cell";
+            const label = document.createElement("div");
+            label.className = "offset-label";
+            label.textContent = rrKey;
+            td0.appendChild(label);
+
             if (rowMyvaillantName) {
               const nameEl = document.createElement("div");
               nameEl.className = "offset-name";
               nameEl.textContent = rowMyvaillantName;
               td0.appendChild(nameEl);
             }
-
             if (ebusdNameList.length) {
               const ebusdEl = document.createElement("div");
               ebusdEl.className = rowMyvaillantName ? "offset-name-secondary" : "offset-name";
-
               let txt = ebusdNameList[0];
               if (ebusdNameList.length > 1) {
                 const head = ebusdNameList.slice(0, 3).join(", ");
@@ -865,97 +1053,119 @@ __ARTIFACT_JSON__
               ebusdEl.textContent = txt;
               td0.appendChild(ebusdEl);
             }
-          }
 
-          if (candidates.length) {
-            const sel = document.createElement("select");
-            sel.className = "type-select";
-            for (const t of candidates) {
-              const opt = document.createElement("option");
-              opt.value = t;
-              opt.textContent = t;
-              sel.appendChild(opt);
+            if (candidates.length) {
+              const sel = document.createElement("select");
+              sel.className = "type-select";
+              for (const t of candidates) {
+                const opt = document.createElement("option");
+                opt.value = t;
+                opt.textContent = t;
+                sel.appendChild(opt);
+              }
+              if (selectedType) sel.value = selectedType;
+              sel.addEventListener("change", () => {
+                setRowOverride(groupKey, rrKey, sel.value, namespaceKey);
+                renderActiveGroup(groupKey);
+              });
+              td0.appendChild(sel);
             }
-            if (selectedType) sel.value = selectedType;
-            sel.addEventListener("change", () => {
-              setRowOverride(groupKey, rrKey, sel.value);
-              renderActiveGroup();
-            });
-            td0.appendChild(sel);
-          }
+            tr.appendChild(td0);
 
-          tr.appendChild(td0);
+            const flagsTd = document.createElement("td");
+            appendAccessBadges(flagsTd, accessValues);
+            tr.appendChild(flagsTd);
 
-          for (const iiKey of instanceKeys) {
-            const td = document.createElement("td");
-            const inst = getInstanceObject(instancesObj[iiKey]);
-            const regs = inst.registers || {};
-            const entry = regs && typeof regs === "object" ? regs[rrKey] : null;
+            for (const iiKey of instanceKeys) {
+              const td = document.createElement("td");
+              const inst = getInstanceObject(instancesObj[iiKey]);
+              const regs = inst.registers || {};
+              const entry = regs && typeof regs === "object" ? regs[rrKey] : null;
 
-            if (!entry) {
-              td.innerHTML = "<div class='cell-missing'>—</div>";
+              if (!entry) {
+                td.innerHTML = "<div class='cell-missing'>—</div>";
+                tr.appendChild(td);
+                continue;
+              }
+
+              const rawHex = typeof entry.raw_hex === "string" ? entry.raw_hex : "";
+              const valueBytes = rawHex ? bytesFromHex(rawHex) : null;
+              const displayValue = (typeof entry.value_display === "string" && entry.value_display.length)
+                ? entry.value_display
+                : entry.value;
+              const decoded = selectedType && valueBytes
+                ? parseTypedValue(selectedType, valueBytes)
+                : { value: displayValue, error: null };
+
+              const valueTxt = formatValue(decoded.value);
+              const valueEl = document.createElement("div");
+              valueEl.className = "cell-value";
+              valueEl.textContent = valueTxt;
+              td.appendChild(valueEl);
+
+              if (rawHex) {
+                const rawEl = document.createElement("div");
+                rawEl.className = "cell-raw";
+                rawEl.textContent = rawHex;
+                td.appendChild(rawEl);
+              }
+
+              const errTxt = typeof entry.error === "string" ? entry.error : decoded.error;
+              if (errTxt) {
+                td.classList.add("cell-bad");
+                const errEl = document.createElement("div");
+                errEl.className = "cell-error";
+                errEl.textContent = errTxt;
+                td.appendChild(errEl);
+              }
+
+              const tipParts = [];
+              if (typeof entry.flags !== "undefined" && entry.flags !== null) tipParts.push(`flags=${entry.flags}`);
+              if (entry.flags_access) tipParts.push(`flags_access=${entry.flags_access}`);
+              if (entry.reply_hex) tipParts.push(`reply_hex=${entry.reply_hex}`);
+              if (entry.type) tipParts.push(`original_type=${entry.type}`);
+              if (typeof entry.value !== "undefined") tipParts.push(`original_value=${formatValue(entry.value)}`);
+              if (entry.enum_raw_name) tipParts.push(`enum_raw_name=${entry.enum_raw_name}`);
+              if (entry.enum_resolved_name) tipParts.push(`enum_resolved_name=${entry.enum_resolved_name}`);
+              if (entry.constraint_type) tipParts.push(`constraint_type=${entry.constraint_type}`);
+              if (typeof entry.constraint_min !== "undefined") tipParts.push(`constraint_min=${formatValue(entry.constraint_min)}`);
+              if (typeof entry.constraint_max !== "undefined") tipParts.push(`constraint_max=${formatValue(entry.constraint_max)}`);
+              if (typeof entry.constraint_step !== "undefined") tipParts.push(`constraint_step=${formatValue(entry.constraint_step)}`);
+              if (entry.constraint_tt) tipParts.push(`constraint_tt=${entry.constraint_tt}`);
+              if (tipParts.length) td.title = tipParts.join("\\n");
+
               tr.appendChild(td);
-              continue;
             }
 
-            const rawHex = typeof entry.raw_hex === "string" ? entry.raw_hex : "";
-            const valueBytes = rawHex ? bytesFromHex(rawHex) : null;
-            const displayValue = (typeof entry.value_display === "string" && entry.value_display.length)
-              ? entry.value_display
-              : entry.value;
-            const decoded = selectedType && valueBytes
-              ? parseTypedValue(selectedType, valueBytes)
-              : { value: displayValue, error: null };
-
-            const valueTxt = formatValue(decoded.value);
-            const valueEl = document.createElement("div");
-            valueEl.className = "cell-value";
-            valueEl.textContent = valueTxt;
-
-            td.appendChild(valueEl);
-
-            if (rawHex) {
-              const rawEl = document.createElement("div");
-              rawEl.className = "cell-raw";
-              rawEl.textContent = rawHex;
-              td.appendChild(rawEl);
-            }
-
-            const errTxt = typeof entry.error === "string" ? entry.error : decoded.error;
-            if (errTxt) {
-              td.classList.add("cell-bad");
-              const errEl = document.createElement("div");
-              errEl.className = "cell-error";
-              errEl.textContent = errTxt;
-              td.appendChild(errEl);
-            }
-
-            const tipParts = [];
-            if (typeof entry.flags !== "undefined" && entry.flags !== null) tipParts.push(`flags=${entry.flags}`);
-            if (entry.flags_access) tipParts.push(`flags_access=${entry.flags_access}`);
-            if (entry.reply_hex) tipParts.push(`reply_hex=${entry.reply_hex}`);
-            if (entry.type) tipParts.push(`original_type=${entry.type}`);
-            if (typeof entry.value !== "undefined") tipParts.push(`original_value=${formatValue(entry.value)}`);
-            if (entry.enum_raw_name) tipParts.push(`enum_raw_name=${entry.enum_raw_name}`);
-            if (entry.enum_resolved_name) tipParts.push(`enum_resolved_name=${entry.enum_resolved_name}`);
-            if (entry.constraint_type) tipParts.push(`constraint_type=${entry.constraint_type}`);
-            if (typeof entry.constraint_min !== "undefined") tipParts.push(`constraint_min=${formatValue(entry.constraint_min)}`);
-            if (typeof entry.constraint_max !== "undefined") tipParts.push(`constraint_max=${formatValue(entry.constraint_max)}`);
-            if (typeof entry.constraint_step !== "undefined") tipParts.push(`constraint_step=${formatValue(entry.constraint_step)}`);
-            if (entry.constraint_tt) tipParts.push(`constraint_tt=${entry.constraint_tt}`);
-            if (tipParts.length) td.title = tipParts.join("\\n");
-
-            tr.appendChild(td);
+            tbody.appendChild(tr);
           }
 
-          tbody.appendChild(tr);
+          table.appendChild(tbody);
+          wrap.appendChild(table);
+          fragment.appendChild(wrap);
+          return fragment;
         }
 
-        table.appendChild(tbody);
-        wrap.appendChild(table);
+        const container = document.createElement("div");
+        const title = document.createElement("div");
+        title.className = "section-title";
+        title.textContent = `${groupKey} · ${groupName}`;
+        container.appendChild(title);
+
+        if (groupObj.dual_namespace && groupObj.namespaces && typeof groupObj.namespaces === "object") {
+          for (const namespaceKey of sortedHexKeys(Object.keys(groupObj.namespaces))) {
+            const namespaceObj = groupObj.namespaces[namespaceKey];
+            if (!namespaceObj || typeof namespaceObj !== "object") continue;
+            const tableTitle = `${namespaceLabel(namespaceKey, namespaceObj.label)} Registers`;
+            container.appendChild(buildGroupTable(tableTitle, namespaceObj.instances || {}, namespaceKey));
+          }
+        } else {
+          const tableTitle = groupObj.dual_namespace ? "Registers" : "Registers";
+          container.appendChild(buildGroupTable(tableTitle, groupObj.instances || {}, null));
+        }
 
         sheetArea.innerHTML = "";
-        sheetArea.appendChild(wrap);
+        sheetArea.appendChild(container);
       }
 
       function renderActiveTab() {
@@ -970,6 +1180,7 @@ __ARTIFACT_JSON__
       const groupsRoot = artifact && typeof artifact === "object" ? artifact.groups || {} : {};
       const groupKeys = sortedHexKeys(Object.keys(groupsRoot));
       const hasB509 = !!(artifact && typeof artifact === "object" && artifact.b509_dump && typeof artifact.b509_dump === "object");
+      renderSummaryChips(groupsRoot);
       buildTabs(groupKeys, hasB509);
       renderActiveTab();
     </script>
