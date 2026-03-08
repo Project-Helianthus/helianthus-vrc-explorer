@@ -364,6 +364,35 @@ def is_instance_present(
             return False
         return value != 0xFF
 
+    if group == 0x05:
+        entry = read_register(
+            transport,
+            dst,
+            opcode,
+            group=group,
+            instance=instance,
+            register=0x0004,
+            type_hint="EXP",
+        )
+        if entry["error"] is not None:
+            return False
+        if entry.get("flags_access") == "absent":
+            return False
+        return entry["value"] is not None
+
+    if group == 0x08:
+        entry = read_register(
+            transport,
+            dst,
+            opcode,
+            group=group,
+            instance=instance,
+            register=0x0001,
+        )
+        if entry["error"] is not None:
+            return False
+        return entry.get("flags_access") != "absent"
+
     if group in {0x09, 0x0A}:
         entry_1 = read_register(
             transport, dst, 0x06, group=group, instance=instance, register=0x0007, type_hint="EXP"
