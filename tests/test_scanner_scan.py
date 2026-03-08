@@ -369,7 +369,7 @@ def test_scan_b524_scans_enabled_unknown_group_via_planner(monkeypatch, tmp_path
     transport = DummyTransport(_write_fixture_unknown_group_69(tmp_path))
 
     def fake_prompt_scan_plan(*_args, **_kwargs):
-        return {0x69: GroupScanPlan(group=0x69, rr_max=0x0000, instances=(0x00,))}
+        return {0x69: GroupScanPlan(group=0x69, opcode=0x02, rr_max=0x0000, instances=(0x00,))}
 
     monkeypatch.setattr(scan_mod, "prompt_scan_plan", fake_prompt_scan_plan)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
@@ -411,6 +411,7 @@ def test_scan_b524_scans_absent_instances_when_planner_overrides(
         return {
             0x02: GroupScanPlan(
                 group=0x02,
+                opcode=0x02,
                 rr_max=0x0002,
                 instances=(
                     0x00,  # present (fixture)
@@ -670,7 +671,7 @@ def test_scan_b524_replan_textual_failure_prompts_classic_immediately(
 
     def fake_prompt_scan_plan(*_args, **_kwargs):
         classic_calls["count"] += 1
-        return {0x02: GroupScanPlan(group=0x02, rr_max=0x0000, instances=(0x00,))}
+        return {0x02: GroupScanPlan(group=0x02, opcode=0x02, rr_max=0x0000, instances=(0x00,))}
 
     monkeypatch.setattr(scan_mod, "_PlannerHotkeyReader", _FakeHotkeys)
     monkeypatch.setattr(

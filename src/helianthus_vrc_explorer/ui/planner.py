@@ -17,6 +17,7 @@ from ..scanner.plan import (
     parse_int_set,
     parse_int_token,
 )
+from ..scanner.register import opcode_for_group
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,6 +117,7 @@ def _build_default_plan(
             continue
         selected[g.group] = GroupScanPlan(
             group=g.group,
+            opcode=opcode_for_group(g.group),
             rr_max=g.rr_max,
             instances=((0x00,) if g.ii_max is None else g.present_instances),
         )
@@ -141,6 +143,7 @@ def build_plan_from_preset(
             continue
         selected[group.group] = GroupScanPlan(
             group=group.group,
+            opcode=opcode_for_group(group.group),
             rr_max=group.rr_max,
             instances=_instances_for_preset(group, preset),
         )
@@ -368,6 +371,7 @@ def prompt_scan_plan(
                 gg,
                 GroupScanPlan(
                     group=gg,
+                    opcode=opcode_for_group(gg),
                     rr_max=eligible[gg].rr_max,
                     instances=(
                         (0x00,) if eligible[gg].ii_max is None else eligible[gg].present_instances
@@ -397,6 +401,7 @@ def prompt_scan_plan(
                         continue
                     selected_plan[gg] = GroupScanPlan(
                         group=gg,
+                        opcode=current.opcode,
                         rr_max=rr_max,
                         instances=current.instances,
                     )
@@ -410,6 +415,7 @@ def prompt_scan_plan(
                     continue
                 selected_plan[gg] = GroupScanPlan(
                     group=gg,
+                    opcode=current.opcode,
                     rr_max=current.rr_max,
                     instances=_ask_instances(
                         console,

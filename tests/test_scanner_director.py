@@ -191,10 +191,31 @@ def test_group_00_rr_max_is_0x00ff() -> None:
 
 
 def test_group_names_match_docs() -> None:
-    assert len(GROUP_CONFIG) == 9
+    assert len(GROUP_CONFIG) == 10
     assert GROUP_CONFIG[0x09]["name"] == "Radio Sensors VRC7xx"
     assert GROUP_CONFIG[0x0A]["name"] == "Radio Sensors VR92"
     assert GROUP_CONFIG[0x0C]["name"] == "Remote Accessories / FM5 Slots"
+
+
+def test_group_config_completeness() -> None:
+    assert set(GROUP_CONFIG) == {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x08, 0x09, 0x0A, 0x0C}
+    assert GROUP_CONFIG[0x08]["name"] == "Buffer / Solar Cylinder 2"
+    assert GROUP_CONFIG[0x08]["opcodes"] == [0x02, 0x06]
+    assert GROUP_CONFIG[0x08]["rr_max_by_opcode"] == {0x02: 0x0007, 0x06: 0x0004}
+    assert GROUP_CONFIG[0x08]["ii_max_by_opcode"] == {0x02: 0x00, 0x06: 0x0A}
+    assert "desc" not in GROUP_CONFIG[0x08]
+    assert GROUP_CONFIG[0x09]["rr_max"] == 0x0035
+    assert GROUP_CONFIG[0x09]["rr_max_by_opcode"] == {0x02: 0x000F, 0x06: 0x0035}
+    assert GROUP_CONFIG[0x0A]["rr_max"] == 0x004D
+    assert GROUP_CONFIG[0x0A]["rr_max_by_opcode"] == {0x02: 0x004D, 0x06: 0x0035}
+
+
+def test_classify_groups_missing_desc() -> None:
+    classified = classify_groups([DiscoveredGroup(group=0x08, descriptor=0.0)])
+
+    assert classified[0].name == "Buffer / Solar Cylinder 2"
+    assert classified[0].expected_descriptor is None
+    assert classified[0].descriptor_mismatch is False
 
 
 def test_discover_groups_command_not_enabled_is_fatal() -> None:

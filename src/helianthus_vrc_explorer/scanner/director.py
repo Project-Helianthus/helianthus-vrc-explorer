@@ -4,7 +4,7 @@ import logging
 import math
 import struct
 from dataclasses import dataclass
-from typing import Final, TypedDict
+from typing import Final, NotRequired, TypedDict
 
 from ..protocol.b524 import build_directory_probe_payload
 from ..transport.base import (
@@ -20,24 +20,91 @@ logger = logging.getLogger(__name__)
 
 class GroupConfig(TypedDict):
     # Informational: last-observed descriptor value. NOT a structural authority.
-    desc: float
+    desc: NotRequired[float]
     name: str
     ii_max: int
     rr_max: int
+    opcodes: list[int]
+    rr_max_by_opcode: NotRequired[dict[int, int]]
+    ii_max_by_opcode: NotRequired[dict[int, int]]
 
 
 # Known groups (hardcoded reference, validated against CSV).
 # Source of truth: `AGENTS.md` (keep in sync).
 GROUP_CONFIG: Final[dict[int, GroupConfig]] = {
-    0x00: {"desc": 3.0, "name": "Regulator Parameters", "ii_max": 0x00, "rr_max": 0x00FF},
-    0x01: {"desc": 3.0, "name": "Hot Water Circuit", "ii_max": 0x00, "rr_max": 0x13},
-    0x02: {"desc": 1.0, "name": "Heating Circuits", "ii_max": 0x0A, "rr_max": 0x25},
-    0x03: {"desc": 1.0, "name": "Zones", "ii_max": 0x0A, "rr_max": 0x2F},
-    0x04: {"desc": 6.0, "name": "Solar Circuit", "ii_max": 0x00, "rr_max": 0x0B},
-    0x05: {"desc": 1.0, "name": "Hot Water Cylinder", "ii_max": 0x01, "rr_max": 0x04},
-    0x09: {"desc": 1.0, "name": "Radio Sensors VRC7xx", "ii_max": 0x0A, "rr_max": 0x2F},
-    0x0A: {"desc": 1.0, "name": "Radio Sensors VR92", "ii_max": 0x0A, "rr_max": 0x3F},
-    0x0C: {"desc": 1.0, "name": "Remote Accessories / FM5 Slots", "ii_max": 0x0A, "rr_max": 0x2F},
+    0x00: {
+        "desc": 3.0,
+        "name": "Regulator Parameters",
+        "ii_max": 0x00,
+        "rr_max": 0x00FF,
+        "opcodes": [0x02],
+    },
+    0x01: {
+        "desc": 3.0,
+        "name": "Hot Water Circuit",
+        "ii_max": 0x00,
+        "rr_max": 0x0013,
+        "opcodes": [0x02],
+    },
+    0x02: {
+        "desc": 1.0,
+        "name": "Heating Circuits",
+        "ii_max": 0x0A,
+        "rr_max": 0x0025,
+        "opcodes": [0x02],
+    },
+    0x03: {
+        "desc": 1.0,
+        "name": "Zones",
+        "ii_max": 0x0A,
+        "rr_max": 0x002E,
+        "opcodes": [0x02],
+    },
+    0x04: {
+        "desc": 6.0,
+        "name": "Solar Circuit",
+        "ii_max": 0x00,
+        "rr_max": 0x000B,
+        "opcodes": [0x02],
+    },
+    0x05: {
+        "desc": 1.0,
+        "name": "Hot Water Cylinder",
+        "ii_max": 0x01,
+        "rr_max": 0x0004,
+        "opcodes": [0x02],
+    },
+    0x08: {
+        "name": "Buffer / Solar Cylinder 2",
+        "ii_max": 0x0A,
+        "rr_max": 0x0007,
+        "opcodes": [0x02, 0x06],
+        "rr_max_by_opcode": {0x02: 0x0007, 0x06: 0x0004},
+        "ii_max_by_opcode": {0x02: 0x00, 0x06: 0x0A},
+    },
+    0x09: {
+        "desc": 1.0,
+        "name": "Radio Sensors VRC7xx",
+        "ii_max": 0x0A,
+        "rr_max": 0x0035,
+        "opcodes": [0x02, 0x06],
+        "rr_max_by_opcode": {0x02: 0x000F, 0x06: 0x0035},
+    },
+    0x0A: {
+        "desc": 1.0,
+        "name": "Radio Sensors VR92",
+        "ii_max": 0x0A,
+        "rr_max": 0x004D,
+        "opcodes": [0x02, 0x06],
+        "rr_max_by_opcode": {0x02: 0x004D, 0x06: 0x0035},
+    },
+    0x0C: {
+        "desc": 1.0,
+        "name": "Remote Accessories / FM5 Slots",
+        "ii_max": 0x0A,
+        "rr_max": 0x002F,
+        "opcodes": [0x06],
+    },
 }
 KNOWN_CORE_GROUPS: Final[frozenset[int]] = frozenset({0x02, 0x03})
 
@@ -182,8 +249,8 @@ def classify_groups(
             )
             continue
 
-        expected = config["desc"]
-        mismatch = expected != group.descriptor
+        expected = config.get("desc")
+        mismatch = expected is not None and expected != group.descriptor
         if mismatch:
             logger.info(
                 "Descriptor mismatch for GG=0x%02X: expected %s, got %s",

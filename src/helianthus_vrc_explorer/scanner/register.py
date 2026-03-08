@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import Final, NotRequired, TypedDict
+from typing import Final, NotRequired, TypedDict, cast
 
 from ..protocol.b524 import RegisterOpcode, build_register_read_payload
 from ..protocol.parser import ValueParseError, parse_typed_value
@@ -13,6 +13,7 @@ from ..transport.base import (
     TransportTimeout,
     emit_trace_label,
 )
+from .director import GROUP_CONFIG
 from .observer import ScanObserver
 
 logger = logging.getLogger(__name__)
@@ -53,7 +54,16 @@ class RegisterEntry(TypedDict):
 def opcode_for_group(group: int) -> RegisterOpcode:
     """Return the B524 register opcode family for a group."""
 
-    return 0x06 if group in _REMOTE_GROUPS else 0x02
+    return opcodes_for_group(group)[0]
+
+
+def opcodes_for_group(group: int) -> list[RegisterOpcode]:
+    """Return all B524 register opcode families for a group."""
+
+    config = GROUP_CONFIG.get(group)
+    if config is None:
+        return [0x02]
+    return [cast(RegisterOpcode, opcode) for opcode in config["opcodes"]]
 
 
 def _interpret_flags(flags: int, *, response_len: int) -> str:
@@ -318,13 +328,21 @@ def read_register(
     }
 
 
-def is_instance_present(transport: TransportInterface, dst: int, group: int, instance: int) -> bool:
+def is_instance_present(
+    transport: TransportInterface,
+    dst: int,
+    group: int,
+    instance: int,
+    *,
+    opcode: RegisterOpcode | None = None,
+) -> bool:
     """Presence heuristic for instanced groups (desc==1.0).
 
     Source of truth: `AGENTS.md` (keep in sync).
     """
 
-    opcode = opcode_for_group(group)
+    if opcode is None:
+        opcode = opcode_for_group(group)
 
     if group == 0x02:
         entry = read_register(

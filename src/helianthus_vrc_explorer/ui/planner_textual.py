@@ -10,6 +10,7 @@ from ..scanner.plan import (
     parse_int_set,
     parse_int_token,
 )
+from ..scanner.register import opcode_for_group
 from .planner import PlannerGroup, PlannerPreset, _format_seconds, build_plan_from_preset
 
 
@@ -61,7 +62,12 @@ def _estimate_footer(
     request_rate_rps: float | None,
 ) -> str:
     plan = {
-        gg: GroupScanPlan(group=gg, rr_max=st.rr_max, instances=st.instances)
+        gg: GroupScanPlan(
+            group=gg,
+            opcode=opcode_for_group(gg),
+            rr_max=st.rr_max,
+            instances=st.instances,
+        )
         for (gg, st) in states.items()
         if st.enabled
     }
@@ -401,7 +407,12 @@ def run_textual_scan_plan(
 
         def action_save(self) -> None:
             plan = {
-                gg: GroupScanPlan(group=gg, rr_max=st.rr_max, instances=st.instances)
+                gg: GroupScanPlan(
+                    group=gg,
+                    opcode=opcode_for_group(gg),
+                    rr_max=st.rr_max,
+                    instances=st.instances,
+                )
                 for (gg, st) in sorted(self._states.items())
                 if st.enabled
             }

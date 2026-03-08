@@ -5,6 +5,8 @@ import pytest
 from helianthus_vrc_explorer.scanner.register import (
     _interpret_flags,
     is_instance_present,
+    opcode_for_group,
+    opcodes_for_group,
     read_register,
 )
 from helianthus_vrc_explorer.transport.base import (
@@ -165,6 +167,20 @@ def test_flags_interpretation_multi_byte() -> None:
     assert _interpret_flags(0x01, response_len=7) == "stable_ro"
     assert _interpret_flags(0x02, response_len=7) == "technical_rw"
     assert _interpret_flags(0x03, response_len=7) == "user_rw"
+
+
+def test_opcodes_for_group_dual_namespace() -> None:
+    assert opcodes_for_group(0x09) == [0x02, 0x06]
+
+
+def test_opcodes_for_group_single_namespace() -> None:
+    assert opcodes_for_group(0x00) == [0x02]
+    assert opcodes_for_group(0x0C) == [0x06]
+
+
+def test_opcode_for_group_deprecated_compat() -> None:
+    assert opcode_for_group(0x09) == 0x02
+    assert opcode_for_group(0x0C) == 0x06
 
 
 def test_read_register_infers_hex_for_unparseable_u24_values() -> None:

@@ -46,7 +46,9 @@ _UNKNOWN_GROUP_DEFAULT_RR_MAX = 0x0030
 _UNKNOWN_GROUP_DEFAULT_II_MAX = 0x0A
 
 PlannerUiMode = Literal["auto", "textual", "classic"]
-_KNOWN_DESCRIPTOR_TYPES = frozenset(float(config["desc"]) for config in GROUP_CONFIG.values())
+_KNOWN_DESCRIPTOR_TYPES = frozenset(
+    float(desc) for config in GROUP_CONFIG.values() if (desc := config.get("desc")) is not None
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -758,12 +760,14 @@ def scan_b524(
                         present_instances_for_plan.append(int(ii_key, 0))
                 plan[group.group] = GroupScanPlan(
                     group=group.group,
+                    opcode=opcode_for_group(group.group),
                     rr_max=rr_max,
                     instances=tuple(sorted(present_instances_for_plan)),
                 )
             else:
                 plan[group.group] = GroupScanPlan(
                     group=group.group,
+                    opcode=opcode_for_group(group.group),
                     rr_max=rr_max,
                     instances=(0x00,),
                 )

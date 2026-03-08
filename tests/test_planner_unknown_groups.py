@@ -84,6 +84,7 @@ def test_prompt_scan_plan_accepts_lowercase_yes_and_aggressive_preset(monkeypatc
     assert plan == {
         0x69: GroupScanPlan(
             group=0x69,
+            opcode=0x02,
             rr_max=0x30,
             instances=tuple(range(0x0A + 1)),
         )

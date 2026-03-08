@@ -41,8 +41,8 @@ def test_parse_int_set_rejects_out_of_range() -> None:
 
 def test_estimate_register_requests() -> None:
     plan = {
-        0x02: GroupScanPlan(group=0x02, rr_max=0x0003, instances=(0x00, 0x01)),
-        0x01: GroupScanPlan(group=0x01, rr_max=0x0001, instances=(0x00,)),
+        0x02: GroupScanPlan(group=0x02, opcode=0x02, rr_max=0x0003, instances=(0x00, 0x01)),
+        0x01: GroupScanPlan(group=0x01, opcode=0x02, rr_max=0x0001, instances=(0x00,)),
     }
     # GG=0x02: 2 instances * (3+1) regs = 8
     # GG=0x01: 1 instance * (1+1) regs = 2
@@ -57,13 +57,13 @@ def test_format_int_set_compacts_ranges() -> None:
 
 def test_build_work_queue_skips_done_tasks() -> None:
     plan = {
-        0x02: GroupScanPlan(group=0x02, rr_max=0x0002, instances=(0x00,)),
+        0x02: GroupScanPlan(group=0x02, opcode=0x02, rr_max=0x0002, instances=(0x00,)),
     }
-    done = {RegisterTask(group=0x02, instance=0x00, register=0x0001)}
+    done = {RegisterTask(group=0x02, opcode=0x02, instance=0x00, register=0x0001)}
     tasks = build_work_queue(plan, done=done)
     assert tasks == [
-        RegisterTask(group=0x02, instance=0x00, register=0x0000),
-        RegisterTask(group=0x02, instance=0x00, register=0x0002),
+        RegisterTask(group=0x02, opcode=0x02, instance=0x00, register=0x0000),
+        RegisterTask(group=0x02, opcode=0x02, instance=0x00, register=0x0002),
     ]
 
 

@@ -115,11 +115,13 @@ def _hex_u16(value: int) -> str:
 @dataclass(frozen=True, slots=True)
 class GroupScanPlan:
     group: int
+    opcode: int
     rr_max: int
     instances: tuple[int, ...]
 
     def to_meta(self) -> dict[str, object]:
         return {
+            "opcode": _hex_u8(self.opcode),
             "rr_max": _hex_u16(self.rr_max),
             "instances": [_hex_u8(ii) for ii in self.instances],
         }
@@ -128,6 +130,7 @@ class GroupScanPlan:
 @dataclass(frozen=True, slots=True, order=True)
 class RegisterTask:
     group: int
+    opcode: int
     instance: int
     register: int
 
@@ -144,7 +147,12 @@ def build_work_queue(
         group_plan = plan[gg]
         for ii in group_plan.instances:
             for rr in range(0x0000, group_plan.rr_max + 1):
-                task = RegisterTask(group=gg, instance=ii, register=rr)
+                task = RegisterTask(
+                    group=gg,
+                    opcode=group_plan.opcode,
+                    instance=ii,
+                    register=rr,
+                )
                 if task in done:
                     continue
                 tasks.append(task)
