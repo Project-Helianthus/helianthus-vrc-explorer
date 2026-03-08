@@ -1288,10 +1288,18 @@ def scan_b524(
                 assert best_entry is not None
                 entry = best_entry
                 if myvaillant_map is not None:
+                    lookup_opcode: int | None = None
+                    read_opcode = entry.get("read_opcode")
+                    if isinstance(read_opcode, str):
+                        try:
+                            lookup_opcode = int(read_opcode, 0)
+                        except ValueError:
+                            lookup_opcode = None
                     mv = myvaillant_map.lookup(
                         group=task.group,
                         instance=task.instance,
                         register=task.register,
+                        opcode=lookup_opcode,
                     )
                     if mv is not None:
                         entry["myvaillant_name"] = mv.leaf
