@@ -134,3 +134,31 @@ def test_browse_store_hides_b524_protocol_when_no_groups_present() -> None:
     node_ids = {node.node_id for node in store.tree_nodes}
     assert "proto:b524" not in node_ids
     assert "proto:b509" in node_ids
+
+
+def test_browse_store_treats_unknown_singleton_group_as_singleton() -> None:
+    artifact = {
+        "meta": {"destination_address": "0x15", "scan_timestamp": "2026-02-11T12:00:00Z"},
+        "groups": {
+            "0x69": {
+                "name": "Unknown",
+                "descriptor_observed": 1.0,
+                "instances": {
+                    "0x00": {
+                        "present": True,
+                        "registers": {
+                            "0x0000": {
+                                "value": 0.0,
+                                "raw_hex": "00",
+                                "flags_access": "stable_ro",
+                                "read_opcode": "0x02",
+                            }
+                        },
+                    }
+                },
+            }
+        },
+    }
+
+    store = BrowseStore.from_artifact(artifact)
+    assert not any(node.level == "instance" for node in store.tree_nodes)

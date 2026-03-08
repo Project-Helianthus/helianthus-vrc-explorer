@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from ..scanner.director import GROUP_CONFIG
 from .browse_models import BrowseTab, RegisterAddress, RegisterRow, TreeNodeRef
 
 
@@ -189,14 +190,16 @@ class BrowseStore:
             if not isinstance(group_obj, dict):
                 continue
             group_name = str(group_obj.get("name") or "Unknown")
-            descriptor_type = group_obj.get(
-                "descriptor_observed",
-                group_obj.get("descriptor_type"),
-            )
             gg = _safe_int_hex(group_key)
-            is_instanced = (
-                isinstance(descriptor_type, (int, float)) and float(descriptor_type) == 1.0
-            ) or (gg in {0x02, 0x03, 0x09, 0x0A, 0x0C})
+            instances = group_obj.get("instances")
+            if not isinstance(instances, dict):
+                continue
+            instance_keys = sorted((k for k in instances if isinstance(k, str)), key=_safe_int_hex)
+            config = GROUP_CONFIG.get(gg)
+            is_instanced = (config is not None and int(config["ii_max"]) > 0) or any(
+                instance_key != "0x00" for instance_key in instance_keys
+            )
+
             tree_nodes.append(
                 TreeNodeRef(
                     node_id=f"b524:group:{group_key}",
@@ -207,13 +210,7 @@ class BrowseStore:
                 )
             )
 
-            instances = group_obj.get("instances")
-            if not isinstance(instances, dict):
-                continue
-
-            for instance_key in sorted(
-                (k for k in instances if isinstance(k, str)), key=_safe_int_hex
-            ):
+            for instance_key in instance_keys:
                 instance_obj = instances.get(instance_key)
                 if not isinstance(instance_obj, dict):
                     continue
