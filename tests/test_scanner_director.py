@@ -123,6 +123,13 @@ def test_group_00_rr_max_is_0x00ff() -> None:
     assert GROUP_CONFIG[0x00]["rr_max"] == 0x00FF
 
 
+def test_group_names_match_docs() -> None:
+    assert len(GROUP_CONFIG) == 9
+    assert GROUP_CONFIG[0x09]["name"] == "Radio Sensors VRC7xx"
+    assert GROUP_CONFIG[0x0A]["name"] == "Radio Sensors VR92"
+    assert GROUP_CONFIG[0x0C]["name"] == "Remote Accessories / FM5 Slots"
+
+
 def test_discover_groups_command_not_enabled_is_fatal() -> None:
     with pytest.raises(TransportCommandNotEnabled):
         discover_groups(FatalDirectoryTransport(), dst=0x15)

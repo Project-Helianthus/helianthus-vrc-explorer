@@ -29,14 +29,14 @@ class GroupConfig(TypedDict):
 # Source of truth: `AGENTS.md` (keep in sync).
 GROUP_CONFIG: Final[dict[int, GroupConfig]] = {
     0x00: {"desc": 3.0, "name": "Regulator Parameters", "ii_max": 0x00, "rr_max": 0x00FF},
-    0x01: {"desc": 3.0, "name": "Hot Water Circuit", "ii_max": 0x00, "rr_max": 0x1F},
+    0x01: {"desc": 3.0, "name": "Hot Water Circuit", "ii_max": 0x00, "rr_max": 0x13},
     0x02: {"desc": 1.0, "name": "Heating Circuits", "ii_max": 0x0A, "rr_max": 0x25},
     0x03: {"desc": 1.0, "name": "Zones", "ii_max": 0x0A, "rr_max": 0x2F},
-    0x04: {"desc": 6.0, "name": "Solar Circuit", "ii_max": 0x00, "rr_max": 0x0F},
-    0x05: {"desc": 1.0, "name": "Hot Water Cylinder", "ii_max": 0x0A, "rr_max": 0x0F},
-    0x09: {"desc": 1.0, "name": "RoomSensors", "ii_max": 0x0A, "rr_max": 0x2F},
-    0x0A: {"desc": 1.0, "name": "RoomState", "ii_max": 0x0A, "rr_max": 0x3F},
-    0x0C: {"desc": 1.0, "name": "Unrecognized", "ii_max": 0x0A, "rr_max": 0x3F},
+    0x04: {"desc": 6.0, "name": "Solar Circuit", "ii_max": 0x00, "rr_max": 0x0B},
+    0x05: {"desc": 1.0, "name": "Hot Water Cylinder", "ii_max": 0x01, "rr_max": 0x04},
+    0x09: {"desc": 1.0, "name": "Radio Sensors VRC7xx", "ii_max": 0x0A, "rr_max": 0x2F},
+    0x0A: {"desc": 1.0, "name": "Radio Sensors VR92", "ii_max": 0x0A, "rr_max": 0x3F},
+    0x0C: {"desc": 1.0, "name": "Remote Accessories / FM5 Slots", "ii_max": 0x0A, "rr_max": 0x2F},
 }
 
 
