@@ -716,6 +716,7 @@ def scan_b524(
     transport = counting_transport
 
     artifact: dict[str, Any] = {
+        "schema_version": "2.0",
         "meta": {
             "scan_timestamp": scan_timestamp,
             "scan_duration_seconds": 0.0,
@@ -1258,7 +1259,21 @@ def scan_b524(
                         if ebusd_schema is not None
                         else None
                     )
-                    type_hint = schema_entry.type_spec if schema_entry is not None else None
+                    myvaillant_entry = (
+                        myvaillant_map.lookup(
+                            group=task.group,
+                            instance=task.instance,
+                            register=task.register,
+                            opcode=opcode,
+                        )
+                        if myvaillant_map is not None
+                        else None
+                    )
+                    type_hint = (
+                        myvaillant_entry.type_hint
+                        if myvaillant_entry is not None and myvaillant_entry.type_hint is not None
+                        else (schema_entry.type_spec if schema_entry is not None else None)
+                    )
 
                     candidate = read_register(
                         transport,

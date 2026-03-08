@@ -23,6 +23,8 @@ _PRINTABLE_LATIN1: Final[set[int]] = set(range(0x20, 0x7F)) | set(range(0xA0, 0x
 class RegisterEntry(TypedDict):
     # B524 register read opcode family used for this entry: 0x02 (local) or 0x06 (remote).
     read_opcode: str
+    # Human-readable opcode family label.
+    read_opcode_label: str
     # Full raw reply payload (after ebusd length-prefix stripping), if available.
     # For register reads this is typically: <FLAGS> <GG> <RR_LO> <RR_HI> <VALUE_BYTES...>
     reply_hex: str | None
@@ -77,6 +79,16 @@ def _interpret_flags(flags: int, *, response_len: int) -> str:
             return "user_rw"
         case _:
             return "unknown"
+
+
+def _opcode_label(opcode: int) -> str:
+    match opcode:
+        case 0x02:
+            return "local"
+        case 0x06:
+            return "remote"
+        case _:
+            return f"0x{opcode:02x}"
 
 
 def _looks_like_nul_terminated_latin1(value_bytes: bytes) -> bool:
@@ -201,6 +213,7 @@ def read_register(
     """Read a B524 register and parse it into an artifact-ready entry."""
 
     read_opcode = f"0x{opcode:02x}"
+    read_opcode_label = _opcode_label(opcode)
     emit_trace_label(
         transport,
         f"Reading dst=0x{dst:02X} GG=0x{group:02X} II=0x{instance:02X} RR=0x{register:04X}",
@@ -211,6 +224,7 @@ def read_register(
     except TransportTimeout:
         return {
             "read_opcode": read_opcode,
+            "read_opcode_label": read_opcode_label,
             "reply_hex": None,
             "flags": None,
             "flags_access": None,
@@ -226,6 +240,7 @@ def read_register(
             raise
         return {
             "read_opcode": read_opcode,
+            "read_opcode_label": read_opcode_label,
             "reply_hex": None,
             "flags": None,
             "flags_access": None,
@@ -248,6 +263,7 @@ def read_register(
     if len(response) == 1:
         return {
             "read_opcode": read_opcode,
+            "read_opcode_label": read_opcode_label,
             "reply_hex": reply_hex,
             "flags": flags,
             "flags_access": flags_access,
@@ -264,6 +280,7 @@ def read_register(
     except ValueError as exc:
         return {
             "read_opcode": read_opcode,
+            "read_opcode_label": read_opcode_label,
             "reply_hex": reply_hex,
             "flags": flags,
             "flags_access": flags_access,
@@ -281,6 +298,7 @@ def read_register(
             value = parse_typed_value(type_hint, value_bytes)
             return {
                 "read_opcode": read_opcode,
+                "read_opcode_label": read_opcode_label,
                 "reply_hex": reply_hex,
                 "flags": flags,
                 "flags_access": flags_access,
@@ -294,6 +312,7 @@ def read_register(
         except ValueParseError as exc:
             return {
                 "read_opcode": read_opcode,
+                "read_opcode_label": read_opcode_label,
                 "reply_hex": reply_hex,
                 "flags": flags,
                 "flags_access": flags_access,
@@ -308,6 +327,7 @@ def read_register(
     inferred_type, inferred_value, inferred_error = _parse_inferred_value(value_bytes)
     return {
         "read_opcode": read_opcode,
+        "read_opcode_label": read_opcode_label,
         "reply_hex": reply_hex,
         "flags": flags,
         "flags_access": flags_access,

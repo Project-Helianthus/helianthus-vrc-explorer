@@ -556,6 +556,12 @@ def test_scan_singleton_group_nonzero_descriptor(tmp_path: Path) -> None:
     assert scanned_instances == {0x00}
 
 
+def test_artifact_schema_version(tmp_path: Path) -> None:
+    artifact = scan_b524(DummyTransport(_write_fixture_group_00(tmp_path)), dst=0x15)
+
+    assert artifact["schema_version"] == "2.0"
+
+
 def test_artifact_dual_namespace_structure(monkeypatch, tmp_path: Path) -> None:
     import sys
 
@@ -604,7 +610,9 @@ def test_artifact_dual_namespace_structure(monkeypatch, tmp_path: Path) -> None:
     assert local_ns["label"] == "local"
     assert remote_ns["label"] == "remote"
     assert local_ns["instances"]["0x00"]["registers"]["0x0000"]["read_opcode"] == "0x02"
+    assert local_ns["instances"]["0x00"]["registers"]["0x0000"]["read_opcode_label"] == "local"
     assert remote_ns["instances"]["0x00"]["registers"]["0x0000"]["read_opcode"] == "0x06"
+    assert remote_ns["instances"]["0x00"]["registers"]["0x0000"]["read_opcode_label"] == "remote"
 
     scan_plan = artifact["meta"]["scan_plan"]["groups"]["0x09"]
     assert scan_plan["dual_namespace"] is True
@@ -625,6 +633,16 @@ def test_artifact_single_namespace_unchanged(tmp_path: Path) -> None:
     assert group["dual_namespace"] is False
     assert "namespaces" not in group
     assert set(group["instances"]) >= {"0x00"}
+
+
+def test_artifact_register_flags_present(tmp_path: Path) -> None:
+    artifact = scan_b524(DummyTransport(_write_fixture_group_02(tmp_path)), dst=0x15)
+
+    entry = artifact["groups"]["0x02"]["instances"]["0x00"]["registers"]["0x0002"]
+
+    assert entry["flags"] == 0x01
+    assert entry["flags_access"] == "stable_ro"
+    assert entry["read_opcode_label"] == "local"
 
 
 def test_group_08_remote_namespace_only_marks_present_instances(
@@ -667,6 +685,73 @@ def test_group_08_remote_namespace_only_marks_present_instances(
     assert group["dual_namespace"] is True
     assert set(group["namespaces"]["0x02"]["instances"]) == {"0x00"}
     assert set(group["namespaces"]["0x06"]["instances"]) == {"0x00"}
+
+
+def test_type_hint_propagation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+
+    import helianthus_vrc_explorer.scanner.scan as scan_mod
+    from helianthus_vrc_explorer.schema.myvaillant_map import MyvaillantRegisterMap
+
+    fixture = {
+        "meta": {"dummy_transport": {"directory_terminator_group": "0x0a"}},
+        "groups": {
+            "0x09": {
+                "descriptor_type": 1.0,
+                "instances": {
+                    "0x00": {
+                        "registers": {
+                            "0x0004": {"raw_hex": "021703"},
+                        }
+                    }
+                },
+            }
+        },
+    }
+    fixture_path = tmp_path / "fixture_fw.json"
+    fixture_path.write_text(json.dumps(fixture), encoding="utf-8")
+
+    map_path = tmp_path / "myvaillant_map.csv"
+    map_path.write_text(
+        "\n".join(
+            [
+                "group,instance,register,leaf,ebusd_name,register_class,type_hint,opcode",
+                "0x09,*,0x0004,radio_device_firmware,,state,FW,0x06",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    def fake_prompt_scan_plan(*_args, **_kwargs):
+        return {
+            (0x09, 0x06): GroupScanPlan(
+                group=0x09,
+                opcode=0x06,
+                rr_max=0x0004,
+                instances=(0x00,),
+            ),
+        }
+
+    monkeypatch.setattr(scan_mod, "prompt_scan_plan", fake_prompt_scan_plan)
+    monkeypatch.setattr(scan_mod, "is_instance_present", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
+    artifact = scan_b524(
+        DummyTransport(fixture_path),
+        dst=0x15,
+        observer=_NoopObserver(),
+        console=Console(force_terminal=True),
+        planner_ui="classic",
+        myvaillant_map=MyvaillantRegisterMap.from_path(map_path),
+    )
+
+    entry = artifact["groups"]["0x09"]["namespaces"]["0x06"]["instances"]["0x00"]["registers"][
+        "0x0004"
+    ]
+    assert entry["myvaillant_name"] == "radio_device_firmware"
+    assert entry["type"] == "FW"
+    assert entry["value"] == "02.17.03"
 
 
 def test_scan_b524_applies_aggressive_preset_to_textual_default_plan(
