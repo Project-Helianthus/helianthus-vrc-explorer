@@ -267,7 +267,7 @@ Examples from VRC720 CSV:
                           opcode optype  GG    II      RR
 
 Examples from VRC720 CSV:
-- `b524,060009010700` -> GG=0x09, II=0x01, RR=0x0007 (room humidity, RoomState)
+- `b524,060009010700` -> GG=0x09, II=0x01, RR=0x0007 (room humidity, Radio Sensors VRC7xx)
 - `b524,06000a010f00` -> GG=0x0A, II=0x01, RR=0x000F (room temp, VR92 addr 1)
 
 **Difference from Family 0x02:**
@@ -461,15 +461,16 @@ def parse_b524_id(id_hex: str) -> dict:
 **Known groups (hardcoded reference, validated against CSV):**
 
     GROUP_CONFIG = {
-        0x00: {"desc": 3.0, "name": "Regulator Parameters", "ii_max": 0x00, "rr_max": 0x00FF},
-        0x01: {"desc": 3.0, "name": "Hot Water Circuit", "ii_max": 0x00, "rr_max": 0x1F},
-        0x02: {"desc": 1.0, "name": "Heating Circuits", "ii_max": 0x0A, "rr_max": 0x25},
-        0x03: {"desc": 1.0, "name": "Zones", "ii_max": 0x0A, "rr_max": 0x2F},
-        0x04: {"desc": 6.0, "name": "Solar Circuit", "ii_max": 0x00, "rr_max": 0x0F},
-        0x05: {"desc": 1.0, "name": "Hot Water Cylinder", "ii_max": 0x0A, "rr_max": 0x0F},
-        0x09: {"desc": 1.0, "name": "RoomSensors", "ii_max": 0x0A, "rr_max": 0x2F},
-        0x0A: {"desc": 1.0, "name": "RoomState", "ii_max": 0x0A, "rr_max": 0x3F},
-        0x0C: {"desc": 1.0, "name": "Unrecognized", "ii_max": 0x0A, "rr_max": 0x3F},
+        0x00: {"desc": 3.0, "name": "Regulator Parameters", "ii_max": 0x00, "rr_max": 0x00FF, "opcodes": [0x02]},
+        0x01: {"desc": 3.0, "name": "Hot Water Circuit", "ii_max": 0x00, "rr_max": 0x13, "opcodes": [0x02]},
+        0x02: {"desc": 1.0, "name": "Heating Circuits", "ii_max": 0x0A, "rr_max": 0x25, "opcodes": [0x02]},
+        0x03: {"desc": 1.0, "name": "Zones", "ii_max": 0x0A, "rr_max": 0x2E, "opcodes": [0x02]},
+        0x04: {"desc": 6.0, "name": "Solar Circuit", "ii_max": 0x00, "rr_max": 0x0B, "opcodes": [0x02]},
+        0x05: {"desc": 1.0, "name": "Hot Water Cylinder", "ii_max": 0x01, "rr_max": 0x04, "opcodes": [0x02]},
+        0x08: {"name": "Buffer / Solar Cylinder 2", "ii_max": 0x0A, "rr_max": 0x07, "opcodes": [0x02, 0x06], "rr_max_by_opcode": {0x02: 0x07, 0x06: 0x04}, "ii_max_by_opcode": {0x02: 0x00, 0x06: 0x0A}},
+        0x09: {"desc": 1.0, "name": "Radio Sensors VRC7xx", "ii_max": 0x0A, "rr_max": 0x35, "opcodes": [0x02, 0x06], "rr_max_by_opcode": {0x02: 0x0F, 0x06: 0x35}},
+        0x0A: {"desc": 1.0, "name": "Radio Sensors VR92", "ii_max": 0x0A, "rr_max": 0x4D, "opcodes": [0x02, 0x06], "rr_max_by_opcode": {0x02: 0x4D, 0x06: 0x35}},
+        0x0C: {"desc": 1.0, "name": "Remote Accessories / FM5 Slots", "ii_max": 0x0A, "rr_max": 0x2F, "opcodes": [0x06]},
     }
 
 **Register families by group:**
@@ -482,16 +483,18 @@ def parse_b524_id(id_hex: str) -> dict:
     0x03   | 0x02 (local)  | Zones (instanced)
     0x04   | 0x02 (local)  | Solar circuit (special Type 6 format)
     0x05   | 0x02 (local)  | Hot water cylinder (instanced)
-    0x09   | 0x06 (remote) | Room sensors
-    0x0A   | 0x06 (remote) | Room state
-    0x0C   | 0x06 (remote) | Unrecognized remote devices
+    0x08   | 0x02/0x06     | Buffer / Solar Cylinder 2 (local singleton + remote instanced)
+    0x09   | 0x02/0x06     | Radio Sensors VRC7xx
+    0x0A   | 0x02/0x06     | Radio Sensors VR92
+    0x0C   | 0x06 (remote) | Remote accessories / FM5 slots
 
 **Instance presence detection (per-group heuristics):**
 
 - **GG=0x02 (Heating Circuits):** Probe RR=0x0002 (CircuitType u16). Absent if response is 0x0000, 0xFFFF, or NaN.
 - **GG=0x03 (Zones):** Probe RR=0x001C (zone index u8). Absent if response is 0xFF.
-- **GG=0x09 / 0x0A (RoomSensors/RoomState):** Present if RR=0x0007 or RR=0x000F returns non-NaN.
-- **GG=0x0C (Unknown):** Present if any of RR in {0x0002, 0x0007, 0x000F, 0x0016} responds.
+- **GG=0x08 (Buffer / Solar Cylinder 2):** Include it in documented group enumerations; local `0x02` stays singleton while remote `0x06` can be instanced.
+- **GG=0x09 / 0x0A (Radio Sensors VRC7xx / Radio Sensors VR92):** Present if RR=0x0007 or RR=0x000F returns non-NaN.
+- **GG=0x0C (Remote Accessories / FM5 Slots):** Present if any of RR in {0x0002, 0x0007, 0x000F, 0x0016} responds.
 
 **Scan all instances from 0x00 to ii_max** (do not stop at gaps, they are legitimate holes).
 
