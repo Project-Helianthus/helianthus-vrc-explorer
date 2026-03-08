@@ -687,9 +687,9 @@ def scan_b524(
         instance_discovery_start_calls = counting_transport.counters.send_calls
         for group in classified:
             meta = metadata_map[group.group]
-            ii_max: int | None = meta.ii_max
+            group_ii_max: int | None = meta.ii_max
             rr_max = meta.rr_max
-            if _is_instanced_group(ii_max):
+            if _is_instanced_group(group_ii_max):
                 emit_trace_label(
                     transport,
                     f"Identifying instances in group 0x{group.group:02X}",
@@ -702,14 +702,14 @@ def scan_b524(
             }
             artifact["groups"][group_key] = group_obj
 
-            if not _is_instanced_group(ii_max):
+            if not _is_instanced_group(group_ii_max):
                 # Singleton groups and unknown groups default to II=0x00 only.
                 group_obj["instances"][_hex_u8(0x00)] = {"present": True}
                 continue
 
-            assert ii_max is not None
+            assert group_ii_max is not None
             present_count = 0
-            for ii in range(0x00, ii_max + 1):
+            for ii in range(0x00, group_ii_max + 1):
                 if observer is not None:
                     observer.status(f"Probe presence GG=0x{group.group:02X} II=0x{ii:02X}")
                 is_present = is_instance_present(
@@ -727,7 +727,7 @@ def scan_b524(
             if observer is not None:
                 observer.log(
                     f"GG=0x{group.group:02X} {group.name}: "
-                    f"{present_count}/{ii_max + 1} present, "
+                    f"{present_count}/{group_ii_max + 1} present, "
                     f"RR_max=0x{rr_max:04X} ({rr_max + 1} registers/instance)",
                     level="info",
                 )
