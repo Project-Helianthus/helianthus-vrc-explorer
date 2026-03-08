@@ -220,6 +220,74 @@ def test_is_instance_present_group_0c_true_on_first_valid_register_response() ->
     assert transport.calls == 2
 
 
+def test_instance_present_cylinder_found(monkeypatch: pytest.MonkeyPatch) -> None:
+    import helianthus_vrc_explorer.scanner.register as register
+
+    calls: list[tuple[int, int, str | None]] = []
+
+    def _fake_read_register(*_args, **kwargs):  # type: ignore[no-untyped-def]
+        calls.append((int(kwargs["group"]), int(kwargs["register"]), kwargs.get("type_hint")))
+        return {
+            "raw_hex": "00004842",
+            "type": "EXP",
+            "value": 50.0,
+            "error": None,
+            "flags_access": "stable_ro",
+        }
+
+    monkeypatch.setattr(register, "read_register", _fake_read_register)
+
+    assert is_instance_present(_StatusOnlyTransport(), dst=0x15, group=0x05, instance=0x00) is True
+    assert calls == [(0x05, 0x0004, "EXP")]
+
+
+def test_instance_present_cylinder_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+    import helianthus_vrc_explorer.scanner.register as register
+
+    def _fake_read_register(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+        return {
+            "raw_hex": None,
+            "type": None,
+            "value": None,
+            "error": None,
+            "flags_access": "absent",
+        }
+
+    monkeypatch.setattr(register, "read_register", _fake_read_register)
+
+    assert is_instance_present(_StatusOnlyTransport(), dst=0x15, group=0x05, instance=0x02) is False
+
+
+def test_instance_present_buffer(monkeypatch: pytest.MonkeyPatch) -> None:
+    import helianthus_vrc_explorer.scanner.register as register
+
+    calls: list[tuple[int, int, int]] = []
+
+    def _fake_read_register(_transport, _dst, opcode, **kwargs):  # type: ignore[no-untyped-def]
+        calls.append((int(opcode), int(kwargs["group"]), int(kwargs["register"])))
+        return {
+            "raw_hex": "01",
+            "type": "UCH",
+            "value": 1,
+            "error": None,
+            "flags_access": "stable_ro",
+        }
+
+    monkeypatch.setattr(register, "read_register", _fake_read_register)
+
+    assert (
+        is_instance_present(
+            _StatusOnlyTransport(),
+            dst=0x15,
+            group=0x08,
+            instance=0x03,
+            opcode=0x06,
+        )
+        is True
+    )
+    assert calls == [(0x06, 0x08, 0x0001)]
+
+
 def test_is_instance_present_group_09_rejects_nan_values(monkeypatch: pytest.MonkeyPatch) -> None:
     import helianthus_vrc_explorer.scanner.register as register
 

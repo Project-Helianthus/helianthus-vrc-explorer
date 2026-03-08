@@ -194,6 +194,28 @@ def _write_fixture_group_09(tmp_path: Path) -> Path:
     return path
 
 
+def _write_fixture_group_08(tmp_path: Path) -> Path:
+    fixture = {
+        "meta": {"dummy_transport": {"directory_terminator_group": "0x09"}},
+        "groups": {
+            "0x08": {
+                "descriptor_type": 1.0,
+                "instances": {
+                    "0x00": {
+                        "registers": {
+                            "0x0001": {"raw_hex": "01"},
+                            "0x0000": {"raw_hex": "00"},
+                        }
+                    }
+                },
+            }
+        },
+    }
+    path = tmp_path / "fixture_group_08.json"
+    path.write_text(json.dumps(fixture), encoding="utf-8")
+    return path
+
+
 class _NoopObserver(ScanObserver):
     def phase_start(self, phase: str, *, total: int) -> None:  # noqa: ARG002
         return
@@ -603,6 +625,48 @@ def test_artifact_single_namespace_unchanged(tmp_path: Path) -> None:
     assert group["dual_namespace"] is False
     assert "namespaces" not in group
     assert set(group["instances"]) >= {"0x00"}
+
+
+def test_group_08_remote_namespace_only_marks_present_instances(
+    monkeypatch, tmp_path: Path
+) -> None:
+    import sys
+
+    import helianthus_vrc_explorer.scanner.scan as scan_mod
+
+    transport = DummyTransport(_write_fixture_group_08(tmp_path))
+
+    def fake_prompt_scan_plan(*_args, **_kwargs):
+        return {
+            (0x08, 0x02): GroupScanPlan(
+                group=0x08,
+                opcode=0x02,
+                rr_max=0x0000,
+                instances=(0x00,),
+            ),
+            (0x08, 0x06): GroupScanPlan(
+                group=0x08,
+                opcode=0x06,
+                rr_max=0x0000,
+                instances=(0x00,),
+            ),
+        }
+
+    monkeypatch.setattr(scan_mod, "prompt_scan_plan", fake_prompt_scan_plan)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
+    artifact = scan_b524(
+        transport,
+        dst=0x15,
+        observer=_NoopObserver(),
+        console=Console(force_terminal=True),
+        planner_ui="classic",
+    )
+
+    group = artifact["groups"]["0x08"]
+    assert group["dual_namespace"] is True
+    assert set(group["namespaces"]["0x02"]["instances"]) == {"0x00"}
+    assert set(group["namespaces"]["0x06"]["instances"]) == {"0x00"}
 
 
 def test_scan_b524_applies_aggressive_preset_to_textual_default_plan(
