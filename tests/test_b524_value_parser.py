@@ -58,6 +58,11 @@ def test_parse_hti_time_u24le_hhmmss() -> None:
     assert parse_typed_value("HTI", bytes.fromhex("235958")) == "23:59:58"
 
 
+def test_parse_fw_valid() -> None:
+    assert parse_typed_value("FW", bytes.fromhex("080500")) == "08.05.00"
+    assert parse_typed_value("FW", bytes.fromhex("021703")) == "02.17.03"
+
+
 @pytest.mark.parametrize(
     ("type_spec", "data_hex"),
     [
@@ -73,6 +78,8 @@ def test_parse_hti_time_u24le_hhmmss() -> None:
         ("HTI", ""),
         ("HTI", "0102"),
         ("HTI", "01020304"),
+        ("FW", "0805"),
+        ("FW", "08050000"),
         ("HEX:2", "00"),
         ("HEX:4", "00"),
         ("I16", "00"),
@@ -94,6 +101,7 @@ def test_parse_wrong_lengths_raise(type_spec: str, data_hex: str) -> None:
         ("HTI", "006000"),  # minute=60
         ("HTI", "000060"),  # second=60
         ("HTI", "23593a"),  # invalid BCD second (0x3A)
+        ("FW", "aa0000"),  # invalid BCD major (0xAA)
     ],
 )
 def test_parse_malformed_values_raise(type_spec: str, data_hex: str) -> None:

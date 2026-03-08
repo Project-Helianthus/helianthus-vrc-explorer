@@ -4,6 +4,7 @@ import pytest
 
 from helianthus_vrc_explorer.scanner.register import (
     _interpret_flags,
+    _parse_inferred_value,
     is_instance_present,
     opcodes_for_group,
     read_register,
@@ -342,3 +343,11 @@ def test_is_instance_present_group_09_accepts_non_nan_values(
         )
         is True
     )
+
+
+def test_fw_not_added_to_inferred_type_selection() -> None:
+    inferred_type, inferred_value, inferred_error = _parse_inferred_value(bytes.fromhex("051226"))
+
+    assert inferred_type == "HDA:3"
+    assert inferred_value == "2026-12-05"
+    assert inferred_error is None

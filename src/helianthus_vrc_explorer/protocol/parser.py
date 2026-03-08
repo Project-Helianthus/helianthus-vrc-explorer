@@ -164,6 +164,20 @@ def parse_hti_time(data: bytes) -> str:
     return f"{hour:02d}:{minute:02d}:{second:02d}"
 
 
+def parse_fw(data: bytes) -> str:
+    """Parse an `FW` value (u24 firmware version encoded as BCD bytes).
+
+    Returns:
+        Canonical firmware version string: `MM.mm.pp`.
+    """
+
+    _expect_len("FW", data, 3)
+    major = _decode_bcd("FW", "major", data[0])
+    minor = _decode_bcd("FW", "minor", data[1])
+    patch = _decode_bcd("FW", "patch", data[2])
+    return f"{major:02d}.{minor:02d}.{patch:02d}"
+
+
 def encode_exp(value: float) -> bytes:
     """Encode an `EXP` value (float32le)."""
 
@@ -320,6 +334,26 @@ def encode_hti_time(value: str) -> bytes:
     )
 
 
+def encode_fw(value: str) -> bytes:
+    """Encode an `FW` value from `MM.mm.pp`."""
+
+    if not isinstance(value, str):
+        raise ValueEncodeError(f"FW expects str, got {type(value).__name__}")
+
+    parts = value.split(".")
+    if len(parts) != 3 or any(len(part) != 2 or not part.isdigit() for part in parts):
+        raise ValueEncodeError("FW expects MM.mm.pp")
+
+    major, minor, patch = (int(part) for part in parts)
+    return bytes(
+        (
+            _encode_bcd("FW", "major", major),
+            _encode_bcd("FW", "minor", minor),
+            _encode_bcd("FW", "patch", patch),
+        )
+    )
+
+
 def encode_typed_value(type_spec: str, value: object) -> bytes:
     """Encode a typed value into bytes compatible with ebusd schema type specs."""
 
@@ -356,6 +390,8 @@ def encode_typed_value(type_spec: str, value: object) -> bytes:
             return encode_hda3_date(value)  # type: ignore[arg-type]
         case "HTI":
             return encode_hti_time(value)  # type: ignore[arg-type]
+        case "FW":
+            return encode_fw(value)  # type: ignore[arg-type]
         case _:
             raise ValueEncodeError(f"Unknown type spec: {type_spec!r}")
 
@@ -372,6 +408,7 @@ def parse_typed_value(type_spec: str, data: bytes) -> object:
     - `STR:*`: cstring (latin1, trailing NULs stripped)
     - `HDA:3`: u24le date encoded as DDMMYY (BCD per byte, `YYYY-MM-DD`)
     - `HTI`: u24le time encoded as HH:MM:SS (BCD per byte, `HH:MM:SS`)
+    - `FW`: 3-byte firmware version encoded as BCD bytes (`MM.mm.pp`)
 
     Args:
         type_spec: Type spec string (e.g. `"EXP"`, `"STR:*"`).
@@ -417,5 +454,7 @@ def parse_typed_value(type_spec: str, data: bytes) -> object:
             return parse_hda3_date(data)
         case "HTI":
             return parse_hti_time(data)
+        case "FW":
+            return parse_fw(data)
         case _:
             raise ValueParseError(f"Unknown type spec: {type_spec!r}")
