@@ -593,7 +593,7 @@ def scan_b524(
             unknown_text = ", ".join(f"0x{gg:02X}" for gg in unknown_groups)
             observer.log(
                 f"Found {len(unknown_groups)} unknown groups ({unknown_text}); "
-                "skipped by default (enable in planner).",
+                "scanned conservatively as singleton by default.",
                 level="warn",
             )
         if unknown_descriptor_types and observer is not None:
@@ -687,7 +687,7 @@ def scan_b524(
         instance_discovery_start_calls = counting_transport.counters.send_calls
         for group in classified:
             meta = metadata_map[group.group]
-            ii_max = meta.ii_max
+            ii_max: int | None = meta.ii_max
             rr_max = meta.rr_max
             if _is_instanced_group(ii_max):
                 emit_trace_label(
@@ -790,6 +790,7 @@ def scan_b524(
             group_meta = metadata_map[group.group]
             group_obj = artifact["groups"][_hex_u8(group.group)]
             planner_ii_max = _planner_ii_max(group_meta.ii_max)
+            present_instances: tuple[int, ...]
             if planner_ii_max is None:
                 present_instances = (0x00,)
             else:
