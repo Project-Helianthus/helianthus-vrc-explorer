@@ -461,16 +461,16 @@ def parse_b524_id(id_hex: str) -> dict:
 **Known groups (hardcoded reference, validated against CSV):**
 
     GROUP_CONFIG = {
-        0x00: {"desc": 3.0, "name": "Regulator Parameters", "ii_max": 0x00, "rr_max": 0x00FF},
-        0x01: {"desc": 3.0, "name": "Hot Water Circuit", "ii_max": 0x00, "rr_max": 0x13},
-        0x02: {"desc": 1.0, "name": "Heating Circuits", "ii_max": 0x0A, "rr_max": 0x25},
-        0x03: {"desc": 1.0, "name": "Zones", "ii_max": 0x0A, "rr_max": 0x2E},
-        0x04: {"desc": 6.0, "name": "Solar Circuit", "ii_max": 0x00, "rr_max": 0x0B},
-        0x05: {"desc": 1.0, "name": "Hot Water Cylinder", "ii_max": 0x01, "rr_max": 0x04},
-        0x08: {"name": "Buffer / Solar Cylinder 2", "ii_max": 0x0A, "rr_max": 0x07},
-        0x09: {"desc": 1.0, "name": "Radio Sensors VRC7xx", "ii_max": 0x0A, "rr_max": 0x35},
-        0x0A: {"desc": 1.0, "name": "Radio Sensors VR92", "ii_max": 0x0A, "rr_max": 0x4D},
-        0x0C: {"desc": 1.0, "name": "Remote Accessories / FM5 Slots", "ii_max": 0x0A, "rr_max": 0x2F},
+        0x00: {"desc": 3.0, "name": "Regulator Parameters", "ii_max": 0x00, "rr_max": 0x00FF, "opcodes": [0x02]},
+        0x01: {"desc": 3.0, "name": "Hot Water Circuit", "ii_max": 0x00, "rr_max": 0x13, "opcodes": [0x02]},
+        0x02: {"desc": 1.0, "name": "Heating Circuits", "ii_max": 0x0A, "rr_max": 0x25, "opcodes": [0x02]},
+        0x03: {"desc": 1.0, "name": "Zones", "ii_max": 0x0A, "rr_max": 0x2E, "opcodes": [0x02]},
+        0x04: {"desc": 6.0, "name": "Solar Circuit", "ii_max": 0x00, "rr_max": 0x0B, "opcodes": [0x02]},
+        0x05: {"desc": 1.0, "name": "Hot Water Cylinder", "ii_max": 0x01, "rr_max": 0x04, "opcodes": [0x02]},
+        0x08: {"name": "Buffer / Solar Cylinder 2", "ii_max": 0x0A, "rr_max": 0x07, "opcodes": [0x02, 0x06], "rr_max_by_opcode": {0x02: 0x07, 0x06: 0x04}, "ii_max_by_opcode": {0x02: 0x00, 0x06: 0x0A}},
+        0x09: {"desc": 1.0, "name": "Radio Sensors VRC7xx", "ii_max": 0x0A, "rr_max": 0x35, "opcodes": [0x02, 0x06], "rr_max_by_opcode": {0x02: 0x0F, 0x06: 0x35}},
+        0x0A: {"desc": 1.0, "name": "Radio Sensors VR92", "ii_max": 0x0A, "rr_max": 0x4D, "opcodes": [0x02, 0x06], "rr_max_by_opcode": {0x02: 0x4D, 0x06: 0x35}},
+        0x0C: {"desc": 1.0, "name": "Remote Accessories / FM5 Slots", "ii_max": 0x0A, "rr_max": 0x2F, "opcodes": [0x06]},
     }
 
 **Register families by group:**
