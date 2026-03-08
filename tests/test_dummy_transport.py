@@ -81,3 +81,104 @@ def test_dummy_transport_artifact_v2_separates_local_and_remote_registers(
 
     assert transport.send(0x15, local_payload) == bytes.fromhex("01090400031702")
     assert transport.send(0x15, remote_payload) == bytes.fromhex("01090400021703")
+
+
+def test_dummy_transport_legacy_remote_only_group_defaults_to_group_opcode(
+    tmp_path: Path,
+) -> None:
+    fixture = {
+        "meta": {},
+        "groups": {
+            "0x0C": {
+                "descriptor_type": 1.0,
+                "instances": {
+                    "0x00": {
+                        "registers": {
+                            "0x0004": {"raw_hex": "080500"},
+                        }
+                    }
+                },
+            }
+        },
+    }
+    fixture_path = tmp_path / "fixture_remote_only.json"
+    fixture_path.write_text(json.dumps(fixture), encoding="utf-8")
+
+    transport = DummyTransport(fixture_path)
+    remote_payload = build_register_read_payload(0x06, group=0x0C, instance=0x00, register=0x0004)
+    local_payload = build_register_read_payload(0x02, group=0x0C, instance=0x00, register=0x0004)
+
+    assert transport.send(0x15, remote_payload) == bytes.fromhex("010c0400080500")
+    with pytest.raises(TransportTimeout):
+        transport.send(0x15, local_payload)
+
+
+def test_dummy_transport_legacy_dual_group_flat_fixture_supports_both_opcodes(
+    tmp_path: Path,
+) -> None:
+    fixture = {
+        "meta": {},
+        "groups": {
+            "0x09": {
+                "descriptor_type": 1.0,
+                "instances": {
+                    "0x00": {
+                        "registers": {
+                            "0x0004": {"raw_hex": "021703"},
+                        }
+                    }
+                },
+            }
+        },
+    }
+    fixture_path = tmp_path / "fixture_dual_flat.json"
+    fixture_path.write_text(json.dumps(fixture), encoding="utf-8")
+
+    transport = DummyTransport(fixture_path)
+    local_payload = build_register_read_payload(0x02, group=0x09, instance=0x00, register=0x0004)
+    remote_payload = build_register_read_payload(0x06, group=0x09, instance=0x00, register=0x0004)
+
+    assert transport.send(0x15, local_payload) == bytes.fromhex("01090400021703")
+    assert transport.send(0x15, remote_payload) == bytes.fromhex("01090400021703")
+
+
+def test_dummy_transport_artifact_v2_namespaces_do_not_require_dual_namespace_flag(
+    tmp_path: Path,
+) -> None:
+    fixture = {
+        "meta": {},
+        "groups": {
+            "0x09": {
+                "descriptor_observed": 1.0,
+                "namespaces": {
+                    "0x02": {
+                        "instances": {
+                            "0x00": {
+                                "registers": {
+                                    "0x0004": {"raw_hex": "031702"},
+                                }
+                            }
+                        }
+                    },
+                    "0x06": {
+                        "instances": {
+                            "0x00": {
+                                "registers": {
+                                    "0x0004": {"raw_hex": "021703"},
+                                }
+                            }
+                        }
+                    },
+                },
+            }
+        },
+    }
+    fixture_path = tmp_path / "fixture_namespaces_only.json"
+    fixture_path.write_text(json.dumps(fixture), encoding="utf-8")
+
+    transport = DummyTransport(fixture_path)
+    local_payload = build_register_read_payload(0x02, group=0x09, instance=0x00, register=0x0004)
+    remote_payload = build_register_read_payload(0x06, group=0x09, instance=0x00, register=0x0004)
+
+    assert transport.send(0x15, local_payload) == bytes.fromhex("01090400031702")
+    assert transport.send(0x15, remote_payload) == bytes.fromhex("01090400021703")

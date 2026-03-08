@@ -20,9 +20,12 @@ A fixture is a JSON object with:
 
 Each group entry contains:
 
-- `descriptor_type` (number): Value returned by the B524 directory probe (`opcode=0x00`), encoded
-  as float32 little-endian on the wire.
+- `descriptor_type` or `descriptor_observed` (number): Value returned by the B524 directory probe
+  (`opcode=0x00`), encoded as float32 little-endian on the wire.
 - `instances` (object, optional): Mapping of instance id -> instance data.
+- `namespaces` (object, optional): Artifact v2 namespace mapping keyed by read opcode (`0x02`,
+  `0x06`, etc.). When present, this is the source of register data even if `dual_namespace` is
+  omitted.
 
 Each instance entry contains:
 
@@ -32,6 +35,9 @@ Each register entry contains:
 
 - `raw_hex` (string): Hex-encoded **value bytes only** for a register read response (no 4-byte echo
   header).
+- `read_opcode` (string, optional): Explicit opcode for flat fixtures that should only answer one
+  namespace/opcode. If omitted, DummyTransport falls back to the configured opcode set for that
+  group.
 
 ### Example
 
@@ -59,3 +65,6 @@ Each register entry contains:
   `0.0`.
 - Register read (`02/06 00 <GG> <II> <RR_LO> <RR_HI>`): returns `echo(4 bytes) + value_bytes`
   where `value_bytes = bytes.fromhex(raw_hex)`. If missing, `TransportTimeout` is raised.
+- Flat legacy fixtures without `read_opcode` follow the configured group opcode(s). Single-opcode
+  groups answer only that opcode; legacy dual-opcode groups answer both until the fixture is
+  upgraded to `namespaces`.

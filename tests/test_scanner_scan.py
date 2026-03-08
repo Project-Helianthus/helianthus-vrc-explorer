@@ -701,7 +701,7 @@ def test_type_hint_propagation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
                 "instances": {
                     "0x00": {
                         "registers": {
-                            "0x0004": {"raw_hex": "021703", "read_opcode": "0x06"},
+                            "0x0004": {"raw_hex": "021703"},
                         }
                     }
                 },

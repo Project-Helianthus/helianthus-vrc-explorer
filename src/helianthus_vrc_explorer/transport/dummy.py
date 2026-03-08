@@ -5,6 +5,7 @@ import struct
 from pathlib import Path
 from typing import Any
 
+from ..scanner.director import GROUP_CONFIG
 from .base import TransportError, TransportInterface, TransportTimeout
 
 
@@ -121,6 +122,19 @@ class DummyTransport(TransportInterface):
             raise ValueError(f"{field} opcode out of range 0..255: {value!r}")
         return opcode
 
+    @staticmethod
+    def _fallback_opcodes(*, group: int, default_opcode: int | None) -> tuple[int, ...]:
+        if default_opcode is not None:
+            return (default_opcode,)
+
+        config = GROUP_CONFIG.get(group)
+        if config is not None:
+            configured = tuple(int(opcode) for opcode in config["opcodes"])
+            if configured:
+                return configured
+
+        return (0x02,)
+
     def _load_instances(
         self,
         *,
@@ -155,12 +169,11 @@ class DummyTransport(TransportInterface):
                     raise ValueError(f"Register {register_key!r} must be a JSON object")
 
                 read_opcode = register_value.get("read_opcode")
+                opcodes: tuple[int, ...]
                 if isinstance(read_opcode, str):
-                    opcode = self._parse_opcode(read_opcode, "register")
-                elif default_opcode is not None:
-                    opcode = default_opcode
+                    opcodes = (self._parse_opcode(read_opcode, "register"),)
                 else:
-                    opcode = 0x02
+                    opcodes = self._fallback_opcodes(group=group, default_opcode=default_opcode)
 
                 raw_hex = register_value.get("raw_hex")
                 if isinstance(raw_hex, str):
@@ -170,12 +183,14 @@ class DummyTransport(TransportInterface):
                         raise ValueError(
                             f"Register {register_key!r} has invalid raw_hex: {raw_hex!r}"
                         ) from exc
-                    self._register_values[(opcode, group, instance, register)] = value_bytes
+                    for opcode in opcodes:
+                        self._register_values[(opcode, group, instance, register)] = value_bytes
                     continue
 
                 error = register_value.get("error")
                 if isinstance(error, str) and error == "timeout":
-                    self._register_timeouts.add((opcode, group, instance, register))
+                    for opcode in opcodes:
+                        self._register_timeouts.add((opcode, group, instance, register))
                     continue
 
                 raise ValueError(
@@ -226,8 +241,8 @@ class DummyTransport(TransportInterface):
                 )
             self._group_descriptor[group] = float(descriptor)
 
-            if bool(group_value.get("dual_namespace")):
-                namespaces = group_value.get("namespaces", {})
+            namespaces = group_value.get("namespaces")
+            if namespaces is not None:
                 if not isinstance(namespaces, dict):
                     raise ValueError(f'Group {group_key!r} field "namespaces" must be an object')
                 for namespace_key, namespace_value in namespaces.items():
@@ -245,6 +260,11 @@ class DummyTransport(TransportInterface):
                         default_opcode=opcode,
                     )
                 continue
+
+            if bool(group_value.get("dual_namespace")):
+                raise ValueError(
+                    f'Group {group_key!r} sets "dual_namespace" but is missing "namespaces"'
+                )
 
             self._load_instances(
                 group_key=group_key,
