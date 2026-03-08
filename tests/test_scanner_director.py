@@ -171,6 +171,17 @@ def test_discover_groups_does_not_terminate_on_transient_transport_failures(tmp_
     assert transport.probed_groups == [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]
 
 
+def test_discover_groups_treats_status_only_gg00_as_transient(tmp_path: Path) -> None:
+    inner = DummyTransport(_write_directory_fixture(tmp_path))
+    flaky = FlakyDirectoryTransport(inner, short_responses={0x00})
+    transport = RecordingTransport(flaky)
+
+    discovered = discover_groups(transport, dst=0x15)
+
+    assert [group.group for group in discovered] == [0x02, 0x03]
+    assert transport.probed_groups == [0x00, 0x01, 0x02, 0x03, 0x04, 0x05]
+
+
 def test_classify_groups_logs_descriptor_mismatch_at_info(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

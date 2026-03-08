@@ -67,16 +67,17 @@ class ConstraintAwareTransport(TransportInterface):
         return self._inner.send(dst, payload)
 
 
-class _B524UnsupportedTransport(TransportInterface):
-    def __init__(self) -> None:
+class _TransientFirstProbeTransport(TransportInterface):
+    def __init__(self, inner: TransportInterface) -> None:
+        self._inner = inner
         self.calls: list[bytes] = []
 
-    def send(self, dst: int, payload: bytes) -> bytes:  # noqa: ARG002
+    def send(self, dst: int, payload: bytes) -> bytes:
         self.calls.append(payload)
         if payload == bytes((0x00, 0x00, 0x00)):
-            # status-only "no data" on first directory probe => unsupported B524
+            # Shared-bus ebusd-tcp can transiently return status-only 0x00 on the first probe.
             return b"\x00"
-        raise AssertionError(f"Unexpected payload after unsupported probe: {payload.hex()}")
+        return self._inner.send(dst, payload)
 
 
 def _write_fixture_group_02(
@@ -304,34 +305,37 @@ def test_scan_b524_scans_all_instances_and_register_range(tmp_path: Path) -> Non
     assert scanned_registers == set(range(0x25 + 1))
 
 
-def test_scan_b524_skips_flow_when_first_directory_probe_is_status_only(
+def test_scan_b524_continues_when_first_directory_probe_is_status_only(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     import sys
 
     import helianthus_vrc_explorer.scanner.scan as scan_mod
 
-    transport = _B524UnsupportedTransport()
+    transport = _TransientFirstProbeTransport(DummyTransport(_write_fixture_group_02(tmp_path)))
 
     def _unexpected_planner(*_args, **_kwargs):
-        raise AssertionError("planner should not run when B524 is unsupported")
+        raise AssertionError("planner should not run for non-interactive scan")
 
     monkeypatch.setattr(scan_mod, "prompt_scan_plan", _unexpected_planner)
-    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
 
     artifact = scan_b524(
         transport,
         dst=0x15,
         observer=_NoopObserver(),
-        console=Console(force_terminal=True),
+        console=Console(force_terminal=False),
         planner_ui="classic",
     )
 
     assert artifact["meta"]["incomplete"] is False
-    assert artifact["meta"]["b524_supported"] is False
-    assert artifact["meta"]["b524_skip_reason"] == "first_directory_probe_no_data"
-    assert artifact["groups"] == {}
-    assert transport.calls == [bytes((0x00, 0x00, 0x00))]
+    assert "b524_supported" not in artifact["meta"]
+    assert "b524_skip_reason" not in artifact["meta"]
+    assert "0x02" in artifact["groups"]
+    assert artifact["groups"]["0x02"]["instances"]["0x00"]["present"] is True
+    assert transport.calls[0] == bytes((0x00, 0x00, 0x00))
+    assert bytes((0x00, 0x02, 0x00)) in transport.calls
 
 
 def test_scan_b524_collects_constraint_dictionary_entries(tmp_path: Path) -> None:
