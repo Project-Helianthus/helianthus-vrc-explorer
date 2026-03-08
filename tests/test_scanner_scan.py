@@ -701,7 +701,7 @@ def test_type_hint_propagation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
                 "instances": {
                     "0x00": {
                         "registers": {
-                            "0x0004": {"raw_hex": "021703"},
+                            "0x0004": {"raw_hex": "021703", "read_opcode": "0x06"},
                         }
                     }
                 },
@@ -752,6 +752,117 @@ def test_type_hint_propagation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     assert entry["myvaillant_name"] == "radio_device_firmware"
     assert entry["type"] == "FW"
     assert entry["value"] == "02.17.03"
+
+
+def test_scan_b524_replays_dual_namespace_fixture_end_to_end(
+    dual_namespace_scan_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import sys
+
+    import helianthus_vrc_explorer.scanner.scan as scan_mod
+    from helianthus_vrc_explorer.scanner.director import DiscoveredGroup
+    from helianthus_vrc_explorer.schema.myvaillant_map import MyvaillantRegisterMap
+
+    transport = RecordingTransport(DummyTransport(dual_namespace_scan_path))
+
+    def fake_prompt_scan_plan(*_args, **_kwargs):
+        return {
+            (0x00, 0x02): GroupScanPlan(
+                group=0x00,
+                opcode=0x02,
+                rr_max=0x0004,
+                instances=(0x00,),
+            ),
+            (0x09, 0x02): GroupScanPlan(
+                group=0x09,
+                opcode=0x02,
+                rr_max=0x0007,
+                instances=(0x00, 0x01),
+            ),
+            (0x09, 0x06): GroupScanPlan(
+                group=0x09,
+                opcode=0x06,
+                rr_max=0x0007,
+                instances=(0x00, 0x01),
+            ),
+            (0x0C, 0x06): GroupScanPlan(
+                group=0x0C,
+                opcode=0x06,
+                rr_max=0x0007,
+                instances=(0x00,),
+            ),
+        }
+
+    monkeypatch.setattr(scan_mod, "prompt_scan_plan", fake_prompt_scan_plan)
+    monkeypatch.setattr(
+        scan_mod,
+        "discover_groups",
+        lambda *_args, **_kwargs: [
+            DiscoveredGroup(group=0x00, descriptor=3.0),
+            DiscoveredGroup(group=0x09, descriptor=1.0),
+            DiscoveredGroup(group=0x0C, descriptor=1.0),
+        ],
+    )
+    monkeypatch.setattr(
+        scan_mod,
+        "is_instance_present",
+        lambda *_args, **kwargs: (
+            kwargs["instance"] in {0x00, 0x01}
+            if kwargs["group"] == 0x09
+            else (kwargs["group"] == 0x0C and kwargs["instance"] == 0x00)
+        ),
+    )
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
+    map_path = tmp_path / "myvaillant_map.csv"
+    map_path.write_text(
+        "\n".join(
+            [
+                "group,instance,register,leaf,ebusd_name,register_class,type_hint,opcode",
+                "0x09,*,0x0004,radio_device_firmware_local,,state,FW,0x02",
+                "0x09,*,0x0004,radio_device_firmware,,state,FW,0x06",
+                "0x0C,*,0x0004,device_firmware_version,,state,FW,0x06",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    artifact = scan_b524(
+        transport,
+        dst=0x15,
+        observer=_NoopObserver(),
+        console=Console(force_terminal=True),
+        planner_ui="classic",
+        myvaillant_map=MyvaillantRegisterMap.from_path(map_path),
+    )
+
+    assert artifact["schema_version"] == "2.0"
+    local_fw = artifact["groups"]["0x09"]["namespaces"]["0x02"]["instances"]["0x00"]["registers"][
+        "0x0004"
+    ]
+    remote_fw = artifact["groups"]["0x09"]["namespaces"]["0x06"]["instances"]["0x00"]["registers"][
+        "0x0004"
+    ]
+    accessory_fw = artifact["groups"]["0x0c"]["instances"]["0x00"]["registers"]["0x0004"]
+
+    assert local_fw["type"] == "FW"
+    assert local_fw["value"] == "03.17.02"
+    assert local_fw["flags_access"] == "stable_ro"
+    assert local_fw["myvaillant_name"] == "radio_device_firmware_local"
+    assert remote_fw["type"] == "FW"
+    assert remote_fw["value"] == "02.17.03"
+    assert remote_fw["flags_access"] == "stable_ro"
+    assert remote_fw["myvaillant_name"] == "radio_device_firmware"
+    assert accessory_fw["type"] == "FW"
+    assert accessory_fw["value"] == "08.05.00"
+    assert accessory_fw["read_opcode_label"] == "remote"
+    assert accessory_fw["myvaillant_name"] == "device_firmware_version"
+    assert (0x02, 0x09, 0x00, 0x0004) in transport.register_reads
+    assert (0x06, 0x09, 0x00, 0x0004) in transport.register_reads
+    assert (0x06, 0x0C, 0x00, 0x0004) in transport.register_reads
 
 
 def test_scan_b524_applies_aggressive_preset_to_textual_default_plan(

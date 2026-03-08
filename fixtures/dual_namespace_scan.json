@@ -1,0 +1,161 @@
+{
+  "schema_version": "2.0",
+  "meta": {
+    "destination_address": "0x15",
+    "scan_timestamp": "2026-03-08T00:00:00Z",
+    "dummy_transport": {
+      "directory_terminator_group": "0x0d"
+    }
+  },
+  "groups": {
+    "0x00": {
+      "name": "Regulator Parameters",
+      "descriptor_observed": 3.0,
+      "instances": {
+        "0x00": {
+          "present": true,
+          "registers": {
+            "0x0000": {
+              "raw_hex": "01",
+              "read_opcode": "0x02",
+              "read_opcode_label": "local",
+              "flags_access": "user_rw",
+              "type": "UCH",
+              "value": 1,
+              "myvaillant_name": "controller_mode"
+            },
+            "0x0004": {
+              "raw_hex": "0000a041",
+              "read_opcode": "0x02",
+              "read_opcode_label": "local",
+              "flags_access": "technical_rw",
+              "type": "EXP",
+              "value": 20.0,
+              "myvaillant_name": "flow_temperature"
+            }
+          }
+        }
+      }
+    },
+    "0x09": {
+      "name": "Radio Sensors VRC7xx",
+      "descriptor_observed": 1.0,
+      "dual_namespace": true,
+      "namespaces": {
+        "0x02": {
+          "label": "local",
+          "instances": {
+            "0x00": {
+              "present": true,
+              "registers": {
+                "0x0004": {
+                  "raw_hex": "031702",
+                  "read_opcode": "0x02",
+                  "read_opcode_label": "local",
+                  "flags_access": "stable_ro",
+                  "type": "FW",
+                  "value": "03.17.02",
+                  "myvaillant_name": "radio_device_firmware_local"
+                },
+                "0x0007": {
+                  "raw_hex": "0000a041",
+                  "read_opcode": "0x02",
+                  "read_opcode_label": "local",
+                  "flags_access": "stable_ro",
+                  "type": "EXP",
+                  "value": 20.0,
+                  "myvaillant_name": "local_room_temperature"
+                }
+              }
+            },
+            "0x01": {
+              "present": true,
+              "registers": {
+                "0x0007": {
+                  "raw_hex": "0000a841",
+                  "read_opcode": "0x02",
+                  "read_opcode_label": "local",
+                  "flags_access": "volatile_ro",
+                  "type": "EXP",
+                  "value": 21.0,
+                  "myvaillant_name": "local_room_temperature"
+                }
+              }
+            }
+          }
+        },
+        "0x06": {
+          "label": "remote",
+          "instances": {
+            "0x00": {
+              "present": true,
+              "registers": {
+                "0x0004": {
+                  "raw_hex": "021703",
+                  "read_opcode": "0x06",
+                  "read_opcode_label": "remote",
+                  "flags_access": "stable_ro",
+                  "type": "FW",
+                  "value": "02.17.03",
+                  "myvaillant_name": "radio_device_firmware"
+                },
+                "0x0007": {
+                  "raw_hex": "0000b041",
+                  "read_opcode": "0x06",
+                  "read_opcode_label": "remote",
+                  "flags_access": "user_rw",
+                  "type": "EXP",
+                  "value": 22.0,
+                  "myvaillant_name": "remote_room_temperature"
+                }
+              }
+            },
+            "0x01": {
+              "present": true,
+              "registers": {
+                "0x0007": {
+                  "raw_hex": "0000b441",
+                  "read_opcode": "0x06",
+                  "read_opcode_label": "remote",
+                  "flags_access": "technical_rw",
+                  "type": "EXP",
+                  "value": 22.5,
+                  "myvaillant_name": "remote_room_temperature"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "0x0C": {
+      "name": "Remote Accessories / FM5 Slots",
+      "descriptor_observed": 1.0,
+      "instances": {
+        "0x00": {
+          "present": true,
+          "registers": {
+            "0x0004": {
+              "raw_hex": "080500",
+              "read_opcode": "0x06",
+              "read_opcode_label": "remote",
+              "flags_access": "stable_ro",
+              "type": "FW",
+              "value": "08.05.00",
+              "myvaillant_name": "device_firmware_version"
+            },
+            "0x0007": {
+              "raw_hex": "01",
+              "read_opcode": "0x06",
+              "read_opcode_label": "remote",
+              "flags_access": "volatile_ro",
+              "type": "UCH",
+              "value": 1,
+              "myvaillant_name": "accessory_state"
+            }
+          }
+        }
+      }
+    }
+  }
+}

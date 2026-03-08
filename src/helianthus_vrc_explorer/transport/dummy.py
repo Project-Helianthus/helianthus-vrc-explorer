@@ -21,8 +21,8 @@ class DummyTransport(TransportInterface):
     def __init__(self, fixture_path: Path) -> None:
         self._fixture_path = fixture_path
         self._group_descriptor: dict[int, float] = {}
-        self._register_values: dict[tuple[int, int, int], bytes] = {}
-        self._register_timeouts: set[tuple[int, int, int]] = set()
+        self._register_values: dict[tuple[int, int, int, int], bytes] = {}
+        self._register_timeouts: set[tuple[int, int, int, int]] = set()
         self._directory_terminator_group: int | None = None
         self._load_fixture()
 
@@ -59,6 +59,7 @@ class DummyTransport(TransportInterface):
         if len(payload) < 2:
             raise TransportError(f"Register payload too short: {len(payload)} bytes")
 
+        opcode = payload[0]
         optype = payload[1]
         if optype != 0x00:
             raise TransportError(
@@ -72,16 +73,16 @@ class DummyTransport(TransportInterface):
         instance = payload[3]
         register = int.from_bytes(payload[4:6], byteorder="little", signed=False)
 
-        value = self._register_values.get((group, instance, register))
-        if (group, instance, register) in self._register_timeouts:
+        value = self._register_values.get((opcode, group, instance, register))
+        if (opcode, group, instance, register) in self._register_timeouts:
             raise TransportTimeout(
                 "Fixture marks register as timeout for "
-                f"GG=0x{group:02X}, II=0x{instance:02X}, RR=0x{register:04X}"
+                f"opcode=0x{opcode:02X}, GG=0x{group:02X}, II=0x{instance:02X}, RR=0x{register:04X}"
             )
         if value is None:
             raise TransportTimeout(
                 "Fixture missing register raw_hex for "
-                f"GG=0x{group:02X}, II=0x{instance:02X}, RR=0x{register:04X}"
+                f"opcode=0x{opcode:02X}, GG=0x{group:02X}, II=0x{instance:02X}, RR=0x{register:04X}"
             )
 
         # Empirically, register replies include a 4-byte header:
@@ -109,6 +110,77 @@ class DummyTransport(TransportInterface):
         if not (0x0000 <= value <= 0xFFFF):
             raise ValueError(f"{field} key out of range 0..65535: {key!r}")
         return value
+
+    @staticmethod
+    def _parse_opcode(value: str, field: str) -> int:
+        try:
+            opcode = int(value, 0)
+        except ValueError as exc:
+            raise ValueError(f"Invalid {field} opcode (expected hex): {value!r}") from exc
+        if not (0x00 <= opcode <= 0xFF):
+            raise ValueError(f"{field} opcode out of range 0..255: {value!r}")
+        return opcode
+
+    def _load_instances(
+        self,
+        *,
+        group_key: str,
+        group: int,
+        instances: Any,
+        default_opcode: int | None,
+    ) -> None:
+        if not isinstance(instances, dict):
+            raise ValueError(f'Group {group_key!r} field "instances" must be an object')
+
+        for instance_key, instance_value in instances.items():
+            if not isinstance(instance_key, str):
+                raise ValueError(
+                    f"Instance keys must be strings, got {type(instance_key).__name__}"
+                )
+            instance = self._parse_hex_key_u8(instance_key, "instance")
+            if not isinstance(instance_value, dict):
+                raise ValueError(f"Instance {instance_key!r} must be a JSON object")
+
+            registers = instance_value.get("registers", {})
+            if not isinstance(registers, dict):
+                raise ValueError(f'Instance {instance_key!r} field "registers" must be an object')
+
+            for register_key, register_value in registers.items():
+                if not isinstance(register_key, str):
+                    raise ValueError(
+                        f"Register keys must be strings, got {type(register_key).__name__}"
+                    )
+                register = self._parse_hex_key_u16(register_key, "register")
+                if not isinstance(register_value, dict):
+                    raise ValueError(f"Register {register_key!r} must be a JSON object")
+
+                read_opcode = register_value.get("read_opcode")
+                if isinstance(read_opcode, str):
+                    opcode = self._parse_opcode(read_opcode, "register")
+                elif default_opcode is not None:
+                    opcode = default_opcode
+                else:
+                    opcode = 0x02
+
+                raw_hex = register_value.get("raw_hex")
+                if isinstance(raw_hex, str):
+                    try:
+                        value_bytes = bytes.fromhex(raw_hex)
+                    except ValueError as exc:
+                        raise ValueError(
+                            f"Register {register_key!r} has invalid raw_hex: {raw_hex!r}"
+                        ) from exc
+                    self._register_values[(opcode, group, instance, register)] = value_bytes
+                    continue
+
+                error = register_value.get("error")
+                if isinstance(error, str) and error == "timeout":
+                    self._register_timeouts.add((opcode, group, instance, register))
+                    continue
+
+                raise ValueError(
+                    f'Register {register_key!r} must contain raw_hex string or have error="timeout"'
+                )
 
     def _load_fixture(self) -> None:
         raw = self._fixture_path.read_text(encoding="utf-8")
@@ -143,56 +215,40 @@ class DummyTransport(TransportInterface):
             if not isinstance(group_value, dict):
                 raise ValueError(f"Group {group_key!r} must be a JSON object")
 
-            descriptor = group_value.get("descriptor_type")
+            descriptor = group_value.get(
+                "descriptor_type",
+                group_value.get("descriptor_observed"),
+            )
             if not isinstance(descriptor, (int, float)) or isinstance(descriptor, bool):
-                raise ValueError(f"Group {group_key!r} must contain numeric descriptor_type")
+                raise ValueError(
+                    "Group "
+                    f"{group_key!r} must contain numeric descriptor_type or descriptor_observed"
+                )
             self._group_descriptor[group] = float(descriptor)
 
-            instances = group_value.get("instances", {})
-            if not isinstance(instances, dict):
-                raise ValueError(f'Group {group_key!r} field "instances" must be an object')
-
-            for instance_key, instance_value in instances.items():
-                if not isinstance(instance_key, str):
-                    raise ValueError(
-                        f"Instance keys must be strings, got {type(instance_key).__name__}"
-                    )
-                instance = self._parse_hex_key_u8(instance_key, "instance")
-                if not isinstance(instance_value, dict):
-                    raise ValueError(f"Instance {instance_key!r} must be a JSON object")
-
-                registers = instance_value.get("registers", {})
-                if not isinstance(registers, dict):
-                    raise ValueError(
-                        f'Instance {instance_key!r} field "registers" must be an object'
-                    )
-
-                for register_key, register_value in registers.items():
-                    if not isinstance(register_key, str):
+            if bool(group_value.get("dual_namespace")):
+                namespaces = group_value.get("namespaces", {})
+                if not isinstance(namespaces, dict):
+                    raise ValueError(f'Group {group_key!r} field "namespaces" must be an object')
+                for namespace_key, namespace_value in namespaces.items():
+                    if not isinstance(namespace_key, str):
                         raise ValueError(
-                            f"Register keys must be strings, got {type(register_key).__name__}"
+                            f"Namespace keys must be strings, got {type(namespace_key).__name__}"
                         )
-                    register = self._parse_hex_key_u16(register_key, "register")
-                    if not isinstance(register_value, dict):
-                        raise ValueError(f"Register {register_key!r} must be a JSON object")
-
-                    raw_hex = register_value.get("raw_hex")
-                    if isinstance(raw_hex, str):
-                        try:
-                            value_bytes = bytes.fromhex(raw_hex)
-                        except ValueError as exc:
-                            raise ValueError(
-                                f"Register {register_key!r} has invalid raw_hex: {raw_hex!r}"
-                            ) from exc
-                        self._register_values[(group, instance, register)] = value_bytes
-                        continue
-
-                    error = register_value.get("error")
-                    if isinstance(error, str) and error == "timeout":
-                        self._register_timeouts.add((group, instance, register))
-                        continue
-
-                    raise ValueError(
-                        f"Register {register_key!r} must contain raw_hex string "
-                        'or have error="timeout"'
+                    if not isinstance(namespace_value, dict):
+                        raise ValueError(f"Namespace {namespace_key!r} must be a JSON object")
+                    opcode = self._parse_opcode(namespace_key, "namespace")
+                    self._load_instances(
+                        group_key=group_key,
+                        group=group,
+                        instances=namespace_value.get("instances", {}),
+                        default_opcode=opcode,
                     )
+                continue
+
+            self._load_instances(
+                group_key=group_key,
+                group=group,
+                instances=group_value.get("instances", {}),
+                default_opcode=None,
+            )
