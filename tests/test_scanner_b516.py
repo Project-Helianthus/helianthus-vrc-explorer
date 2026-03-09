@@ -1,8 +1,16 @@
 from __future__ import annotations
 
-from helianthus_vrc_explorer.scanner.b516 import scan_b516
+import struct
+
+from helianthus_vrc_explorer.scanner.b516 import DEFAULT_B516_SELECTORS, scan_b516
 from helianthus_vrc_explorer.scanner.scan import scan_vrc
 from helianthus_vrc_explorer.transport.base import TransportError, TransportTimeout
+
+
+def _build_b516_reply(payload: bytes, value_wh: float) -> bytes:
+    return bytes((payload[1], 0xAA, 0xBB, payload[4], payload[5], payload[6], payload[7])) + (
+        struct.pack("<f", value_wh)
+    )
 
 
 class _ProtoOnlyTransport:
@@ -54,37 +62,55 @@ class _NoopTransport:
         raise AssertionError("send_proto should not be called")
 
 
-def test_scan_b516_collects_entries_and_preserves_errors() -> None:
-    responses = {
-        bytes.fromhex("1000ffff04030030"): bytes.fromhex("00aabb0403003000004842"),
-        bytes.fromhex("1000ffff04040030"): TransportTimeout("timeout"),
-        bytes.fromhex("1000ffff03030030"): bytes.fromhex("00aabb0303003000002041"),
-        bytes.fromhex("1000ffff03040030"): bytes.fromhex("00aabb030400300000a040"),
-        bytes.fromhex("1003ffff04030032"): bytes.fromhex("03aabb0403003200002041"),
-        bytes.fromhex("1003ffff04040032"): bytes.fromhex("03aabb040400320000a040"),
-        bytes.fromhex("1003ffff03030032"): bytes.fromhex("03aabb030300320000f041"),
-        bytes.fromhex("1003ffff03040032"): bytes.fromhex("03aabb0304003200002042"),
-        bytes.fromhex("1003ffff04030030"): bytes.fromhex("03aabb0403003000002041"),
-        bytes.fromhex("1003ffff04040030"): bytes.fromhex("03aabb040400300000a040"),
-        bytes.fromhex("1003ffff03030030"): bytes.fromhex("03aabb030300300000f041"),
-        bytes.fromhex("1003ffff03040030"): bytes.fromhex("03aabb0304003000002042"),
-    }
-    transport = _ProtoOnlyTransport(responses)
+def test_scan_b516_preserves_raw_evidence_selector_context_and_errors() -> None:
+    responses: dict[bytes, bytes | Exception] = {}
+    for index, spec in enumerate(DEFAULT_B516_SELECTORS, start=1):
+        responses[spec.payload] = _build_b516_reply(spec.payload, value_wh=index * 100.0)
 
-    artifact = scan_b516(transport, dst=0x15)
+    gas_hot_water = next(
+        spec for spec in DEFAULT_B516_SELECTORS if spec.key == "system.gas.hot_water"
+    )
+    previous_electric_dhw = next(
+        spec for spec in DEFAULT_B516_SELECTORS if spec.key == "year.previous.electricity.hot_water"
+    )
+    responses[gas_hot_water.payload] = TransportTimeout("timed out")
+    responses[previous_electric_dhw.payload] = bytes.fromhex("03aabb030400")
+
+    artifact = scan_b516(_ProtoOnlyTransport(responses), dst=0x15)
 
     meta = artifact["meta"]
     assert meta["destination_address"] == "0x15"
-    assert meta["selector_count"] == 12
-    assert meta["read_count"] == 12
-    assert meta["error_count"] == 1
+    assert meta["read_count"] == len(DEFAULT_B516_SELECTORS)
+    assert meta["error_count"] == 2
     assert meta["incomplete"] is False
 
-    entries = artifact["entries"]
-    assert entries["system.gas.heating"]["value_wh"] == 50.0
-    assert entries["system.gas.hot_water"]["error"] == "timeout"
-    assert entries["year.current.gas.heating"]["echo_period"] == "0x3"
-    assert entries["year.previous.electricity.hot_water"]["value_kwh"] == 0.04
+    gas_heating = artifact["entries"]["system.gas.heating"]
+    assert gas_heating["period"] == "system"
+    assert gas_heating["source"] == "gas"
+    assert gas_heating["usage"] == "heating"
+    assert gas_heating["request_hex"] == bytes.fromhex("1000ffff04030030").hex()
+    assert (
+        gas_heating["reply_hex"]
+        == _build_b516_reply(bytes.fromhex("1000ffff04030030"), 100.0).hex()
+    )
+    assert gas_heating["echo_period"] == "0x0"
+    assert gas_heating["echo_source"] == "0x4"
+    assert gas_heating["echo_usage"] == "0x3"
+    assert gas_heating["echo_window"] == "0x00"
+    assert gas_heating["echo_qualifier"] == "0x0"
+    assert gas_heating["value_wh"] == 100.0
+    assert gas_heating["value_kwh"] == 0.1
+    assert gas_heating["error"] is None
+
+    gas_hot_water_entry = artifact["entries"]["system.gas.hot_water"]
+    assert gas_hot_water_entry["request_hex"] == gas_hot_water.payload.hex()
+    assert gas_hot_water_entry["reply_hex"] is None
+    assert gas_hot_water_entry["error"] == "timeout"
+
+    previous_electric_dhw_entry = artifact["entries"]["year.previous.electricity.hot_water"]
+    assert previous_electric_dhw_entry["request_hex"] == previous_electric_dhw.payload.hex()
+    assert previous_electric_dhw_entry["reply_hex"] == "03aabb030400"
+    assert previous_electric_dhw_entry["error"].startswith("parse_error:")
 
 
 def test_scan_vrc_adds_b516_dump_when_opted_in(monkeypatch) -> None:
@@ -103,15 +129,27 @@ def test_scan_vrc_adds_b516_dump_when_opted_in(monkeypatch) -> None:
     monkeypatch.setattr(scan_mod, "scan_b516", _fake_scan_b516)
     monkeypatch.setattr(scan_mod, "scan_b509", _fake_scan_b509)
 
-    artifact = scan_vrc(
-        _NoopTransport(),
-        dst=0x15,
-        b509_ranges=[],
-        b516_dump=True,
-    )
+    artifact = scan_vrc(_NoopTransport(), dst=0x15, b509_ranges=[], b516_dump=True)
 
     assert artifact["b516_dump"]["meta"]["read_count"] == 12
     assert artifact["b509_dump"]["meta"]["read_count"] == 0
+
+
+def test_scan_vrc_skips_b516_when_b524_is_incomplete(monkeypatch) -> None:
+    import helianthus_vrc_explorer.scanner.scan as scan_mod
+
+    def _fake_scan_b524(*_args, **_kwargs):
+        return {"meta": {"incomplete": True}, "groups": {}}
+
+    def _unexpected_scan_b516(*_args, **_kwargs):
+        raise AssertionError("B516 should be skipped when B524 is incomplete")
+
+    monkeypatch.setattr(scan_mod, "scan_b524", _fake_scan_b524)
+    monkeypatch.setattr(scan_mod, "scan_b516", _unexpected_scan_b516)
+
+    artifact = scan_vrc(_NoopTransport(), dst=0x15, b509_ranges=[], b516_dump=True)
+
+    assert "b516_dump" not in artifact
 
 
 def test_scan_vrc_propagates_incomplete_b516_and_skips_b509(monkeypatch) -> None:
@@ -137,12 +175,7 @@ def test_scan_vrc_propagates_incomplete_b516_and_skips_b509(monkeypatch) -> None
     monkeypatch.setattr(scan_mod, "scan_b516", _fake_scan_b516)
     monkeypatch.setattr(scan_mod, "scan_b509", _unexpected_scan_b509)
 
-    artifact = scan_vrc(
-        _NoopTransport(),
-        dst=0x15,
-        b509_ranges=[],
-        b516_dump=True,
-    )
+    artifact = scan_vrc(_NoopTransport(), dst=0x15, b509_ranges=[], b516_dump=True)
 
     assert artifact["meta"]["incomplete"] is True
     assert artifact["meta"]["incomplete_reason"] == "b516_user_interrupt"
