@@ -148,6 +148,21 @@ class FlakyDirectoryTransport(TransportInterface):
         return self._inner.send(dst, payload)
 
 
+class OneShotTimeoutDirectoryTransport(TransportInterface):
+    def __init__(self, inner: TransportInterface, *, groups: set[int]) -> None:
+        self._inner = inner
+        self._groups = groups
+        self._seen: set[int] = set()
+
+    def send(self, dst: int, payload: bytes) -> bytes:
+        if payload and payload[0] == 0x00 and len(payload) >= 2:
+            gg = payload[1]
+            if gg in self._groups and gg not in self._seen:
+                self._seen.add(gg)
+                raise TransportTimeout("boom-once")
+        return self._inner.send(dst, payload)
+
+
 class FatalDirectoryTransport(TransportInterface):
     def send(self, dst: int, payload: bytes) -> bytes:  # noqa: ARG002
         raise TransportCommandNotEnabled("ERR: command not enabled")
@@ -168,7 +183,11 @@ def test_discover_groups_does_not_terminate_on_transient_transport_failures(tmp_
 
     assert [group.group for group in discovered] == [0x00, 0x02, 0x03]
     # Failures at 0x04/0x05/0x06 must not terminate discovery early.
-    assert transport.probed_groups == [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]
+    assert transport.probed_groups[:4] == [0x00, 0x01, 0x02, 0x03]
+    assert transport.probed_groups.count(0x04) == 3
+    assert transport.probed_groups.count(0x05) == 3
+    assert transport.probed_groups.count(0x06) == 1
+    assert transport.probed_groups[-2:] == [0x07, 0x08]
 
 
 def test_discover_groups_treats_status_only_gg00_as_transient(tmp_path: Path) -> None:
@@ -179,7 +198,19 @@ def test_discover_groups_treats_status_only_gg00_as_transient(tmp_path: Path) ->
     discovered = discover_groups(transport, dst=0x15)
 
     assert [group.group for group in discovered] == [0x02, 0x03]
-    assert transport.probed_groups == [0x00, 0x01, 0x02, 0x03, 0x04, 0x05]
+    assert transport.probed_groups.count(0x00) == 3
+    assert transport.probed_groups[-5:] == [0x01, 0x02, 0x03, 0x04, 0x05]
+
+
+def test_discover_groups_retries_known_group_after_single_timeout(tmp_path: Path) -> None:
+    inner = DummyTransport(_write_directory_fixture(tmp_path))
+    flaky = OneShotTimeoutDirectoryTransport(inner, groups={0x03})
+    transport = RecordingTransport(flaky)
+
+    discovered = discover_groups(transport, dst=0x15)
+
+    assert [group.group for group in discovered] == [0x00, 0x02, 0x03]
+    assert transport.probed_groups.count(0x03) == 2
 
 
 def test_classify_groups_logs_descriptor_mismatch_at_info(

@@ -116,6 +116,10 @@ def test_plan_dual_namespace_creates_two_entries() -> None:
     assert sorted(recommended) == [(0x09, 0x02), (0x09, 0x06)]
     assert recommended[(0x09, 0x02)].rr_max == 0x000F
     assert recommended[(0x09, 0x06)].rr_max == 0x000F
+    assert recommended[(0x09, 0x02)].instances == (0x00,)
+    assert recommended[(0x09, 0x06)].instances == (0x00,)
 
-    aggressive = build_plan_from_preset(groups, preset="aggressive")
-    assert aggressive[(0x09, 0x06)].rr_max == 0x0035
+    full = build_plan_from_preset(groups, preset="full")
+    assert full[(0x09, 0x02)].instances == tuple(range(0x0A + 1))
+    assert full[(0x09, 0x06)].instances == tuple(range(0x0A + 1))
+    assert full[(0x09, 0x06)].rr_max == 0x0035

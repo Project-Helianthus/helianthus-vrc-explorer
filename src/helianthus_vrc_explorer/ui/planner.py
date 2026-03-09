@@ -53,7 +53,7 @@ class PlannerGroup:
         return f"{_hex_u8(self.group)} ({self.namespace_label})"
 
 
-PlannerPreset = Literal["conservative", "recommended", "aggressive", "custom"]
+PlannerPreset = Literal["conservative", "recommended", "full", "custom"]
 
 
 def _hex_u8(value: int) -> str:
@@ -149,7 +149,7 @@ def _build_default_plan(
 def _instances_for_preset(group: PlannerGroup, preset: PlannerPreset) -> tuple[int, ...]:
     if group.ii_max is None:
         return (0x00,)
-    if preset == "conservative":
+    if preset in {"conservative", "recommended"}:
         return group.present_instances
     return tuple(range(0x00, group.ii_max + 1))
 
@@ -161,14 +161,14 @@ def build_plan_from_preset(
 ) -> dict[PlanKey, GroupScanPlan]:
     selected: dict[PlanKey, GroupScanPlan] = {}
     for group in sorted(groups, key=lambda g: (g.group, g.opcode)):
-        if preset != "aggressive" and not group.known:
+        if preset != "full" and not group.known:
             continue
         if preset == "conservative" and not group.primary:
             continue
         selected[group.key] = GroupScanPlan(
             group=group.group,
             opcode=group.opcode,
-            rr_max=(group.rr_max_full if preset == "aggressive" else group.rr_max),
+            rr_max=(group.rr_max_full if preset == "full" else group.rr_max),
             instances=_instances_for_preset(group, preset),
         )
     return selected
@@ -224,11 +224,11 @@ def _print_plan_breakdown(console: Console, plan: dict[PlanKey, GroupScanPlan]) 
 
 
 def _ask_preset(console: Console, *, default_preset: PlannerPreset) -> PlannerPreset:
-    preset_hint = "Preset: (1) conservative, (2) recommended, (3) aggressive, (4) custom"
+    preset_hint = "Preset: (1) conservative, (2) recommended, (3) full, (4) custom"
     default_token = {
         "conservative": "1",
         "recommended": "2",
-        "aggressive": "3",
+        "full": "3",
         "custom": "4",
     }[default_preset]
     mapping: dict[str, PlannerPreset] = {
@@ -236,8 +236,9 @@ def _ask_preset(console: Console, *, default_preset: PlannerPreset) -> PlannerPr
         "conservative": "conservative",
         "2": "recommended",
         "recommended": "recommended",
-        "3": "aggressive",
-        "aggressive": "aggressive",
+        "3": "full",
+        "full": "full",
+        "aggressive": "full",
         "4": "custom",
         "custom": "custom",
     }
@@ -394,6 +395,12 @@ def prompt_scan_plan(
         selected_plan = dict(default_selected_plan)
     else:
         selected_plan = build_plan_from_preset(groups, preset=preset)
+
+    if preset == "full":
+        console.print(
+            "[bold yellow]Warning:[/bold yellow] full preset expands all instance slots and full "
+            "RR ranges. Expect large multi-hour live scans on BASV2.",
+        )
 
     if preset == "custom":
         selected_groups = _ask_groups_to_scan(

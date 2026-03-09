@@ -358,7 +358,7 @@ def test_scan_b524_collects_constraint_dictionary_entries(tmp_path: Path) -> Non
 
     plan = artifact["meta"]["scan_plan"]["groups"]["0x02"]
     assert plan["rr_max"] == "0x0025"
-    assert plan["instances"] == [f"0x{ii:02x}" for ii in range(0x0A + 1)]
+    assert plan["instances"] == ["0x00"]
     assert (0x02, 0x02) in transport.constraint_requests
     bounds = artifact["meta"]["group_metadata_bounds"]["0x02"]
     assert bounds["rr_max"] == "0x0025"
@@ -419,6 +419,50 @@ def test_scan_b524_skips_constraint_dictionary_by_default(tmp_path: Path) -> Non
     assert transport.constraint_requests == []
     assert artifact["meta"]["constraint_probe_enabled"] is False
     assert artifact["meta"]["constraint_dictionary"] == {}
+    entry = artifact["groups"]["0x02"]["instances"]["0x00"]["registers"]["0x0002"]
+    assert entry["constraint_source"] == "static_catalog"
+    assert entry["constraint_type"] == "u16_range"
+    assert entry["constraint_min"] == 0
+    assert entry["constraint_max"] == 4
+
+
+def test_scan_b524_flags_seeded_constraint_mismatch(tmp_path: Path) -> None:
+    fixture = {
+        "meta": {"dummy_transport": {"directory_terminator_group": "0x05"}},
+        "groups": {
+            "0x02": {
+                "descriptor_type": 1.0,
+                "instances": {
+                    "0x00": {
+                        "registers": {
+                            "0x0002": {"raw_hex": "0500"},
+                        }
+                    }
+                },
+            }
+        },
+    }
+    fixture_path = tmp_path / "constraint_mismatch.json"
+    fixture_path.write_text(json.dumps(fixture), encoding="utf-8")
+
+    artifact = scan_b524(
+        DummyTransport(fixture_path),
+        dst=0x15,
+        observer=_NoopObserver(),
+        console=Console(force_terminal=True),
+        planner_ui="classic",
+    )
+
+    entry = artifact["groups"]["0x02"]["instances"]["0x00"]["registers"]["0x0002"]
+    assert entry["value"] == 5
+    assert entry["constraint_source"] == "static_catalog"
+    assert "constraint_mismatch_reason" in entry
+    mismatches = artifact["meta"]["constraint_mismatches"]
+    assert len(mismatches) == 1
+    assert mismatches[0]["group"] == "0x02"
+    assert mismatches[0]["register"] == "0x0002"
+    assert mismatches[0]["value"] == 5
+    assert artifact["meta"]["constraint_rescan_recommended"] is True
 
 
 def test_scan_b524_group_bounds_come_from_profile_defaults(tmp_path: Path) -> None:
@@ -537,7 +581,7 @@ def test_scan_instanced_group_zero_descriptor(tmp_path: Path) -> None:
     assert group["dual_namespace"] is False
     assert group["descriptor_observed"] == 0.0
     assert group["instances"]["0x00"]["present"] is True
-    assert group["instances"]["0x01"]["present"] is False
+    assert "0x01" not in group["instances"]
 
     probed_instances = sorted(
         {ii for (_opcode, gg, ii, rr) in transport.register_reads if gg == 0x02 and rr == 0x0002}
@@ -869,7 +913,7 @@ def test_scan_b524_replays_dual_namespace_fixture_end_to_end(
     assert (0x06, 0x0C, 0x00, 0x0004) in transport.register_reads
 
 
-def test_scan_b524_applies_aggressive_preset_to_textual_default_plan(
+def test_scan_b524_normalizes_legacy_aggressive_preset_to_full_for_textual_default_plan(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -905,7 +949,7 @@ def test_scan_b524_applies_aggressive_preset_to_textual_default_plan(
         planner_preset="aggressive",
     )
 
-    assert captured["default_preset"] == "aggressive"
+    assert captured["default_preset"] == "full"
     default_plan = captured["default_plan"]
     assert isinstance(default_plan, dict)
     assert (0x69, 0x02) in default_plan
@@ -919,7 +963,7 @@ def test_scan_b524_applies_preset_in_non_interactive_mode(tmp_path: Path) -> Non
         DummyTransport(_write_fixture_unknown_group_69(tmp_path)),
         dst=0x15,
         planner_ui="auto",
-        planner_preset="aggressive",
+        planner_preset="full",
     )
 
     scan_plan = artifact["meta"]["scan_plan"]["groups"]
@@ -937,7 +981,7 @@ def test_scan_unknown_group_defaults_to_singleton(tmp_path: Path) -> None:
         DummyTransport(_write_fixture_unknown_group_69(tmp_path)),
         dst=0x15,
         planner_ui="auto",
-        planner_preset="aggressive",
+        planner_preset="full",
     )
 
     group = artifact["groups"]["0x69"]

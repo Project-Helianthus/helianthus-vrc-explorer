@@ -65,6 +65,13 @@ class _ModelCatalogEntry:
     notes: str
 
 
+def _normalize_planner_preset(raw: str) -> str:
+    normalized = raw.strip().lower()
+    if normalized == "aggressive":
+        return "full"
+    return normalized
+
+
 def _load_default_myvaillant_map() -> tuple[MyvaillantRegisterMap | None, str | None]:
     """Load bundled default myVaillant mapping for installed/package use."""
 
@@ -597,7 +604,10 @@ def scan(
     preset: str = typer.Option(  # noqa: B008
         "recommended",
         "--preset",
-        help="Planner preset: conservative, recommended, aggressive, or custom.",
+        help=(
+            "Planner preset: conservative, recommended, full, or custom. "
+            "`full` scans every instance slot and full RR ranges; expect very long runs."
+        ),
     ),
     no_tips: bool = typer.Option(  # noqa: B008
         False,
@@ -613,8 +623,10 @@ def scan(
         False,
         "--probe-constraints/--no-probe-constraints",
         help=(
-            "Probe B524 opcode 0x01 constraint dictionary (GG/RR). "
-            "Disabled by default because some BASV2 setups return noisy/unreliable replies."
+            "Research-only live B524 opcode 0x01 constraint probe (GG/RR). "
+            "Disabled by default: it can add hundreds of extra bus requests and some BASV2 "
+            "setups return noisy/unreliable replies. Normal scans already use the bundled "
+            "static BASV2 constraint catalog."
         ),
     ),
 ) -> None:
@@ -634,11 +646,10 @@ def scan(
             err=True,
         )
         raise typer.Exit(2)
-    preset_value = preset.strip().lower()
-    if preset_value not in {"conservative", "recommended", "aggressive", "custom"}:
+    preset_value = _normalize_planner_preset(preset)
+    if preset_value not in {"conservative", "recommended", "full", "custom"}:
         typer.echo(
-            "Invalid --preset value. Expected one of: conservative, recommended, "
-            "aggressive, custom.",
+            "Invalid --preset value. Expected one of: conservative, recommended, full, custom.",
             err=True,
         )
         raise typer.Exit(2)

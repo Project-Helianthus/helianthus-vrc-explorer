@@ -303,4 +303,32 @@ def render_summary(console: Console, artifact: dict[str, Any], *, output_path: P
             f"Attach artifacts: {output_path} and {output_path.with_suffix('.html')}",
             style="yellow",
         )
+    constraint_mismatches = meta.get("constraint_mismatches")
+    if isinstance(constraint_mismatches, list) and constraint_mismatches:
+        console.print(
+            "Warning: observed values exceed the bundled static constraint catalog. "
+            "Consider rerunning with --probe-constraints for live confirmation.",
+            style="yellow",
+        )
+        for mismatch in constraint_mismatches[:5]:
+            if not isinstance(mismatch, dict):
+                continue
+            selector = "/".join(
+                str(mismatch.get(key))
+                for key in ("group", "instance", "register")
+                if mismatch.get(key) is not None
+            )
+            console.print(
+                f"  {selector} value={mismatch.get('value')!r} "
+                f"expected=[{mismatch.get('constraint_min')!r}, "
+                f"{mismatch.get('constraint_max')!r}] "
+                f"name={mismatch.get('name') or 'n/a'}",
+                style="yellow",
+            )
+        if len(constraint_mismatches) > 5:
+            console.print(
+                f"  ... and {len(constraint_mismatches) - 5} more mismatches in "
+                "meta.constraint_mismatches",
+                style="yellow",
+            )
     console.print(f"artifact={output_path}", style="dim")
