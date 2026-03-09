@@ -31,6 +31,7 @@ from ..transport.base import (
 from ..transport.instrumented import CountingTransport
 from ..ui.planner import PlannerGroup, PlannerPreset, build_plan_from_preset, prompt_scan_plan
 from .b509 import scan_b509
+from .b555 import scan_b555
 from .director import GROUP_CONFIG, classify_groups, discover_groups
 from .observer import ScanObserver
 from .plan import (
@@ -1507,6 +1508,7 @@ def scan_vrc(
     *,
     dst: int,
     b509_ranges: list[tuple[int, int]],
+    b555_dump: bool = False,
     ebusd_host: str | None = None,
     ebusd_port: int | None = None,
     ebusd_schema: EbusdCsvSchema | None = None,
@@ -1517,7 +1519,7 @@ def scan_vrc(
     planner_preset: PlannerPreset = "recommended",
     probe_constraints: bool = False,
 ) -> dict[str, Any]:
-    """Run the full VRC scan flow: B524 primary scan, then B509 register dump."""
+    """Run the full VRC scan flow: B524 primary scan, optional B555 dump, then B509."""
 
     artifact = scan_b524(
         transport,
@@ -1539,6 +1541,27 @@ def scan_vrc(
     scan_fn = getattr(transport, "send_proto", None)
     if not callable(scan_fn):
         return artifact
+
+    if b555_dump:
+        b555_artifact = scan_b555(
+            transport,  # type: ignore[arg-type]
+            dst=dst,
+            observer=observer,
+        )
+        artifact["b555_dump"] = b555_artifact
+
+        b555_meta = b555_artifact.get("meta", {})
+        if (
+            isinstance(b555_meta, dict)
+            and bool(b555_meta.get("incomplete"))
+            and isinstance(meta, dict)
+        ):
+            meta["incomplete"] = True
+            if "incomplete_reason" not in meta:
+                reason = b555_meta.get("incomplete_reason")
+                if isinstance(reason, str):
+                    meta["incomplete_reason"] = f"b555_{reason}"
+            return artifact
 
     b509_dump = scan_b509(
         transport,  # type: ignore[arg-type]

@@ -604,6 +604,10 @@ CI enforces this via `python scripts/check_docs_sync.py`.
 │ --b509-range                                         TEXT     B509 register range to dump (repeatable), format:      │
 │                                                               0x0000..0x00FF. If omitted, defaults to                │
 │                                                               0x0000..0x00FF.                                        │
+│ --b555-dump                --no-b555-dump                     Opt-in read-only B555 timer dump (A3/A4/A5). Disabled  │
+│                                                               by default to keep the standard B524/B509 scan path    │
+│                                                               unchanged.                                             │
+│                                                               [default: no-b555-dump]                                │
 │ --planner-ui                                         TEXT     Interactive planner mode: disabled, auto, textual, or  │
 │                                                               classic.                                               │
 │                                                               [default: disabled]                                    │

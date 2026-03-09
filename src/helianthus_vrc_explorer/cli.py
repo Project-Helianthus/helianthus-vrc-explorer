@@ -606,6 +606,14 @@ def scan(
             "If omitted, defaults to 0x0000..0x00FF."
         ),
     ),
+    b555_dump: bool = typer.Option(  # noqa: B008
+        False,
+        "--b555-dump/--no-b555-dump",
+        help=(
+            "Opt-in read-only B555 timer dump (A3/A4/A5). Disabled by default to keep "
+            "the standard B524/B509 scan path unchanged."
+        ),
+    ),
     planner_ui: str = typer.Option(  # noqa: B008
         "disabled",
         "--planner-ui",
@@ -755,6 +763,7 @@ def scan(
                             transport,
                             dst=dst_u8,
                             b509_ranges=b509_ranges,
+                            b555_dump=b555_dump,
                             ebusd_host=transport_settings.host,
                             ebusd_port=transport_settings.port,
                             ebusd_schema=ebusd_schema,

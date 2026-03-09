@@ -230,6 +230,7 @@ def test_scan_cli_defaults_planner_ui_to_disabled(monkeypatch, tmp_path: Path) -
 
     def _fake_scan_vrc(*_args, **kwargs):
         captured["planner_ui"] = kwargs["planner_ui"]
+        captured["b555_dump"] = kwargs["b555_dump"]
         return {
             "meta": {
                 "scan_timestamp": "2026-02-13T00:00:00Z",
@@ -249,6 +250,7 @@ def test_scan_cli_defaults_planner_ui_to_disabled(monkeypatch, tmp_path: Path) -
     result = runner.invoke(app, ["scan", "--dst", "0x15", "--output-dir", str(tmp_path)])
     assert result.exit_code == 0
     assert captured["planner_ui"] == "disabled"
+    assert captured["b555_dump"] is False
 
 
 def test_scan_cli_passes_explicit_planner_ui(monkeypatch, tmp_path: Path) -> None:
@@ -302,6 +304,58 @@ def test_scan_cli_passes_explicit_planner_ui(monkeypatch, tmp_path: Path) -> Non
     )
     assert result.exit_code == 0
     assert captured["planner_ui"] == "auto"
+
+
+def test_scan_cli_passes_b555_dump_flag(monkeypatch, tmp_path: Path) -> None:
+    import helianthus_vrc_explorer.cli as cli_mod
+
+    captured: dict[str, object] = {}
+
+    class _OkTransport:
+        @contextmanager
+        def session(self):
+            yield self
+
+    def _fake_build_transport(settings, *, trace_file):  # noqa: ANN001
+        _ = settings
+        _ = trace_file
+        return _OkTransport()
+
+    @contextmanager
+    def _fake_observer(*_args, **_kwargs):
+        yield None
+
+    def _fake_scan_vrc(*_args, **kwargs):
+        captured["b555_dump"] = kwargs["b555_dump"]
+        return {
+            "meta": {
+                "scan_timestamp": "2026-02-13T00:00:00Z",
+                "destination_address": "0x15",
+                "incomplete": False,
+                "schema_sources": [],
+            },
+            "groups": {},
+        }
+
+    monkeypatch.setattr(cli_mod, "_build_transport", _fake_build_transport)
+    monkeypatch.setattr(cli_mod, "_probe_scan_identity", lambda _transport, *, dst: {})
+    monkeypatch.setattr(cli_mod, "make_scan_observer", _fake_observer)
+    monkeypatch.setattr(cli_mod, "scan_vrc", _fake_scan_vrc)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            "--dst",
+            "0x15",
+            "--b555-dump",
+            "--output-dir",
+            str(tmp_path),
+        ],
+    )
+    assert result.exit_code == 0
+    assert captured["b555_dump"] is True
 
 
 def test_scan_cli_missing_textual_browse_falls_back_to_html_and_summary(
