@@ -100,6 +100,10 @@ def _load_default_myvaillant_map() -> tuple[MyvaillantRegisterMap | None, str | 
         return (None, None)
 
 
+def _emit_scan_status(console: Console, message: str) -> None:
+    console.print(f"[scan] {message}", highlight=False, markup=False, style="cyan")
+
+
 def _load_default_model_catalog() -> dict[str, _ModelCatalogEntry]:
     paths: list[Path] = []
     with contextlib.suppress(Exception):
@@ -737,18 +741,29 @@ def scan(
         else:
             b509_ranges = [(0x0000, 0x00FF)]
         while True:
+            _emit_scan_status(
+                console,
+                (
+                    f"Opening {transport_settings.protocol.upper()} transport to "
+                    f"{transport_settings.host}:{transport_settings.port}"
+                ),
+            )
             transport = _build_transport(transport_settings, trace_file=trace_file)
             opened_session = False
             try:
                 with transport.session():
                     opened_session = True
                     if requested_dst == "auto":
+                        _emit_scan_status(console, "Resolving destination address from ebusd")
                         dst_u8 = _resolve_scan_destination(transport, dst=dst)
+                        _emit_scan_status(console, f"Resolved destination to 0x{dst_u8:02X}")
                     else:
                         dst_u8 = cast(int, explicit_dst_u8)
+                        _emit_scan_status(console, f"Using explicit destination 0x{dst_u8:02X}")
                     title = f"helianthus-vrc-explorer scan (B524) dst=0x{dst_u8:02X}"
                     subtitle_lines = [f"Planner: {planner_ui_value} (preset={preset_value})"]
 
+                    _emit_scan_status(console, f"Probing regulator identity at 0x{dst_u8:02X}")
                     identity = _probe_scan_identity(transport, dst=dst_u8)
                     if redact:
                         identity["serial"] = "<SERIAL_NUMBER_REDACTED>"

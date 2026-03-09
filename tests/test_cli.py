@@ -255,6 +255,54 @@ def test_scan_cli_defaults_planner_ui_to_disabled(monkeypatch, tmp_path: Path) -
     assert captured["b516_dump"] is False
 
 
+def test_scan_emits_pre_identification_status_during_auto_detection(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    import helianthus_vrc_explorer.cli as cli_mod
+
+    class _OkTransport:
+        @contextmanager
+        def session(self):
+            yield self
+
+    def _fake_build_transport(settings, *, trace_file):  # noqa: ANN001
+        _ = settings
+        _ = trace_file
+        return _OkTransport()
+
+    @contextmanager
+    def _fake_observer(*_args, **_kwargs):
+        yield None
+
+    def _fake_scan_vrc(*_args, **_kwargs):
+        return {
+            "meta": {
+                "scan_timestamp": "2026-02-13T00:00:00Z",
+                "destination_address": "0x15",
+                "incomplete": False,
+                "schema_sources": [],
+            },
+            "groups": {},
+        }
+
+    monkeypatch.setattr(cli_mod, "_build_transport", _fake_build_transport)
+    monkeypatch.setattr(cli_mod, "_resolve_scan_destination", lambda _transport, dst: 0x15)
+    monkeypatch.setattr(cli_mod, "_probe_scan_identity", lambda _transport, *, dst: {})
+    monkeypatch.setattr(cli_mod, "make_scan_observer", _fake_observer)
+    monkeypatch.setattr(cli_mod, "scan_vrc", _fake_scan_vrc)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["scan", "--output-dir", str(tmp_path)])
+
+    assert result.exit_code == 0
+    plain = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", result.stderr)
+    assert "[scan] Opening TCP transport to 127.0.0.1:8888" in plain
+    assert "[scan] Resolving destination address from ebusd" in plain
+    assert "[scan] Resolved destination to 0x15" in plain
+    assert "[scan] Probing regulator identity at 0x15" in plain
+
+
 def test_scan_cli_passes_explicit_planner_ui(monkeypatch, tmp_path: Path) -> None:
     import helianthus_vrc_explorer.cli as cli_mod
 
