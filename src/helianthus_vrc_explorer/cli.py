@@ -614,6 +614,14 @@ def scan(
             "the standard B524/B509 scan path unchanged."
         ),
     ),
+    b516_dump: bool = typer.Option(  # noqa: B008
+        False,
+        "--b516-dump/--no-b516-dump",
+        help=(
+            "Opt-in read-only B516 energy dump (active request/response only). Disabled "
+            "by default to keep the standard B524/B555/B509 scan path unchanged."
+        ),
+    ),
     planner_ui: str = typer.Option(  # noqa: B008
         "disabled",
         "--planner-ui",
@@ -764,6 +772,7 @@ def scan(
                             dst=dst_u8,
                             b509_ranges=b509_ranges,
                             b555_dump=b555_dump,
+                            b516_dump=b516_dump,
                             ebusd_host=transport_settings.host,
                             ebusd_port=transport_settings.port,
                             ebusd_schema=ebusd_schema,

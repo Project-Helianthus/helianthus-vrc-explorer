@@ -608,6 +608,10 @@ CI enforces this via `python scripts/check_docs_sync.py`.
 │                                                               by default to keep the standard B524/B509 scan path    │
 │                                                               unchanged.                                             │
 │                                                               [default: no-b555-dump]                                │
+│ --b516-dump                --no-b516-dump                     Opt-in read-only B516 energy dump (active              │
+│                                                               request/response only). Disabled by default to keep    │
+│                                                               the standard B524/B555/B509 scan path unchanged.       │
+│                                                               [default: no-b516-dump]                                │
 │ --planner-ui                                         TEXT     Interactive planner mode: disabled, auto, textual, or  │
 │                                                               classic.                                               │
 │                                                               [default: disabled]                                    │
