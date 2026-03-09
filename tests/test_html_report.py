@@ -97,6 +97,95 @@ def test_html_report_supports_b555_tab() -> None:
     assert '"hc":"0x00"' in html
 
 
+def test_html_report_supports_b516_tab() -> None:
+    artifact = {
+        "meta": {"destination_address": "0x15", "scan_timestamp": "2026-02-11T00:00:00Z"},
+        "groups": {},
+        "b516_dump": {
+            "meta": {"read_count": 1, "error_count": 0, "incomplete": False},
+            "entries": {
+                "system.gas.heating": {
+                    "label": "System Gas Heating",
+                    "period": "system",
+                    "source": "gas",
+                    "usage": "heating",
+                    "request_hex": "1000ffff04030030",
+                    "reply_hex": "00aabb0403003000004842",
+                    "echo_period": "0x0",
+                    "echo_source": "0x4",
+                    "echo_usage": "0x3",
+                    "echo_window": "0x00",
+                    "echo_qualifier": "0x0",
+                    "value_wh": 50.0,
+                    "value_kwh": 0.05,
+                    "error": None,
+                }
+            },
+        },
+    }
+
+    html = render_html_report(artifact, title="test")
+
+    assert "B516 Dump" in html
+    assert "No B516 dump in artifact." in html
+    assert "System Gas Heating" in html
+    assert '"period":"system"' in html
+    assert '"source":"gas"' in html
+    assert '"usage":"heating"' in html
+    assert "1000ffff04030030" in html
+    assert "00aabb0403003000004842" in html
+    assert '"echo_period":"0x0"' in html
+
+
+def test_html_report_supports_b516_tab_with_raw_evidence() -> None:
+    artifact = {
+        "meta": {"destination_address": "0x15", "scan_timestamp": "2026-02-11T00:00:00Z"},
+        "groups": {},
+        "b516_dump": {
+            "meta": {"read_count": 2, "error_count": 1, "incomplete": False},
+            "entries": {
+                "system.gas.heating": {
+                    "label": "System Gas Heating",
+                    "period": "system",
+                    "source": "gas",
+                    "usage": "heating",
+                    "request_hex": "1000ffff04030030",
+                    "reply_hex": "00aabb040300300000c842",
+                    "echo_period": "0x0",
+                    "echo_source": "0x4",
+                    "echo_usage": "0x3",
+                    "echo_window": "0x00",
+                    "echo_qualifier": "0x0",
+                    "value_wh": 100.0,
+                    "value_kwh": 0.1,
+                    "error": None,
+                },
+                "year.previous.electricity.hot_water": {
+                    "label": "Previous Year Electricity Hot Water",
+                    "period": "year_previous",
+                    "source": "electricity",
+                    "usage": "hot_water",
+                    "request_hex": "1030ffff03043131",
+                    "reply_hex": "03aabb030400",
+                    "error": "parse_error: B516 response must be at least 11 bytes",
+                },
+            },
+        },
+    }
+
+    html = render_html_report(artifact, title="test")
+
+    assert "B516 Dump" in html
+    assert "No B516 dump in artifact." in html
+    assert "No B516 entries in artifact." in html
+    assert '"system.gas.heating"' in html
+    assert '"request_hex":"1000ffff04030030"' in html
+    assert '"reply_hex":"00aabb040300300000c842"' in html
+    assert '"value_kwh":0.1' in html
+    assert '"value_wh":100.0' in html
+    assert '"echo_period":"0x0"' in html
+
+
 def test_html_report_renders_namespace_totals_and_flags_access_for_dual_namespace_groups() -> None:
     artifact = {
         "meta": {"destination_address": "0x15", "scan_timestamp": "2026-02-11T00:00:00Z"},

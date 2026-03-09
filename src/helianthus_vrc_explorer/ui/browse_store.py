@@ -94,7 +94,7 @@ def _instance_label(
 
 
 def _row_sort_key(row: RegisterRow) -> tuple[int, int, int, int, int]:
-    proto_weight_map = {"b524": 0, "b555": 1, "b509": 2}
+    proto_weight_map = {"b524": 0, "b555": 1, "b516": 2, "b509": 3}
     proto_weight = proto_weight_map.get(row.protocol, 99)
     if row.protocol == "b524":
         return (
@@ -111,6 +111,21 @@ def _row_sort_key(row: RegisterRow) -> tuple[int, int, int, int, int]:
             0,
             0,
             _safe_int_hex(row.register_key.split(":", 1)[-1] if ":" in row.register_key else "0"),
+        )
+    if row.protocol == "b516":
+        period_weight_map = {
+            "system": 0,
+            "year_current": 1,
+            "year_previous": 2,
+        }
+        source_weight_map = {"gas": 0, "electricity": 1}
+        usage_weight_map = {"heating": 0, "hot_water": 1}
+        return (
+            proto_weight,
+            period_weight_map.get(row.group_key or "", 99),
+            source_weight_map.get(row.namespace_key or "", 99),
+            usage_weight_map.get(row.namespace_label or "", 99),
+            0,
         )
     return (proto_weight, 0, 0, 0, _safe_int_hex(row.register_key))
 
@@ -200,6 +215,22 @@ def _format_b555_value(entry: dict[str, Any]) -> str:
         if isinstance(temp, (int, float)) and not isinstance(temp, bool):
             return f"{start_text}-{end_text} @ {float(temp):g}C"
         return f"{start_text}-{end_text}"
+    return "entry"
+
+
+def _format_b516_value(entry: dict[str, Any]) -> str:
+    error = entry.get("error")
+    if isinstance(error, str) and error:
+        return error
+    value_kwh = entry.get("value_kwh")
+    value_wh = entry.get("value_wh")
+    if isinstance(value_kwh, (int, float)) and not isinstance(value_kwh, bool):
+        value_txt = f"{float(value_kwh):g} kWh"
+        if isinstance(value_wh, (int, float)) and not isinstance(value_wh, bool):
+            value_txt += f" ({float(value_wh):g} Wh)"
+        return value_txt
+    if isinstance(value_wh, (int, float)) and not isinstance(value_wh, bool):
+        return f"{float(value_wh):g} Wh"
     return "entry"
 
 
@@ -675,6 +706,115 @@ class BrowseStore:
                             rows.append(row)
                             row_by_id[row_id] = row
 
+        b516_dump = artifact.get("b516_dump")
+        if isinstance(b516_dump, dict):
+            tree_nodes.append(
+                TreeNodeRef(
+                    node_id="proto:b516",
+                    label="B516",
+                    level="protocol",
+                    protocol="b516",
+                )
+            )
+            entries = b516_dump.get("entries")
+            if isinstance(entries, dict):
+                period_labels = {
+                    "system": "System",
+                    "year_current": "Current Year",
+                    "year_previous": "Previous Year",
+                }
+                seen_periods: set[str] = set()
+                for entry_key in sorted(
+                    (key for key in entries if isinstance(key, str)),
+                    key=str,
+                ):
+                    entry = entries.get(entry_key)
+                    if not isinstance(entry, dict):
+                        continue
+                    period = str(entry.get("period") or "").strip()
+                    source = str(entry.get("source") or "").strip()
+                    usage = str(entry.get("usage") or "").strip()
+                    label = str(entry.get("label") or entry_key).strip() or entry_key
+                    if period and period not in seen_periods:
+                        tree_nodes.append(
+                            TreeNodeRef(
+                                node_id=f"b516:group:{period}",
+                                label=period_labels.get(period, period),
+                                level="group",
+                                protocol="b516",
+                                group_key=period,
+                            )
+                        )
+                        seen_periods.add(period)
+                    request_hex = str(entry.get("request_hex") or "")
+                    reply_hex = str(entry.get("reply_hex") or "")
+                    error = str(entry.get("error") or "")
+                    value_text = _format_b516_value(entry)
+                    path_parts = ["B516"]
+                    if period:
+                        path_parts.append(period_labels.get(period, period))
+                    if source:
+                        path_parts.append(source)
+                    if usage:
+                        path_parts.append(usage)
+                    path = "/".join(path_parts + [label])
+                    address = RegisterAddress(
+                        protocol="b516",
+                        group_key=period or None,
+                        namespace_key=source or None,
+                        namespace_label=usage or None,
+                        instance_key=None,
+                        register_key=entry_key,
+                        read_opcode=None,
+                    )
+                    search_blob = " ".join(
+                        [
+                            path.lower(),
+                            label.lower(),
+                            entry_key.lower(),
+                            period.lower(),
+                            source.lower(),
+                            usage.lower(),
+                            value_text.lower(),
+                            request_hex.lower(),
+                            reply_hex.lower(),
+                            error.lower(),
+                            str(entry.get("echo_period") or "").lower(),
+                            str(entry.get("echo_source") or "").lower(),
+                            str(entry.get("echo_usage") or "").lower(),
+                            str(entry.get("echo_window") or "").lower(),
+                            str(entry.get("echo_qualifier") or "").lower(),
+                            "state",
+                        ]
+                    )
+                    row_id = f"b516:{entry_key}"
+                    row = RegisterRow(
+                        row_id=row_id,
+                        protocol="b516",
+                        group_key=period or None,
+                        namespace_key=source or None,
+                        namespace_label=usage or None,
+                        group_name="B516",
+                        instance_key=None,
+                        register_key=entry_key,
+                        name=label,
+                        myvaillant_name="",
+                        ebusd_name="",
+                        path=path,
+                        tab="state",
+                        address=address,
+                        value_text=value_text,
+                        raw_hex=reply_hex,
+                        unit="kWh",
+                        access_flags="read-only",
+                        last_update_text=last_update_text,
+                        age_text=age_text,
+                        change_indicator="-",
+                        search_blob=search_blob,
+                    )
+                    rows.append(row)
+                    row_by_id[row_id] = row
+
         rows.sort(key=_row_sort_key)
         return cls(
             device_label=device_label,
@@ -694,7 +834,7 @@ class BrowseStore:
             return [row for row in selected if row.protocol == node.protocol]
         if (
             node.level == "group"
-            and node.protocol in {"b524", "b555"}
+            and node.protocol in {"b524", "b555", "b516"}
             and node.group_key is not None
         ):
             return [

@@ -89,3 +89,46 @@ def test_render_summary_shows_namespace_totals_and_flags_distribution(tmp_path: 
     assert "local=1, remote=1" in text
     assert "Radio Sensors VRC7xx" in text
     assert "2/2" not in text
+
+
+def test_render_summary_shows_b516_stats(tmp_path: Path) -> None:
+    artifact = {
+        "meta": {
+            "destination_address": "0x15",
+            "scan_timestamp": "2026-02-11T12:00:00Z",
+            "scan_duration_seconds": 0.75,
+        },
+        "groups": {},
+        "b516_dump": {
+            "meta": {"read_count": 12, "error_count": 2, "incomplete": True},
+            "entries": {
+                "system.gas.heating": {
+                    "label": "System Gas Heating",
+                    "period": "system",
+                    "source": "gas",
+                    "usage": "heating",
+                    "request_hex": "1000ffff04030030",
+                    "reply_hex": "00",
+                    "value_wh": 100.0,
+                    "value_kwh": 0.1,
+                    "error": None,
+                },
+                "year.previous.electricity.hot_water": {
+                    "label": "Previous Year Electricity Hot Water",
+                    "period": "year_previous",
+                    "source": "electricity",
+                    "usage": "hot_water",
+                    "request_hex": "1030ffff03043231",
+                    "reply_hex": None,
+                    "error": "timeout",
+                },
+            },
+        },
+    }
+
+    console = Console(record=True, width=140)
+
+    render_summary(console, artifact, output_path=tmp_path / "artifact.json")
+
+    text = console.export_text()
+    assert "b516 reads=12 errors=2 entries=2 incomplete=true" in text

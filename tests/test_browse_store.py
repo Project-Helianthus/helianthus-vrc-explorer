@@ -297,6 +297,60 @@ def test_browse_store_adds_b555_protocol_and_program_rows() -> None:
     assert [row.register_key for row in selected] == ["monday:0x00"]
 
 
+def test_browse_store_adds_b516_protocol_and_entry_rows() -> None:
+    artifact = {
+        "meta": {"destination_address": "0x15", "scan_timestamp": "2026-02-11T12:00:00Z"},
+        "groups": {},
+        "b516_dump": {
+            "meta": {"read_count": 2, "error_count": 1, "incomplete": False},
+            "entries": {
+                "system.gas.heating": {
+                    "label": "System Gas Heating",
+                    "period": "system",
+                    "source": "gas",
+                    "usage": "heating",
+                    "request_hex": "1000ffff04030030",
+                    "reply_hex": "00aabb040300300000c842",
+                    "value_wh": 100.0,
+                    "value_kwh": 0.1,
+                    "error": None,
+                },
+                "year.previous.electricity.hot_water": {
+                    "label": "Previous Year Electricity Hot Water",
+                    "period": "year_previous",
+                    "source": "electricity",
+                    "usage": "hot_water",
+                    "request_hex": "1030ffff03043131",
+                    "reply_hex": "03aabb030400",
+                    "error": "parse_error: B516 response must be at least 11 bytes",
+                },
+            },
+        },
+    }
+
+    store = BrowseStore.from_artifact(artifact)
+    node_ids = {node.node_id for node in store.tree_nodes}
+    assert "proto:b516" in node_ids
+    assert "b516:group:system" in node_ids
+    assert "b516:group:year_previous" in node_ids
+
+    b516_rows = [row for row in store.rows if row.protocol == "b516"]
+    assert len(b516_rows) == 2
+
+    heating_row = next(row for row in b516_rows if row.register_key == "system.gas.heating")
+    assert heating_row.name == "System Gas Heating"
+    assert heating_row.value_text == "0.1 kWh (100 Wh)"
+    assert heating_row.raw_hex == "00aabb040300300000c842"
+    assert heating_row.path == "B516/System/gas/heating/System Gas Heating"
+    assert heating_row.access_flags == "read-only"
+
+    group_node = next(
+        node for node in store.tree_nodes if node.node_id == "b516:group:year_previous"
+    )
+    selected = store.rows_for_selection(group_node, tab="state")
+    assert [row.row_id for row in selected] == ["b516:year.previous.electricity.hot_water"]
+
+
 def test_browse_store_treats_unknown_singleton_group_as_singleton() -> None:
     artifact = {
         "meta": {"destination_address": "0x15", "scan_timestamp": "2026-02-11T12:00:00Z"},

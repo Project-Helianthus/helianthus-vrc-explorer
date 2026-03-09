@@ -913,6 +913,10 @@ __ARTIFACT_JSON__
         return tabId === "b555";
       }
 
+      function _isB516Tab(tabId) {
+        return tabId === "b516";
+      }
+
       function _isB524Tab(tabId) {
         return typeof tabId === "string" && tabId.startsWith("b524:");
       }
@@ -929,7 +933,7 @@ __ARTIFACT_JSON__
         }
       }
 
-      function buildTabs(groupKeys, hasB555, hasB509) {
+      function buildTabs(groupKeys, hasB555, hasB516, hasB509) {
         tabsEl.innerHTML = "";
         const groupsRoot = artifact && typeof artifact === "object" ? artifact.groups || {} : {};
         const orderedTabIds = [];
@@ -946,6 +950,20 @@ __ARTIFACT_JSON__
           });
           tabsEl.appendChild(btn);
           orderedTabIds.push("b555");
+        }
+
+        if (hasB516) {
+          const btn = document.createElement("div");
+          btn.className = "tab";
+          btn.textContent = "B516 Dump";
+          btn.dataset.tabId = "b516";
+          btn.addEventListener("click", () => {
+            state.activeTab = "b516";
+            _syncActiveTabClasses();
+            renderActiveTab();
+          });
+          tabsEl.appendChild(btn);
+          orderedTabIds.push("b516");
         }
 
         if (hasB509) {
@@ -1097,6 +1115,104 @@ __ARTIFACT_JSON__
           if (row.requestHex) {
             tr.title = `request_hex=${row.requestHex}${row.replyHex ? `\\nreply_hex=${row.replyHex}` : ""}`;
           }
+          tbody.appendChild(tr);
+        }
+
+        table.appendChild(tbody);
+        wrap.appendChild(table);
+        card.appendChild(wrap);
+        sheetArea.innerHTML = "";
+        sheetArea.appendChild(card);
+      }
+
+      function renderB516Tab() {
+        const b516 = artifact && typeof artifact === "object" ? artifact.b516_dump : null;
+        if (!b516 || typeof b516 !== "object") {
+          sheetArea.innerHTML = "<div class='subtitle'>No B516 dump in artifact.</div>";
+          return;
+        }
+
+        const entries = b516.entries && typeof b516.entries === "object" ? b516.entries : {};
+        const rows = [];
+        for (const entryKey of Object.keys(entries).sort()) {
+          const entry = entries[entryKey];
+          if (!entry || typeof entry !== "object") continue;
+          rows.push({ entryKey, entry });
+        }
+
+        const card = document.createElement("div");
+        if (!rows.length) {
+          const msg = document.createElement("div");
+          msg.className = "subtitle";
+          msg.textContent = "No B516 entries in artifact.";
+          card.appendChild(msg);
+          sheetArea.innerHTML = "";
+          sheetArea.appendChild(card);
+          return;
+        }
+
+        const wrap = document.createElement("div");
+        wrap.className = "table-wrap";
+        const table = document.createElement("table");
+        const thead = document.createElement("thead");
+        const trHead = document.createElement("tr");
+        for (const col of ["Label", "Selector", "kWh", "Wh", "Request", "Reply", "Error"]) {
+          const th = document.createElement("th");
+          th.textContent = col;
+          trHead.appendChild(th);
+        }
+        thead.appendChild(trHead);
+        table.appendChild(thead);
+
+        const tbody = document.createElement("tbody");
+        for (const row of rows) {
+          const tr = document.createElement("tr");
+          const entry = row.entry;
+          const label = typeof entry.label === "string" && entry.label ? entry.label : row.entryKey;
+          const period = typeof entry.period === "string" ? entry.period : "n/a";
+          const source = typeof entry.source === "string" ? entry.source : "n/a";
+          const usage = typeof entry.usage === "string" ? entry.usage : "n/a";
+          const requestHex = typeof entry.request_hex === "string" ? entry.request_hex : "";
+          const replyHex = typeof entry.reply_hex === "string" ? entry.reply_hex : "";
+          const error = typeof entry.error === "string" ? entry.error : "";
+          const valueKwh = typeof entry.value_kwh === "number" ? formatValue(entry.value_kwh) : "—";
+          const valueWh = typeof entry.value_wh === "number" ? formatValue(entry.value_wh) : "—";
+
+          const labelTd = document.createElement("td");
+          const nameEl = document.createElement("div");
+          nameEl.className = "offset-name";
+          nameEl.textContent = label;
+          labelTd.appendChild(nameEl);
+          const keyEl = document.createElement("div");
+          keyEl.className = "offset-name-secondary";
+          keyEl.textContent = row.entryKey;
+          labelTd.appendChild(keyEl);
+          tr.appendChild(labelTd);
+
+          const selectorTd = document.createElement("td");
+          selectorTd.textContent = `${period} / ${source} / ${usage}`;
+          const echoParts = [];
+          if (typeof entry.echo_period === "string") echoParts.push(`p=${entry.echo_period}`);
+          if (typeof entry.echo_source === "string") echoParts.push(`s=${entry.echo_source}`);
+          if (typeof entry.echo_usage === "string") echoParts.push(`u=${entry.echo_usage}`);
+          if (typeof entry.echo_window === "string") echoParts.push(`w=${entry.echo_window}`);
+          if (typeof entry.echo_qualifier === "string") echoParts.push(`q=${entry.echo_qualifier}`);
+          if (echoParts.length) {
+            const echoEl = document.createElement("div");
+            echoEl.className = "offset-name-secondary";
+            echoEl.textContent = `echo ${echoParts.join(" ")}`;
+            selectorTd.appendChild(echoEl);
+          }
+          tr.appendChild(selectorTd);
+
+          for (const value of [valueKwh, valueWh, requestHex || "—", replyHex || "—", error || "—"]) {
+            const td = document.createElement("td");
+            td.textContent = value;
+            if (value === requestHex || value === replyHex) td.className = "cell-raw";
+            if (value === error && error) td.className = "cell-error";
+            tr.appendChild(td);
+          }
+
           tbody.appendChild(tr);
         }
 
@@ -1560,6 +1676,10 @@ __ARTIFACT_JSON__
           renderB555Tab();
           return;
         }
+        if (_isB516Tab(state.activeTab)) {
+          renderB516Tab();
+          return;
+        }
         if (_isB509Tab(state.activeTab)) {
           renderB509Tab();
           return;
@@ -1571,9 +1691,10 @@ __ARTIFACT_JSON__
       const groupsRoot = artifact && typeof artifact === "object" ? artifact.groups || {} : {};
       const groupKeys = sortedHexKeys(Object.keys(groupsRoot));
       const hasB555 = !!(artifact && typeof artifact === "object" && artifact.b555_dump && typeof artifact.b555_dump === "object");
+      const hasB516 = !!(artifact && typeof artifact === "object" && artifact.b516_dump && typeof artifact.b516_dump === "object");
       const hasB509 = !!(artifact && typeof artifact === "object" && artifact.b509_dump && typeof artifact.b509_dump === "object");
       renderSummaryChips(groupsRoot);
-      buildTabs(groupKeys, hasB555, hasB509);
+      buildTabs(groupKeys, hasB555, hasB516, hasB509);
       renderActiveTab();
     </script>
   </body>

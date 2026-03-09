@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 BrowseTab = Literal["config", "config_limits", "state"]
-ProtocolKey = Literal["b524", "b555", "b509"]
+ProtocolKey = Literal["b524", "b555", "b516", "b509"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +25,8 @@ class RegisterAddress:
         if self.protocol == "b555":
             group_key = self.group_key or "program"
             return f"B555 {group_key} {self.register_key}{suffix}".strip()
+        if self.protocol == "b516":
+            return f"B516 {self.register_key}{suffix}".strip()
         group_key = self.group_key or "0x??"
         instance_key = self.instance_key or "0x??"
         return f"GG={group_key} II={instance_key} RR={self.register_key}{suffix}"
