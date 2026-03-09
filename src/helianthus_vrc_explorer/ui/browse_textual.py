@@ -857,7 +857,12 @@ def run_browse_from_artifact(
                     self._set_status(f"Encode error: {exc}")
                     return None
                 return (raw, data)
-            if normalized == "HDA:3" or normalized == "HTI" or normalized.startswith("HEX:"):
+            if (
+                normalized == "HDA:3"
+                or normalized == "HTI"
+                or normalized == "FW"
+                or normalized.startswith("HEX:")
+            ):
                 try:
                     data = encode_typed_value(normalized, raw)
                 except ValueEncodeError as exc:

@@ -449,7 +449,7 @@ __ARTIFACT_JSON__
         if (!Number.isFinite(n) || n <= 0) return [];
         if (n === 1) return ["UCH", "I8", "BOOL", "HEX:1"];
         if (n === 2) return ["UIN", "I16", "HEX:2"];
-        if (n === 3) return ["HDA:3", "HTI", "HEX:3"];
+        if (n === 3) return ["HDA:3", "HTI", "FW", "HEX:3"];
         if (n === 4) return ["EXP", "U32", "I32", "HEX:4"];
         return [`HEX:${n}`, "STR:*"];
       }
@@ -547,10 +547,12 @@ __ARTIFACT_JSON__
             }
             case "HDA:3": {
               expectLen(3);
-              const dd = decodeBcdByte(bytes[0]);
-              const mm = decodeBcdByte(bytes[1]);
-              const yy = decodeBcdByte(bytes[2]);
-              if (dd === null || mm === null || yy === null) throw new Error("invalid BCD date");
+              const dd = bytes[0];
+              const mm = bytes[1];
+              const yy = bytes[2];
+              if (dd < 1 || dd > 31) throw new Error("day out of range");
+              if (mm < 1 || mm > 12) throw new Error("month out of range");
+              if (yy < 0 || yy > 99) throw new Error("year out of range");
               const yyyy = 2000 + yy;
               const iso = `${yyyy.toString().padStart(4, "0")}-${mm.toString().padStart(2, "0")}-${dd
                 .toString()
@@ -568,6 +570,21 @@ __ARTIFACT_JSON__
                 .toString()
                 .padStart(2, "0")}`;
               return { value: txt, error: null };
+            }
+            case "FW": {
+              expectLen(3);
+              const major = decodeBcdByte(bytes[0]);
+              const minor = decodeBcdByte(bytes[1]);
+              const patch = decodeBcdByte(bytes[2]);
+              if (major === null || minor === null || patch === null) {
+                throw new Error("invalid FW version");
+              }
+              return {
+                value: `${major.toString().padStart(2, "0")}.${minor
+                  .toString()
+                  .padStart(2, "0")}.${patch.toString().padStart(2, "0")}`,
+                error: null,
+              };
             }
             default:
               return { value: null, error: `unknown type: ${typeSpec}` };

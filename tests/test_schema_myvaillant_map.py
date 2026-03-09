@@ -212,6 +212,19 @@ def test_radio_firmware_entry_exposes_type_hint_and_opcode() -> None:
     assert entry.opcode == 0x06
 
 
+def test_zone_name_suffix_entry_exposes_string_type_hint() -> None:
+    csv_path = Path(__file__).resolve().parents[1] / "data" / "myvaillant_register_map.csv"
+    schema = MyvaillantRegisterMap.from_path(csv_path)
+
+    suffix = schema.lookup(group=0x03, instance=0x00, register=0x0018)
+    prefix = schema.lookup(group=0x03, instance=0x00, register=0x0017)
+
+    assert suffix is not None
+    assert prefix is not None
+    assert suffix.type_hint == "STR:*"
+    assert prefix.type_hint == "STR:*"
+
+
 def test_register_map_minimum_entry_count_and_no_duplicates() -> None:
     csv_path = Path(__file__).resolve().parents[1] / "data" / "myvaillant_register_map.csv"
 

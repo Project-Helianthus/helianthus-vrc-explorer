@@ -346,8 +346,8 @@ def test_is_instance_present_group_09_accepts_non_nan_values(
 
 
 def test_fw_not_added_to_inferred_type_selection() -> None:
-    inferred_type, inferred_value, inferred_error = _parse_inferred_value(bytes.fromhex("051226"))
+    inferred_type, inferred_value, inferred_error = _parse_inferred_value(bytes.fromhex("0f021b"))
 
     assert inferred_type == "HDA:3"
-    assert inferred_value == "2026-12-05"
+    assert inferred_value == "2027-02-15"
     assert inferred_error is None
