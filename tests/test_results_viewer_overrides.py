@@ -87,7 +87,7 @@ def test_apply_row_type_override_can_target_one_namespace_only() -> None:
         "meta": {},
         "groups": {
             "0x09": {
-                "name": "Radio Sensors VRC7xx",
+                "name": "Regulators",
                 "dual_namespace": True,
                 "namespaces": {
                     "0x02": {

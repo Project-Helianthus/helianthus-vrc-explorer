@@ -33,7 +33,7 @@ def test_render_summary_shows_namespace_totals_and_flags_distribution(tmp_path: 
                 },
             },
             "0x09": {
-                "name": "Radio Sensors VRC7xx",
+                "name": "Regulators",
                 "descriptor_observed": 1.0,
                 "dual_namespace": True,
                 "namespaces": {
@@ -87,7 +87,7 @@ def test_render_summary_shows_namespace_totals_and_flags_distribution(tmp_path: 
     assert "flags_access volatile_ro=0, stable_ro=2, technical_rw=0, user_rw=1" in text
     assert "b555 reads=4 errors=1 programs=2" in text
     assert "local=1, remote=1" in text
-    assert "Radio Sensors VRC7xx" in text
+    assert "Regulators" in text
     assert "2/2" not in text
 
 

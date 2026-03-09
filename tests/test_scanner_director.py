@@ -234,9 +234,9 @@ def test_group_00_rr_max_is_0x00ff() -> None:
 
 def test_group_names_match_docs() -> None:
     assert len(GROUP_CONFIG) == 10
-    assert GROUP_CONFIG[0x09]["name"] == "Radio Sensors VRC7xx"
-    assert GROUP_CONFIG[0x0A]["name"] == "Radio Sensors VR92"
-    assert GROUP_CONFIG[0x0C]["name"] == "Remote Accessories / FM5 Slots"
+    assert GROUP_CONFIG[0x09]["name"] == "Regulators"
+    assert GROUP_CONFIG[0x0A]["name"] == "Thermostats"
+    assert GROUP_CONFIG[0x0C]["name"] == "Functional Modules"
 
 
 def test_group_config_completeness() -> None:

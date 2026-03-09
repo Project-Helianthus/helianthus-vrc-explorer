@@ -52,7 +52,7 @@ def _dual_namespace_artifact() -> dict[str, object]:
         },
         "groups": {
             "0x09": {
-                "name": "Radio Sensors VRC7xx",
+                "name": "Regulators",
                 "dual_namespace": True,
                 "namespaces": {
                     "0x02": {
@@ -139,7 +139,7 @@ def test_browse_store_builds_namespace_nodes_for_dual_namespace_groups() -> None
     store = BrowseStore.from_artifact(_dual_namespace_artifact())
 
     by_node_id = {node.node_id: node for node in store.tree_nodes}
-    assert by_node_id["b524:group:0x09"].label == "Radio Sensors VRC7xx (0x09)"
+    assert by_node_id["b524:group:0x09"].label == "Regulators (0x09)"
     assert by_node_id["b524:ns:0x09:0x02"].label == "Local (0x02)"
     assert by_node_id["b524:ns:0x09:0x06"].label == "Remote (0x06)"
 

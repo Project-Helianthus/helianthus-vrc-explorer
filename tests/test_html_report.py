@@ -191,7 +191,7 @@ def test_html_report_renders_namespace_totals_and_flags_access_for_dual_namespac
         "meta": {"destination_address": "0x15", "scan_timestamp": "2026-02-11T00:00:00Z"},
         "groups": {
             "0x09": {
-                "name": "Radio Sensors VRC7xx",
+                "name": "Regulators",
                 "dual_namespace": True,
                 "namespaces": {
                     "0x02": {
@@ -241,7 +241,7 @@ def test_html_report_renders_namespace_totals_and_flags_access_for_dual_namespac
 
     assert "Namespace Totals" in html
     assert "FLAGS Access" in html
-    assert "Radio Sensors VRC7xx" in html
+    assert "Regulators" in html
     assert "activeNamespaceByGroup" in html
     assert '"label":"local"' in html
     assert '"label":"remote"' in html

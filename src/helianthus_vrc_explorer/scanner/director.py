@@ -85,7 +85,7 @@ GROUP_CONFIG: Final[dict[int, GroupConfig]] = {
     },
     0x09: {
         "desc": 1.0,
-        "name": "Radio Sensors VRC7xx",
+        "name": "Regulators",
         "ii_max": 0x0A,
         "rr_max": 0x0035,
         "opcodes": [0x02, 0x06],
@@ -93,7 +93,7 @@ GROUP_CONFIG: Final[dict[int, GroupConfig]] = {
     },
     0x0A: {
         "desc": 1.0,
-        "name": "Radio Sensors VR92",
+        "name": "Thermostats",
         "ii_max": 0x0A,
         "rr_max": 0x004D,
         "opcodes": [0x02, 0x06],
@@ -101,7 +101,7 @@ GROUP_CONFIG: Final[dict[int, GroupConfig]] = {
     },
     0x0C: {
         "desc": 1.0,
-        "name": "Remote Accessories / FM5 Slots",
+        "name": "Functional Modules",
         "ii_max": 0x0A,
         "rr_max": 0x002F,
         "opcodes": [0x06],

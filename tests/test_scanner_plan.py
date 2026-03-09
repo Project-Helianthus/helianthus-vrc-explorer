@@ -87,7 +87,7 @@ def test_plan_dual_namespace_creates_two_entries() -> None:
         PlannerGroup(
             group=0x09,
             opcode=0x02,
-            name="Radio Sensors VRC7xx",
+            name="Regulators",
             descriptor=1.0,
             known=True,
             ii_max=0x0A,
@@ -100,7 +100,7 @@ def test_plan_dual_namespace_creates_two_entries() -> None:
         PlannerGroup(
             group=0x09,
             opcode=0x06,
-            name="Radio Sensors VRC7xx",
+            name="Regulators",
             descriptor=1.0,
             known=True,
             ii_max=0x0A,
