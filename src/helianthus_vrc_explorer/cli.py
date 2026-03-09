@@ -335,6 +335,13 @@ def _can_launch_interactive_browse(console: Console) -> bool:
     )
 
 
+def _is_missing_textual_module(exc: ModuleNotFoundError) -> bool:
+    name = getattr(exc, "name", None)
+    if isinstance(name, str) and (name == "textual" or name.startswith("textual.")):
+        return True
+    return "textual" in str(exc)
+
+
 def _can_prompt_transport_retry(console: Console) -> bool:
     return (
         console.is_terminal
@@ -801,7 +808,16 @@ def scan(
 
     if _can_launch_interactive_browse(console):
         # Post-scan default UX: enter the new fullscreen browse UI directly.
-        run_browse_from_artifact(artifact, allow_write=False)
+        try:
+            run_browse_from_artifact(artifact, allow_write=False)
+        except ModuleNotFoundError as exc:
+            if not _is_missing_textual_module(exc):
+                raise
+            typer.echo(
+                "Interactive browse UI unavailable in this environment (missing "
+                "'textual'); continuing without browse.",
+                err=True,
+            )
 
     html_path = output_path.with_suffix(".html")
     html_path.write_text(
