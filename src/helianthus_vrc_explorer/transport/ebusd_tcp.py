@@ -41,6 +41,7 @@ _EBUSD_COMMAND_TERMINATOR: Final[bytes] = b"\n"
 _HEX_CHARS: Final[set[str]] = set(string.hexdigits)
 _POST_RESPONSE_DRAIN_TIMEOUT_S: Final[float] = 0.01
 _BUS_SETTLE_RETRY_S: Final[float] = 5.0
+_BUS_LOST_RETRY_S: Final[float] = 15.0
 _RETRYABLE_TRANSPORT_ERROR_SUBSTRINGS: Final[tuple[str, ...]] = (
     "arbitration lost",
     "syn received",
@@ -401,12 +402,11 @@ class EbusdTcpTransport(TransportInterface):
                             exc,
                             f"no-signal polling exceeded {self._config.no_signal_max_s:.1f}s",
                         ) from exc
-                    sleep_s = self._config.no_signal_poll_ms / 1000.0
                     self._trace(
                         f"#{seq} RETRY type=no_signal elapsed_ms={int(elapsed_s * 1000)} "
-                        f"sleep_ms={self._config.no_signal_poll_ms}"
+                        f"sleep_ms={int(_BUS_LOST_RETRY_S * 1000)}"
                     )
-                    time.sleep(sleep_s)
+                    time.sleep(_BUS_LOST_RETRY_S)
                     continue
 
                 no_signal_start_monotonic = None

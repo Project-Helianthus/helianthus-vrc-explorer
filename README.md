@@ -56,6 +56,7 @@ If startup fails on default transport (`tcp://127.0.0.1:8888`) in an interactive
 Transport note:
 - On shared live `ebusd-tcp` setups, the first B524 directory probe (`GG=0x00`) can transiently return a status-only `00`. The scanner treats this as transient noise and continues discovery instead of declaring B524 unsupported immediately.
 - On `ebusd-tcp`, `ERR: timeout`, `ERR: arbitration lost`, `ERR: SYN received`, and `ERR: wrong symbol received` now trigger a fixed 5-second quiet backoff before retry so the bus can settle.
+- On `ebusd-tcp`, `ERR: no signal` now triggers a fixed 15-second quiet backoff before retry so the eBUS side can recover instead of being polled aggressively.
 
 Constraint note:
 - Normal scans use a bundled static BASV2 constraint catalog and flag values that fall outside it.

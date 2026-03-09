@@ -313,13 +313,13 @@ def test_transport_send_polls_no_signal_then_recovers(
 
     assert result == bytes.fromhex("010203")
     assert commands == ["hex 15B52406020002000F00", "hex 15B52406020002000F00"]
-    assert sleep_calls == [0.2]
+    assert sleep_calls == [15.0]
 
 
-def test_transport_send_no_signal_polling_exhausts(
+def test_transport_send_no_signal_backoff_exhausts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    with _run_ebusd_test_server([["ERR: no signal"]] * 4) as (host, port, commands):
+    with _run_ebusd_test_server([["ERR: no signal"]] * 2) as (host, port, commands):
         sleep_calls: list[float] = []
         now = {"t": 0.0}
 
@@ -336,16 +336,16 @@ def test_transport_send_no_signal_polling_exhausts(
                 host=host,
                 port=port,
                 timeout_s=0.5,
-                no_signal_max_s=0.6,
+                no_signal_max_s=15.0,
                 no_signal_poll_ms=200,
             )
         )
         payload = bytes.fromhex("020002000F00")
-        with pytest.raises(TransportError, match=r"no-signal polling exceeded 0.6s"):
+        with pytest.raises(TransportError, match=r"no-signal polling exceeded 15.0s"):
             transport.send(0x15, payload)
 
-    assert commands == ["hex 15B52406020002000F00"] * 4
-    assert sleep_calls == [0.2, 0.2, 0.2]
+    assert commands == ["hex 15B52406020002000F00"] * 2
+    assert sleep_calls == [15.0]
 
 
 def test_parse_ebusd_info_lines_scans_all_lines_for_errors() -> None:
