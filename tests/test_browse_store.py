@@ -224,6 +224,79 @@ def test_browse_store_hides_b524_protocol_when_no_groups_present() -> None:
     assert "proto:b509" in node_ids
 
 
+def test_browse_store_adds_b555_protocol_and_program_rows() -> None:
+    artifact = {
+        "meta": {"destination_address": "0x15", "scan_timestamp": "2026-02-11T12:00:00Z"},
+        "groups": {},
+        "b555_dump": {
+            "meta": {"read_count": 3, "error_count": 0, "incomplete": False},
+            "programs": {
+                "z1_heating": {
+                    "label": "Z1 Heating",
+                    "selector": {"zone": "0x00", "hc": "0x00"},
+                    "config": {
+                        "op": "0xa3",
+                        "reply_hex": "000c0a05010c051e00",
+                        "status": "0x00",
+                        "status_label": "available",
+                        "max_slots": 12,
+                        "temp_slots": 12,
+                        "time_resolution_min": 10,
+                    },
+                    "slots_per_weekday": {
+                        "op": "0xa4",
+                        "reply_hex": "000100000000000000",
+                        "status": "0x00",
+                        "status_label": "available",
+                        "days": {
+                            "monday": 1,
+                            "tuesday": 0,
+                            "wednesday": 0,
+                            "thursday": 0,
+                            "friday": 0,
+                            "saturday": 0,
+                            "sunday": 0,
+                        },
+                    },
+                    "weekdays": {
+                        "monday": {
+                            "slots": {
+                                "0x00": {
+                                    "op": "0xa5",
+                                    "reply_hex": "0000001800e100",
+                                    "status": "0x00",
+                                    "status_label": "available",
+                                    "start_text": "00:00",
+                                    "end_text": "24:00",
+                                    "temperature_c": 22.5,
+                                }
+                            }
+                        }
+                    },
+                }
+            },
+        },
+    }
+
+    store = BrowseStore.from_artifact(artifact)
+    node_ids = {node.node_id for node in store.tree_nodes}
+    assert "proto:b555" in node_ids
+    assert "b555:program:z1_heating" in node_ids
+
+    b555_rows = [row for row in store.rows if row.protocol == "b555"]
+    assert len(b555_rows) == 3
+    assert any(row.name == "Z1 Heating config" for row in b555_rows)
+    assert any(row.name == "Z1 Heating slots per weekday" for row in b555_rows)
+    slot_row = next(row for row in b555_rows if row.register_key == "monday:0x00")
+    assert slot_row.value_text == "00:00-24:00 @ 22.5C"
+
+    program_node = next(
+        node for node in store.tree_nodes if node.node_id == "b555:program:z1_heating"
+    )
+    selected = store.rows_for_selection(program_node, tab="state")
+    assert [row.register_key for row in selected] == ["monday:0x00"]
+
+
 def test_browse_store_treats_unknown_singleton_group_as_singleton() -> None:
     artifact = {
         "meta": {"destination_address": "0x15", "scan_timestamp": "2026-02-11T12:00:00Z"},

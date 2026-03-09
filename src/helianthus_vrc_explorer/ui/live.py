@@ -27,6 +27,7 @@ _PHASE_LABELS: dict[str, str] = {
     "constraint_probe": "Constraint Probe",
     "instance_discovery": "Instance Discovery",
     "register_scan": "Register Scan",
+    "b555_dump": "B555 Dump",
     "b509_dump": "B509 Dump",
 }
 

@@ -94,7 +94,8 @@ def _instance_label(
 
 
 def _row_sort_key(row: RegisterRow) -> tuple[int, int, int, int, int]:
-    proto_weight = 0 if row.protocol == "b524" else 1
+    proto_weight_map = {"b524": 0, "b555": 1, "b509": 2}
+    proto_weight = proto_weight_map.get(row.protocol, 99)
     if row.protocol == "b524":
         return (
             proto_weight,
@@ -102,6 +103,14 @@ def _row_sort_key(row: RegisterRow) -> tuple[int, int, int, int, int]:
             _safe_int_hex(row.namespace_key or "0"),
             _safe_int_hex(row.instance_key or "0"),
             _safe_int_hex(row.register_key),
+        )
+    if row.protocol == "b555":
+        return (
+            proto_weight,
+            _safe_int_hex(row.group_key or "0"),
+            0,
+            0,
+            _safe_int_hex(row.register_key.split(":", 1)[-1] if ":" in row.register_key else "0"),
         )
     return (proto_weight, 0, 0, 0, _safe_int_hex(row.register_key))
 
@@ -162,6 +171,38 @@ def _parse_range_key(range_key: str) -> tuple[int, int] | None:
     return (start, end)
 
 
+def _format_b555_value(entry: dict[str, Any]) -> str:
+    error = entry.get("error")
+    if isinstance(error, str) and error:
+        return error
+    status_label = str(entry.get("status_label") or "").strip()
+    if status_label and status_label != "available":
+        return status_label
+    op = str(entry.get("op") or "").strip().lower()
+    if op == "0xa3":
+        parts: list[str] = []
+        if isinstance(entry.get("max_slots"), int):
+            parts.append(f"max_slots={entry['max_slots']}")
+        if isinstance(entry.get("temp_slots"), int):
+            parts.append(f"temp_slots={entry['temp_slots']}")
+        if isinstance(entry.get("time_resolution_min"), int):
+            parts.append(f"resolution={entry['time_resolution_min']}m")
+        return ", ".join(parts) or "config"
+    if op == "0xa4":
+        days = entry.get("days")
+        if isinstance(days, dict):
+            return ", ".join(f"{day[:3]}={value}" for day, value in days.items())
+        return "slots/weekday"
+    start_text = entry.get("start_text")
+    end_text = entry.get("end_text")
+    temp = entry.get("temperature_c")
+    if isinstance(start_text, str) and isinstance(end_text, str):
+        if isinstance(temp, (int, float)) and not isinstance(temp, bool):
+            return f"{start_text}-{end_text} @ {float(temp):g}C"
+        return f"{start_text}-{end_text}"
+    return "entry"
+
+
 @dataclass(slots=True)
 class BrowseStore:
     device_label: str
@@ -194,12 +235,7 @@ class BrowseStore:
         row_by_id: dict[str, RegisterRow] = {}
         groups = artifact.get("groups")
         if not isinstance(groups, dict):
-            return cls(
-                device_label=device_label,
-                rows=[],
-                tree_nodes=tree_nodes,
-                _row_by_id={},
-            )
+            groups = {}
 
         group_keys = sorted((k for k in groups if isinstance(k, str)), key=_safe_int_hex)
         if group_keys:
@@ -471,6 +507,174 @@ class BrowseStore:
                             rows.append(row)
                             row_by_id[row_id] = row
 
+        b555_dump = artifact.get("b555_dump")
+        if isinstance(b555_dump, dict):
+            tree_nodes.append(
+                TreeNodeRef(
+                    node_id="proto:b555",
+                    label="B555",
+                    level="protocol",
+                    protocol="b555",
+                )
+            )
+            programs = b555_dump.get("programs")
+            if isinstance(programs, dict):
+                for program_key in sorted(
+                    (key for key in programs if isinstance(key, str)),
+                    key=str,
+                ):
+                    program_obj = programs.get(program_key)
+                    if not isinstance(program_obj, dict):
+                        continue
+                    label = str(program_obj.get("label") or program_key)
+                    tree_nodes.append(
+                        TreeNodeRef(
+                            node_id=f"b555:program:{program_key}",
+                            label=label,
+                            level="group",
+                            protocol="b555",
+                            group_key=program_key,
+                        )
+                    )
+
+                    selector_obj = program_obj.get("selector")
+                    selector_text = ""
+                    if isinstance(selector_obj, dict):
+                        zone = selector_obj.get("zone")
+                        hc = selector_obj.get("hc")
+                        if isinstance(zone, str) and isinstance(hc, str):
+                            selector_text = f"zone={zone} hc={hc}"
+
+                    for entry_key, tab in (("config", "config"), ("slots_per_weekday", "config")):
+                        entry = program_obj.get(entry_key)
+                        if not isinstance(entry, dict):
+                            continue
+                        register_key = "0xa3" if entry_key == "config" else "0xa4"
+                        name = f"{label} {entry_key.replace('_', ' ')}"
+                        value_text = _format_b555_value(entry)
+                        raw_hex = str(entry.get("reply_hex") or "")
+                        access_flags = str(entry.get("status_label") or "—")
+                        path = f"B555/{label}/{entry_key}"
+                        row_id = f"b555:{program_key}:{entry_key}"
+                        address = RegisterAddress(
+                            protocol="b555",
+                            group_key=program_key,
+                            namespace_key=None,
+                            namespace_label=None,
+                            instance_key=None,
+                            register_key=register_key,
+                            read_opcode=register_key,
+                        )
+                        search_blob = " ".join(
+                            [
+                                path.lower(),
+                                name.lower(),
+                                selector_text.lower(),
+                                value_text.lower(),
+                                raw_hex.lower(),
+                                access_flags.lower(),
+                            ]
+                        )
+                        row = RegisterRow(
+                            row_id=row_id,
+                            protocol="b555",
+                            group_key=program_key,
+                            namespace_key=None,
+                            namespace_label=None,
+                            group_name=label,
+                            instance_key=None,
+                            register_key=register_key,
+                            name=name,
+                            myvaillant_name="",
+                            ebusd_name="",
+                            path=path,
+                            tab=tab,
+                            address=address,
+                            value_text=value_text,
+                            raw_hex=raw_hex,
+                            unit="n/a",
+                            access_flags=access_flags,
+                            last_update_text=last_update_text,
+                            age_text=age_text,
+                            change_indicator="-",
+                            search_blob=search_blob,
+                        )
+                        rows.append(row)
+                        row_by_id[row_id] = row
+
+                    weekdays = program_obj.get("weekdays")
+                    if not isinstance(weekdays, dict):
+                        continue
+                    for day_name in sorted(
+                        (key for key in weekdays if isinstance(key, str)),
+                        key=str,
+                    ):
+                        day_obj = weekdays.get(day_name)
+                        if not isinstance(day_obj, dict):
+                            continue
+                        slots = day_obj.get("slots")
+                        if not isinstance(slots, dict):
+                            continue
+                        for slot_key in sorted(
+                            (key for key in slots if isinstance(key, str)),
+                            key=_safe_int_hex,
+                        ):
+                            entry = slots.get(slot_key)
+                            if not isinstance(entry, dict):
+                                continue
+                            register_key = f"{day_name}:{slot_key}"
+                            name = f"{label} {day_name} slot {slot_key}"
+                            value_text = _format_b555_value(entry)
+                            raw_hex = str(entry.get("reply_hex") or "")
+                            access_flags = str(entry.get("status_label") or "—")
+                            path = f"B555/{label}/{day_name}/{slot_key}"
+                            row_id = f"b555:{program_key}:{day_name}:{slot_key}"
+                            address = RegisterAddress(
+                                protocol="b555",
+                                group_key=program_key,
+                                namespace_key=None,
+                                namespace_label=None,
+                                instance_key=None,
+                                register_key=register_key,
+                                read_opcode=str(entry.get("op") or "0xa5"),
+                            )
+                            search_blob = " ".join(
+                                [
+                                    path.lower(),
+                                    name.lower(),
+                                    selector_text.lower(),
+                                    value_text.lower(),
+                                    raw_hex.lower(),
+                                    access_flags.lower(),
+                                ]
+                            )
+                            row = RegisterRow(
+                                row_id=row_id,
+                                protocol="b555",
+                                group_key=program_key,
+                                namespace_key=None,
+                                namespace_label=None,
+                                group_name=label,
+                                instance_key=None,
+                                register_key=register_key,
+                                name=name,
+                                myvaillant_name="",
+                                ebusd_name="",
+                                path=path,
+                                tab="state",
+                                address=address,
+                                value_text=value_text,
+                                raw_hex=raw_hex,
+                                unit="n/a",
+                                access_flags=access_flags,
+                                last_update_text=last_update_text,
+                                age_text=age_text,
+                                change_indicator="-",
+                                search_blob=search_blob,
+                            )
+                            rows.append(row)
+                            row_by_id[row_id] = row
+
         rows.sort(key=_row_sort_key)
         return cls(
             device_label=device_label,
@@ -488,11 +692,15 @@ class BrowseStore:
             return selected
         if node.level == "protocol" and node.protocol is not None:
             return [row for row in selected if row.protocol == node.protocol]
-        if node.level == "group" and node.protocol == "b524" and node.group_key is not None:
+        if (
+            node.level == "group"
+            and node.protocol in {"b524", "b555"}
+            and node.group_key is not None
+        ):
             return [
                 row
                 for row in selected
-                if row.protocol == "b524" and row.group_key == node.group_key
+                if row.protocol == node.protocol and row.group_key == node.group_key
             ]
         if (
             node.level == "namespace"

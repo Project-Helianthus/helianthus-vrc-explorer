@@ -253,6 +253,25 @@ def render_summary(console: Console, artifact: dict[str, Any], *, output_path: P
                 b509_txt += " incomplete=true"
             console.print(b509_txt, style="dim")
 
+    b555_dump = artifact.get("b555_dump")
+    if isinstance(b555_dump, dict):
+        b555_meta = b555_dump.get("meta")
+        if isinstance(b555_meta, dict):
+            b555_reads = b555_meta.get("read_count")
+            b555_errors = b555_meta.get("error_count")
+            b555_incomplete = bool(b555_meta.get("incomplete", False))
+            programs = b555_dump.get("programs")
+            b555_txt = "b555"
+            if isinstance(b555_reads, int):
+                b555_txt += f" reads={b555_reads}"
+            if isinstance(b555_errors, int):
+                b555_txt += f" errors={b555_errors}"
+            if isinstance(programs, dict):
+                b555_txt += f" programs={len(programs)}"
+            if b555_incomplete:
+                b555_txt += " incomplete=true"
+            console.print(b555_txt, style="dim")
+
     table = Table(show_header=True, header_style="bold", box=None)
     table.add_column("Group", style="cyan", no_wrap=True)
     table.add_column("Name", style="white")

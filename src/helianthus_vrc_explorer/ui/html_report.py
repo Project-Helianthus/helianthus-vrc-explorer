@@ -909,6 +909,10 @@ __ARTIFACT_JSON__
         return tabId === "b509";
       }
 
+      function _isB555Tab(tabId) {
+        return tabId === "b555";
+      }
+
       function _isB524Tab(tabId) {
         return typeof tabId === "string" && tabId.startsWith("b524:");
       }
@@ -925,10 +929,24 @@ __ARTIFACT_JSON__
         }
       }
 
-      function buildTabs(groupKeys, hasB509) {
+      function buildTabs(groupKeys, hasB555, hasB509) {
         tabsEl.innerHTML = "";
         const groupsRoot = artifact && typeof artifact === "object" ? artifact.groups || {} : {};
         const orderedTabIds = [];
+
+        if (hasB555) {
+          const btn = document.createElement("div");
+          btn.className = "tab";
+          btn.textContent = "B555 Dump";
+          btn.dataset.tabId = "b555";
+          btn.addEventListener("click", () => {
+            state.activeTab = "b555";
+            _syncActiveTabClasses();
+            renderActiveTab();
+          });
+          tabsEl.appendChild(btn);
+          orderedTabIds.push("b555");
+        }
 
         if (hasB509) {
           const btn = document.createElement("div");
@@ -965,6 +983,128 @@ __ARTIFACT_JSON__
           state.activeTab = orderedTabIds[0] || null;
         }
         _syncActiveTabClasses();
+      }
+
+      function renderB555Tab() {
+        const b555 = artifact && typeof artifact === "object" ? artifact.b555_dump : null;
+        if (!b555 || typeof b555 !== "object") {
+          sheetArea.innerHTML = "<div class='subtitle'>No B555 dump in artifact.</div>";
+          return;
+        }
+
+        const programs = b555.programs && typeof b555.programs === "object" ? b555.programs : {};
+        const rows = [];
+
+        for (const programKey of Object.keys(programs).sort()) {
+          const program = programs[programKey];
+          if (!program || typeof program !== "object") continue;
+          const label = typeof program.label === "string" && program.label ? program.label : programKey;
+          const selector = program.selector && typeof program.selector === "object" ? program.selector : {};
+          const zone = typeof selector.zone === "string" ? selector.zone : "n/a";
+          const hc = typeof selector.hc === "string" ? selector.hc : "n/a";
+
+          function pushRow(kind, key, entry, valueText) {
+            if (!entry || typeof entry !== "object") return;
+            rows.push({
+              programKey,
+              label,
+              selector: `zone=${zone} hc=${hc}`,
+              kind,
+              key,
+              valueText,
+              requestHex: typeof entry.request_hex === "string" ? entry.request_hex : "",
+              replyHex: typeof entry.reply_hex === "string" ? entry.reply_hex : "",
+              error: typeof entry.error === "string" ? entry.error : "",
+              status: typeof entry.status_label === "string" ? entry.status_label : (typeof entry.status === "string" ? entry.status : ""),
+            });
+          }
+
+          const config = program.config;
+          if (config && typeof config === "object") {
+            const parts = [];
+            if (typeof config.max_slots === "number") parts.push(`max_slots=${config.max_slots}`);
+            if (typeof config.temp_slots === "number") parts.push(`temp_slots=${config.temp_slots}`);
+            if (typeof config.time_resolution_min === "number") parts.push(`resolution=${config.time_resolution_min}m`);
+            pushRow("A3", "config", config, parts.join(", ") || "config");
+          }
+
+          const slots = program.slots_per_weekday;
+          if (slots && typeof slots === "object") {
+            const dayMap = slots.days && typeof slots.days === "object" ? slots.days : {};
+            const valueText = Object.entries(dayMap).map(([day, count]) => `${day.slice(0, 3)}=${count}`).join(", ") || "slots/weekday";
+            pushRow("A4", "slots_per_weekday", slots, valueText);
+          }
+
+          const weekdays = program.weekdays && typeof program.weekdays === "object" ? program.weekdays : {};
+          for (const dayName of Object.keys(weekdays).sort()) {
+            const dayObj = weekdays[dayName];
+            if (!dayObj || typeof dayObj !== "object") continue;
+            const slotMap = dayObj.slots && typeof dayObj.slots === "object" ? dayObj.slots : {};
+            for (const slotKey of sortedHexKeys(Object.keys(slotMap))) {
+              const entry = slotMap[slotKey];
+              if (!entry || typeof entry !== "object") continue;
+              let valueText = typeof entry.status_label === "string" && entry.status_label && entry.status_label !== "available"
+                ? entry.status_label
+                : "entry";
+              if (typeof entry.start_text === "string" && typeof entry.end_text === "string") {
+                valueText = `${entry.start_text}-${entry.end_text}`;
+                if (typeof entry.temperature_c === "number") valueText += ` @ ${formatValue(entry.temperature_c)}C`;
+              }
+              pushRow("A5", `${dayName}:${slotKey}`, entry, valueText);
+            }
+          }
+        }
+
+        const card = document.createElement("div");
+        if (!rows.length) {
+          const msg = document.createElement("div");
+          msg.className = "subtitle";
+          msg.textContent = "No B555 rows in artifact.";
+          card.appendChild(msg);
+          sheetArea.innerHTML = "";
+          sheetArea.appendChild(card);
+          return;
+        }
+
+        const wrap = document.createElement("div");
+        wrap.className = "table-wrap";
+        const table = document.createElement("table");
+        const thead = document.createElement("thead");
+        const trHead = document.createElement("tr");
+        for (const col of ["Program", "Selector", "Entry", "Value", "Reply", "Error"]) {
+          const th = document.createElement("th");
+          th.textContent = col;
+          trHead.appendChild(th);
+        }
+        thead.appendChild(trHead);
+        table.appendChild(thead);
+
+        const tbody = document.createElement("tbody");
+        for (const row of rows) {
+          const tr = document.createElement("tr");
+          for (const value of [
+            row.label,
+            row.selector,
+            `${row.kind} ${row.key}`,
+            row.status ? `${row.valueText} (${row.status})` : row.valueText,
+            row.replyHex || "—",
+            row.error || "—",
+          ]) {
+            const td = document.createElement("td");
+            td.textContent = value;
+            tr.appendChild(td);
+          }
+          if (row.requestHex) {
+            tr.title = `request_hex=${row.requestHex}${row.replyHex ? `\\nreply_hex=${row.replyHex}` : ""}`;
+          }
+          tbody.appendChild(tr);
+        }
+
+        table.appendChild(tbody);
+        wrap.appendChild(table);
+        card.appendChild(wrap);
+        sheetArea.innerHTML = "";
+        sheetArea.appendChild(card);
       }
 
       function renderB509Tab() {
@@ -1416,6 +1556,10 @@ __ARTIFACT_JSON__
       }
 
       function renderActiveTab() {
+        if (_isB555Tab(state.activeTab)) {
+          renderB555Tab();
+          return;
+        }
         if (_isB509Tab(state.activeTab)) {
           renderB509Tab();
           return;
@@ -1426,9 +1570,10 @@ __ARTIFACT_JSON__
 
       const groupsRoot = artifact && typeof artifact === "object" ? artifact.groups || {} : {};
       const groupKeys = sortedHexKeys(Object.keys(groupsRoot));
+      const hasB555 = !!(artifact && typeof artifact === "object" && artifact.b555_dump && typeof artifact.b555_dump === "object");
       const hasB509 = !!(artifact && typeof artifact === "object" && artifact.b509_dump && typeof artifact.b509_dump === "object");
       renderSummaryChips(groupsRoot);
-      buildTabs(groupKeys, hasB509);
+      buildTabs(groupKeys, hasB555, hasB509);
       renderActiveTab();
     </script>
   </body>

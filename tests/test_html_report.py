@@ -41,6 +41,62 @@ def test_html_report_supports_b509_tab_and_dual_naming() -> None:
     assert "ebusd: " in html
 
 
+def test_html_report_supports_b555_tab() -> None:
+    artifact = {
+        "meta": {"destination_address": "0x15", "scan_timestamp": "2026-02-11T00:00:00Z"},
+        "groups": {},
+        "b555_dump": {
+            "meta": {"read_count": 3, "error_count": 0, "incomplete": False},
+            "programs": {
+                "z1_heating": {
+                    "label": "Z1 Heating",
+                    "selector": {"zone": "0x00", "hc": "0x00"},
+                    "config": {
+                        "request_hex": "a30000",
+                        "reply_hex": "000c0a05010c051e00",
+                        "status": "0x00",
+                        "status_label": "available",
+                        "max_slots": 12,
+                        "temp_slots": 12,
+                        "time_resolution_min": 10,
+                    },
+                    "slots_per_weekday": {
+                        "request_hex": "a40000",
+                        "reply_hex": "000100000000000000",
+                        "status": "0x00",
+                        "status_label": "available",
+                        "days": {"monday": 1},
+                    },
+                    "weekdays": {
+                        "monday": {
+                            "slots": {
+                                "0x00": {
+                                    "op": "0xa5",
+                                    "request_hex": "a500000000",
+                                    "reply_hex": "0000001800e100",
+                                    "status": "0x00",
+                                    "status_label": "available",
+                                    "start_text": "00:00",
+                                    "end_text": "24:00",
+                                    "temperature_c": 22.5,
+                                }
+                            }
+                        }
+                    },
+                }
+            },
+        },
+    }
+
+    html = render_html_report(artifact, title="test")
+
+    assert "B555 Dump" in html
+    assert "No B555 dump in artifact." in html
+    assert "request_hex=" in html
+    assert '"zone":"0x00"' in html
+    assert '"hc":"0x00"' in html
+
+
 def test_html_report_renders_namespace_totals_and_flags_access_for_dual_namespace_groups() -> None:
     artifact = {
         "meta": {"destination_address": "0x15", "scan_timestamp": "2026-02-11T00:00:00Z"},
