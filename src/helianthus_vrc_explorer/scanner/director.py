@@ -16,6 +16,7 @@ from ..transport.base import (
 from .observer import ScanObserver
 
 logger = logging.getLogger(__name__)
+_KNOWN_GROUP_DISCOVERY_RETRIES: Final[int] = 2
 
 
 class GroupConfig(TypedDict):
@@ -135,6 +136,12 @@ def _parse_directory_descriptor(resp: bytes, group: int) -> float:
     return struct.unpack("<f", resp[:4])[0]
 
 
+def _directory_probe_retry_budget(group: int) -> int:
+    if group in GROUP_CONFIG:
+        return 1 + _KNOWN_GROUP_DISCOVERY_RETRIES
+    return 1
+
+
 def discover_groups(
     transport: TransportInterface,
     dst: int,
@@ -156,42 +163,108 @@ def discover_groups(
             observer.status(f"Directory probe GG=0x{gg:02X}")
             observer.phase_advance("group_discovery", advance=1)
         payload = build_directory_probe_payload(gg)
-        try:
-            resp = transport.send(dst, payload)
-        except TransportTimeout:
-            logger.warning("Directory probe timeout for GG=0x%02X", gg)
-            if observer is not None:
-                observer.log(f"Directory probe timeout for GG=0x{gg:02X}", level="warn")
+        attempts = _directory_probe_retry_budget(gg)
+        descriptor: float | None = None
+        skip_group = False
+        for attempt in range(1, attempts + 1):
+            retrying = attempt < attempts
+            try:
+                resp = transport.send(dst, payload)
+            except TransportTimeout:
+                if retrying:
+                    logger.warning(
+                        "Directory probe timeout for GG=0x%02X (attempt %d/%d); retrying",
+                        gg,
+                        attempt,
+                        attempts,
+                    )
+                    if observer is not None:
+                        observer.log(
+                            f"Directory probe timeout for GG=0x{gg:02X} "
+                            f"(attempt {attempt}/{attempts}); retrying",
+                            level="warn",
+                        )
+                    continue
+                logger.warning("Directory probe timeout for GG=0x%02X", gg)
+                if observer is not None:
+                    observer.log(f"Directory probe timeout for GG=0x{gg:02X}", level="warn")
+                skip_group = True
+                break
+            except TransportError as exc:
+                if isinstance(exc, TransportCommandNotEnabled):
+                    raise
+                if retrying:
+                    logger.warning(
+                        "Directory probe transport error for GG=0x%02X: %s (attempt %d/%d); "
+                        "retrying",
+                        gg,
+                        exc,
+                        attempt,
+                        attempts,
+                    )
+                    if observer is not None:
+                        observer.log(
+                            f"Directory probe transport error for GG=0x{gg:02X}: {exc} "
+                            f"(attempt {attempt}/{attempts}); retrying",
+                            level="warn",
+                        )
+                    continue
+                logger.warning("Directory probe transport error for GG=0x%02X: %s", gg, exc)
+                if observer is not None:
+                    observer.log(
+                        f"Directory probe transport error for GG=0x{gg:02X}: {exc}",
+                        level="warn",
+                    )
+                skip_group = True
+                break
+
+            if gg == 0x00 and resp == b"\x00":
+                if retrying:
+                    logger.warning(
+                        "Directory probe GG=0x00 returned status-only 0x00 "
+                        "(attempt %d/%d); retrying",
+                        attempt,
+                        attempts,
+                    )
+                    if observer is not None:
+                        observer.log(
+                            "Directory probe GG=0x00 returned status-only 0x00 "
+                            f"(attempt {attempt}/{attempts}); retrying",
+                            level="warn",
+                        )
+                    continue
+                message = (
+                    "Directory probe GG=0x00 returned status-only 0x00; "
+                    "treating as transient and continuing"
+                )
+                logger.warning("%s", message)
+                if observer is not None:
+                    observer.log(message, level="warn")
+                skip_group = True
+                break
+
+            try:
+                descriptor = _parse_directory_descriptor(resp, gg)
+            except ValueError as exc:
+                if retrying:
+                    logger.warning("%s (attempt %d/%d); retrying", exc, attempt, attempts)
+                    if observer is not None:
+                        observer.log(
+                            f"{exc} (attempt {attempt}/{attempts}); retrying",
+                            level="warn",
+                        )
+                    continue
+                logger.warning("%s", exc)
+                if observer is not None:
+                    observer.log(str(exc), level="warn")
+                skip_group = True
+                break
+
+            break
+
+        if skip_group or descriptor is None:
             # Transport failures are not evidence of a NaN terminator; skip without advancing the
             # NaN streak.
-            continue
-        except TransportError as exc:
-            if isinstance(exc, TransportCommandNotEnabled):
-                raise
-            logger.warning("Directory probe transport error for GG=0x%02X: %s", gg, exc)
-            if observer is not None:
-                observer.log(
-                    f"Directory probe transport error for GG=0x{gg:02X}: {exc}",
-                    level="warn",
-                )
-            continue
-
-        if gg == 0x00 and resp == b"\x00":
-            message = (
-                "Directory probe GG=0x00 returned status-only 0x00; "
-                "treating as transient and continuing"
-            )
-            logger.warning("%s", message)
-            if observer is not None:
-                observer.log(message, level="warn")
-            continue
-
-        try:
-            descriptor = _parse_directory_descriptor(resp, gg)
-        except ValueError as exc:
-            logger.warning("%s", exc)
-            if observer is not None:
-                observer.log(str(exc), level="warn")
             continue
 
         if descriptor == 0.0:

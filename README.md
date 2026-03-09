@@ -43,8 +43,8 @@ python -m helianthus_vrc_explorer scan \
 
 Key scan UX flags:
 - `--planner-ui auto|textual|classic`
-- `--preset conservative|recommended|aggressive|custom`
-- `--probe-constraints` (optional opcode `0x01` GG/RR probe; off by default)
+- `--preset conservative|recommended|full|custom`
+- `--probe-constraints` (optional live opcode `0x01` GG/RR rescan; off by default and research-only)
 - `--no-tips`
 - `--redact` (redact identity fields like serial number from console output)
 - `--trace-file /path/to/trace.log`
@@ -55,6 +55,11 @@ If startup fails on default transport (`tcp://127.0.0.1:8888`) in an interactive
 
 Transport note:
 - On shared live `ebusd-tcp` setups, the first B524 directory probe (`GG=0x00`) can transiently return a status-only `00`. The scanner treats this as transient noise and continues discovery instead of declaring B524 unsupported immediately.
+
+Constraint note:
+- Normal scans use a bundled static BASV2 constraint catalog and flag values that fall outside it.
+- `--probe-constraints` is a separate live rescan path for opcode `0x01`; it can add hundreds of extra requests and should only be used when you need to confirm a mismatch or do research work.
+- `--preset full` is intentionally expensive: it expands all instance slots and full RR ranges and can take hours on BASV2.
 
 Output:
 - JSON artifact: `b524_scan_0x??_<timestamp>.json`
@@ -87,7 +92,8 @@ device writes are planned.
 ## Features
 - Session preface with regulator identity and transport endpoint.
 - Phased scanner progress: Group Discovery, Instance Discovery, Register Scan.
-- Optional phased `0x01` constraint probing (`Constraint Probe`) when explicitly enabled.
+- Bundled static BASV2 constraint catalog with mismatch warnings in scan artifacts and summaries.
+- Optional live `0x01` constraint probing (`Constraint Probe`) when explicitly enabled.
 - Interactive planner (`textual` or classic) with presets and per-group overrides.
 - Register decoding with raw payload retention and TT/metadata annotations in JSON.
 - Auto-generated HTML report alongside JSON scan output.

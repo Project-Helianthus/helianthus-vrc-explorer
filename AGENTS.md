@@ -496,7 +496,7 @@ def parse_b524_id(id_hex: str) -> dict:
 - **GG=0x09 / 0x0A (Radio Sensors VRC7xx / Radio Sensors VR92):** Present if RR=0x0007 or RR=0x000F returns non-NaN.
 - **GG=0x0C (Remote Accessories / FM5 Slots):** Present if any of RR in {0x0002, 0x0007, 0x000F, 0x0016} responds.
 
-**Scan all instances from 0x00 to ii_max** (do not stop at gaps, they are legitimate holes).
+**Instance discovery probes all slots from 0x00 to ii_max** (do not stop at gaps, they are legitimate holes). The default register scan then uses the discovered present set; only the `full` preset expands back to every slot.
 
 #### Schema Loading
 
@@ -606,15 +606,18 @@ CI enforces this via `python scripts/check_docs_sync.py`.
 │                                                               0x0000..0x00FF.                                        │
 │ --planner-ui                                         TEXT     Interactive planner mode: auto, textual, or classic.   │
 │                                                               [default: auto]                                        │
-│ --preset                                             TEXT     Planner preset: conservative, recommended, aggressive, │
-│                                                               or custom.                                             │
+│ --preset                                             TEXT     Planner preset: conservative, recommended, full, or    │
+│                                                               custom. `full` scans every instance slot and full RR   │
+│                                                               ranges; expect very long runs.                         │
 │                                                               [default: recommended]                                 │
 │ --no-tips                                                     Hide scan header tips in interactive terminal mode.    │
 │ --redact                                                      Redact device identity fields (e.g. serial number) in  │
 │                                                               console output.                                        │
-│ --probe-constraints        --no-probe-constraints             Probe B524 opcode 0x01 constraint dictionary (GG/RR).  │
-│                                                               Disabled by default because some BASV2 setups return   │
-│                                                               noisy/unreliable replies.                              │
+│ --probe-constraints        --no-probe-constraints             Research-only live B524 opcode 0x01 constraint probe   │
+│                                                               (GG/RR). Disabled by default: it can add hundreds of   │
+│                                                               extra bus requests and some BASV2 setups return        │
+│                                                               noisy/unreliable replies. Normal scans already use the │
+│                                                               bundled static BASV2 constraint catalog.               │
 │                                                               [default: no-probe-constraints]                        │
 │ --help                 -h                                     Show this message and exit.                            │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
@@ -1196,7 +1199,9 @@ Example: `./out/b524_scan_0x15_2026-02-06T194424Z.json`
 **Trigger:** Only when the user explicitly passes `--probe-constraints`.
 
 **Notes / Caveats:**
+- Normal scans already use a bundled static BASV2 constraint catalog and only use runtime `0x01` when the user explicitly asks for a live rescan.
 - Some BASV2 setups return noisy/unreliable replies for opcode `0x01`; this is why it is off by default.
+- Live `0x01` probing can add hundreds of extra runtime requests.
 - Only a subset of response type tags (TT) are currently supported (u8/u16/f32/date ranges).
 
 #### Phase: Instance Discovery
@@ -1224,7 +1229,7 @@ Presence is determined by group-specific heuristics in `src/helianthus_vrc_explo
 (function `is_instance_present`). It uses `tt_kind` + decoded values to avoid false positives
 (e.g. NaN or TT=00 "no data").
 
-**Scan ALL instances 0x00..ii_max** (do not stop at gaps, they are legitimate holes).
+**Instance discovery probes ALL slots 0x00..ii_max** (do not stop at gaps, they are legitimate holes). The default register scan remains presence-aware; only the `full` preset expands back to every slot.
 
 #### Sub-step: Planner (preset + interactive overrides)
 
@@ -1233,6 +1238,8 @@ optionally allow the user to tweak the plan interactively (TTY only).
 
 **Trigger:**
 - Always applies (preset builds defaults).
+- `recommended` stays presence-aware and scans only discovered instance slots.
+- `full` is the explicit heavy preset: all instance slots + full RR ranges + unknown groups.
 - Interactive planner opens based on `--planner-ui` and TTY detection.
 - During Register Scan, `p` can reopen the planner to replan remaining work.
 
@@ -1418,7 +1425,7 @@ Override/extend via repeatable `--b509-range 0x0000..0x00FF` flags.
 3. **CSV schema is NOT hardcoded** - always load from data/field_mappings.csv
 4. **ebusd responses are multiline** - parse correctly (first hex line = payload, ignore ERR after)
 5. **Retry timeouts once** - then skip register and continue
-6. **Scan ALL instances 0x00..ii_max** - do not stop at gaps
+6. **Probe ALL instance slots 0x00..ii_max during discovery** - do not stop at gaps; the default register scan then uses only the discovered present set
 7. **NaN terminator stops discovery on the first NaN** - do not keep probing
 8. **Live UI updates only last line** - do not spam scrollback
 9. **Non-TTY mode is script-friendly** - rich live UI is disabled; stdout prints the artifact path only

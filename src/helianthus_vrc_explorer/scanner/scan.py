@@ -15,6 +15,11 @@ from typing import Any, Literal, cast
 from rich.console import Console
 
 from ..protocol.b524 import RegisterOpcode, build_constraint_probe_payload
+from ..schema.b524_constraints import (
+    StaticConstraintCatalog,
+    StaticConstraintEntry,
+    load_default_b524_constraints_catalog,
+)
 from ..schema.ebusd_csv import EbusdCsvSchema
 from ..schema.myvaillant_map import MyvaillantRegisterMap
 from ..transport.base import (
@@ -59,6 +64,13 @@ _KNOWN_DESCRIPTOR_TYPES = frozenset(
 
 def _is_instanced_group(ii_max: int | None) -> bool:
     return ii_max is not None and ii_max > 0
+
+
+def _normalize_planner_preset(preset: str) -> PlannerPreset:
+    normalized = preset.strip().lower()
+    if normalized == "aggressive":
+        normalized = "full"
+    return cast(PlannerPreset, normalized)
 
 
 def _planner_ii_max(ii_max: int | None) -> int | None:
@@ -431,6 +443,68 @@ def _constraint_map_to_dict(
     return serializable
 
 
+def _constraint_catalog_entry_count(catalog: StaticConstraintCatalog) -> int:
+    return sum(len(registers) for registers in catalog.values())
+
+
+def _constraint_for_register(
+    *,
+    group: int,
+    register: int,
+    live_constraints: dict[int, dict[int, ConstraintEntry]],
+    static_constraints: StaticConstraintCatalog,
+) -> ConstraintEntry | StaticConstraintEntry | None:
+    live = live_constraints.get(group, {}).get(register)
+    if live is not None:
+        return live
+    return static_constraints.get(group, {}).get(register)
+
+
+def _apply_constraint_metadata(
+    entry: RegisterEntry,
+    constraint: ConstraintEntry | StaticConstraintEntry,
+) -> None:
+    entry["constraint_tt"] = _hex_u8(constraint.tt)
+    entry["constraint_type"] = constraint.kind
+    entry["constraint_min"] = constraint.min_value
+    entry["constraint_max"] = constraint.max_value
+    entry["constraint_step"] = constraint.step_value
+    entry["constraint_source"] = constraint.source
+
+
+def _constraint_mismatch_reason(
+    entry: RegisterEntry,
+    constraint: ConstraintEntry | StaticConstraintEntry,
+) -> str | None:
+    if constraint.source != "static_catalog":
+        return None
+    if entry.get("error") is not None or entry.get("flags_access") == "absent":
+        return None
+    value = entry.get("value")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if isinstance(value, float) and math.isnan(value):
+        return None
+
+    min_value = constraint.min_value
+    max_value = constraint.max_value
+    if (
+        isinstance(min_value, bool)
+        or isinstance(max_value, bool)
+        or not isinstance(min_value, (int, float))
+        or not isinstance(max_value, (int, float))
+    ):
+        return None
+
+    epsilon = 1e-6 if any(isinstance(obj, float) for obj in (value, min_value, max_value)) else 0.0
+    if float(value) < float(min_value) - epsilon or float(value) > float(max_value) + epsilon:
+        return (
+            f"value {value!r} outside seeded range "
+            f"[{constraint.min_value!r}, {constraint.max_value!r}]"
+        )
+    return None
+
+
 def _entry_has_valid_value(entry: RegisterEntry) -> bool:
     """Return True when a register read produced a meaningful value.
 
@@ -709,8 +783,10 @@ def scan_b524(
     Partial scans are supported: Ctrl+C yields `meta.incomplete=true`.
     """
 
+    planner_preset = _normalize_planner_preset(planner_preset)
     start_perf = time.perf_counter()
     scan_timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    static_constraints, static_constraints_source = load_default_b524_constraints_catalog()
 
     counting_transport = CountingTransport(transport)
     transport = counting_transport
@@ -730,12 +806,30 @@ def scan_b524(
         artifact["meta"]["ebusd_host"] = ebusd_host
     if ebusd_port is not None:
         artifact["meta"]["ebusd_port"] = ebusd_port
+    if static_constraints_source is not None:
+        artifact["meta"]["constraint_catalog_source"] = static_constraints_source
+        artifact["meta"]["constraint_catalog_entries"] = _constraint_catalog_entry_count(
+            static_constraints
+        )
 
     incomplete_reason: str | None = None
 
     try:
         if observer is not None:
             observer.log(f"Starting scan dst={_hex_u8(dst)}", level="info")
+            if planner_preset == "full":
+                observer.log(
+                    "Full preset selected: scan will expand all instance slots and full RR "
+                    "ranges. Expect multi-hour BASV2 runs.",
+                    level="warn",
+                )
+            if probe_constraints:
+                observer.log(
+                    "Live opcode 0x01 constraint probing enabled. This is research-only and "
+                    "can add hundreds of extra runtime requests; default scans already use the "
+                    "bundled static BASV2 constraint catalog.",
+                    level="warn",
+                )
         emit_trace_label(transport, f"Starting scan dst={_hex_u8(dst)}")
 
         group_discovery_requests = 0
@@ -826,6 +920,10 @@ def scan_b524(
                 if rr_max < 0x80:
                     probe_total += 1
             if observer is not None:
+                observer.log(
+                    f"Live constraint probe will add up to {probe_total} extra requests.",
+                    level="warn",
+                )
                 observer.phase_start("constraint_probe", total=probe_total or 1)
 
             for group in classified:
@@ -842,9 +940,16 @@ def scan_b524(
                     constraint_map[group.group] = constraints
             if observer is not None:
                 observer.phase_finish("constraint_probe")
+                if not constraint_map:
+                    observer.log(
+                        "Live constraint probe decoded no entries; using bundled static "
+                        "constraint catalog only.",
+                        level="warn",
+                    )
         elif observer is not None:
             observer.log(
-                "Skipping opcode 0x01 constraint probe (using static annotations).",
+                "Skipping live opcode 0x01 constraint probe (using bundled static "
+                "constraint catalog).",
                 level="info",
             )
 
@@ -1126,6 +1231,7 @@ def scan_b524(
         artifact["meta"]["group_metadata_bounds"] = _metadata_map_to_dict(metadata_map)
         artifact["meta"]["constraint_probe_enabled"] = probe_constraints
         artifact["meta"]["constraint_dictionary"] = _constraint_map_to_dict(constraint_map)
+        constraint_mismatches: list[dict[str, Any]] = []
 
         # Phase D: register scan (supports interactive replanning).
         done: set[RegisterTask] = set()
@@ -1320,13 +1426,32 @@ def scan_b524(
                             if mapped_ebusd_name:
                                 entry["ebusd_name"] = mapped_ebusd_name
 
-                constraint = constraint_map.get(task.group, {}).get(task.register)
+                constraint = _constraint_for_register(
+                    group=task.group,
+                    register=task.register,
+                    live_constraints=constraint_map,
+                    static_constraints=static_constraints,
+                )
                 if constraint is not None:
-                    entry["constraint_tt"] = _hex_u8(constraint.tt)
-                    entry["constraint_type"] = constraint.kind
-                    entry["constraint_min"] = constraint.min_value
-                    entry["constraint_max"] = constraint.max_value
-                    entry["constraint_step"] = constraint.step_value
+                    _apply_constraint_metadata(entry, constraint)
+                    mismatch_reason = _constraint_mismatch_reason(entry, constraint)
+                    if mismatch_reason is not None:
+                        entry["constraint_mismatch_reason"] = mismatch_reason
+                        constraint_mismatches.append(
+                            {
+                                "group": _hex_u8(task.group),
+                                "instance": _hex_u8(task.instance),
+                                "register": _hex_u16(task.register),
+                                "read_opcode": str(entry.get("read_opcode")),
+                                "name": entry.get("myvaillant_name") or entry.get("ebusd_name"),
+                                "value": entry.get("value"),
+                                "constraint_min": constraint.min_value,
+                                "constraint_max": constraint.max_value,
+                                "constraint_type": constraint.kind,
+                                "constraint_source": constraint.source,
+                                "reason": mismatch_reason,
+                            }
+                        )
                 done.add(task)
 
                 _ensure_group_artifact(
@@ -1350,6 +1475,16 @@ def scan_b524(
                     registers[_hex_u16(task.register)] = entry
 
         _apply_contextual_enum_annotations(artifact)
+        if constraint_mismatches:
+            artifact["meta"]["constraint_mismatches"] = constraint_mismatches
+            artifact["meta"]["constraint_rescan_recommended"] = True
+            if observer is not None:
+                observer.log(
+                    "Observed register values outside the bundled static constraint catalog. "
+                    "Review meta.constraint_mismatches and rerun with --probe-constraints if "
+                    "you want live confirmation.",
+                    level="warn",
+                )
 
         if observer is not None:
             observer.phase_finish("register_scan")

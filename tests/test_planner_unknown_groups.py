@@ -55,13 +55,13 @@ def test_prompt_scan_plan_disables_unknown_groups_by_default(monkeypatch) -> Non
     assert sorted(plan.keys()) == [(0x02, 0x02)]
 
 
-def test_prompt_scan_plan_accepts_lowercase_yes_and_aggressive_preset(monkeypatch) -> None:
+def test_prompt_scan_plan_accepts_legacy_aggressive_alias_as_full(monkeypatch) -> None:
     import helianthus_vrc_explorer.ui.planner as planner
 
     answers = iter(
         [
             "y",  # Customize?
-            "3",  # Aggressive preset
+            "aggressive",  # Legacy alias for full preset
             "y",  # Proceed?
         ]
     )
@@ -125,4 +125,4 @@ def test_build_plan_from_preset_recommended_skips_unknown_groups() -> None:
 
     plan = build_plan_from_preset(groups, preset="recommended")
     assert sorted(plan.keys()) == [(0x02, 0x02)]
-    assert plan[(0x02, 0x02)].instances == tuple(range(0x0A + 1))
+    assert plan[(0x02, 0x02)].instances == (0x00, 0x01)
