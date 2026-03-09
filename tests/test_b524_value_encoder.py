@@ -39,6 +39,7 @@ def test_encode_str_roundtrips() -> None:
 
 def test_encode_hda3_roundtrips() -> None:
     data = encode_typed_value("HDA:3", "2026-02-06")
+    assert data.hex() == "06021a"
     assert parse_typed_value("HDA:3", data) == "2026-02-06"
 
 

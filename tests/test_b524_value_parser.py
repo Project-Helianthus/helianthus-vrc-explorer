@@ -50,8 +50,9 @@ def test_parse_str_cstring_stops_at_first_nul() -> None:
     assert parse_typed_value("STR:*", b"zone\x00junk\x00") == "zone"
 
 
-def test_parse_hda3_date_u24le_ddmmyy() -> None:
-    assert parse_typed_value("HDA:3", bytes.fromhex("060226")) == "2026-02-06"
+def test_parse_hda3_date_u24le_raw_ddmmyy() -> None:
+    assert parse_typed_value("HDA:3", bytes.fromhex("06021a")) == "2026-02-06"
+    assert parse_typed_value("HDA:3", bytes.fromhex("01010f")) == "2015-01-01"
 
 
 def test_parse_hti_time_u24le_hhmmss() -> None:
@@ -96,7 +97,7 @@ def test_parse_wrong_lengths_raise(type_spec: str, data_hex: str) -> None:
     [
         ("HDA:3", "320226"),  # day=32
         ("HDA:3", "310226"),  # day=31 in Feb
-        ("HDA:3", "063b26"),  # invalid BCD month (0x3B)
+        ("HDA:3", "063b1a"),  # month=59
         ("HTI", "240000"),  # hour=24
         ("HTI", "006000"),  # minute=60
         ("HTI", "000060"),  # second=60

@@ -118,20 +118,26 @@ def parse_str_cstring(data: bytes) -> str:
 
 
 def parse_hda3_date(data: bytes) -> str:
-    """Parse an `HDA:3` value (u24le date encoded as DDMMYY, BCD per byte).
+    """Parse an `HDA:3` value (u24le date encoded as raw DD MM YY bytes).
 
     Returns:
         ISO-ish date string: `YYYY-MM-DD`.
 
     Notes:
-        The underlying schema only gives a 2-digit year. We interpret it as `2000 + YY`
-        to match modern VRC firmware dates (2000-2099).
+        BASV2 live data uses plain numeric bytes here, not BCD. For example,
+        `09 03 1A` means `2026-03-09` and `01 01 0F` means `2015-01-01`.
     """
 
     _expect_len("HDA:3", data, 3)
-    day = _decode_bcd("HDA:3", "day", data[0])
-    month = _decode_bcd("HDA:3", "month", data[1])
-    year_2digit = _decode_bcd("HDA:3", "year", data[2])
+    day = data[0]
+    month = data[1]
+    year_2digit = data[2]
+    if not (1 <= day <= 31):
+        raise ValueParseError(f"HDA:3 day must be 1..31, got {day}")
+    if not (1 <= month <= 12):
+        raise ValueParseError(f"HDA:3 month must be 1..12, got {month}")
+    if not (0 <= year_2digit <= 99):
+        raise ValueParseError(f"HDA:3 year must be 0..99, got {year_2digit}")
 
     year = 2000 + year_2digit
     try:
@@ -298,13 +304,7 @@ def encode_hda3_date(value: str) -> bytes:
     if not (2000 <= yyyy <= 2099):
         raise ValueEncodeError(f"HDA:3 year must be 2000..2099, got {yyyy}")
     yy = yyyy - 2000
-    return bytes(
-        (
-            _encode_bcd("HDA:3", "day", dd),
-            _encode_bcd("HDA:3", "month", mm),
-            _encode_bcd("HDA:3", "year", yy),
-        )
-    )
+    return bytes((dd, mm, yy))
 
 
 def encode_hti_time(value: str) -> bytes:
@@ -406,7 +406,7 @@ def parse_typed_value(type_spec: str, data: bytes) -> object:
     - `UIN`: u16le
     - `UCH`: u8
     - `STR:*`: cstring (latin1, trailing NULs stripped)
-    - `HDA:3`: u24le date encoded as DDMMYY (BCD per byte, `YYYY-MM-DD`)
+    - `HDA:3`: u24le date encoded as raw DD MM YY bytes (`YYYY-MM-DD`)
     - `HTI`: u24le time encoded as HH:MM:SS (BCD per byte, `HH:MM:SS`)
     - `FW`: 3-byte firmware version encoded as BCD bytes (`MM.mm.pp`)
 

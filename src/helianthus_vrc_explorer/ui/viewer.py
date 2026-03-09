@@ -26,7 +26,7 @@ def candidate_type_specs_for_length(length: int) -> tuple[str, ...]:
     if length == 2:
         return ("UIN", "I16", "HEX:2")
     if length == 3:
-        return ("HDA:3", "HTI", "HEX:3")
+        return ("HDA:3", "HTI", "FW", "HEX:3")
     if length == 4:
         return ("EXP", "U32", "I32", "HEX:4")
     # Unknown widths: allow "raw view" and "best-effort string".
