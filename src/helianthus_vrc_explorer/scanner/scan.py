@@ -26,7 +26,7 @@ from ..transport.base import (
 from ..transport.instrumented import CountingTransport
 from ..ui.planner import PlannerGroup, PlannerPreset, build_plan_from_preset, prompt_scan_plan
 from .b509 import scan_b509
-from .director import GROUP_CONFIG, B524UnsupportedError, classify_groups, discover_groups
+from .director import GROUP_CONFIG, classify_groups, discover_groups
 from .observer import ScanObserver
 from .plan import (
     GroupScanPlan,
@@ -748,16 +748,7 @@ def scan_b524(
         emit_trace_label(transport, "Discovering Groups")
         group_discovery_start = time.perf_counter()
         group_discovery_start_calls = counting_transport.counters.send_calls
-        try:
-            discovered = discover_groups(transport, dst=dst, observer=observer)
-        except B524UnsupportedError as exc:
-            if observer is not None:
-                observer.phase_finish("group_discovery")
-                observer.log(str(exc), level="warn")
-            artifact["meta"]["b524_supported"] = False
-            artifact["meta"]["b524_skip_reason"] = "first_directory_probe_no_data"
-            artifact["meta"]["scan_duration_seconds"] = round(time.perf_counter() - start_perf, 4)
-            return artifact
+        discovered = discover_groups(transport, dst=dst, observer=observer)
         group_discovery_duration_s = time.perf_counter() - group_discovery_start
         group_discovery_requests = (
             counting_transport.counters.send_calls - group_discovery_start_calls

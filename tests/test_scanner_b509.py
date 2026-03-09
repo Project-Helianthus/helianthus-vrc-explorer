@@ -44,15 +44,11 @@ class _HybridTransport(TransportInterface):
         raise TransportError("unmapped register")
 
 
-class _UnsupportedB524HybridTransport(TransportInterface):
-    def __init__(self) -> None:
-        self._send_calls = 0
-
-    def send(self, dst: int, payload: bytes) -> bytes:  # noqa: ARG002
-        self._send_calls += 1
+class _TransientFirstProbeHybridTransport(_HybridTransport):
+    def send(self, dst: int, payload: bytes) -> bytes:
         if payload == bytes((0x00, 0x00, 0x00)):
             return bytes.fromhex("00")
-        raise TransportError(f"unexpected b524 payload: {payload.hex()}")
+        return super().send(dst, payload)
 
     def send_proto(
         self,
@@ -118,16 +114,16 @@ def test_scan_vrc_adds_b509_dump_section(tmp_path: Path) -> None:
     assert regs["0x2702"]["error"] == "timeout"
 
 
-def test_scan_vrc_keeps_b509_when_b524_is_unsupported() -> None:
+def test_scan_vrc_keeps_b509_when_first_directory_probe_is_status_only(tmp_path: Path) -> None:
     artifact = scan_vrc(
-        _UnsupportedB524HybridTransport(),
+        _TransientFirstProbeHybridTransport(_write_fixture_group_02(tmp_path)),
         dst=0x15,
         b509_ranges=[(0x2700, 0x2700)],
     )
 
-    assert artifact["meta"]["b524_supported"] is False
-    assert artifact["meta"]["b524_skip_reason"] == "first_directory_probe_no_data"
-    assert artifact["groups"] == {}
+    assert "b524_supported" not in artifact["meta"]
+    assert "b524_skip_reason" not in artifact["meta"]
+    assert "0x02" in artifact["groups"]
     assert artifact["meta"]["incomplete"] is False
 
     b509_dump = artifact.get("b509_dump")

@@ -53,6 +53,9 @@ Key scan UX flags:
 
 If startup fails on default transport (`tcp://127.0.0.1:8888`) in an interactive TTY, scan opens a retry dialog so you can adjust protocol/host/port and retry or cancel.
 
+Transport note:
+- On shared live `ebusd-tcp` setups, the first B524 directory probe (`GG=0x00`) can transiently return a status-only `00`. The scanner treats this as transient noise and continues discovery instead of declaring B524 unsupported immediately.
+
 Output:
 - JSON artifact: `b524_scan_0x??_<timestamp>.json`
 - HTML report: `b524_scan_0x??_<timestamp>.html`
