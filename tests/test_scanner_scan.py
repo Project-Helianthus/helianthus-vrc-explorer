@@ -976,6 +976,39 @@ def test_scan_b524_applies_preset_in_non_interactive_mode(tmp_path: Path) -> Non
     assert group["instances"]["0x00"]["present"] is True
 
 
+def test_scan_b524_disabled_planner_skips_interactive_planner_even_on_tty(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    import sys
+
+    import helianthus_vrc_explorer.scanner.scan as scan_mod
+
+    transport = DummyTransport(_write_fixture_unknown_group_69(tmp_path))
+
+    def _unexpected(*_args, **_kwargs):
+        raise AssertionError("planner should stay disabled")
+
+    monkeypatch.setattr(scan_mod, "prompt_scan_plan", _unexpected)
+    monkeypatch.setattr(
+        "helianthus_vrc_explorer.ui.planner_textual.run_textual_scan_plan",
+        _unexpected,
+        raising=False,
+    )
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
+    artifact = scan_b524(
+        transport,
+        dst=0x15,
+        observer=_NoopObserver(),
+        console=Console(force_terminal=True),
+        planner_ui="disabled",
+        planner_preset="recommended",
+    )
+
+    assert artifact["meta"]["incomplete"] is False
+
+
 def test_scan_unknown_group_defaults_to_singleton(tmp_path: Path) -> None:
     artifact = scan_b524(
         DummyTransport(_write_fixture_unknown_group_69(tmp_path)),

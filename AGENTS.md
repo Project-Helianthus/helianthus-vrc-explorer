@@ -604,8 +604,9 @@ CI enforces this via `python scripts/check_docs_sync.py`.
 │ --b509-range                                         TEXT     B509 register range to dump (repeatable), format:      │
 │                                                               0x0000..0x00FF. If omitted, defaults to                │
 │                                                               0x0000..0x00FF.                                        │
-│ --planner-ui                                         TEXT     Interactive planner mode: auto, textual, or classic.   │
-│                                                               [default: auto]                                        │
+│ --planner-ui                                         TEXT     Interactive planner mode: disabled, auto, textual, or  │
+│                                                               classic.                                               │
+│                                                               [default: disabled]                                    │
 │ --preset                                             TEXT     Planner preset: conservative, recommended, full, or    │
 │                                                               custom. `full` scans every instance slot and full RR   │
 │                                                               ranges; expect very long runs.                         │
