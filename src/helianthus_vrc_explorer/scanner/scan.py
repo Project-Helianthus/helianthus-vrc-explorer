@@ -56,7 +56,7 @@ _REMOTE_REGISTER_OPCODE: RegisterOpcode = 0x06
 _UNKNOWN_GROUP_DEFAULT_RR_MAX = 0x0030
 _UNKNOWN_GROUP_DEFAULT_II_MAX = 0x00
 
-PlannerUiMode = Literal["auto", "textual", "classic"]
+PlannerUiMode = Literal["disabled", "auto", "textual", "classic"]
 _KNOWN_DESCRIPTOR_TYPES = frozenset(
     float(desc) for config in GROUP_CONFIG.values() if (desc := config.get("desc")) is not None
 )
@@ -667,6 +667,8 @@ def _resolve_planner_mode(
     observer: ScanObserver | None,
 ) -> Literal["disabled", "textual", "classic"]:
     if not interactive:
+        return "disabled"
+    if planner_ui == "disabled":
         return "disabled"
     if planner_ui == "classic":
         return "classic"

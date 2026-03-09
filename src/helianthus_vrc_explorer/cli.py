@@ -597,9 +597,9 @@ def scan(
         ),
     ),
     planner_ui: str = typer.Option(  # noqa: B008
-        "auto",
+        "disabled",
         "--planner-ui",
-        help="Interactive planner mode: auto, textual, or classic.",
+        help="Interactive planner mode: disabled, auto, textual, or classic.",
     ),
     preset: str = typer.Option(  # noqa: B008
         "recommended",
@@ -640,9 +640,9 @@ def scan(
     dst_u8: int
     console = Console(stderr=True)
     planner_ui_value = planner_ui.strip().lower()
-    if planner_ui_value not in {"auto", "textual", "classic"}:
+    if planner_ui_value not in {"disabled", "auto", "textual", "classic"}:
         typer.echo(
-            "Invalid --planner-ui value. Expected one of: auto, textual, classic.",
+            "Invalid --planner-ui value. Expected one of: disabled, auto, textual, classic.",
             err=True,
         )
         raise typer.Exit(2)

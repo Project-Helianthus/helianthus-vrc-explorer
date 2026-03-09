@@ -38,6 +38,7 @@ def test_scan_command_is_present() -> None:
     assert "planner-ui" in plain
     assert "preset" in plain
     assert "no-tips" in plain
+    assert "disabled" in plain
     assert "auto" in plain
 
 
@@ -206,6 +207,101 @@ def test_scan_command_not_enabled_exits_with_enablehex_hint(
     result = runner.invoke(app, ["scan", "--dst", "0x15", "--output-dir", str(tmp_path)])
     assert result.exit_code == 2
     assert "--enablehex" in result.stderr
+
+
+def test_scan_cli_defaults_planner_ui_to_disabled(monkeypatch, tmp_path: Path) -> None:
+    import helianthus_vrc_explorer.cli as cli_mod
+
+    captured: dict[str, object] = {}
+
+    class _OkTransport:
+        @contextmanager
+        def session(self):
+            yield self
+
+    def _fake_build_transport(settings, *, trace_file):  # noqa: ANN001
+        _ = settings
+        _ = trace_file
+        return _OkTransport()
+
+    @contextmanager
+    def _fake_observer(*_args, **_kwargs):
+        yield None
+
+    def _fake_scan_vrc(*_args, **kwargs):
+        captured["planner_ui"] = kwargs["planner_ui"]
+        return {
+            "meta": {
+                "scan_timestamp": "2026-02-13T00:00:00Z",
+                "destination_address": "0x15",
+                "incomplete": False,
+                "schema_sources": [],
+            },
+            "groups": {},
+        }
+
+    monkeypatch.setattr(cli_mod, "_build_transport", _fake_build_transport)
+    monkeypatch.setattr(cli_mod, "_probe_scan_identity", lambda _transport, *, dst: {})
+    monkeypatch.setattr(cli_mod, "make_scan_observer", _fake_observer)
+    monkeypatch.setattr(cli_mod, "scan_vrc", _fake_scan_vrc)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["scan", "--dst", "0x15", "--output-dir", str(tmp_path)])
+    assert result.exit_code == 0
+    assert captured["planner_ui"] == "disabled"
+
+
+def test_scan_cli_passes_explicit_planner_ui(monkeypatch, tmp_path: Path) -> None:
+    import helianthus_vrc_explorer.cli as cli_mod
+
+    captured: dict[str, object] = {}
+
+    class _OkTransport:
+        @contextmanager
+        def session(self):
+            yield self
+
+    def _fake_build_transport(settings, *, trace_file):  # noqa: ANN001
+        _ = settings
+        _ = trace_file
+        return _OkTransport()
+
+    @contextmanager
+    def _fake_observer(*_args, **_kwargs):
+        yield None
+
+    def _fake_scan_vrc(*_args, **kwargs):
+        captured["planner_ui"] = kwargs["planner_ui"]
+        return {
+            "meta": {
+                "scan_timestamp": "2026-02-13T00:00:00Z",
+                "destination_address": "0x15",
+                "incomplete": False,
+                "schema_sources": [],
+            },
+            "groups": {},
+        }
+
+    monkeypatch.setattr(cli_mod, "_build_transport", _fake_build_transport)
+    monkeypatch.setattr(cli_mod, "_probe_scan_identity", lambda _transport, *, dst: {})
+    monkeypatch.setattr(cli_mod, "make_scan_observer", _fake_observer)
+    monkeypatch.setattr(cli_mod, "scan_vrc", _fake_scan_vrc)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            "--dst",
+            "0x15",
+            "--planner-ui",
+            "auto",
+            "--output-dir",
+            str(tmp_path),
+        ],
+    )
+    assert result.exit_code == 0
+    assert captured["planner_ui"] == "auto"
 
 
 def test_discover_command_is_present() -> None:
