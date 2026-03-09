@@ -29,7 +29,7 @@ class _FlakyOnceTransport(TransportInterface):
         group = payload[2]
         rr = payload[4:6]
         header = bytes((0x01, group)) + rr
-        return header + b"\x01\x00"
+        return header + b"\x01"
 
 
 class _AlwaysTimeoutTransport(TransportInterface):
@@ -124,6 +124,28 @@ class _AlwaysCommandNotEnabledTransport(TransportInterface):
         raise TransportCommandNotEnabled("ERR: command not enabled")
 
 
+class _BoolFalseTransport(TransportInterface):
+    def __init__(self) -> None:
+        self.calls: int = 0
+
+    def send(self, dst: int, payload: bytes) -> bytes:  # noqa: ARG002
+        self.calls += 1
+        group = payload[2]
+        rr = payload[4:6]
+        return bytes((0x01, group)) + rr + b"\x00"
+
+
+class _BoolTrueTransport(TransportInterface):
+    def __init__(self) -> None:
+        self.calls: int = 0
+
+    def send(self, dst: int, payload: bytes) -> bytes:  # noqa: ARG002
+        self.calls += 1
+        group = payload[2]
+        rr = payload[4:6]
+        return bytes((0x01, group)) + rr + b"\x01"
+
+
 class _StatusOnlyTransport(TransportInterface):
     def send(self, dst: int, payload: bytes) -> bytes:  # noqa: ARG002
         return b"\x00"
@@ -203,22 +225,29 @@ def test_is_instance_present_group_0c_requires_valid_register_response() -> None
     transport = _AlwaysDecodeErrorTransport()
 
     assert is_instance_present(transport, dst=0x15, group=0x0C, instance=0x00) is False
-    assert transport.calls == 4
+    assert transport.calls == 1
 
 
 def test_is_instance_present_group_0c_transport_errors_do_not_count_as_present() -> None:
     transport = _AlwaysTransportErrorTransport()
 
     assert is_instance_present(transport, dst=0x15, group=0x0C, instance=0x00) is False
-    assert transport.calls == 4
+    assert transport.calls == 1
 
 
 def test_is_instance_present_group_0c_true_on_first_valid_register_response() -> None:
-    transport = _FlakyOnceTransport()
+    transport = _BoolTrueTransport()
 
-    # First probe times out, next probe succeeds and marks the instance present.
+    # device_connected=true marks the accessory slot as present.
     assert is_instance_present(transport, dst=0x15, group=0x0C, instance=0x00) is True
-    assert transport.calls == 2
+    assert transport.calls == 1
+
+
+def test_is_instance_present_group_0c_false_when_device_connected_is_false() -> None:
+    transport = _BoolFalseTransport()
+
+    assert is_instance_present(transport, dst=0x15, group=0x0C, instance=0x00) is False
+    assert transport.calls == 1
 
 
 def test_instance_present_cylinder_found(monkeypatch: pytest.MonkeyPatch) -> None:

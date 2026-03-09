@@ -439,11 +439,20 @@ def is_instance_present(
         )
 
     if group == 0x0C:
-        for rr in (0x0002, 0x0007, 0x000F, 0x0016):
-            entry = read_register(transport, dst, 0x06, group=group, instance=instance, register=rr)
-            if entry["error"] is None and entry.get("flags_access") != "absent":
-                return True
-        return False
+        entry = read_register(
+            transport,
+            dst,
+            0x06,
+            group=group,
+            instance=instance,
+            register=0x0001,
+            type_hint="BOOL",
+        )
+        if entry["error"] is not None:
+            return False
+        if entry.get("flags_access") == "absent":
+            return False
+        return entry["value"] is True
 
     logger.debug(
         "No presence heuristic for GG=0x%02X; assuming present for II=0x%02X", group, instance
