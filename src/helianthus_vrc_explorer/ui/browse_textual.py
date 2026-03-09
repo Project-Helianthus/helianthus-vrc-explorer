@@ -5,8 +5,13 @@ from datetime import UTC, datetime
 from time import monotonic
 from typing import Any
 
+from rich.console import Group
+from rich.table import Table
+from rich.text import Text
+
 from .browse_models import BrowseTab, RegisterRow, TreeNodeRef
 from .browse_store import BrowseStore
+from .emphasis import rich_star_bold_text
 
 _ALLOWED_WATCH_INTERVALS: tuple[float, ...] = (0.25, 0.5, 1.0, 2.0, 5.0)
 _WRITE_MARK = "✎"
@@ -77,6 +82,42 @@ def parse_bool_input(raw: str) -> bool | None:
     if text in {"0", "false", "f", "no", "n", "off"}:
         return False
     return None
+
+
+def _build_identity_header_renderable(artifact: dict[str, object]) -> Group | None:
+    meta = artifact.get("meta")
+    if not isinstance(meta, dict):
+        return None
+    identity = meta.get("identity")
+    if not isinstance(identity, dict):
+        identity = meta.get("resolved_identity")
+    if not isinstance(identity, dict):
+        return None
+
+    rows: list[tuple[str, str]] = []
+    for label, key in (
+        ("Device", "device"),
+        ("Model", "model"),
+        ("Serial", "serial"),
+        ("Firmware", "firmware"),
+    ):
+        value = identity.get(key)
+        if not isinstance(value, str):
+            continue
+        text = value.strip()
+        if not text or text == "n/a":
+            continue
+        rows.append((label, text))
+
+    if not rows:
+        return None
+
+    table = Table.grid(expand=True)
+    table.add_column(style="bold cyan", ratio=1)
+    table.add_column(ratio=6)
+    for label, value in rows:
+        table.add_row(f"{label}:", rich_star_bold_text(value))
+    return Group(Text("Scan Identity", style="bold"), table)
 
 
 @dataclass(slots=True)
@@ -290,6 +331,13 @@ def run_browse_from_artifact(
             background: #2e3436;
             color: #eeeeec;
         }
+        #identity-header {
+            height: auto;
+            min-height: 5;
+            padding: 0 1;
+            border: round #729fcf;
+            margin-bottom: 1;
+        }
         #main {
             height: 1fr;
         }
@@ -331,9 +379,12 @@ def run_browse_from_artifact(
             self._editing_row_id: str | None = None
             self._pending_write: _PendingWrite | None = None
             self._written_at: dict[str, str] = {}
+            self._identity_header = _build_identity_header_renderable(artifact)
 
         def compose(self) -> ComposeResult:
             yield Header(show_clock=False)
+            if self._identity_header is not None:
+                yield Static(self._identity_header, id="identity-header")
             with Horizontal(id="main"):
                 with Vertical(id="tree-pane"):
                     yield Tree(self._store.device_label, id="browse-tree")

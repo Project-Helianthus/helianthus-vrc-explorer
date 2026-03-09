@@ -100,3 +100,29 @@ def test_html_report_renders_namespace_totals_and_flags_access_for_dual_namespac
     assert "activeNamespaceByGroup" in html
     assert '"label":"local"' in html
     assert '"label":"remote"' in html
+
+
+def test_html_report_renders_identity_card_with_star_bold_markers() -> None:
+    artifact = {
+        "meta": {
+            "destination_address": "0x15",
+            "scan_timestamp": "2026-02-11T00:00:00Z",
+            "identity": {
+                "device": (
+                    "Wireless 720-series Regulator *BA*se *S*tation "
+                    "*V*aillant-branded Revision *2* (BASV2)"
+                ),
+                "model": "Vaillant sensoCOMFORT RF (VRC 720f/2) 0020262148",
+                "serial": "21213400202621480000000001N7",
+                "firmware": "SW 0507 / HW 1704",
+            },
+        },
+        "groups": {},
+    }
+
+    html = render_html_report(artifact, title="test")
+
+    assert "Scan Identity" in html
+    assert "<strong>BA</strong>se" in html
+    assert "<strong>S</strong>tation" in html
+    assert "<strong>V</strong>aillant-branded Revision <strong>2</strong>" in html

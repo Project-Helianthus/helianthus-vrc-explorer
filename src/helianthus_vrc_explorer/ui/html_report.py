@@ -6,6 +6,8 @@ import json
 from html import escape as _escape_html
 from typing import Any
 
+from .emphasis import html_star_bold
+
 
 def _json_for_html(obj: Any) -> str:
     """Dump JSON in a form that is safe to embed inside an HTML <script> tag."""
@@ -355,6 +357,40 @@ _TEMPLATE = """<!doctype html>
         color: var(--ink);
       }
 
+      .identity-card {
+        display: grid;
+        gap: 10px;
+      }
+
+      .identity-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 10px;
+      }
+
+      .identity-row {
+        display: grid;
+        gap: 4px;
+        padding: 10px 12px;
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.035);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+      }
+
+      .identity-label {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--muted);
+      }
+
+      .identity-value {
+        font-size: 14px;
+        line-height: 1.4;
+        color: var(--ink);
+        word-break: break-word;
+      }
+
       .table-title {
         margin: 8px 0 6px;
         font-size: 14px;
@@ -414,6 +450,8 @@ _TEMPLATE = """<!doctype html>
           <span class="pill" id="metaIncomplete" style="display: none"></span>
         </div>
       </header>
+
+__IDENTITY_CARD__
 
       <section class="sheet-card">
         <div class="section-title">Namespace Totals</div>
@@ -1399,9 +1437,47 @@ __ARTIFACT_JSON__
 
 
 def render_html_report(artifact: dict[str, Any], *, title: str | None = None) -> str:
+    meta = artifact.get("meta")
+    identity_html = ""
+    if isinstance(meta, dict):
+        identity_obj = meta.get("identity")
+        if not isinstance(identity_obj, dict):
+            identity_obj = meta.get("resolved_identity")
+        if isinstance(identity_obj, dict):
+            rows: list[tuple[str, str]] = []
+            for label, key in (
+                ("Device", "device"),
+                ("Model", "model"),
+                ("Serial", "serial"),
+                ("Firmware", "firmware"),
+            ):
+                value = identity_obj.get(key)
+                if not isinstance(value, str):
+                    continue
+                text = value.strip()
+                if not text or text == "n/a":
+                    continue
+                rows.append((label, text))
+            if rows:
+                cards = "".join(
+                    (
+                        '<div class="identity-row">'
+                        f'<div class="identity-label">{_escape_html(label)}</div>'
+                        f'<div class="identity-value">{html_star_bold(value)}</div>'
+                        "</div>"
+                    )
+                    for label, value in rows
+                )
+                identity_html = (
+                    '<section class="sheet-card identity-card">'
+                    '<div class="section-title">Scan Identity</div>'
+                    f'<div class="identity-grid">{cards}</div>'
+                    "</section>"
+                )
     page_title = title or "helianthus-vrc-explorer scan report"
     return (
         _TEMPLATE.replace("__TITLE__", _escape_html(page_title))
+        .replace("__IDENTITY_CARD__", identity_html)
         .replace("__ARTIFACT_JSON__", _json_for_html(artifact))
         .rstrip()
         + "\n"

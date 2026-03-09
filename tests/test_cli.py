@@ -359,6 +359,60 @@ def test_scan_cli_missing_textual_browse_falls_back_to_html_and_summary(
     assert str(output_path) in result.stdout
 
 
+def test_scan_persists_identity_metadata_in_artifact(monkeypatch, tmp_path: Path) -> None:
+    import helianthus_vrc_explorer.cli as cli_mod
+
+    class _OkTransport:
+        @contextmanager
+        def session(self):
+            yield self
+
+    def _fake_build_transport(settings, *, trace_file):  # noqa: ANN001
+        _ = settings
+        _ = trace_file
+        return _OkTransport()
+
+    @contextmanager
+    def _fake_observer(*_args, **_kwargs):
+        yield None
+
+    def _fake_scan_vrc(*_args, **_kwargs):
+        return {
+            "meta": {
+                "scan_timestamp": "2026-02-13T00:00:00Z",
+                "destination_address": "0x15",
+                "incomplete": False,
+                "schema_sources": [],
+            },
+            "groups": {},
+        }
+
+    identity = {
+        "device": (
+            "Wireless 720-series Regulator *BA*se *S*tation "
+            "*V*aillant-branded Revision *2* (BASV2)"
+        ),
+        "model": "Vaillant sensoCOMFORT RF (VRC 720f/2) 0020262148",
+        "serial": "21213400202621480000000001N7",
+        "firmware": "SW 0507 / HW 1704",
+    }
+
+    monkeypatch.setattr(cli_mod, "_build_transport", _fake_build_transport)
+    monkeypatch.setattr(cli_mod, "_probe_scan_identity", lambda _transport, *, dst: dict(identity))
+    monkeypatch.setattr(cli_mod, "make_scan_observer", _fake_observer)
+    monkeypatch.setattr(cli_mod, "scan_vrc", _fake_scan_vrc)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["scan", "--dst", "0x15", "--output-dir", str(tmp_path)])
+
+    assert result.exit_code == 0
+    output_path = Path(result.stdout.strip())
+    artifact = json.loads(output_path.read_text(encoding="utf-8"))
+    meta = artifact.get("meta", {})
+    assert meta.get("identity") == identity
+    assert meta.get("resolved_identity") == identity
+
+
 def test_discover_command_is_present() -> None:
     runner = CliRunner()
     result = runner.invoke(app, ["discover", "--help"])

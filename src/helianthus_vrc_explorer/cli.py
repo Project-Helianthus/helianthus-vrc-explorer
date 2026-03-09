@@ -14,6 +14,7 @@ from typing import cast
 
 import typer
 from rich.console import Console
+from rich.text import Text
 
 from . import __version__
 from .ebusd import parse_ebusd_info_target_addresses
@@ -32,6 +33,7 @@ from .schema.myvaillant_map import MyvaillantRegisterMap
 from .transport.base import TransportCommandNotEnabled, TransportError, TransportTimeout
 from .transport.ebusd_tcp import EbusdTcpConfig, EbusdTcpTransport
 from .ui.browse_textual import run_browse_from_artifact
+from .ui.emphasis import rich_star_bold_text
 from .ui.html_report import render_html_report
 from .ui.live import ScanSessionPreface, make_scan_observer
 from .ui.planner import PlannerPreset
@@ -320,10 +322,11 @@ def _build_scan_session_preface(
 
 
 def _emit_non_tty_session_preface(preface: ScanSessionPreface) -> None:
-    typer.echo(preface.app_line, err=True)
-    typer.echo(preface.scan_line, err=True)
+    console = Console(stderr=True)
+    console.print(rich_star_bold_text(preface.app_line))
+    console.print(rich_star_bold_text(preface.scan_line))
     for label, value in preface.rows:
-        typer.echo(f"{label}: {value}", err=True)
+        console.print(Text.assemble(f"{label}: ", rich_star_bold_text(value)))
 
 
 def _can_launch_interactive_browse(console: Console) -> bool:
@@ -672,6 +675,7 @@ def scan(
 
     myvaillant_map: MyvaillantRegisterMap | None = None
     myvaillant_map_source: str | None = None
+    identity_for_artifact: dict[str, str] | None = None
     if myvaillant_map_path is not None:
         try:
             myvaillant_map = MyvaillantRegisterMap.from_path(myvaillant_map_path)
@@ -732,6 +736,7 @@ def scan(
                     identity = _probe_scan_identity(transport, dst=dst_u8)
                     if redact:
                         identity["serial"] = "<SERIAL_NUMBER_REDACTED>"
+                    identity_for_artifact = dict(identity)
                     preface = _build_scan_session_preface(
                         dst=dst_u8,
                         endpoint=f"{transport_settings.host}:{transport_settings.port}",
@@ -795,6 +800,9 @@ def scan(
                 sources_obj.append(ebusd_schema_source)
             if myvaillant_map_source:
                 sources_obj.append(myvaillant_map_source)
+        if identity_for_artifact is not None:
+            meta_obj["identity"] = dict(identity_for_artifact)
+            meta_obj["resolved_identity"] = dict(identity_for_artifact)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / default_output_filename(
