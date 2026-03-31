@@ -412,11 +412,14 @@ def _prompt_transport_retry_settings(
         proto = result.protocol.lower()
         if proto in ("ens", "enh", "enhanced"):
             proto = "enhanced"
+        # Default src to 0xF7 for enhanced if not already set (e.g. retry
+        # switching from tcp where src is None).
+        src = settings.src if settings.src is not None else (0xF7 if proto == "enhanced" else None)
         return _TransportSettings(
             protocol=proto,
             host=result.host,
             port=result.port,
-            src=settings.src,
+            src=src,
         )
     except Exception as exc:
         typer.echo(
@@ -451,11 +454,12 @@ def _prompt_transport_retry_settings(
     normalized = protocol.lower()
     if normalized in ("ens", "enh", "enhanced"):
         normalized = "enhanced"
+    src = settings.src if settings.src is not None else (0xF7 if normalized == "enhanced" else None)
     return _TransportSettings(
         protocol=normalized,
         host=host or settings.host,
         port=parsed_port,
-        src=settings.src,
+        src=src,
     )
 
 

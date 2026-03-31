@@ -445,9 +445,10 @@ class EnhancedTcpTransport(TransportInterface):
         self._reset_parser()
         if session is None:
             return
-        with contextlib.suppress(OSError):
-            if session.trace_handle is not None:
+        if session.trace_handle is not None:
+            with contextlib.suppress(OSError):
                 session.trace_handle.close()
+        with contextlib.suppress(OSError):
             session.sock.close()
 
     @contextlib.contextmanager
