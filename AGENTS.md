@@ -583,9 +583,15 @@ CI enforces this via `python scripts/check_docs_sync.py`.
  Scan a VRC regulator using B524 (GetExtendedRegisters).
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ --transport                                          TEXT     Transport backend: tcp (ebusd hex) or enh (direct ENH  │
+│                                                               adapter).                                              │
+│                                                               [default: tcp]                                         │
 │ --dst                                                TEXT     Destination eBUS address (e.g. 0x15) or auto           │
 │                                                               (default).                                             │
 │                                                               [default: auto]                                        │
+│ --source-address                                     TEXT     Source initiator address for ENH transport. Ignored    │
+│                                                               for tcp.                                               │
+│                                                               [default: 0x31]                                        │
 │ --host                                               TEXT     ebusd host (TCP). [default: 127.0.0.1]                 │
 │ --port                                               INTEGER  ebusd port (TCP). [default: 8888]                      │
 │ --dry-run                                                     Replay a scan fixture using DummyTransport (no device  │

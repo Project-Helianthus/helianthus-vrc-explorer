@@ -32,6 +32,7 @@ from .schema.ebusd_csv import EbusdCsvSchema
 from .schema.myvaillant_map import MyvaillantRegisterMap
 from .transport.base import TransportCommandNotEnabled, TransportError, TransportTimeout
 from .transport.ebusd_tcp import EbusdTcpConfig, EbusdTcpTransport
+from .transport.ens_tcp import EnsTcpConfig, EnsTcpTransport
 from .ui.browse_textual import run_browse_from_artifact
 from .ui.emphasis import rich_star_bold_text
 from .ui.html_report import render_html_report
@@ -57,6 +58,7 @@ class _TransportSettings:
     protocol: str
     host: str
     port: int
+    src: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -254,7 +256,7 @@ def _format_fw(sw: str | None, hw: str | None) -> str:
 
 
 def _probe_scan_identity(
-    transport: EbusdTcpTransport,
+    transport: EbusdTcpTransport | EnsTcpTransport,
     *,
     dst: int,
     model_catalog: dict[str, _ModelCatalogEntry] | None = None,
@@ -370,12 +372,21 @@ def _build_transport(
     settings: _TransportSettings,
     *,
     trace_file: Path | None,
-) -> EbusdTcpTransport:
-    if settings.protocol != "tcp":
-        raise typer.BadParameter(f"Unsupported transport protocol: {settings.protocol!r}")
-    return EbusdTcpTransport(
-        EbusdTcpConfig(host=settings.host, port=settings.port, trace_path=trace_file)
-    )
+) -> EbusdTcpTransport | EnsTcpTransport:
+    if settings.protocol == "tcp":
+        return EbusdTcpTransport(
+            EbusdTcpConfig(host=settings.host, port=settings.port, trace_path=trace_file)
+        )
+    if settings.protocol == "enh":
+        return EnsTcpTransport(
+            EnsTcpConfig(
+                host=settings.host,
+                port=settings.port,
+                src=settings.src if settings.src is not None else 0x31,
+                trace_path=trace_file,
+            )
+        )
+    raise typer.BadParameter(f"Unsupported transport protocol: {settings.protocol!r}")
 
 
 def _prompt_transport_retry_settings(
@@ -436,7 +447,7 @@ def _prompt_transport_retry_settings(
 
 
 def _probe_group_descriptor(
-    transport: EbusdTcpTransport,
+    transport: EbusdTcpTransport | EnsTcpTransport,
     *,
     dst: int,
     group: int,
@@ -460,7 +471,7 @@ def _probe_group_descriptor(
 
 
 def _probe_scan_identification(
-    transport: EbusdTcpTransport,
+    transport: EbusdTcpTransport | EnsTcpTransport,
     *,
     dst: int,
     retries: int = _SCAN_IDENT_RETRIES,
@@ -559,10 +570,20 @@ def main(
 
 @app.command()
 def scan(
+    transport_protocol: str = typer.Option(  # noqa: B008
+        _DEFAULT_TRANSPORT_PROTOCOL,
+        "--transport",
+        help="Transport backend: tcp (ebusd hex) or enh (direct ENH adapter).",
+    ),
     dst: str = typer.Option(  # noqa: B008
         "auto",
         "--dst",
         help="Destination eBUS address (e.g. 0x15) or auto (default).",
+    ),
+    source_address: str = typer.Option(  # noqa: B008
+        "0x31",
+        "--source-address",
+        help="Source initiator address for ENH transport. Ignored for tcp.",
     ),
     host: str = typer.Option(  # noqa: B008
         _DEFAULT_EBUSD_HOST,
@@ -662,11 +683,24 @@ def scan(
     ),
 ) -> None:
     """Scan a VRC regulator using B524 (GetExtendedRegisters)."""
+    transport_proto = transport_protocol.strip().lower()
+    if transport_proto not in {"tcp", "enh"}:
+        typer.echo(
+            "Invalid --transport value. Expected: tcp or enh.",
+            err=True,
+        )
+        raise typer.Exit(2)
     requested_dst = dst.strip().lower()
     explicit_dst_u8: int | None = None
     if requested_dst != "auto":
         # Validate explicit destination before any network activity.
         explicit_dst_u8 = _parse_u8_address(dst)
+    if transport_proto != "tcp" and requested_dst == "auto":
+        typer.echo(
+            "Auto destination only supported on ebusd TCP. Use --dst 0x.. for ENH.",
+            err=True,
+        )
+        raise typer.Exit(2)
 
     dst_u8: int
     console = Console(stderr=True)
@@ -727,10 +761,12 @@ def scan(
         )
         _emit_non_tty_session_preface(preface)
     else:
+        source_addr_u8 = _parse_u8_address(source_address) if transport_proto == "enh" else None
         transport_settings = _TransportSettings(
-            protocol=_DEFAULT_TRANSPORT_PROTOCOL,
+            protocol=transport_proto,
             host=host,
             port=port,
+            src=source_addr_u8,
         )
         allow_transport_retry = _is_default_transport_settings(transport_settings)
         b509_ranges: list[tuple[int, int]] = []
@@ -758,7 +794,9 @@ def scan(
                     opened_session = True
                     if requested_dst == "auto":
                         _emit_scan_status(console, "Resolving destination address from ebusd")
-                        dst_u8 = _resolve_scan_destination(transport, dst=dst)
+                        dst_u8 = _resolve_scan_destination(
+                            cast(EbusdTcpTransport, transport), dst=dst
+                        )
                         _emit_scan_status(console, f"Resolved destination to 0x{dst_u8:02X}")
                     else:
                         dst_u8 = cast(int, explicit_dst_u8)
