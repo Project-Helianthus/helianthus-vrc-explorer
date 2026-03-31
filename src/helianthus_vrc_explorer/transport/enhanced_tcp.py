@@ -318,6 +318,7 @@ class EnhancedTcpConfig:
 @dataclass(slots=True)
 class _EnhancedTcpSession:
     sock: socket.socket
+    trace_handle: object | None = None  # IO[str] when trace is active
 
 
 class _EnhancedCollision(TransportError):
@@ -356,6 +357,12 @@ def _encode_enh(command: int, data: int) -> bytes:
     byte1 = 0xC0 | ((command & 0x0F) << 2) | ((data & 0xC0) >> 6)
     byte2 = 0x80 | (data & 0x3F)
     return bytes((byte1, byte2))
+
+
+# Pre-encoded ENH frames for hot-path symbols (avoids per-call encoding).
+_ENH_SEND_SYN = _encode_enh(_ENH_REQ_SEND, _EBUS_SYN)
+_ENH_SEND_ACK = _encode_enh(_ENH_REQ_SEND, _EBUS_ACK)
+_ENH_SEND_NACK = _encode_enh(_ENH_REQ_SEND, _EBUS_NACK)
 
 
 def _crc_update(crc: int, value: int) -> int:
@@ -413,13 +420,12 @@ class EnhancedTcpTransport(TransportInterface):
         self._enh_pending_first: int | None = None
 
     def _trace(self, message: str) -> None:
-        trace_path = self._config.trace_path
-        if trace_path is None:
+        session = self._session
+        if session is None or session.trace_handle is None:
             return
         with contextlib.suppress(OSError):
-            trace_path.parent.mkdir(parents=True, exist_ok=True)
-            with trace_path.open("a", encoding="utf-8") as handle:
-                handle.write(f"{_utc_ts()} {message}\n")
+            session.trace_handle.write(f"{_utc_ts()} {message}\n")
+            session.trace_handle.flush()
 
     def trace_label(self, label: str) -> None:
         if not isinstance(label, str):
@@ -439,6 +445,8 @@ class EnhancedTcpTransport(TransportInterface):
         if session is None:
             return
         with contextlib.suppress(OSError):
+            if session.trace_handle is not None:
+                session.trace_handle.close()
             session.sock.close()
 
     @contextlib.contextmanager
@@ -467,6 +475,7 @@ class EnhancedTcpTransport(TransportInterface):
                 self._config.timeout_s,
             )
             sock.settimeout(self._config.timeout_s)
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         except TimeoutError as exc:
             raise TransportTimeout(
                 f"Enhanced adapter timeout {self._config.host}:{self._config.port}"
@@ -476,7 +485,13 @@ class EnhancedTcpTransport(TransportInterface):
                 f"Enhanced adapter {self._config.host}:{self._config.port}: {exc}"
             ) from exc
 
-        self._session = _EnhancedTcpSession(sock=sock)
+        trace_handle = None
+        trace_path = self._config.trace_path
+        if trace_path is not None:
+            with contextlib.suppress(OSError):
+                trace_path.parent.mkdir(parents=True, exist_ok=True)
+                trace_handle = trace_path.open("a", encoding="utf-8")
+        self._session = _EnhancedTcpSession(sock=sock, trace_handle=trace_handle)
         self._reset_parser()
         try:
             self._init_transport(features=0x01)
@@ -496,7 +511,16 @@ class EnhancedTcpTransport(TransportInterface):
     def _send_enh_frame(self, command: int, data: int) -> None:
         session = self._ensure_session()
         try:
-            session.sock.sendall(_encode_enh(command, data))
+            # Use pre-encoded frames for common hot-path symbols.
+            if command == _ENH_REQ_SEND and data == _EBUS_SYN:
+                frame = _ENH_SEND_SYN
+            elif command == _ENH_REQ_SEND and data == _EBUS_ACK:
+                frame = _ENH_SEND_ACK
+            elif command == _ENH_REQ_SEND and data == _EBUS_NACK:
+                frame = _ENH_SEND_NACK
+            else:
+                frame = _encode_enh(command, data)
+            session.sock.sendall(frame)
         except TimeoutError as exc:
             self.close()
             raise TransportTimeout(
