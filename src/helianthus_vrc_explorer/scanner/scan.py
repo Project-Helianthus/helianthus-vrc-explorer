@@ -33,7 +33,7 @@ from ..ui.planner import PlannerGroup, PlannerPreset, build_plan_from_preset, pr
 from .b509 import scan_b509
 from .b516 import scan_b516
 from .b555 import scan_b555
-from .director import GROUP_CONFIG, classify_groups, discover_groups
+from .director import GROUP_CONFIG, DiscoveredGroup, classify_groups, discover_groups
 from .observer import ScanObserver
 from .plan import (
     GroupScanPlan,
@@ -908,6 +908,23 @@ def scan_b524(
         group_discovery_start = time.perf_counter()
         group_discovery_start_calls = counting_transport.counters.send_calls
         discovered = discover_groups(transport, dst=dst, observer=observer)
+
+        # Exhaustive mode: inject synthetic DiscoveredGroup entries for any GG in
+        # 0x00..0x11 not already found by directory probing.
+        if planner_preset == "exhaustive":
+            discovered_ggs = {dg.group for dg in discovered}
+            for gg in range(0x00, 0x12):
+                if gg not in discovered_ggs:
+                    # Use NaN as the synthetic descriptor so downstream analytics
+                    # (unknown_descriptor_types, issue_suggestion) skip it instead
+                    # of recording a fake 0.0 observation.
+                    discovered.append(DiscoveredGroup(group=gg, descriptor=float("nan")))
+                    if observer is not None:
+                        observer.log(
+                            f"Exhaustive: injected synthetic group GG=0x{gg:02X}",
+                            level="info",
+                        )
+
         group_discovery_duration_s = time.perf_counter() - group_discovery_start
         group_discovery_requests = (
             counting_transport.counters.send_calls - group_discovery_start_calls
@@ -920,7 +937,8 @@ def scan_b524(
             {
                 float(group.descriptor)
                 for group in classified
-                if float(group.descriptor) not in _KNOWN_DESCRIPTOR_TYPES
+                if not math.isnan(group.descriptor)
+                and float(group.descriptor) not in _KNOWN_DESCRIPTOR_TYPES
             }
         )
         if unknown_groups and observer is not None:
@@ -1058,11 +1076,14 @@ def scan_b524(
             opcodes = _group_opcodes(group.group)
             dual_namespace = len(opcodes) > 1
             config = GROUP_CONFIG.get(group.group)
+            # NaN descriptors come from synthetic exhaustive-mode injection;
+            # store as None to keep JSON-serializable and avoid polluting analytics.
+            desc_for_artifact = None if math.isnan(group.descriptor) else group.descriptor
             _ensure_group_artifact(
                 artifact,
                 group=group.group,
                 name=group.name,
-                descriptor_observed=group.descriptor,
+                descriptor_observed=desc_for_artifact,
                 dual_namespace=dual_namespace,
             )
 
@@ -1258,7 +1279,7 @@ def scan_b524(
                         opcode=opcode,
                         name=group.name,
                         descriptor=group.descriptor,
-                        known=config is not None,
+                        known=config is not None and not config.get("exhaustive_only", False),
                         ii_max=planner_ii_max,
                         rr_max=primary_rr_max,
                         rr_max_full=_rr_max_for_opcode(

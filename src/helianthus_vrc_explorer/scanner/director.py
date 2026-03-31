@@ -28,6 +28,10 @@ class GroupConfig(TypedDict):
     opcodes: list[int]
     rr_max_by_opcode: NotRequired[dict[int, int]]
     ii_max_by_opcode: NotRequired[dict[int, int]]
+    # When True, this group is only included in the exhaustive preset.
+    # It will NOT appear in conservative/recommended/full presets even if
+    # discovered by the directory probe.
+    exhaustive_only: NotRequired[bool]
 
 
 # Known groups (hardcoded reference, validated against CSV).
@@ -105,6 +109,62 @@ GROUP_CONFIG: Final[dict[int, GroupConfig]] = {
         "ii_max": 0x0A,
         "rr_max": 0x002F,
         "opcodes": [0x06],
+    },
+    0x06: {
+        "name": "Unknown 0x06",
+        "ii_max": 0x0A,
+        "rr_max": 0x0030,
+        "opcodes": [0x02, 0x06],
+        "exhaustive_only": True,
+    },
+    0x07: {
+        "name": "Unknown 0x07",
+        "ii_max": 0x0A,
+        "rr_max": 0x0030,
+        "opcodes": [0x02, 0x06],
+        "exhaustive_only": True,
+    },
+    0x0B: {
+        "name": "Unknown 0x0B",
+        "ii_max": 0x0A,
+        "rr_max": 0x0010,
+        "opcodes": [0x02, 0x06],
+        "exhaustive_only": True,
+    },
+    0x0D: {
+        "name": "Unknown 0x0D (VWZIO?)",
+        "ii_max": 0x0A,
+        "rr_max": 0x0030,
+        "opcodes": [0x02, 0x06],
+        "exhaustive_only": True,
+    },
+    0x0E: {
+        "name": "Unknown 0x0E",
+        "ii_max": 0x0A,
+        "rr_max": 0x0010,
+        "opcodes": [0x02, 0x06],
+        "exhaustive_only": True,
+    },
+    0x0F: {
+        "name": "Unknown 0x0F",
+        "ii_max": 0x0A,
+        "rr_max": 0x0010,
+        "opcodes": [0x02, 0x06],
+        "exhaustive_only": True,
+    },
+    0x10: {
+        "name": "Unknown 0x10",
+        "ii_max": 0x0A,
+        "rr_max": 0x0010,
+        "opcodes": [0x02, 0x06],
+        "exhaustive_only": True,
+    },
+    0x11: {
+        "name": "Unknown 0x11",
+        "ii_max": 0x0A,
+        "rr_max": 0x0010,
+        "opcodes": [0x02, 0x06],
+        "exhaustive_only": True,
     },
 }
 KNOWN_CORE_GROUPS: Final[frozenset[int]] = frozenset({0x02, 0x03})

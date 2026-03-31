@@ -186,7 +186,7 @@ def test_discover_groups_does_not_terminate_on_transient_transport_failures(tmp_
     assert transport.probed_groups[:4] == [0x00, 0x01, 0x02, 0x03]
     assert transport.probed_groups.count(0x04) == 3
     assert transport.probed_groups.count(0x05) == 3
-    assert transport.probed_groups.count(0x06) == 1
+    assert transport.probed_groups.count(0x06) == 3
     assert transport.probed_groups[-2:] == [0x07, 0x08]
 
 
@@ -233,14 +233,33 @@ def test_group_00_rr_max_is_0x00ff() -> None:
 
 
 def test_group_names_match_docs() -> None:
-    assert len(GROUP_CONFIG) == 10
+    assert len(GROUP_CONFIG) == 18
     assert GROUP_CONFIG[0x09]["name"] == "Regulators"
     assert GROUP_CONFIG[0x0A]["name"] == "Thermostats"
     assert GROUP_CONFIG[0x0C]["name"] == "Functional Modules"
 
 
 def test_group_config_completeness() -> None:
-    assert set(GROUP_CONFIG) == {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x08, 0x09, 0x0A, 0x0C}
+    assert set(GROUP_CONFIG) == {
+        0x00,
+        0x01,
+        0x02,
+        0x03,
+        0x04,
+        0x05,
+        0x06,
+        0x07,
+        0x08,
+        0x09,
+        0x0A,
+        0x0B,
+        0x0C,
+        0x0D,
+        0x0E,
+        0x0F,
+        0x10,
+        0x11,
+    }
     assert GROUP_CONFIG[0x08]["name"] == "Buffer / Solar Cylinder 2"
     assert GROUP_CONFIG[0x08]["opcodes"] == [0x02, 0x06]
     assert GROUP_CONFIG[0x08]["rr_max_by_opcode"] == {0x02: 0x0007, 0x06: 0x0004}

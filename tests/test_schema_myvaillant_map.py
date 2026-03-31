@@ -255,7 +255,11 @@ def test_register_map_all_groups_represented() -> None:
         group for (group, _register, _opcode) in schema._wildcard_instance
     }
 
-    assert groups_in_csv == set(GROUP_CONFIG)
+    # CSV must cover all core known groups.
+    core_groups = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x08, 0x09, 0x0A, 0x0C}
+    assert core_groups <= groups_in_csv
+    # CSV groups must be a subset of GROUP_CONFIG (no stale entries).
+    assert groups_in_csv <= set(GROUP_CONFIG)
 
 
 def test_packaged_myvaillant_map_stays_in_sync_with_repo_copy() -> None:
