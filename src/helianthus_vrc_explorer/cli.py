@@ -635,8 +635,9 @@ def scan(
         "recommended",
         "--preset",
         help=(
-            "Planner preset: conservative, recommended, full, or custom. "
-            "`full` scans every instance slot and full RR ranges; expect very long runs."
+            "Planner preset: conservative, recommended, full, exhaustive, or custom. "
+            "`full` scans every instance slot and full RR ranges; "
+            "`exhaustive` also injects all GG 0x00-0x11 groups. Expect very long runs."
         ),
     ),
     no_tips: bool = typer.Option(  # noqa: B008
@@ -677,9 +678,9 @@ def scan(
         )
         raise typer.Exit(2)
     preset_value = _normalize_planner_preset(preset)
-    if preset_value not in {"conservative", "recommended", "full", "custom"}:
+    if preset_value not in {"conservative", "recommended", "full", "exhaustive", "custom"}:
         typer.echo(
-            "Invalid --preset value. Expected one of: conservative, recommended, full, custom.",
+            "Invalid --preset value. Expected one of: conservative, recommended, full, exhaustive, custom.",
             err=True,
         )
         raise typer.Exit(2)

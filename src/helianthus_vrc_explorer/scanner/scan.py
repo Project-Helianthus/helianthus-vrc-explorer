@@ -33,7 +33,7 @@ from ..ui.planner import PlannerGroup, PlannerPreset, build_plan_from_preset, pr
 from .b509 import scan_b509
 from .b516 import scan_b516
 from .b555 import scan_b555
-from .director import GROUP_CONFIG, classify_groups, discover_groups
+from .director import GROUP_CONFIG, DiscoveredGroup, classify_groups, discover_groups
 from .observer import ScanObserver
 from .plan import (
     GroupScanPlan,
@@ -908,6 +908,20 @@ def scan_b524(
         group_discovery_start = time.perf_counter()
         group_discovery_start_calls = counting_transport.counters.send_calls
         discovered = discover_groups(transport, dst=dst, observer=observer)
+
+        # Exhaustive mode: inject synthetic DiscoveredGroup entries for any GG in
+        # 0x00..0x11 not already found by directory probing.
+        if planner_preset == "exhaustive":
+            discovered_ggs = {dg.group for dg in discovered}
+            for gg in range(0x00, 0x12):
+                if gg not in discovered_ggs:
+                    discovered.append(DiscoveredGroup(group=gg, descriptor=0.0))
+                    if observer is not None:
+                        observer.log(
+                            f"Exhaustive: injected synthetic group GG=0x{gg:02X}",
+                            level="info",
+                        )
+
         group_discovery_duration_s = time.perf_counter() - group_discovery_start
         group_discovery_requests = (
             counting_transport.counters.send_calls - group_discovery_start_calls

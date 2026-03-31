@@ -53,7 +53,7 @@ class PlannerGroup:
         return f"{_hex_u8(self.group)} ({self.namespace_label})"
 
 
-PlannerPreset = Literal["conservative", "recommended", "full", "custom"]
+PlannerPreset = Literal["conservative", "recommended", "full", "exhaustive", "custom"]
 
 
 def _hex_u8(value: int) -> str:
@@ -157,6 +157,12 @@ def _instances_for_preset(group: PlannerGroup, preset: PlannerPreset) -> tuple[i
     return full_range
 
 
+def _instances_for_exhaustive(ii_max: int | None) -> tuple[int, ...]:
+    if ii_max is None:
+        return (0x00,)
+    return tuple(range(0x00, ii_max + 1))
+
+
 def build_plan_from_preset(
     groups: list[PlannerGroup],
     *,
@@ -164,6 +170,15 @@ def build_plan_from_preset(
 ) -> dict[PlanKey, GroupScanPlan]:
     selected: dict[PlanKey, GroupScanPlan] = {}
     for group in sorted(groups, key=lambda g: (g.group, g.opcode)):
+        if preset == "exhaustive":
+            # Exhaustive: include ALL groups with rr_max_full and all instances.
+            selected[group.key] = GroupScanPlan(
+                group=group.group,
+                opcode=group.opcode,
+                rr_max=group.rr_max_full,
+                instances=_instances_for_exhaustive(group.ii_max),
+            )
+            continue
         if preset != "full" and not group.known:
             continue
         if preset == "conservative" and not group.primary:
@@ -227,12 +242,13 @@ def _print_plan_breakdown(console: Console, plan: dict[PlanKey, GroupScanPlan]) 
 
 
 def _ask_preset(console: Console, *, default_preset: PlannerPreset) -> PlannerPreset:
-    preset_hint = "Preset: (1) conservative, (2) recommended, (3) full, (4) custom"
+    preset_hint = "Preset: (1) conservative, (2) recommended, (3) full, (4) exhaustive, (5) custom"
     default_token = {
         "conservative": "1",
         "recommended": "2",
         "full": "3",
-        "custom": "4",
+        "exhaustive": "4",
+        "custom": "5",
     }[default_preset]
     mapping: dict[str, PlannerPreset] = {
         "1": "conservative",
@@ -242,7 +258,9 @@ def _ask_preset(console: Console, *, default_preset: PlannerPreset) -> PlannerPr
         "3": "full",
         "full": "full",
         "aggressive": "full",
-        "4": "custom",
+        "4": "exhaustive",
+        "exhaustive": "exhaustive",
+        "5": "custom",
         "custom": "custom",
     }
     while True:
@@ -259,7 +277,7 @@ def _ask_preset(console: Console, *, default_preset: PlannerPreset) -> PlannerPr
         preset = mapping.get(raw)
         if preset is not None:
             return preset
-        console.print("[red]Invalid preset. Use 1,2,3,4 or name.[/red]")
+        console.print("[red]Invalid preset. Use 1,2,3,4,5 or name.[/red]")
 
 
 def _ask_groups_to_scan(

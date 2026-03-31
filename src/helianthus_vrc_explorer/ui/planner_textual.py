@@ -104,9 +104,6 @@ def run_textual_scan_plan(
     class _InputDialog(ModalScreen[str | None]):
         BINDINGS = [
             Binding("escape", "cancel", "Cancel"),
-            Binding("enter", "submit", "Save"),
-            Binding("ctrl+j", "submit", show=False),
-            Binding("ctrl+m", "submit", show=False),
         ]
         CSS = """
         _InputDialog {
@@ -142,12 +139,10 @@ def run_textual_scan_plan(
         def action_cancel(self) -> None:
             self.dismiss(None)
 
-        def action_submit(self) -> None:
-            self.dismiss(self.query_one(Input).value.strip())
-
         def on_input_submitted(self, event: Input.Submitted) -> None:
             # Enter is handled by the Input widget first; submit explicitly so
             # users can confirm edits without relying on screen-level bindings.
+            event.stop()
             self.dismiss(event.value.strip())
 
     class _PlannerApp(App[dict[PlanKey, GroupScanPlan] | None]):
@@ -158,6 +153,7 @@ def run_textual_scan_plan(
             Binding("1", "preset_conservative", "Preset 1"),
             Binding("2", "preset_recommended", "Preset 2"),
             Binding("3", "preset_full", "Preset 3"),
+            Binding("4", "preset_exhaustive", "Preset 4"),
             Binding("s", "save", "Save"),
             Binding("q", "cancel", "Cancel"),
             Binding("question_mark", "show_help", "Help"),
@@ -221,7 +217,7 @@ def run_textual_scan_plan(
             table.cursor_type = "row"
             table.add_columns("On", "GG", "Name", "Type", "Instances", "RR_max")
             self._refresh_table()
-            self._set_help("1/2/3 presets | Space toggle | Enter edit RR_max | i edit instances")
+            self._set_help("1/2/3/4 presets | Space toggle | Enter edit RR_max | i edit instances")
             table.focus()
 
         def _set_help(self, text: str) -> None:
@@ -404,8 +400,11 @@ def run_textual_scan_plan(
         def action_preset_full(self) -> None:
             self._apply_preset("full")
 
+        def action_preset_exhaustive(self) -> None:
+            self._apply_preset("exhaustive")
+
         def action_show_help(self) -> None:
-            self._set_help("Space=toggle Enter=RR i=instances 1/2/3=presets s=save q=cancel")
+            self._set_help("Space=toggle Enter=RR i=instances 1/2/3/4=presets s=save q=cancel")
 
         def action_save(self) -> None:
             plan = {
