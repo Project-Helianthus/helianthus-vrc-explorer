@@ -298,10 +298,10 @@ class EnhancedTcpConfig:
     src: int = 0x31
     trace_path: Path | None = None
     timeout_max_retries: int = 2
-    collision_max_retries: int = 2
-    nack_max_retries: int = 1
-    collision_backoff_min_ms: int = 10
-    collision_backoff_max_ms: int = 50
+    collision_max_retries: int = 5
+    nack_max_retries: int = 2
+    collision_backoff_min_ms: int = 20
+    collision_backoff_max_ms: int = 100
 
 
 @dataclass(slots=True)
@@ -674,44 +674,50 @@ class EnhancedTcpTransport(TransportInterface):
             try:
                 return send_once()
             except TransportTimeout as exc:
-                self.close()
                 timeout_retries += 1
                 if timeout_retries > self._config.timeout_max_retries:
+                    self.close()
                     raise TransportTimeout(
                         f"{exc} (timeout retries exhausted ({self._config.timeout_max_retries}))"
                     ) from exc
+                # First timeout: reset parser and retry on the same session.
+                # Subsequent timeouts after exhaustion: close above.
+                self._reset_parser()
                 self._trace(
-                    "#"
-                    f"{seq} RETRY type=timeout "
+                    f"#{seq} RETRY type=timeout "
                     f"n={timeout_retries}/{self._config.timeout_max_retries}"
                 )
             except _EnhancedCollision as exc:
-                self.close()
+                # Collision is normal on a shared bus — just re-arbitrate
+                # on the same session after a short random backoff.
                 collision_retries += 1
                 if collision_retries > self._config.collision_max_retries:
                     raise TransportError(
                         f"{exc} (collision retries exhausted "
                         f"({self._config.collision_max_retries}))"
                     ) from exc
+                self._reset_parser()
                 sleep_s = random.uniform(
                     self._config.collision_backoff_min_ms / 1000.0,
                     self._config.collision_backoff_max_ms / 1000.0,
                 )
                 self._trace(
                     f"#{seq} RETRY type=collision n={collision_retries}/"
-                    f"{self._config.collision_max_retries} sleep_ms={int(round(sleep_s * 1000))}"
+                    f"{self._config.collision_max_retries} "
+                    f"sleep_ms={int(round(sleep_s * 1000))}"
                 )
                 time.sleep(sleep_s)
             except (_EnhancedNack, _EnhancedCrcMismatch) as exc:
-                self.close()
+                # NACK/CRC are retryable on the same session — the bus
+                # protocol already handled ACK/NACK exchange.
                 nack_retries += 1
                 if nack_retries > self._config.nack_max_retries:
                     raise TransportError(
                         f"{exc} (nack/crc retries exhausted ({self._config.nack_max_retries}))"
                     ) from exc
+                self._reset_parser()
                 self._trace(
-                    "#"
-                    f"{seq} RETRY type=nack_or_crc "
+                    f"#{seq} RETRY type=nack_or_crc "
                     f"n={nack_retries}/{self._config.nack_max_retries}"
                 )
 
