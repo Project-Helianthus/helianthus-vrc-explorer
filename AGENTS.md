@@ -615,9 +615,10 @@ CI enforces this via `python scripts/check_docs_sync.py`.
 │ --planner-ui                                         TEXT     Interactive planner mode: disabled, auto, textual, or  │
 │                                                               classic.                                               │
 │                                                               [default: disabled]                                    │
-│ --preset                                             TEXT     Planner preset: conservative, recommended, full, or    │
-│                                                               custom. `full` scans every instance slot and full RR   │
-│                                                               ranges; expect very long runs.                         │
+│ --preset                                             TEXT     Planner preset: conservative, recommended, full,       │
+│                                                               exhaustive, or custom. `full` scans every instance     │
+│                                                               slot and full RR ranges; `exhaustive` also injects all │
+│                                                               GG 0x00-0x11 groups. Expect very long runs.            │
 │                                                               [default: recommended]                                 │
 │ --no-tips                                                     Hide scan header tips in interactive terminal mode.    │
 │ --redact                                                      Redact device identity fields (e.g. serial number) in  │
