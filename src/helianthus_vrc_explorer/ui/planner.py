@@ -35,6 +35,7 @@ class PlannerGroup:
     present_instances: tuple[int, ...]
     namespace_label: str | None = None
     primary: bool = True
+    exhaustive_only: bool = False
 
     @property
     def key(self) -> PlanKey:
@@ -179,7 +180,11 @@ def build_plan_from_preset(
                 instances=_instances_for_exhaustive(group.ii_max),
             )
             continue
-        if preset != "full" and not group.known:
+        if group.exhaustive_only:
+            # exhaustive_only groups (GG 0x06..0x11 experimental)
+            # are only included under --preset exhaustive.
+            continue
+        if not group.known and preset != "full":
             continue
         if preset == "conservative" and not group.primary:
             continue

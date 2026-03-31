@@ -1279,7 +1279,7 @@ def scan_b524(
                         opcode=opcode,
                         name=group.name,
                         descriptor=group.descriptor,
-                        known=config is not None and not config.get("exhaustive_only", False),
+                        known=config is not None,
                         ii_max=planner_ii_max,
                         rr_max=primary_rr_max,
                         rr_max_full=_rr_max_for_opcode(
@@ -1290,6 +1290,7 @@ def scan_b524(
                         present_instances=present_instances,
                         namespace_label=(_opcode_label(opcode) if dual_namespace else None),
                         primary=(opcode == primary_opcode),
+                        exhaustive_only=bool(config and config.get("exhaustive_only")),
                     )
                 )
 

@@ -295,13 +295,24 @@ class EnhancedTcpConfig:
     host: str = "127.0.0.1"
     port: int = 9999
     timeout_s: float = 5.0
-    src: int = 0x31
+    # Default initiator: priority class 3, sub-address 0xF.
+    # Lowest useful priority while avoiding the 0xFF target-address
+    # conflict with NETX3 (0x04).  Per eBUS spec section 6.4,
+    # address 0xF7 yields to all priority-0/1/2 masters.
+    src: int = 0xF7
     trace_path: Path | None = None
     timeout_max_retries: int = 2
-    collision_max_retries: int = 5
-    nack_max_retries: int = 2
-    collision_backoff_min_ms: int = 20
-    collision_backoff_max_ms: int = 100
+    # Collisions are expected at low priority — be persistent.
+    collision_max_retries: int = 10
+    nack_max_retries: int = 1  # Per spec section 7.4: exactly 1 retry
+    # Collision backoff: the PIC16F firmware enforces a 0x3C (60) tick
+    # minimum scan deadline after FAILED, but a rapid START bypasses it
+    # (race in protocol_state_dispatch line 9938).  A 50ms floor lets
+    # the PIC flush its FAILED response, apply the deadline, and reset
+    # the UART state before we re-arbitrate.  Without this, rapid
+    # START floods cause transient eBUS signal loss (ebus_error=0x00).
+    collision_backoff_min_ms: int = 50
+    collision_backoff_max_ms: int = 50
 
 
 @dataclass(slots=True)
@@ -688,30 +699,38 @@ class EnhancedTcpTransport(TransportInterface):
                     f"n={timeout_retries}/{self._config.timeout_max_retries}"
                 )
             except _EnhancedCollision as exc:
-                # Collision is normal on a shared bus — just re-arbitrate
-                # on the same session after a short random backoff.
+                # Collision is normal on a shared bus.  Per eBUS spec
+                # section 6.2.2.2 the adapter waits for the winner's
+                # telegram and the subsequent SYN release automatically.
+                # We just re-issue START — no software backoff needed.
                 collision_retries += 1
                 if collision_retries > self._config.collision_max_retries:
+                    self.close()
                     raise TransportError(
                         f"{exc} (collision retries exhausted "
                         f"({self._config.collision_max_retries}))"
                     ) from exc
                 self._reset_parser()
-                sleep_s = random.uniform(
-                    self._config.collision_backoff_min_ms / 1000.0,
-                    self._config.collision_backoff_max_ms / 1000.0,
-                )
+                backoff_max = self._config.collision_backoff_max_ms
+                if backoff_max > 0:
+                    sleep_s = random.uniform(
+                        self._config.collision_backoff_min_ms / 1000.0,
+                        backoff_max / 1000.0,
+                    )
+                    time.sleep(sleep_s)
+                else:
+                    sleep_s = 0.0
                 self._trace(
                     f"#{seq} RETRY type=collision n={collision_retries}/"
                     f"{self._config.collision_max_retries} "
                     f"sleep_ms={int(round(sleep_s * 1000))}"
                 )
-                time.sleep(sleep_s)
             except (_EnhancedNack, _EnhancedCrcMismatch) as exc:
                 # NACK/CRC are retryable on the same session — the bus
                 # protocol already handled ACK/NACK exchange.
                 nack_retries += 1
                 if nack_retries > self._config.nack_max_retries:
+                    self.close()
                     raise TransportError(
                         f"{exc} (nack/crc retries exhausted ({self._config.nack_max_retries}))"
                     ) from exc

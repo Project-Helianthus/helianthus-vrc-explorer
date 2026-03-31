@@ -409,10 +409,14 @@ def _prompt_transport_retry_settings(
         )
         if result is None:
             return None
+        proto = result.protocol.lower()
+        if proto in ("ens", "enh", "enhanced"):
+            proto = "enhanced"
         return _TransportSettings(
-            protocol=result.protocol,
+            protocol=proto,
             host=result.host,
             port=result.port,
+            src=settings.src,
         )
     except Exception as exc:
         typer.echo(
@@ -443,7 +447,16 @@ def _prompt_transport_retry_settings(
     retry = typer.confirm("Retry with these settings?", default=True)
     if not retry:
         return None
-    return _TransportSettings(protocol=protocol, host=host or settings.host, port=parsed_port)
+    # Normalize ens/enh aliases to "enhanced" (same wire protocol).
+    normalized = protocol.lower()
+    if normalized in ("ens", "enh", "enhanced"):
+        normalized = "enhanced"
+    return _TransportSettings(
+        protocol=normalized,
+        host=host or settings.host,
+        port=parsed_port,
+        src=settings.src,
+    )
 
 
 def _probe_group_descriptor(
@@ -581,7 +594,7 @@ def scan(
         help="Destination eBUS address (e.g. 0x15) or auto (default).",
     ),
     source_address: str = typer.Option(  # noqa: B008
-        "0x31",
+        "0xF7",
         "--source-address",
         help="Source initiator address for enhanced transport. Ignored for tcp.",
     ),
@@ -698,7 +711,7 @@ def scan(
     if requested_dst != "auto":
         # Validate explicit destination before any network activity.
         explicit_dst_u8 = _parse_u8_address(dst)
-    if transport_proto != "tcp" and requested_dst == "auto":
+    if transport_proto != "tcp" and requested_dst == "auto" and not dry_run:
         typer.echo(
             "Auto destination only supported on ebusd TCP. Use --dst 0x.. for enhanced transport.",
             err=True,
