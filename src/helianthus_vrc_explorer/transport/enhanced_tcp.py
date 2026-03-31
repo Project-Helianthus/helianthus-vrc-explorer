@@ -17,7 +17,6 @@ _EBUS_SYN = 0xAA
 _EBUS_ACK = 0x00
 _EBUS_NACK = 0xFF
 _ADDRESS_BROADCAST = 0xFE
-_DEFAULT_SOURCE_ADDRESS = 0xF1
 
 _ENH_REQ_INIT = 0x0
 _ENH_REQ_SEND = 0x1
@@ -292,11 +291,11 @@ _CRC_TABLE: tuple[int, ...] = (
 
 
 @dataclass(frozen=True)
-class EnsTcpConfig:
+class EnhancedTcpConfig:
     host: str = "127.0.0.1"
-    port: int = 19002
+    port: int = 9999
     timeout_s: float = 5.0
-    src: int = _DEFAULT_SOURCE_ADDRESS
+    src: int = 0x31
     trace_path: Path | None = None
     timeout_max_retries: int = 2
     collision_max_retries: int = 2
@@ -306,19 +305,19 @@ class EnsTcpConfig:
 
 
 @dataclass(slots=True)
-class _EnsTcpSession:
+class _EnhancedTcpSession:
     sock: socket.socket
 
 
-class _EnsCollision(TransportError):
+class _EnhancedCollision(TransportError):
     """Retryable collision or unexpected bus-ownership event."""
 
 
-class _EnsNack(TransportError):
+class _EnhancedNack(TransportError):
     """Retryable NACK from the bus peer."""
 
 
-class _EnsCrcMismatch(TransportError):
+class _EnhancedCrcMismatch(TransportError):
     """Retryable CRC mismatch while reading a target response."""
 
 
@@ -379,10 +378,10 @@ def _is_initiator_capable_address(addr: int) -> bool:
     return _part_index(addr & 0x0F) > 0 and _part_index((addr & 0xF0) >> 4) > 0
 
 
-class EnsTcpTransport(TransportInterface):
-    """Enhanced-protocol TCP client for the Helianthus proxy ENS profile."""
+class EnhancedTcpTransport(TransportInterface):
+    """Enhanced-protocol TCP client for direct eBUS adapter connections."""
 
-    def __init__(self, config: EnsTcpConfig) -> None:
+    def __init__(self, config: EnhancedTcpConfig) -> None:
         _validate_u8("src", config.src)
         if config.timeout_max_retries < 0:
             raise ValueError("timeout_max_retries must be >= 0")
@@ -398,7 +397,7 @@ class EnsTcpTransport(TransportInterface):
         self._config = config
         self._trace_seq = 0
         self._session_depth = 0
-        self._session: _EnsTcpSession | None = None
+        self._session: _EnhancedTcpSession | None = None
         self._messages = deque[tuple[str, int, int]]()
         self._enh_pending_first: int | None = None
 
@@ -432,7 +431,7 @@ class EnsTcpTransport(TransportInterface):
             session.sock.close()
 
     @contextlib.contextmanager
-    def session(self) -> Iterator[EnsTcpTransport]:
+    def session(self) -> Iterator[EnhancedTcpTransport]:
         self._session_depth += 1
         if self._session_depth == 1:
             try:
@@ -459,22 +458,22 @@ class EnsTcpTransport(TransportInterface):
             sock.settimeout(self._config.timeout_s)
         except TimeoutError as exc:
             raise TransportTimeout(
-                f"Timed out talking to ENS proxy at {self._config.host}:{self._config.port}"
+                f"Enhanced adapter timeout {self._config.host}:{self._config.port}"
             ) from exc
         except OSError as exc:
             raise TransportError(
-                f"Failed talking to ENS proxy at {self._config.host}:{self._config.port}: {exc}"
+                f"Enhanced adapter {self._config.host}:{self._config.port}: {exc}"
             ) from exc
 
-        self._session = _EnsTcpSession(sock=sock)
+        self._session = _EnhancedTcpSession(sock=sock)
         self._reset_parser()
         try:
-            self._init_transport(features=0x00)
+            self._init_transport(features=0x01)
         except Exception:
             self.close()
             raise
 
-    def _ensure_session(self) -> _EnsTcpSession:
+    def _ensure_session(self) -> _EnhancedTcpSession:
         session = self._session
         if session is not None:
             return session
@@ -490,12 +489,12 @@ class EnsTcpTransport(TransportInterface):
         except TimeoutError as exc:
             self.close()
             raise TransportTimeout(
-                f"Timed out talking to ENS proxy at {self._config.host}:{self._config.port}"
+                f"Enhanced adapter timeout {self._config.host}:{self._config.port}"
             ) from exc
         except OSError as exc:
             self.close()
             raise TransportError(
-                f"Failed talking to ENS proxy at {self._config.host}:{self._config.port}: {exc}"
+                f"Enhanced adapter {self._config.host}:{self._config.port}: {exc}"
             ) from exc
 
     def _read_message(self) -> tuple[str, int, int]:
@@ -509,18 +508,18 @@ class EnsTcpTransport(TransportInterface):
             except TimeoutError as exc:
                 self._reset_parser()
                 raise TransportTimeout(
-                    f"Timed out talking to ENS proxy at {self._config.host}:{self._config.port}"
+                    f"Enhanced adapter timeout {self._config.host}:{self._config.port}"
                 ) from exc
             except OSError as exc:
                 self.close()
                 raise TransportError(
-                    f"Failed talking to ENS proxy at {self._config.host}:{self._config.port}: {exc}"
+                    f"Enhanced adapter {self._config.host}:{self._config.port}: {exc}"
                 ) from exc
 
             if not chunk:
                 self.close()
                 raise TransportError(
-                    f"ENS proxy closed the connection at {self._config.host}:{self._config.port}"
+                    f"Enhanced adapter disconnected {self._config.host}:{self._config.port}"
                 )
 
             for value in chunk:
@@ -586,17 +585,17 @@ class EnsTcpTransport(TransportInterface):
             if command == _ENH_RES_FAILED:
                 self._trace(f"START_RESP failed winner=0x{data:02X}")
                 self._reset_parser()
-                raise _EnsCollision(
-                    f"enh arbitration failed for initiator 0x{initiator:02X}, winner 0x{data:02X}"
+                raise _EnhancedCollision(
+                    f"Arbitration failed src=0x{initiator:02X} winner=0x{data:02X}"
                 )
             if command == _ENH_RES_ERROR_EBUS:
                 self._trace(f"START_RESP ebus_error=0x{data:02X}")
                 self._reset_parser()
-                raise _EnsCollision(f"enh arbitration eBUS error 0x{data:02X}")
+                raise _EnhancedCollision(f"enhanced arbitration eBUS error 0x{data:02X}")
             if command == _ENH_RES_ERROR_HOST:
                 self._trace(f"START_RESP host_error=0x{data:02X}")
                 self._reset_parser()
-                raise _EnsCollision(f"enh arbitration host error 0x{data:02X}")
+                raise _EnhancedCollision(f"enhanced arbitration host error 0x{data:02X}")
             if command == _ENH_RES_RESETTED:
                 self._trace(f"START_RESP reset features=0x{data:02X}")
                 self._reset_parser()
@@ -614,17 +613,19 @@ class EnsTcpTransport(TransportInterface):
             if command == _ENH_RES_INFO:
                 continue
             if command == _ENH_RES_ERROR_EBUS:
-                raise TransportError(f"enh bus read eBUS error 0x{data:02X}")
+                raise TransportError(f"enhanced bus read eBUS error 0x{data:02X}")
             if command == _ENH_RES_ERROR_HOST:
-                raise TransportError(f"enh bus read host error 0x{data:02X}")
+                raise TransportError(f"enhanced bus read host error 0x{data:02X}")
 
     def _send_symbol_with_echo(self, symbol: int) -> None:
         self._send_enh_frame(_ENH_REQ_SEND, symbol)
         echo = self._recv_bus_symbol()
         if echo == _EBUS_SYN and symbol != _EBUS_SYN:
-            raise _EnsCollision("unexpected SYN while waiting for echo")
+            raise _EnhancedCollision("unexpected SYN while waiting for echo")
         if echo != symbol:
-            raise _EnsCollision(f"echo mismatch while waiting for 0x{symbol:02X}: got 0x{echo:02X}")
+            raise _EnhancedCollision(
+                f"echo mismatch while waiting for 0x{symbol:02X}: got 0x{echo:02X}"
+            )
 
     def _send_end_of_message(self) -> None:
         self._send_symbol_with_echo(_EBUS_SYN)
@@ -684,7 +685,7 @@ class EnsTcpTransport(TransportInterface):
                     f"{seq} RETRY type=timeout "
                     f"n={timeout_retries}/{self._config.timeout_max_retries}"
                 )
-            except _EnsCollision as exc:
+            except _EnhancedCollision as exc:
                 self.close()
                 collision_retries += 1
                 if collision_retries > self._config.collision_max_retries:
@@ -701,7 +702,7 @@ class EnsTcpTransport(TransportInterface):
                     f"{self._config.collision_max_retries} sleep_ms={int(round(sleep_s * 1000))}"
                 )
                 time.sleep(sleep_s)
-            except (_EnsNack, _EnsCrcMismatch) as exc:
+            except (_EnhancedNack, _EnhancedCrcMismatch) as exc:
                 self.close()
                 nack_retries += 1
                 if nack_retries > self._config.nack_max_retries:
@@ -744,7 +745,7 @@ class EnsTcpTransport(TransportInterface):
 
         ack = self._recv_bus_symbol()
         if ack == _EBUS_NACK:
-            raise _EnsNack("nack received while waiting for command ack")
+            raise _EnhancedNack("nack received while waiting for command ack")
         if ack == _EBUS_SYN:
             raise TransportTimeout("syn received while waiting for command ack")
         if ack != _EBUS_ACK:
@@ -777,7 +778,7 @@ class EnsTcpTransport(TransportInterface):
                 if response_attempt == 0:
                     continue
                 self._send_end_of_message()
-                raise _EnsCrcMismatch("response crc mismatch")
+                raise _EnhancedCrcMismatch("response crc mismatch")
 
             self._send_symbol_with_echo(_EBUS_ACK)
             self._send_end_of_message()
@@ -785,10 +786,10 @@ class EnsTcpTransport(TransportInterface):
             self._trace(f"#{seq} PARSED_PROTO len={len(parsed)} hex={_short_hex(parsed)}")
             return parsed
 
-        raise TransportTimeout("unreachable ENS response loop")
+        raise TransportTimeout("unreachable enhanced response loop")
 
     def command_lines(self, command: str, *, read_all: bool = False) -> list[str]:
         _ = read_all
         raise TransportError(
-            f"ENS proxy transport does not support ebusd command passthrough: {command!r}"
+            f"enhanced adapter transport does not support ebusd command passthrough: {command!r}"
         )

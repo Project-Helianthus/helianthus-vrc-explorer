@@ -32,7 +32,7 @@ from .schema.ebusd_csv import EbusdCsvSchema
 from .schema.myvaillant_map import MyvaillantRegisterMap
 from .transport.base import TransportCommandNotEnabled, TransportError, TransportTimeout
 from .transport.ebusd_tcp import EbusdTcpConfig, EbusdTcpTransport
-from .transport.ens_tcp import EnsTcpConfig, EnsTcpTransport
+from .transport.enhanced_tcp import EnhancedTcpConfig, EnhancedTcpTransport
 from .ui.browse_textual import run_browse_from_artifact
 from .ui.emphasis import rich_star_bold_text
 from .ui.html_report import render_html_report
@@ -256,7 +256,7 @@ def _format_fw(sw: str | None, hw: str | None) -> str:
 
 
 def _probe_scan_identity(
-    transport: EbusdTcpTransport | EnsTcpTransport,
+    transport: EbusdTcpTransport | EnhancedTcpTransport,
     *,
     dst: int,
     model_catalog: dict[str, _ModelCatalogEntry] | None = None,
@@ -372,14 +372,14 @@ def _build_transport(
     settings: _TransportSettings,
     *,
     trace_file: Path | None,
-) -> EbusdTcpTransport | EnsTcpTransport:
+) -> EbusdTcpTransport | EnhancedTcpTransport:
     if settings.protocol == "tcp":
         return EbusdTcpTransport(
             EbusdTcpConfig(host=settings.host, port=settings.port, trace_path=trace_file)
         )
-    if settings.protocol == "enh":
-        return EnsTcpTransport(
-            EnsTcpConfig(
+    if settings.protocol == "enhanced":
+        return EnhancedTcpTransport(
+            EnhancedTcpConfig(
                 host=settings.host,
                 port=settings.port,
                 src=settings.src if settings.src is not None else 0x31,
@@ -447,7 +447,7 @@ def _prompt_transport_retry_settings(
 
 
 def _probe_group_descriptor(
-    transport: EbusdTcpTransport | EnsTcpTransport,
+    transport: EbusdTcpTransport | EnhancedTcpTransport,
     *,
     dst: int,
     group: int,
@@ -471,7 +471,7 @@ def _probe_group_descriptor(
 
 
 def _probe_scan_identification(
-    transport: EbusdTcpTransport | EnsTcpTransport,
+    transport: EbusdTcpTransport | EnhancedTcpTransport,
     *,
     dst: int,
     retries: int = _SCAN_IDENT_RETRIES,
@@ -573,7 +573,7 @@ def scan(
     transport_protocol: str = typer.Option(  # noqa: B008
         _DEFAULT_TRANSPORT_PROTOCOL,
         "--transport",
-        help="Transport backend: tcp (ebusd hex) or enh (direct ENH adapter).",
+        help="Transport: tcp (ebusd hex) or ens/enh (enhanced eBUS adapter).",
     ),
     dst: str = typer.Option(  # noqa: B008
         "auto",
@@ -583,7 +583,7 @@ def scan(
     source_address: str = typer.Option(  # noqa: B008
         "0x31",
         "--source-address",
-        help="Source initiator address for ENH transport. Ignored for tcp.",
+        help="Source initiator address for enhanced transport. Ignored for tcp.",
     ),
     host: str = typer.Option(  # noqa: B008
         _DEFAULT_EBUSD_HOST,
@@ -684,9 +684,12 @@ def scan(
 ) -> None:
     """Scan a VRC regulator using B524 (GetExtendedRegisters)."""
     transport_proto = transport_protocol.strip().lower()
-    if transport_proto not in {"tcp", "enh"}:
+    # ens and enh are aliases — both use the enhanced eBUS adapter protocol.
+    if transport_proto in ("ens", "enh", "enhanced"):
+        transport_proto = "enhanced"
+    if transport_proto not in {"tcp", "enhanced"}:
         typer.echo(
-            "Invalid --transport value. Expected: tcp or enh.",
+            "Invalid --transport value. Expected: tcp, ens, or enh.",
             err=True,
         )
         raise typer.Exit(2)
@@ -697,7 +700,7 @@ def scan(
         explicit_dst_u8 = _parse_u8_address(dst)
     if transport_proto != "tcp" and requested_dst == "auto":
         typer.echo(
-            "Auto destination only supported on ebusd TCP. Use --dst 0x.. for ENH.",
+            "Auto destination only supported on ebusd TCP. Use --dst 0x.. for enhanced transport.",
             err=True,
         )
         raise typer.Exit(2)
@@ -761,7 +764,9 @@ def scan(
         )
         _emit_non_tty_session_preface(preface)
     else:
-        source_addr_u8 = _parse_u8_address(source_address) if transport_proto == "enh" else None
+        source_addr_u8 = (
+            _parse_u8_address(source_address) if transport_proto == "enhanced" else None
+        )
         transport_settings = _TransportSettings(
             protocol=transport_proto,
             host=host,
