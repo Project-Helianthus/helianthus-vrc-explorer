@@ -7,15 +7,15 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from queue import Queue
 
-from helianthus_vrc_explorer.transport.ens_tcp import (
+from helianthus_vrc_explorer.transport.enhanced_tcp import (
     _ENH_REQ_INIT,
     _ENH_REQ_SEND,
     _ENH_REQ_START,
     _ENH_RES_RECEIVED,
     _ENH_RES_RESETTED,
     _ENH_RES_STARTED,
-    EnsTcpConfig,
-    EnsTcpTransport,
+    EnhancedTcpConfig,
+    EnhancedTcpTransport,
     _crc,
     _encode_enh,
 )
@@ -92,8 +92,8 @@ def test_ens_transport_send_proto_round_trips_identification_request() -> None:
     response_crc = _crc(response_segment)
 
     def _handler(conn: socket.socket) -> None:
-        assert _read_enh_frame(conn) == (_ENH_REQ_INIT, 0x00)
-        _write_enh_frame(conn, _ENH_RES_RESETTED, 0x00)
+        assert _read_enh_frame(conn) == (_ENH_REQ_INIT, 0x01)
+        _write_enh_frame(conn, _ENH_RES_RESETTED, 0x01)
 
         assert _read_enh_frame(conn) == (_ENH_REQ_START, src)
         _write_enh_frame(conn, _ENH_RES_STARTED, src)
@@ -113,7 +113,9 @@ def test_ens_transport_send_proto_round_trips_identification_request() -> None:
         _write_bus_symbol(conn, 0xAA)
 
     with _run_ens_test_server(_handler) as (host, port):
-        transport = EnsTcpTransport(EnsTcpConfig(host=host, port=port, timeout_s=0.5, src=src))
+        transport = EnhancedTcpTransport(
+            EnhancedTcpConfig(host=host, port=port, timeout_s=0.5, src=src)
+        )
         result = transport.send_proto(dst, 0x07, 0x04, b"")
 
     assert result == response
@@ -130,8 +132,8 @@ def test_ens_transport_send_wraps_b524_request() -> None:
     response_crc = _crc(response_segment)
 
     def _handler(conn: socket.socket) -> None:
-        assert _read_enh_frame(conn) == (_ENH_REQ_INIT, 0x00)
-        _write_enh_frame(conn, _ENH_RES_RESETTED, 0x00)
+        assert _read_enh_frame(conn) == (_ENH_REQ_INIT, 0x01)
+        _write_enh_frame(conn, _ENH_RES_RESETTED, 0x01)
 
         assert _read_enh_frame(conn) == (_ENH_REQ_START, src)
         _write_enh_frame(conn, _ENH_RES_STARTED, src)
@@ -151,7 +153,9 @@ def test_ens_transport_send_wraps_b524_request() -> None:
         _write_bus_symbol(conn, 0xAA)
 
     with _run_ens_test_server(_handler) as (host, port):
-        transport = EnsTcpTransport(EnsTcpConfig(host=host, port=port, timeout_s=0.5, src=src))
+        transport = EnhancedTcpTransport(
+            EnhancedTcpConfig(host=host, port=port, timeout_s=0.5, src=src)
+        )
         result = transport.send(dst, payload)
 
     assert result == response
@@ -164,8 +168,8 @@ def test_ens_transport_broadcast_does_not_expect_response() -> None:
     request = request_without_crc + bytes((_crc(request_without_crc),))
 
     def _handler(conn: socket.socket) -> None:
-        assert _read_enh_frame(conn) == (_ENH_REQ_INIT, 0x00)
-        _write_enh_frame(conn, _ENH_RES_RESETTED, 0x00)
+        assert _read_enh_frame(conn) == (_ENH_REQ_INIT, 0x01)
+        _write_enh_frame(conn, _ENH_RES_RESETTED, 0x01)
 
         assert _read_enh_frame(conn) == (_ENH_REQ_START, src)
         _write_enh_frame(conn, _ENH_RES_STARTED, src)
@@ -178,7 +182,9 @@ def test_ens_transport_broadcast_does_not_expect_response() -> None:
         _write_bus_symbol(conn, 0xAA)
 
     with _run_ens_test_server(_handler) as (host, port):
-        transport = EnsTcpTransport(EnsTcpConfig(host=host, port=port, timeout_s=0.5, src=src))
+        transport = EnhancedTcpTransport(
+            EnhancedTcpConfig(host=host, port=port, timeout_s=0.5, src=src)
+        )
         result = transport.send_proto(dst, 0x07, 0xFE, b"", expect_response=False)
 
     assert result == b""
