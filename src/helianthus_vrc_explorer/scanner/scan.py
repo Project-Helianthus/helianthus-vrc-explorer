@@ -74,6 +74,10 @@ _UNKNOWN_GROUP_DEFAULT_II_MAX = 0x0A
 _UNKNOWN_GROUP_INITIAL_INSTANCES: tuple[int, ...] = (0x00, 0x01)
 _UNKNOWN_GROUP_EXPANDED_INSTANCES: tuple[int, ...] = tuple(range(0x00, 0x0B)) + (0xFF,)
 _UNKNOWN_GROUP_PRESENCE_REGISTER = 0x0000
+_UNKNOWN_GROUP_OPCODE_CANDIDATES: tuple[RegisterOpcode, ...] = (
+    _LOCAL_REGISTER_OPCODE,
+    _REMOTE_REGISTER_OPCODE,
+)
 
 PlannerUiMode = Literal["disabled", "auto", "textual", "classic"]
 _KNOWN_DESCRIPTOR_TYPES = frozenset(
@@ -162,24 +166,25 @@ def _instance_discovery_decision(*, group: int, dual_namespace: bool) -> dict[st
 
 def _scan_plan_meta_groups(plan: dict[PlanKey, GroupScanPlan]) -> dict[str, object]:
     serializable: dict[str, object] = {}
+    grouped: dict[int, list[GroupScanPlan]] = {}
     for _key, group_plan in sorted(plan.items()):
-        group_key = _hex_u8(group_plan.group)
-        if _is_dual_namespace_group(group_plan.group):
-            group_obj = serializable.setdefault(
-                group_key,
-                {
-                    "dual_namespace": True,
-                    "namespaces": {},
-                },
-            )
-            assert isinstance(group_obj, dict)
-            namespaces = group_obj.setdefault("namespaces", {})
-            assert isinstance(namespaces, dict)
-            namespace_meta = group_plan.to_meta()
-            namespace_meta["label"] = opcode_label(group_plan.opcode)
-            namespaces[_hex_u8(group_plan.opcode)] = namespace_meta
+        grouped.setdefault(group_plan.group, []).append(group_plan)
+
+    for group in sorted(grouped):
+        group_plans = sorted(grouped[group], key=lambda gp: gp.opcode)
+        group_key = _hex_u8(group)
+        if len(group_plans) > 1:
+            namespace_meta: dict[str, object] = {}
+            for group_plan in group_plans:
+                payload = group_plan.to_meta()
+                payload["label"] = opcode_label(group_plan.opcode)
+                namespace_meta[_hex_u8(group_plan.opcode)] = payload
+            serializable[group_key] = {
+                "dual_namespace": True,
+                "namespaces": namespace_meta,
+            }
             continue
-        serializable[group_key] = group_plan.to_meta()
+        serializable[group_key] = group_plans[0].to_meta()
     return serializable
 
 
@@ -334,6 +339,58 @@ def _mark_present_instances(instances_obj: dict[str, Any], *, instances: tuple[i
 
 def _entry_is_readable(entry: RegisterEntry) -> bool:
     return entry["error"] is None and entry.get("flags_access") != "absent"
+
+
+def _entry_is_opcode_responsive(entry: RegisterEntry) -> bool:
+    return entry["error"] is None
+
+
+def _probe_unknown_group_opcodes(
+    transport: TransportInterface,
+    *,
+    dst: int,
+    group: int,
+    observer: ScanObserver | None,
+) -> tuple[tuple[RegisterOpcode, ...], dict[str, Any]]:
+    evidence: dict[str, Any] = {}
+    responsive: list[RegisterOpcode] = []
+
+    for opcode in _UNKNOWN_GROUP_OPCODE_CANDIDATES:
+        if observer is not None:
+            observer.status(
+                f"Probe opcode GG=0x{group:02X} OP={_hex_u8(opcode)} "
+                f"II=0x00 RR={_hex_u16(_UNKNOWN_GROUP_PRESENCE_REGISTER)}"
+            )
+        entry = read_register(
+            transport,
+            dst,
+            opcode,
+            group=group,
+            instance=0x00,
+            register=_UNKNOWN_GROUP_PRESENCE_REGISTER,
+        )
+        is_responsive = _entry_is_opcode_responsive(entry)
+        if is_responsive:
+            responsive.append(opcode)
+        evidence[_hex_u8(opcode)] = {
+            "responsive": is_responsive,
+            "error": entry.get("error"),
+            "flags_access": entry.get("flags_access"),
+            "reply_hex": entry.get("reply_hex"),
+            "raw_hex": entry.get("raw_hex"),
+        }
+
+    selected = tuple(sorted(set(responsive)))
+    probe_summary: dict[str, Any] = {
+        "kind": "opcode_responsiveness",
+        "selector": {
+            "instance": _hex_u8(0x00),
+            "register": _hex_u16(_UNKNOWN_GROUP_PRESENCE_REGISTER),
+        },
+        "candidates": evidence,
+        "responsive_opcodes": [_hex_u8(opcode) for opcode in selected],
+    }
+    return cast(tuple[RegisterOpcode, ...], selected), probe_summary
 
 
 def _probe_unknown_present_instances(
@@ -1099,7 +1156,7 @@ def scan_b524(
             unknown_text = ", ".join(f"0x{gg:02X}" for gg in unknown_groups)
             observer.log(
                 f"Found {len(unknown_groups)} unknown groups ({unknown_text}); "
-                "scanned conservatively as singleton by default.",
+                "deriving namespace coverage from opcode responsiveness probes.",
                 level="warn",
             )
         if unknown_descriptor_types and observer is not None:
@@ -1190,16 +1247,52 @@ def scan_b524(
                 level="info",
             )
 
+        resolved_group_opcodes: dict[int, tuple[RegisterOpcode, ...]] = {}
+        unknown_opcode_probe_map: dict[int, dict[str, Any]] = {}
+        for group in classified:
+            config = GROUP_CONFIG.get(group.group)
+            if config is not None:
+                resolved_group_opcodes[group.group] = _group_opcodes(group.group)
+                continue
+
+            opcodes, probe_summary = _probe_unknown_group_opcodes(
+                transport,
+                dst=dst,
+                group=group.group,
+                observer=observer,
+            )
+            resolved_group_opcodes[group.group] = opcodes
+            unknown_opcode_probe_map[group.group] = probe_summary
+            if observer is None:
+                continue
+            if opcodes:
+                observer.log(
+                    f"GG=0x{group.group:02X}: responsive opcode namespaces "
+                    f"{', '.join(_hex_u8(opcode) for opcode in opcodes)}",
+                    level="info",
+                )
+            else:
+                observer.log(
+                    f"GG=0x{group.group:02X}: no responsive opcode namespace detected; "
+                    "group will be skipped unless planner overrides it.",
+                    level="warn",
+                )
+
+        group_dual_namespace_runtime: dict[int, bool] = {
+            group: len(opcodes) > 1 for group, opcodes in resolved_group_opcodes.items()
+        }
+
         # Phase C: instance discovery (groups with ii_max > 0 only).
         instance_total = 0
         for group in classified:
             meta = metadata_map[group.group]
+            opcodes = resolved_group_opcodes.get(group.group, ())
             if GROUP_CONFIG.get(group.group) is None:
                 instance_total += len(_UNKNOWN_GROUP_EXPANDED_INSTANCES) * len(
-                    _group_opcodes(group.group)
+                    opcodes
                 )
                 continue
-            for opcode in _group_opcodes(group.group):
+            for opcode in opcodes:
                 namespace_ii_max = _ii_max_for_opcode(
                     group=group.group,
                     default_ii_max=meta.ii_max,
@@ -1216,7 +1309,7 @@ def scan_b524(
         for group in classified:
             meta = metadata_map[group.group]
             rr_max = meta.rr_max
-            opcodes = _group_opcodes(group.group)
+            opcodes = resolved_group_opcodes.get(group.group, ())
             dual_namespace = len(opcodes) > 1
             config = GROUP_CONFIG.get(group.group)
             # NaN descriptors come from synthetic exhaustive-mode injection;
@@ -1227,6 +1320,8 @@ def scan_b524(
                 "semantic_authority": False,
                 "proven_register_opcodes": [_hex_u8(opcode) for opcode in opcodes],
             }
+            if group.group in unknown_opcode_probe_map:
+                discovery_advisory["opcode_probe"] = unknown_opcode_probe_map[group.group]
             discovery_advisory["instance_discovery_decision"] = _instance_discovery_decision(
                 group=group.group,
                 dual_namespace=dual_namespace,
@@ -1245,6 +1340,9 @@ def scan_b524(
                 dual_namespace=dual_namespace,
                 discovery_advisory=discovery_advisory,
             )
+
+            if not opcodes:
+                continue
 
             if config is None:
                 namespace_probe_counts: list[str] = []
@@ -1342,7 +1440,7 @@ def scan_b524(
         plan: dict[PlanKey, GroupScanPlan] = {}
         for group in classified:
             meta = metadata_map[group.group]
-            for opcode in _group_opcodes(group.group):
+            for opcode in resolved_group_opcodes.get(group.group, ()):
                 namespace_ii_max = _ii_max_for_opcode(
                     group=group.group,
                     default_ii_max=meta.ii_max,
@@ -1387,13 +1485,10 @@ def scan_b524(
         for group in classified:
             config = GROUP_CONFIG.get(group.group)
             group_meta = metadata_map[group.group]
-            opcodes = _group_opcodes(group.group)
+            opcodes = resolved_group_opcodes.get(group.group, ())
+            if not opcodes:
+                continue
             primary_opcode = opcodes[0]
-            primary_rr_max = _rr_max_for_opcode(
-                group=group.group,
-                default_rr_max=group_meta.rr_max,
-                opcode=primary_opcode,
-            )
             dual_namespace = len(opcodes) > 1
             for opcode in opcodes:
                 planner_ii_max = _planner_ii_max(
@@ -1418,7 +1513,11 @@ def scan_b524(
                         descriptor=group.descriptor,
                         known=config is not None,
                         ii_max=planner_ii_max,
-                        rr_max=primary_rr_max,
+                        rr_max=_rr_max_for_opcode(
+                            group=group.group,
+                            default_rr_max=group_meta.rr_max,
+                            opcode=opcode,
+                        ),
                         rr_max_full=_rr_max_for_opcode(
                             group=group.group,
                             default_rr_max=group_meta.rr_max,
@@ -1595,71 +1694,43 @@ def scan_b524(
                     )
                     observer.phase_advance("register_scan", advance=1)
 
-                # Some groups are ambiguous and may respond to either opcode family (0x02 vs 0x06).
-                # When in doubt (unknown group), probe both but keep only the best/most-meaningful
-                # reply in the artifact.
-                opcodes_to_try: tuple[RegisterOpcode, ...]
-                if task.group in GROUP_CONFIG:
-                    opcodes_to_try = (task.opcode,)
-                else:
-                    opcodes_to_try = (_LOCAL_REGISTER_OPCODE, _REMOTE_REGISTER_OPCODE)
-
-                best_entry: RegisterEntry | None = None
-                best_quality = -1
-                for opcode in opcodes_to_try:
-                    schema_entry = (
-                        ebusd_schema.lookup(
-                            opcode=opcode,
-                            group=task.group,
-                            instance=task.instance,
-                            register=task.register,
-                        )
-                        if ebusd_schema is not None
-                        else None
-                    )
-                    myvaillant_entry = (
-                        myvaillant_map.lookup(
-                            group=task.group,
-                            instance=task.instance,
-                            register=task.register,
-                            opcode=opcode,
-                        )
-                        if myvaillant_map is not None
-                        else None
-                    )
-                    type_hint = (
-                        myvaillant_entry.type_hint
-                        if myvaillant_entry is not None and myvaillant_entry.type_hint is not None
-                        else (schema_entry.type_spec if schema_entry is not None else None)
-                    )
-
-                    candidate = read_register(
-                        transport,
-                        dst,
-                        opcode,
+                schema_entry = (
+                    ebusd_schema.lookup(
+                        opcode=task.opcode,
                         group=task.group,
                         instance=task.instance,
                         register=task.register,
-                        type_hint=type_hint,
                     )
-                    if schema_entry is not None:
-                        candidate["ebusd_name"] = schema_entry.name
-
-                    # Prefer a meaningful value over status-only / no_data replies; otherwise prefer
-                    # a clean reply (no error) over transport/decode failures.
-                    quality = (
-                        2
-                        if _entry_has_valid_value(candidate)
-                        else (1 if candidate["error"] is None else 0)
+                    if ebusd_schema is not None
+                    else None
+                )
+                myvaillant_entry = (
+                    myvaillant_map.lookup(
+                        group=task.group,
+                        instance=task.instance,
+                        register=task.register,
+                        opcode=task.opcode,
                     )
-                    if quality > best_quality:
-                        best_entry = candidate
-                        best_quality = quality
-                    if quality == 2:
-                        break
+                    if myvaillant_map is not None
+                    else None
+                )
+                type_hint = (
+                    myvaillant_entry.type_hint
+                    if myvaillant_entry is not None and myvaillant_entry.type_hint is not None
+                    else (schema_entry.type_spec if schema_entry is not None else None)
+                )
 
-                assert best_entry is not None
-                entry = best_entry
+                entry = read_register(
+                    transport,
+                    dst,
+                    task.opcode,
+                    group=task.group,
+                    instance=task.instance,
+                    register=task.register,
+                    type_hint=type_hint,
+                )
+                if schema_entry is not None:
+                    entry["ebusd_name"] = schema_entry.name
                 if myvaillant_map is not None:
                     lookup_opcode: int | None = None
                     read_opcode = entry.get("read_opcode")
@@ -1725,7 +1796,7 @@ def scan_b524(
                     group=task.group,
                     name="Unknown",
                     descriptor_observed=None,
-                    dual_namespace=_is_dual_namespace_group(task.group),
+                    dual_namespace=group_dual_namespace_runtime.get(task.group, False),
                 )
                 instances_obj = _instances_object(
                     artifact,

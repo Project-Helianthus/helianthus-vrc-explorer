@@ -1236,6 +1236,21 @@ def test_scan_b524_applies_preset_in_non_interactive_mode(tmp_path: Path) -> Non
     assert group["namespaces"]["0x06"]["instances"]["0x00"]["present"] is True
 
 
+def test_scan_b524_recommended_plan_keeps_namespace_rr_max(tmp_path: Path) -> None:
+    artifact = scan_b524(
+        DummyTransport(_write_fixture_group_09(tmp_path)),
+        dst=0x15,
+        planner_ui="auto",
+        planner_preset="recommended",
+    )
+
+    plan = artifact["meta"]["scan_plan"]["groups"]["0x09"]
+    assert plan["dual_namespace"] is True
+    assert plan["namespaces"]["0x02"]["rr_max"] == "0x000f"
+    assert plan["namespaces"]["0x06"]["rr_max"] == "0x0035"
+    assert artifact["meta"]["scan_plan"]["estimated_register_requests"] == 70
+
+
 def test_scan_b524_disabled_planner_skips_interactive_planner_even_on_tty(
     monkeypatch,
     tmp_path: Path,
@@ -1309,9 +1324,23 @@ def test_scan_unknown_group_expands_to_instance_ff_after_readable_probe(tmp_path
     )
 
     group = artifact["groups"]["0x69"]
-    remote_instances = group["namespaces"]["0x06"]["instances"]
+    assert group["dual_namespace"] is False
+    remote_instances = group["instances"]
     assert remote_instances["0x00"]["present"] is True
     assert remote_instances["0xff"]["present"] is True
+
+    assert "0x69" not in artifact["meta"]["scan_plan"]["groups"]
+
+    advisory = group["discovery_advisory"]
+    assert advisory["proven_register_opcodes"] == ["0x06"]
+    assert advisory["opcode_probe"]["responsive_opcodes"] == ["0x06"]
+
+    local_reads = {
+        (opcode, ii, rr)
+        for (opcode, gg, ii, rr) in transport.register_reads
+        if gg == 0x69 and opcode == 0x02
+    }
+    assert local_reads == {(0x02, 0x00, 0x0000)}
     assert (0x06, 0x69, 0xFF, 0x0000) in transport.register_reads
 
 

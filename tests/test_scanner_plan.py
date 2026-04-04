@@ -108,7 +108,7 @@ def test_plan_dual_namespace_creates_two_entries() -> None:
             descriptor=1.0,
             known=True,
             ii_max=0x0A,
-            rr_max=0x000F,
+            rr_max=0x0035,
             rr_max_full=0x0035,
             present_instances=(0x00,),
             namespace_label="remote",
@@ -121,7 +121,7 @@ def test_plan_dual_namespace_creates_two_entries() -> None:
     remote_key = make_plan_key(0x09, 0x06)
     assert sorted(recommended) == [local_key, remote_key]
     assert recommended[local_key].rr_max == 0x000F
-    assert recommended[remote_key].rr_max == 0x000F
+    assert recommended[remote_key].rr_max == 0x0035
     assert recommended[local_key].instances == (0x00,)
     assert recommended[remote_key].instances == (0x00,)
 
@@ -129,6 +129,45 @@ def test_plan_dual_namespace_creates_two_entries() -> None:
     assert full[local_key].instances == tuple(range(0x0A + 1))
     assert full[remote_key].instances == tuple(range(0x0A + 1))
     assert full[remote_key].rr_max == 0x0035
+
+
+def test_plan_dual_namespace_presets_keep_namespace_specific_ii_max() -> None:
+    groups = [
+        PlannerGroup(
+            group=0x08,
+            opcode=0x02,
+            name="Buffer / Solar Cylinder 2",
+            descriptor=1.0,
+            known=True,
+            ii_max=None,
+            rr_max=0x0007,
+            rr_max_full=0x0007,
+            present_instances=(0x00,),
+            namespace_label="local",
+            primary=True,
+        ),
+        PlannerGroup(
+            group=0x08,
+            opcode=0x06,
+            name="Buffer / Solar Cylinder 2",
+            descriptor=1.0,
+            known=True,
+            ii_max=0x0A,
+            rr_max=0x0004,
+            rr_max_full=0x0004,
+            present_instances=(0x00, 0x02),
+            namespace_label="remote",
+            primary=False,
+        ),
+    ]
+
+    recommended = build_plan_from_preset(groups, preset="recommended")
+    assert recommended[make_plan_key(0x08, 0x02)].instances == (0x00,)
+    assert recommended[make_plan_key(0x08, 0x06)].instances == (0x00, 0x02)
+
+    full = build_plan_from_preset(groups, preset="full")
+    assert full[make_plan_key(0x08, 0x02)].instances == (0x00,)
+    assert full[make_plan_key(0x08, 0x06)].instances == tuple(range(0x0A + 1))
 
 
 def test_plan_key_is_opcode_first_namespace_identity() -> None:
