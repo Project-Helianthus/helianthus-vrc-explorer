@@ -86,7 +86,9 @@ def test_discover_groups_includes_core_with_zero_descriptor(tmp_path: Path) -> N
     assert [group.group for group in discovered] == [0x00, 0x02, 0x03]
 
 
-def test_discover_groups_skips_non_core_known_with_zero_descriptor(tmp_path: Path) -> None:
+def test_discover_groups_uses_zero_descriptor_as_negative_hint_for_non_core_groups(
+    tmp_path: Path,
+) -> None:
     fixture_path = _write_directory_fixture(
         tmp_path,
         groups={
@@ -99,16 +101,20 @@ def test_discover_groups_skips_non_core_known_with_zero_descriptor(tmp_path: Pat
 
     discovered = discover_groups(transport, dst=0x15)
 
+    # Non-core groups still use a zero descriptor as a discovery-time negative hint.
     assert [group.group for group in discovered] == [0x00, 0x02, 0x03]
     assert 0x09 in transport.probed_groups
 
 
-def test_discover_groups_skips_unknown_with_zero_descriptor(tmp_path: Path) -> None:
+def test_discover_groups_uses_zero_descriptor_as_negative_hint_for_unknown_groups(
+    tmp_path: Path,
+) -> None:
     fixture_path = _write_directory_fixture(tmp_path, groups={}, terminator_group=None)
     transport = RecordingTransport(DummyTransport(fixture_path))
 
     discovered = discover_groups(transport, dst=0x15)
 
+    # Unknown groups are still filtered by the directory probe in Phase A.
     assert [group.group for group in discovered] == [0x02, 0x03]
     assert transport.probed_groups[0] == 0x00
     assert transport.probed_groups[-1] == 0xFF

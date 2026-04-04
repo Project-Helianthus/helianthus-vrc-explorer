@@ -255,7 +255,9 @@ def discover_groups(
     """Phase A: Probe GG=0x00..0xFF via directory probe (opcode 0x00).
 
     Terminator logic: stop on the first NaN descriptor.
-    Descriptor `0.0` is an advisory negative hint only: known core groups remain candidates.
+    Directory descriptors are not semantic authority for group identity or namespace topology.
+    A descriptor of `0.0` is still used as a discovery-time negative hint for non-core groups,
+    while known core groups remain scan candidates.
     """
 
     discovered: list[DiscoveredGroup] = []
@@ -381,7 +383,9 @@ def discover_groups(
                     )
             elif observer is not None:
                 observer.log(
-                    f"GG=0x{gg:02X} descriptor=0.0, non-core group - skipped (advisory hint)",
+                    "GG=0x"
+                    f"{gg:02X} descriptor=0.0, non-core group - skipped "
+                    "(discovery-time hint only; not semantic authority)",
                     level="info",
                 )
             continue
@@ -409,7 +413,8 @@ def classify_groups(
 ) -> list[ClassifiedGroup]:
     """Phase C (per issue wording): Map discovered groups using GROUP_CONFIG.
 
-    Descriptors are advisory metadata only, not structural authority.
+    Descriptors are advisory metadata for semantic identity and namespace topology once a group
+    is a scan candidate; discovery-time filtering still happens earlier in Phase A.
     """
 
     classified: list[ClassifiedGroup] = []
