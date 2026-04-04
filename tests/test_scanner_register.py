@@ -205,10 +205,20 @@ def test_opcodes_for_group_single_namespace() -> None:
     assert opcodes_for_group(0x0B) == [0x06]
 
 
+def test_opcodes_for_group_unknown_group_requires_discovery_evidence() -> None:
+    with pytest.raises(ValueError, match="Unknown group 0x69"):
+        opcodes_for_group(0x69)
+
+
 def test_namespace_opcodes_for_group_supports_staged_remote_namespaces() -> None:
     assert namespace_opcodes_for_group(0x01) == [0x02, 0x06]
     assert namespace_opcodes_for_group(0x02) == [0x02, 0x06]
     assert namespace_opcodes_for_group(0x0C) == [0x06]
+
+
+def test_namespace_opcodes_for_group_unknown_group_requires_discovery_evidence() -> None:
+    with pytest.raises(ValueError, match="Unknown group 0x69"):
+        namespace_opcodes_for_group(0x69)
 
 
 def test_read_register_infers_hex_for_unparseable_u24_values() -> None:

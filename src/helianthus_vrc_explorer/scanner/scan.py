@@ -693,41 +693,46 @@ def _constraint_for_register(
     )
 
 
-def _iter_group_instance_maps(group_obj: dict[str, Any]) -> list[dict[str, Any]]:
+def _iter_group_namespace_instance_maps(
+    group_obj: dict[str, Any],
+) -> list[tuple[str | None, dict[str, Any]]]:
     if bool(group_obj.get("dual_namespace")):
         namespaces = group_obj.get("namespaces")
         if not isinstance(namespaces, dict):
             return []
-        instance_maps: list[dict[str, Any]] = []
-        for namespace_obj in namespaces.values():
+        instance_maps: list[tuple[str | None, dict[str, Any]]] = []
+        for namespace_key, namespace_obj in namespaces.items():
+            if not isinstance(namespace_key, str):
+                continue
             if not isinstance(namespace_obj, dict):
                 continue
             instances = namespace_obj.get("instances")
             if isinstance(instances, dict):
-                instance_maps.append(instances)
+                instance_maps.append((namespace_key, instances))
         return instance_maps
 
     instances = group_obj.get("instances")
     if isinstance(instances, dict):
-        return [instances]
+        return [(None, instances)]
     return []
 
 
 def _group_instances_for_namespace(
     group_obj: dict[str, Any], *, namespace_key: str | None = None
 ) -> dict[str, Any] | None:
-    if namespace_key is not None and bool(group_obj.get("dual_namespace")):
-        namespaces = group_obj.get("namespaces")
-        if not isinstance(namespaces, dict):
-            return None
-        namespace_obj = namespaces.get(namespace_key)
-        if not isinstance(namespace_obj, dict):
-            return None
-        instances = namespace_obj.get("instances")
-        return instances if isinstance(instances, dict) else None
+    instance_maps = _iter_group_namespace_instance_maps(group_obj)
+    if namespace_key is None:
+        return instance_maps[0][1] if instance_maps else None
 
-    instance_maps = _iter_group_instance_maps(group_obj)
-    return instance_maps[0] if instance_maps else None
+    for candidate_namespace, instances in instance_maps:
+        if candidate_namespace == namespace_key:
+            return instances
+    if not bool(group_obj.get("dual_namespace")) and namespace_key == _hex_u8(
+        _LOCAL_REGISTER_OPCODE
+    ):
+        # Single-namespace artifacts are local by definition.
+        return instance_maps[0][1] if instance_maps else None
+    return None
 
 
 def _apply_constraint_metadata(
@@ -865,8 +870,16 @@ def _apply_contextual_enum_annotations(artifact: dict[str, Any]) -> None:
     gg02 = groups.get("0x02")
     if not isinstance(gg02, dict):
         return
-    gg02_instances = _group_instances_for_namespace(gg02, namespace_key="0x02")
-    if not isinstance(gg02_instances, dict) or not gg02_instances:
+    gg02_namespace_maps = _iter_group_namespace_instance_maps(gg02)
+    if bool(gg02.get("dual_namespace")):
+        gg02_instance_maps = [
+            instances
+            for namespace_key, instances in gg02_namespace_maps
+            if namespace_key == _hex_u8(_LOCAL_REGISTER_OPCODE)
+        ]
+    else:
+        gg02_instance_maps = [instances for _namespace_key, instances in gg02_namespace_maps]
+    if not gg02_instance_maps:
         return
 
     gg00 = groups.get("0x00")
@@ -885,51 +898,52 @@ def _apply_contextual_enum_annotations(artifact: dict[str, Any]) -> None:
     gg05_present = "0x05" in groups
     pool_sensor_present = False
 
-    for instance_obj in gg02_instances.values():
-        if not isinstance(instance_obj, dict):
-            continue
-        registers = instance_obj.get("registers")
-        if not isinstance(registers, dict):
-            continue
+    for gg02_instances in gg02_instance_maps:
+        for instance_obj in gg02_instances.values():
+            if not isinstance(instance_obj, dict):
+                continue
+            registers = instance_obj.get("registers")
+            if not isinstance(registers, dict):
+                continue
 
-        cooling_enabled = (
-            _entry_int_value(registers.get("0x0006"))
-            if isinstance(registers.get("0x0006"), dict)
-            else None
-        )
+            cooling_enabled = (
+                _entry_int_value(registers.get("0x0006"))
+                if isinstance(registers.get("0x0006"), dict)
+                else None
+            )
 
-        rr01 = registers.get("0x0001")
-        if isinstance(rr01, dict):
-            raw_value = _entry_int_value(rr01)
-            if raw_value is not None:
-                raw_name, resolved_name = _resolve_heating_circuit_type_name(raw_value)
-                rr01["enum_raw_name"] = raw_name
-                rr01["enum_resolved_name"] = resolved_name
-                rr01["value_display"] = f"{raw_name} ({resolved_name})"
+            rr01 = registers.get("0x0001")
+            if isinstance(rr01, dict):
+                raw_value = _entry_int_value(rr01)
+                if raw_value is not None:
+                    raw_name, resolved_name = _resolve_heating_circuit_type_name(raw_value)
+                    rr01["enum_raw_name"] = raw_name
+                    rr01["enum_resolved_name"] = resolved_name
+                    rr01["value_display"] = f"{raw_name} ({resolved_name})"
 
-        rr02 = registers.get("0x0002")
-        if isinstance(rr02, dict):
-            raw_value = _entry_int_value(rr02)
-            if raw_value is not None:
-                raw_name, resolved_name = _resolve_mixer_circuit_type_name(
-                    raw_value,
-                    cooling_enabled=cooling_enabled,
-                    gg05_present=gg05_present,
-                    system_schema=system_schema,
-                    pool_sensor_present=pool_sensor_present,
-                )
-                rr02["enum_raw_name"] = raw_name
-                rr02["enum_resolved_name"] = resolved_name
-                rr02["value_display"] = f"{raw_name} ({resolved_name})"
+            rr02 = registers.get("0x0002")
+            if isinstance(rr02, dict):
+                raw_value = _entry_int_value(rr02)
+                if raw_value is not None:
+                    raw_name, resolved_name = _resolve_mixer_circuit_type_name(
+                        raw_value,
+                        cooling_enabled=cooling_enabled,
+                        gg05_present=gg05_present,
+                        system_schema=system_schema,
+                        pool_sensor_present=pool_sensor_present,
+                    )
+                    rr02["enum_raw_name"] = raw_name
+                    rr02["enum_resolved_name"] = resolved_name
+                    rr02["value_display"] = f"{raw_name} ({resolved_name})"
 
-        rr03 = registers.get("0x0003")
-        if isinstance(rr03, dict):
-            raw_value = _entry_int_value(rr03)
-            if raw_value is not None:
-                raw_name, resolved_name = _resolve_room_influence_type_name(raw_value)
-                rr03["enum_raw_name"] = raw_name
-                rr03["enum_resolved_name"] = resolved_name
-                rr03["value_display"] = f"{raw_name} ({resolved_name})"
+            rr03 = registers.get("0x0003")
+            if isinstance(rr03, dict):
+                raw_value = _entry_int_value(rr03)
+                if raw_value is not None:
+                    raw_name, resolved_name = _resolve_room_influence_type_name(raw_value)
+                    rr03["enum_raw_name"] = raw_name
+                    rr03["enum_resolved_name"] = resolved_name
+                    rr03["value_display"] = f"{raw_name} ({resolved_name})"
 
 
 def _resolve_planner_mode(

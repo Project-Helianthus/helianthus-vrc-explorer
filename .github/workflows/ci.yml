@@ -28,6 +28,9 @@ jobs:
       - name: Protocol terminology gate
         run: python scripts/check_protocol_terminology.py
 
+      - name: B524 namespace guardrails
+        run: python scripts/check_b524_namespace_guardrails.py
+
       - name: Docs sync gate (CLI + README)
         run: python scripts/check_docs_sync.py
 

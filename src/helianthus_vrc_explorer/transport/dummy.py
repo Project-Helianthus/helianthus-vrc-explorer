@@ -133,7 +133,11 @@ class DummyTransport(TransportInterface):
             if configured:
                 return configured
 
-        return (0x02, 0x06)
+        raise ValueError(
+            "Unknown group "
+            f"0x{group:02X} fixture requires explicit namespace/read_opcode; "
+            "implicit [0x02, 0x06] fallback is forbidden."
+        )
 
     def _load_instances(
         self,

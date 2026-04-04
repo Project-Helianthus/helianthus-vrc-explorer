@@ -182,3 +182,28 @@ def test_dummy_transport_artifact_v2_namespaces_do_not_require_dual_namespace_fl
 
     assert transport.send(0x15, local_payload) == bytes.fromhex("01090400031702")
     assert transport.send(0x15, remote_payload) == bytes.fromhex("01090400021703")
+
+
+def test_dummy_transport_unknown_group_flat_fixture_requires_explicit_namespace(
+    tmp_path: Path,
+) -> None:
+    fixture = {
+        "meta": {},
+        "groups": {
+            "0x69": {
+                "descriptor_type": 1.0,
+                "instances": {
+                    "0x00": {
+                        "registers": {
+                            "0x0000": {"raw_hex": "00"},
+                        }
+                    }
+                },
+            }
+        },
+    }
+    fixture_path = tmp_path / "fixture_unknown_flat.json"
+    fixture_path.write_text(json.dumps(fixture), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="implicit \\[0x02, 0x06\\] fallback is forbidden"):
+        DummyTransport(fixture_path)

@@ -142,12 +142,26 @@ def _write_fixture_unknown_group_69(tmp_path: Path) -> Path:
         "groups": {
             "0x69": {
                 "descriptor_type": 1.0,
-                "instances": {
-                    "0x00": {
-                        "registers": {
-                            "0x0000": {"raw_hex": "00"},
+                "dual_namespace": True,
+                "namespaces": {
+                    "0x02": {
+                        "instances": {
+                            "0x00": {
+                                "registers": {
+                                    "0x0000": {"raw_hex": "00"},
+                                }
+                            }
                         }
-                    }
+                    },
+                    "0x06": {
+                        "instances": {
+                            "0x00": {
+                                "registers": {
+                                    "0x0000": {"raw_hex": "00"},
+                                }
+                            }
+                        }
+                    },
                 },
             }
         },
@@ -921,7 +935,7 @@ def test_artifact_register_flags_present(tmp_path: Path) -> None:
     assert entry["read_opcode_label"] == "local"
 
 
-def test_contextual_enum_annotations_are_namespace_owned_for_group_02(tmp_path: Path) -> None:
+def test_contextual_enum_annotations_do_not_relabel_remote_namespace(tmp_path: Path) -> None:
     fixture_path = _write_fixture_group_02_dual_namespace(tmp_path)
     artifact = json.loads(fixture_path.read_text(encoding="utf-8"))
     _apply_contextual_enum_annotations(artifact)
@@ -935,9 +949,13 @@ def test_contextual_enum_annotations_are_namespace_owned_for_group_02(tmp_path: 
     assert local_registers["0x0001"]["enum_resolved_name"] == "DIRECT_HEATING_CIRCUIT"
     assert local_registers["0x0002"]["enum_resolved_name"] == "FIXED_VALUE"
     assert local_registers["0x0003"]["enum_resolved_name"] == "ACTIVE"
+
     assert "enum_resolved_name" not in remote_registers["0x0001"]
     assert "enum_resolved_name" not in remote_registers["0x0002"]
     assert "enum_resolved_name" not in remote_registers["0x0003"]
+    assert "value_display" not in remote_registers["0x0001"]
+    assert "value_display" not in remote_registers["0x0002"]
+    assert "value_display" not in remote_registers["0x0003"]
 
 
 def test_group_08_remote_namespace_only_marks_present_instances(

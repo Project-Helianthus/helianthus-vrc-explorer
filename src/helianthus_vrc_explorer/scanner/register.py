@@ -78,7 +78,11 @@ def opcodes_for_group(group: int) -> list[RegisterOpcode]:
 
     config = GROUP_CONFIG.get(group)
     if config is None:
-        return [0x02, 0x06]
+        raise ValueError(
+            "Unknown group 0x"
+            f"{group:02X} has no implicit opcode defaults. "
+            "Use discovery evidence to classify namespace opcodes."
+        )
     return [cast(RegisterOpcode, opcode) for opcode in config["opcodes"]]
 
 
@@ -91,7 +95,11 @@ def namespace_opcodes_for_group(group: int) -> list[RegisterOpcode]:
 
     config = GROUP_CONFIG.get(group)
     if config is None:
-        return [0x02, 0x06]
+        raise ValueError(
+            "Unknown group 0x"
+            f"{group:02X} has no implicit namespace defaults. "
+            "Use discovery evidence to classify namespace opcodes."
+        )
     raw_opcodes = config.get("namespace_opcodes", config["opcodes"])
     return [cast(RegisterOpcode, opcode) for opcode in raw_opcodes]
 
