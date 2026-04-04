@@ -53,7 +53,13 @@ def _register_identity_set(artifact: dict[str, Any]) -> set[tuple[Any, ...]]:
 
 def _namespace_collision_index(artifact: dict[str, Any]) -> dict[tuple[str, str, str], set[str]]:
     by_coordinate: dict[tuple[str, str, str], set[str]] = {}
-    for group_key, namespace_key, instance_key, register_key, _entry in iter_register_entries(artifact):
+    for (
+        group_key,
+        namespace_key,
+        instance_key,
+        register_key,
+        _entry,
+    ) in iter_register_entries(artifact):
         if not isinstance(namespace_key, str):
             continue
         coordinate = (group_key, instance_key, register_key)
@@ -161,7 +167,13 @@ def test_issue_208_fixture_backward_compatibility_migrates_legacy_shape() -> Non
     assert _register_identity_set(migrated) == _register_identity_set(current)
     assert _namespace_collision_index(migrated) == collision_index
 
-    for group_key, namespace_key, instance_key, register_key, entry in iter_register_entries(migrated):
+    for (
+        group_key,
+        namespace_key,
+        instance_key,
+        register_key,
+        entry,
+    ) in iter_register_entries(migrated):
         coordinate = (group_key, instance_key, register_key)
         if coordinate not in collision_index:
             continue
