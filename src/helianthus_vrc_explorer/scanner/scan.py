@@ -342,7 +342,7 @@ def _entry_is_readable(entry: RegisterEntry) -> bool:
 
 
 def _entry_is_opcode_responsive(entry: RegisterEntry) -> bool:
-    return entry["error"] is None
+    return entry["error"] is None and entry.get("flags_access") != "absent"
 
 
 def _probe_unknown_group_opcodes(

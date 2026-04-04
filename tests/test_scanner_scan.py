@@ -8,7 +8,11 @@ from rich.console import Console
 
 from helianthus_vrc_explorer.scanner.observer import ScanObserver
 from helianthus_vrc_explorer.scanner.plan import GroupScanPlan, make_plan_key
-from helianthus_vrc_explorer.scanner.scan import _apply_contextual_enum_annotations, scan_b524
+from helianthus_vrc_explorer.scanner.scan import (
+    _apply_contextual_enum_annotations,
+    _probe_unknown_group_opcodes,
+    scan_b524,
+)
 from helianthus_vrc_explorer.transport.base import TransportInterface
 from helianthus_vrc_explorer.transport.dummy import DummyTransport
 
@@ -1309,6 +1313,28 @@ def test_scan_unknown_group_probes_both_opcodes_and_two_instances(tmp_path: Path
         (0x06, 0x00),
         (0x06, 0x01),
     }
+
+
+def test_probe_unknown_group_opcodes_ignores_absent_flags_access() -> None:
+    class _AbsentProbeTransport(TransportInterface):
+        def send(self, dst: int, payload: bytes) -> bytes:  # noqa: ARG002
+            if payload == bytes((0x02, 0x00, 0x69, 0x00, 0x00, 0x00)):
+                return b"\x00"
+            if payload == bytes((0x06, 0x00, 0x69, 0x00, 0x00, 0x00)):
+                return b"\x01\x69\x00\x00\x01"
+            raise AssertionError(f"unexpected probe payload: {payload.hex()}")
+
+    opcodes, probe_summary = _probe_unknown_group_opcodes(
+        _AbsentProbeTransport(),
+        dst=0x15,
+        group=0x69,
+        observer=None,
+    )
+
+    assert opcodes == (0x06,)
+    assert probe_summary["responsive_opcodes"] == ["0x06"]
+    assert probe_summary["candidates"]["0x02"]["flags_access"] == "absent"
+    assert probe_summary["candidates"]["0x02"]["responsive"] is False
 
 
 def test_scan_unknown_group_expands_to_instance_ff_after_readable_probe(tmp_path: Path) -> None:
