@@ -14,6 +14,14 @@ _KIND_TO_TT = {
     "f32_range": 0x0F,
 }
 
+CONSTRAINT_SCOPE_DECISION = "gg_rr_invariant"
+CONSTRAINT_SCOPE_PROTOCOL = "opcode_0x01"
+CONSTRAINT_SCOPE_APPLIES_TO = "all_register_read_namespaces"
+CONSTRAINT_SCOPE_RATIONALE = (
+    "B524 constraint probe frames (01 GG RR) do not encode register-read opcode or "
+    "instance, so static constraints are treated as GG/RR-scoped invariants."
+)
+
 
 @dataclass(frozen=True, slots=True)
 class StaticConstraintEntry:
@@ -23,9 +31,22 @@ class StaticConstraintEntry:
     max_value: int | float | str
     step_value: int | float
     source: str = "static_catalog"
+    scope: str = CONSTRAINT_SCOPE_DECISION
+    provenance: str = "catalog_seeded_from_opcode_0x01"
 
 
 type StaticConstraintCatalog = dict[int, dict[int, StaticConstraintEntry]]
+
+
+def constraint_scope_metadata() -> dict[str, str]:
+    """Return canonical metadata describing the active constraint-scope decision."""
+
+    return {
+        "decision": CONSTRAINT_SCOPE_DECISION,
+        "protocol": CONSTRAINT_SCOPE_PROTOCOL,
+        "applies_to": CONSTRAINT_SCOPE_APPLIES_TO,
+        "rationale": CONSTRAINT_SCOPE_RATIONALE,
+    }
 
 
 def _parse_hex_u8(value: str) -> int:
@@ -125,8 +146,7 @@ def lookup_static_constraint(
     """Resolve the current static catalog using canonical register identity.
 
     The static catalog remains GG/RR-scoped because the underlying opcode-0x01
-    constraint protocol does not encode opcode or instance. The namespace-scope
-    decision is intentionally handled in follow-up issue #198.
+    constraint protocol does not encode opcode or instance.
     """
 
     _opcode, group, _instance, register = identity

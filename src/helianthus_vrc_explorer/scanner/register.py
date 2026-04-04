@@ -47,6 +47,8 @@ class RegisterEntry(TypedDict):
     constraint_max: NotRequired[int | float | str]
     constraint_step: NotRequired[int | float]
     constraint_source: NotRequired[str]
+    constraint_scope: NotRequired[str]
+    constraint_provenance: NotRequired[str]
     constraint_mismatch_reason: NotRequired[str]
     register_class: NotRequired[str]
     enum_raw_name: NotRequired[str]

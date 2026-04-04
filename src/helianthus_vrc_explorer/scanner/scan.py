@@ -16,8 +16,11 @@ from rich.console import Console
 
 from ..protocol.b524 import RegisterOpcode, build_constraint_probe_payload
 from ..schema.b524_constraints import (
+    CONSTRAINT_SCOPE_DECISION,
+    CONSTRAINT_SCOPE_PROTOCOL,
     StaticConstraintCatalog,
     StaticConstraintEntry,
+    constraint_scope_metadata,
     load_default_b524_constraints_catalog,
     lookup_static_constraint,
 )
@@ -332,6 +335,8 @@ class ConstraintEntry:
     step_value: int | float
     raw_hex: str
     source: str = "opcode_0x01"
+    scope: str = CONSTRAINT_SCOPE_DECISION
+    provenance: str = "live_probe_from_opcode_0x01"
 
 
 def _decode_constraint_date(value: bytes) -> str:
@@ -496,6 +501,8 @@ def _constraint_map_to_dict(
                 "step": entry.step_value,
                 "raw_hex": entry.raw_hex,
                 "source": entry.source,
+                "scope": entry.scope,
+                "provenance": entry.provenance,
             }
         serializable[_hex_u8(group)] = group_obj
     return serializable
@@ -575,6 +582,8 @@ def _apply_constraint_metadata(
     entry["constraint_max"] = constraint.max_value
     entry["constraint_step"] = constraint.step_value
     entry["constraint_source"] = constraint.source
+    entry["constraint_scope"] = constraint.scope
+    entry["constraint_provenance"] = constraint.provenance
 
 
 def _constraint_mismatch_reason(
@@ -919,6 +928,7 @@ def scan_b524(
         artifact["meta"]["constraint_catalog_entries"] = _constraint_catalog_entry_count(
             static_constraints
         )
+    artifact["meta"]["constraint_scope"] = constraint_scope_metadata()
 
     incomplete_reason: str | None = None
 
@@ -1618,6 +1628,9 @@ def scan_b524(
                                 "constraint_max": constraint.max_value,
                                 "constraint_type": constraint.kind,
                                 "constraint_source": constraint.source,
+                                "constraint_scope": constraint.scope,
+                                "constraint_provenance": constraint.provenance,
+                                "constraint_probe_protocol": CONSTRAINT_SCOPE_PROTOCOL,
                                 "reason": mismatch_reason,
                             }
                         )

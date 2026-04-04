@@ -1592,6 +1592,8 @@ __ARTIFACT_JSON__
               if (typeof entry.constraint_max !== "undefined") tipParts.push(`constraint_max=${formatValue(entry.constraint_max)}`);
               if (typeof entry.constraint_step !== "undefined") tipParts.push(`constraint_step=${formatValue(entry.constraint_step)}`);
               if (entry.constraint_tt) tipParts.push(`constraint_tt=${entry.constraint_tt}`);
+              if (entry.constraint_scope) tipParts.push(`constraint_scope=${entry.constraint_scope}`);
+              if (entry.constraint_provenance) tipParts.push(`constraint_provenance=${entry.constraint_provenance}`);
               if (tipParts.length) td.title = tipParts.join("\\n");
 
               tr.appendChild(td);
