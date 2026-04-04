@@ -109,8 +109,7 @@ class MyvaillantRegisterMap:
                 if gg_raw == "*":
                     if ii_raw != "*":
                         raise ValueError(
-                            "Group wildcard mappings require instance='*' "
-                            f"for register=0x{rr:04X}"
+                            f"Group wildcard mappings require instance='*' for register=0x{rr:04X}"
                         )
                     if opcode is None:
                         raise ValueError(
