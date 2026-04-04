@@ -274,6 +274,9 @@ def test_group_config_completeness() -> None:
     assert GROUP_CONFIG[0x09]["rr_max_by_opcode"] == {0x02: 0x000F, 0x06: 0x0035}
     assert GROUP_CONFIG[0x0A]["rr_max"] == 0x004D
     assert GROUP_CONFIG[0x0A]["rr_max_by_opcode"] == {0x02: 0x004D, 0x06: 0x0035}
+    assert GROUP_CONFIG[0x06]["opcodes"] == [0x06]
+    assert GROUP_CONFIG[0x07]["opcodes"] == [0x06]
+    assert GROUP_CONFIG[0x0B]["opcodes"] == [0x06]
 
 
 def test_group_namespace_profiles_support_opcode_first_identity() -> None:

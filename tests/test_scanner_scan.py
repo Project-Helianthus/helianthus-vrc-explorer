@@ -680,6 +680,12 @@ def test_scan_instanced_group_zero_descriptor(tmp_path: Path) -> None:
     group = artifact["groups"]["0x02"]
     assert group["dual_namespace"] is False
     assert group["descriptor_observed"] == 0.0
+    assert group["discovery_advisory"]["kind"] == "directory_probe"
+    assert group["discovery_advisory"]["semantic_authority"] is False
+    assert group["discovery_advisory"]["descriptor_observed"] == 0.0
+    assert group["discovery_advisory"]["descriptor_expected"] == 1.0
+    assert group["discovery_advisory"]["descriptor_mismatch"] is True
+    assert group["discovery_advisory"]["proven_register_opcodes"] == ["0x02"]
     assert group["instances"]["0x00"]["present"] is True
     assert "0x01" not in group["instances"]
 
@@ -697,6 +703,12 @@ def test_scan_singleton_group_nonzero_descriptor(tmp_path: Path) -> None:
     group = artifact["groups"]["0x00"]
     assert group["dual_namespace"] is False
     assert group["descriptor_observed"] == 3.0
+    assert group["discovery_advisory"]["kind"] == "directory_probe"
+    assert group["discovery_advisory"]["semantic_authority"] is False
+    assert group["discovery_advisory"]["descriptor_observed"] == 3.0
+    assert group["discovery_advisory"]["descriptor_expected"] == 3.0
+    assert "descriptor_mismatch" not in group["discovery_advisory"]
+    assert group["discovery_advisory"]["proven_register_opcodes"] == ["0x02"]
     assert set(group["instances"]) == {"0x00"}
     assert artifact["meta"]["scan_plan"]["groups"]["0x00"]["instances"] == ["0x00"]
 

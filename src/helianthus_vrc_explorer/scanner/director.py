@@ -123,21 +123,21 @@ GROUP_CONFIG: Final[dict[int, GroupConfig]] = {
         "name": "Unknown 0x06",
         "ii_max": 0x0A,
         "rr_max": 0x0030,
-        "opcodes": [0x02, 0x06],
+        "opcodes": [0x06],
         "exhaustive_only": True,
     },
     0x07: {
         "name": "Unknown 0x07",
         "ii_max": 0x0A,
         "rr_max": 0x0030,
-        "opcodes": [0x02, 0x06],
+        "opcodes": [0x06],
         "exhaustive_only": True,
     },
     0x0B: {
         "name": "Unknown 0x0B",
         "ii_max": 0x0A,
         "rr_max": 0x0010,
-        "opcodes": [0x02, 0x06],
+        "opcodes": [0x06],
         "exhaustive_only": True,
     },
     0x0D: {
@@ -255,7 +255,7 @@ def discover_groups(
     """Phase A: Probe GG=0x00..0xFF via directory probe (opcode 0x00).
 
     Terminator logic: stop on the first NaN descriptor.
-    Descriptor `0.0` is a weak negative hint only: known core groups remain candidates.
+    Descriptor `0.0` is an advisory negative hint only: known core groups remain candidates.
     """
 
     discovered: list[DiscoveredGroup] = []
@@ -381,7 +381,7 @@ def discover_groups(
                     )
             elif observer is not None:
                 observer.log(
-                    f"GG=0x{gg:02X} descriptor=0.0, non-core group - skipped (weak hint)",
+                    f"GG=0x{gg:02X} descriptor=0.0, non-core group - skipped (advisory hint)",
                     level="info",
                 )
             continue
@@ -409,7 +409,7 @@ def classify_groups(
 ) -> list[ClassifiedGroup]:
     """Phase C (per issue wording): Map discovered groups using GROUP_CONFIG.
 
-    Descriptors are opaque hints, not structural authority.
+    Descriptors are advisory metadata only, not structural authority.
     """
 
     classified: list[ClassifiedGroup] = []

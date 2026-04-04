@@ -199,6 +199,9 @@ def test_opcodes_for_group_dual_namespace() -> None:
 def test_opcodes_for_group_single_namespace() -> None:
     assert opcodes_for_group(0x00) == [0x02]
     assert opcodes_for_group(0x0C) == [0x06]
+    assert opcodes_for_group(0x06) == [0x06]
+    assert opcodes_for_group(0x07) == [0x06]
+    assert opcodes_for_group(0x0B) == [0x06]
 
 
 def test_namespace_opcodes_for_group_supports_staged_remote_namespaces() -> None:
