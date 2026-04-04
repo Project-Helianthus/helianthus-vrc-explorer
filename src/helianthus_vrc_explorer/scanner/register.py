@@ -14,6 +14,7 @@ from ..transport.base import (
     emit_trace_label,
 )
 from .director import GROUP_CONFIG
+from .identity import make_register_identity, opcode_label
 
 logger = logging.getLogger(__name__)
 
@@ -54,12 +55,26 @@ class RegisterEntry(TypedDict):
 
 
 def opcodes_for_group(group: int) -> list[RegisterOpcode]:
-    """Return all B524 register opcode families for a group."""
+    """Return active B524 register opcode families for a group."""
 
     config = GROUP_CONFIG.get(group)
     if config is None:
         return [0x02, 0x06]
     return [cast(RegisterOpcode, opcode) for opcode in config["opcodes"]]
+
+
+def namespace_opcodes_for_group(group: int) -> list[RegisterOpcode]:
+    """Return namespace-capable opcode families for a group.
+
+    This can be broader than `opcodes_for_group` while scanner heuristics are
+    still staged. It is intended for opcode-first model/config decisions.
+    """
+
+    config = GROUP_CONFIG.get(group)
+    if config is None:
+        return [0x02, 0x06]
+    raw_opcodes = config.get("namespace_opcodes", config["opcodes"])
+    return [cast(RegisterOpcode, opcode) for opcode in raw_opcodes]
 
 
 def _interpret_flags(flags: int, *, response_len: int) -> str:
@@ -81,16 +96,6 @@ def _interpret_flags(flags: int, *, response_len: int) -> str:
             return "user_rw"
         case _:
             return "unknown"
-
-
-def _opcode_label(opcode: int) -> str:
-    match opcode:
-        case 0x02:
-            return "local"
-        case 0x06:
-            return "remote"
-        case _:
-            return f"0x{opcode:02x}"
 
 
 def _looks_like_nul_terminated_latin1(value_bytes: bytes) -> bool:
@@ -214,11 +219,17 @@ def read_register(
 ) -> RegisterEntry:
     """Read a B524 register and parse it into an artifact-ready entry."""
 
+    register_key = make_register_identity(
+        opcode=opcode, group=group, instance=instance, register=register
+    )
     read_opcode = f"0x{opcode:02x}"
-    read_opcode_label = _opcode_label(opcode)
+    read_opcode_label = opcode_label(opcode)
     emit_trace_label(
         transport,
-        f"Reading dst=0x{dst:02X} GG=0x{group:02X} II=0x{instance:02X} RR=0x{register:04X}",
+        "Reading "
+        f"key=(op=0x{register_key[0]:02X},gg=0x{register_key[1]:02X},"
+        f"ii=0x{register_key[2]:02X},rr=0x{register_key[3]:04X}) "
+        f"dst=0x{dst:02X}",
     )
     payload = build_register_read_payload(opcode, group=group, instance=instance, register=register)
     try:

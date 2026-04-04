@@ -34,6 +34,7 @@ from .b509 import scan_b509
 from .b516 import scan_b516
 from .b555 import scan_b555
 from .director import GROUP_CONFIG, DiscoveredGroup, classify_groups, discover_groups
+from .identity import opcode_label
 from .observer import ScanObserver
 from .plan import (
     GroupScanPlan,
@@ -90,14 +91,6 @@ def _primary_opcode(group: int) -> RegisterOpcode:
     return _group_opcodes(group)[0]
 
 
-def _opcode_label(opcode: int) -> str:
-    labels: dict[int, str] = {
-        _LOCAL_REGISTER_OPCODE: "local",
-        _REMOTE_REGISTER_OPCODE: "remote",
-    }
-    return labels.get(opcode, _hex_u8(opcode))
-
-
 def _is_dual_namespace_group(group: int) -> bool:
     return len(_group_opcodes(group)) > 1
 
@@ -145,7 +138,7 @@ def _scan_plan_meta_groups(plan: dict[PlanKey, GroupScanPlan]) -> dict[str, obje
             namespaces = group_obj.setdefault("namespaces", {})
             assert isinstance(namespaces, dict)
             namespace_meta = group_plan.to_meta()
-            namespace_meta["label"] = _opcode_label(group_plan.opcode)
+            namespace_meta["label"] = opcode_label(group_plan.opcode)
             namespaces[_hex_u8(group_plan.opcode)] = namespace_meta
             continue
         serializable[group_key] = group_plan.to_meta()
@@ -189,11 +182,11 @@ def _ensure_namespace_artifact(group_obj: dict[str, Any], *, opcode: int) -> dic
     namespace_obj = namespaces.setdefault(
         namespace_key,
         {
-            "label": _opcode_label(opcode),
+            "label": opcode_label(opcode),
             "instances": {},
         },
     )
-    namespace_obj.setdefault("label", _opcode_label(opcode))
+    namespace_obj.setdefault("label", opcode_label(opcode))
     namespace_obj.setdefault("instances", {})
     return namespace_obj
 
@@ -1095,7 +1088,7 @@ def scan_b524(
                     emit_trace_label(
                         transport,
                         "Exploring unknown group "
-                        f"0x{group.group:02X} ({_opcode_label(opcode)}) "
+                        f"0x{group.group:02X} ({opcode_label(opcode)}) "
                         "across multiple instances",
                     )
                     present_instances = _probe_unknown_present_instances(
@@ -1107,7 +1100,7 @@ def scan_b524(
                     )
                     _mark_present_instances(instances_obj, instances=present_instances)
                     namespace_probe_counts.append(
-                        f"{_opcode_label(opcode)} {len(present_instances)}/{total_slots}"
+                        f"{opcode_label(opcode)} {len(present_instances)}/{total_slots}"
                     )
                 if observer is not None:
                     observer.log(
@@ -1165,13 +1158,13 @@ def scan_b524(
                 instances_obj = _instances_object(artifact, group=group.group, opcode=opcode)
                 if not _is_instanced_group(namespace_ii_max):
                     _mark_present_instances(instances_obj, instances=(0x00,))
-                    known_namespace_probe_counts.append(f"{_opcode_label(opcode)} 1/1")
+                    known_namespace_probe_counts.append(f"{opcode_label(opcode)} 1/1")
                     continue
 
                 assert namespace_ii_max is not None
                 emit_trace_label(
                     transport,
-                    f"Identifying instances in group 0x{group.group:02X} ({_opcode_label(opcode)})",
+                    f"Identifying instances in group 0x{group.group:02X} ({opcode_label(opcode)})",
                 )
                 present_instances = _probe_present_instances(
                     transport,
@@ -1183,7 +1176,7 @@ def scan_b524(
                 )
                 _mark_present_instances(instances_obj, instances=present_instances)
                 known_namespace_probe_counts.append(
-                    f"{_opcode_label(opcode)} {len(present_instances)}/{namespace_ii_max + 1}"
+                    f"{opcode_label(opcode)} {len(present_instances)}/{namespace_ii_max + 1}"
                 )
 
             if observer is not None:
@@ -1288,7 +1281,7 @@ def scan_b524(
                             opcode=opcode,
                         ),
                         present_instances=present_instances,
-                        namespace_label=(_opcode_label(opcode) if dual_namespace else None),
+                        namespace_label=(opcode_label(opcode) if dual_namespace else None),
                         primary=(opcode == primary_opcode),
                         exhaustive_only=bool(config and config.get("exhaustive_only")),
                     )

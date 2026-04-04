@@ -26,6 +26,9 @@ class GroupConfig(TypedDict):
     ii_max: int
     rr_max: int
     opcodes: list[int]
+    # Namespace-capable opcode families known for this group. This can include
+    # future namespaces even when active scanning still uses a conservative subset.
+    namespace_opcodes: NotRequired[list[int]]
     rr_max_by_opcode: NotRequired[dict[int, int]]
     ii_max_by_opcode: NotRequired[dict[int, int]]
     # When True, this group is only included in the exhaustive preset.
@@ -50,6 +53,9 @@ GROUP_CONFIG: Final[dict[int, GroupConfig]] = {
         "ii_max": 0x00,
         "rr_max": 0x0013,
         "opcodes": [0x02],
+        "namespace_opcodes": [0x02, 0x06],
+        "rr_max_by_opcode": {0x02: 0x0013, 0x06: 0x0015},
+        "ii_max_by_opcode": {0x02: 0x00, 0x06: 0x00},
     },
     0x02: {
         "desc": 1.0,
@@ -57,6 +63,9 @@ GROUP_CONFIG: Final[dict[int, GroupConfig]] = {
         "ii_max": 0x0A,
         "rr_max": 0x0025,
         "opcodes": [0x02],
+        "namespace_opcodes": [0x02, 0x06],
+        "rr_max_by_opcode": {0x02: 0x0025, 0x06: 0x0025},
+        "ii_max_by_opcode": {0x02: 0x0A, 0x06: 0x0A},
     },
     0x03: {
         "desc": 1.0,
@@ -168,6 +177,41 @@ GROUP_CONFIG: Final[dict[int, GroupConfig]] = {
     },
 }
 KNOWN_CORE_GROUPS: Final[frozenset[int]] = frozenset({0x02, 0x03})
+
+
+@dataclass(frozen=True, slots=True)
+class NamespaceProfile:
+    opcode: int
+    ii_max: int
+    rr_max: int
+
+
+def group_namespace_profiles(group: int) -> dict[int, NamespaceProfile]:
+    """Return namespace-aware profile rows keyed by opcode.
+
+    The returned map is canonical for config/model surfaces that need opcode-first
+    identity decisions without depending on scanner heuristics.
+    """
+
+    config = GROUP_CONFIG.get(group)
+    if config is None:
+        return {}
+
+    namespace_opcodes = config.get("namespace_opcodes", config["opcodes"])
+    rr_overrides = config.get("rr_max_by_opcode", {})
+    ii_overrides = config.get("ii_max_by_opcode", {})
+    default_rr = int(config["rr_max"])
+    default_ii = int(config["ii_max"])
+
+    profiles: dict[int, NamespaceProfile] = {}
+    for opcode in namespace_opcodes:
+        op = int(opcode)
+        profiles[op] = NamespaceProfile(
+            opcode=op,
+            ii_max=int(ii_overrides.get(op, default_ii)),
+            rr_max=int(rr_overrides.get(op, default_rr)),
+        )
+    return profiles
 
 
 @dataclass(frozen=True, slots=True)

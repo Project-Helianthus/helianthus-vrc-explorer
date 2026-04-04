@@ -12,6 +12,7 @@ from helianthus_vrc_explorer.scanner.director import (
     DiscoveredGroup,
     classify_groups,
     discover_groups,
+    group_namespace_profiles,
 )
 from helianthus_vrc_explorer.transport.base import (
     TransportCommandNotEnabled,
@@ -261,6 +262,10 @@ def test_group_config_completeness() -> None:
         0x11,
     }
     assert GROUP_CONFIG[0x08]["name"] == "Buffer / Solar Cylinder 2"
+    assert GROUP_CONFIG[0x01]["namespace_opcodes"] == [0x02, 0x06]
+    assert GROUP_CONFIG[0x01]["rr_max_by_opcode"] == {0x02: 0x0013, 0x06: 0x0015}
+    assert GROUP_CONFIG[0x02]["namespace_opcodes"] == [0x02, 0x06]
+    assert GROUP_CONFIG[0x02]["ii_max_by_opcode"] == {0x02: 0x0A, 0x06: 0x0A}
     assert GROUP_CONFIG[0x08]["opcodes"] == [0x02, 0x06]
     assert GROUP_CONFIG[0x08]["rr_max_by_opcode"] == {0x02: 0x0007, 0x06: 0x0004}
     assert GROUP_CONFIG[0x08]["ii_max_by_opcode"] == {0x02: 0x00, 0x06: 0x0A}
@@ -269,6 +274,19 @@ def test_group_config_completeness() -> None:
     assert GROUP_CONFIG[0x09]["rr_max_by_opcode"] == {0x02: 0x000F, 0x06: 0x0035}
     assert GROUP_CONFIG[0x0A]["rr_max"] == 0x004D
     assert GROUP_CONFIG[0x0A]["rr_max_by_opcode"] == {0x02: 0x004D, 0x06: 0x0035}
+
+
+def test_group_namespace_profiles_support_opcode_first_identity() -> None:
+    hw = group_namespace_profiles(0x01)
+    hc = group_namespace_profiles(0x02)
+
+    assert sorted(hw) == [0x02, 0x06]
+    assert hw[0x02].rr_max == 0x0013
+    assert hw[0x06].rr_max == 0x0015
+
+    assert sorted(hc) == [0x02, 0x06]
+    assert hc[0x02].ii_max == 0x0A
+    assert hc[0x06].ii_max == 0x0A
 
 
 def test_classify_groups_missing_desc() -> None:
