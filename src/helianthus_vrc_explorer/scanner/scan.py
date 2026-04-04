@@ -157,6 +157,7 @@ def _ensure_group_artifact(
     name: str,
     descriptor_observed: float | None,
     dual_namespace: bool,
+    discovery_advisory: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     group_key = _hex_u8(group)
     default: dict[str, Any] = {
@@ -178,6 +179,8 @@ def _ensure_group_artifact(
     group_obj.setdefault("name", name)
     group_obj.setdefault("descriptor_observed", descriptor_observed)
     group_obj["dual_namespace"] = dual_namespace
+    if discovery_advisory is not None:
+        group_obj["discovery_advisory"] = discovery_advisory
     return cast(dict[str, Any], group_obj)
 
 
@@ -1132,12 +1135,24 @@ def scan_b524(
             # NaN descriptors come from synthetic exhaustive-mode injection;
             # store as None to keep JSON-serializable and avoid polluting analytics.
             desc_for_artifact = None if math.isnan(group.descriptor) else group.descriptor
+            discovery_advisory: dict[str, Any] = {
+                "kind": "directory_probe",
+                "semantic_authority": False,
+                "proven_register_opcodes": [_hex_u8(opcode) for opcode in opcodes],
+            }
+            if desc_for_artifact is not None:
+                discovery_advisory["descriptor_observed"] = desc_for_artifact
+            if group.expected_descriptor is not None:
+                discovery_advisory["descriptor_expected"] = group.expected_descriptor
+            if group.descriptor_mismatch:
+                discovery_advisory["descriptor_mismatch"] = True
             _ensure_group_artifact(
                 artifact,
                 group=group.group,
                 name=group.name,
                 descriptor_observed=desc_for_artifact,
                 dual_namespace=dual_namespace,
+                discovery_advisory=discovery_advisory,
             )
 
             if config is None:

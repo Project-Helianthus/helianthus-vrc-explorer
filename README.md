@@ -57,6 +57,7 @@ Transport note:
 - On shared live `ebusd-tcp` setups, the first B524 directory probe (`GG=0x00`) can transiently return a status-only `00`. The scanner treats this as transient noise and continues discovery instead of declaring B524 unsupported immediately.
 - On `ebusd-tcp`, `ERR: timeout`, `ERR: arbitration lost`, `ERR: SYN received`, and `ERR: wrong symbol received` now trigger a fixed 5-second quiet backoff before retry so the bus can settle.
 - On `ebusd-tcp`, `ERR: no signal` now triggers a fixed 15-second quiet backoff before retry so the eBUS side can recover instead of being polled aggressively.
+- Classic GG directory-probe results are retained as advisory metadata for semantic identity and namespace topology. They are useful evidence for reverse-engineering and debugging, but they do not define those semantics once a group is a scan candidate. A `descriptor_type == 0.0` result is still used as a discovery-time negative hint for non-core/unknown groups in Phase A.
 
 Constraint note:
 - Normal scans use a bundled static BASV2 constraint catalog and flag values that fall outside it.
