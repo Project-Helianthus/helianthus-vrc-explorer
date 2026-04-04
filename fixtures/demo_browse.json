@@ -1,4 +1,5 @@
 {
+  "schema_version": "2.1",
   "meta": {
     "destination_address": "0x15",
     "device_info": {
@@ -22,7 +23,8 @@
   },
   "groups": {
     "0x00": {
-      "descriptor_type": 3.0,
+      "descriptor_observed": 3.0,
+      "dual_namespace": false,
       "instances": {
         "0x00": {
           "present": true,
@@ -61,7 +63,7 @@
               "flags": 3,
               "flags_access": "user_rw",
               "type": "HDA:3",
-              "value": "2013-01-01"
+              "value": "2019-01-01"
             }
           }
         }
@@ -69,7 +71,8 @@
       "name": "Regulator Parameters"
     },
     "0x01": {
-      "descriptor_type": 3.0,
+      "descriptor_observed": 3.0,
+      "dual_namespace": false,
       "instances": {
         "0x00": {
           "present": true,
@@ -116,7 +119,8 @@
       "name": "Hot Water Circuit"
     },
     "0x02": {
-      "descriptor_type": 1.0,
+      "descriptor_observed": 1.0,
+      "dual_namespace": false,
       "instances": {
         "0x00": {
           "present": true,
@@ -163,7 +167,8 @@
       "name": "Heating Circuits"
     },
     "0x03": {
-      "descriptor_type": 1.0,
+      "descriptor_observed": 1.0,
+      "dual_namespace": false,
       "instances": {
         "0x00": {
           "present": true,

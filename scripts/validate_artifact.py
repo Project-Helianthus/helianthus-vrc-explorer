@@ -7,6 +7,14 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from helianthus_vrc_explorer.artifact_schema import (
+    LEGACY_UNVERSIONED_SCHEMA,
+    ArtifactSchemaError,
+    count_register_entries,
+    detect_schema_version,
+    iter_register_entries,
+    migrate_artifact_schema,
+)
 from helianthus_vrc_explorer.protocol.parser import ValueParseError, parse_typed_value
 
 
@@ -17,33 +25,86 @@ def _parse_hex_key(key: str) -> int | None:
         return None
 
 
-def _iter_register_entries(artifact: dict[str, Any]):
+def _normalize_opcode_hex(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    raw = value.strip()
+    if not raw:
+        return None
+    try:
+        opcode = int(raw, 0)
+    except ValueError:
+        return None
+    if not (0x00 <= opcode <= 0xFF):
+        return None
+    return f"0x{opcode:02x}"
+
+
+def _validate_schema_shape(artifact: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
     groups = artifact.get("groups")
     if not isinstance(groups, dict):
-        return
+        return ['groups: missing required top-level object "groups"']
+
     for group_key, group_obj in groups.items():
         if not isinstance(group_key, str) or not isinstance(group_obj, dict):
+            errors.append(f"{group_key!r}: group entry must be an object keyed by hex string")
             continue
-        instances = group_obj.get("instances")
-        if not isinstance(instances, dict):
+
+        descriptor_observed = group_obj.get("descriptor_observed")
+        descriptor_type = group_obj.get("descriptor_type")
+        if not isinstance(descriptor_observed, (int, float)) and not isinstance(
+            descriptor_type, (int, float)
+        ):
+            errors.append(
+                f"{group_key}: expected numeric descriptor_observed (or descriptor_type for legacy)"
+            )
+
+        dual_namespace = group_obj.get("dual_namespace")
+        if not isinstance(dual_namespace, bool):
+            errors.append(f"{group_key}: missing required boolean dual_namespace")
             continue
-        for instance_key, instance_obj in instances.items():
-            if not isinstance(instance_key, str) or not isinstance(instance_obj, dict):
-                continue
-            registers = instance_obj.get("registers")
-            if not isinstance(registers, dict):
-                continue
-            for rr_key, entry in registers.items():
-                if not isinstance(rr_key, str) or not isinstance(entry, dict):
-                    continue
-                yield group_key, instance_key, rr_key, entry
+
+        has_namespaces = isinstance(group_obj.get("namespaces"), dict)
+        has_instances = isinstance(group_obj.get("instances"), dict)
+
+        if dual_namespace:
+            if not has_namespaces:
+                errors.append(f"{group_key}: dual_namespace=true requires namespaces object")
+            if has_instances:
+                errors.append(f"{group_key}: dual_namespace=true must not include flat instances")
+            continue
+
+        if has_namespaces:
+            errors.append(f"{group_key}: dual_namespace=false must not include namespaces")
+        if not has_instances:
+            errors.append(f"{group_key}: dual_namespace=false requires instances object")
+
+    return errors
 
 
-def validate_scan_artifact(artifact: dict[str, Any]) -> list[str]:
+def validate_scan_artifact(
+    artifact: dict[str, Any],
+    *,
+    allow_legacy: bool,
+) -> tuple[list[str], dict[str, Any], str]:
     errors: list[str] = []
+    source_schema_version = detect_schema_version(artifact)
+    if not allow_legacy and source_schema_version == LEGACY_UNVERSIONED_SCHEMA:
+        errors.append("schema_version: legacy unversioned artifact rejected (--reject-legacy)")
+        return errors, artifact, source_schema_version
 
-    for group_key, instance_key, rr_key, entry in _iter_register_entries(artifact):
-        loc = f"{group_key}/{instance_key}/{rr_key}"
+    try:
+        migrated, _migration = migrate_artifact_schema(artifact)
+    except ArtifactSchemaError as exc:
+        errors.append(f"schema_version: {exc}")
+        return errors, artifact, source_schema_version
+
+    errors.extend(_validate_schema_shape(migrated))
+
+    for group_key, namespace_key, instance_key, rr_key, entry in iter_register_entries(migrated):
+        namespace_loc = namespace_key if namespace_key is not None else "flat"
+        loc = f"{group_key}/{namespace_loc}/{instance_key}/{rr_key}"
         gg = _parse_hex_key(group_key)
         rr = _parse_hex_key(rr_key)
         if gg is None:
@@ -52,6 +113,17 @@ def validate_scan_artifact(artifact: dict[str, Any]) -> list[str]:
         if rr is None:
             errors.append(f"{loc}: invalid register key")
             continue
+
+        if namespace_key is not None:
+            namespace_opcode = _normalize_opcode_hex(namespace_key)
+            if namespace_opcode is None:
+                errors.append(f"{loc}: invalid namespace key")
+                continue
+            read_opcode = _normalize_opcode_hex(entry.get("read_opcode"))
+            if read_opcode is not None and read_opcode != namespace_opcode:
+                errors.append(
+                    f"{loc}: read_opcode {read_opcode} does not match namespace {namespace_opcode}"
+                )
 
         reply_hex = entry.get("reply_hex")
         raw_hex = entry.get("raw_hex")
@@ -116,15 +188,25 @@ def validate_scan_artifact(artifact: dict[str, Any]) -> list[str]:
                     f"{loc}: value mismatch type={type_spec} expected={parsed!r} got={value!r}"
                 )
 
-    return errors
+    return errors, migrated, source_schema_version
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 2 or argv[1] in {"-h", "--help"}:
-        print("Usage: validate_artifact.py <artifact.json>", file=sys.stderr)
+    args = argv[1:]
+    if not args or args[0] in {"-h", "--help"}:
+        print("Usage: validate_artifact.py [--reject-legacy] <artifact.json>", file=sys.stderr)
         return 2
 
-    path = Path(argv[1])
+    reject_legacy = False
+    if args and args[0] == "--reject-legacy":
+        reject_legacy = True
+        args = args[1:]
+
+    if len(args) != 1:
+        print("Usage: validate_artifact.py [--reject-legacy] <artifact.json>", file=sys.stderr)
+        return 2
+
+    path = Path(args[0])
     try:
         artifact = json.loads(path.read_text(encoding="utf-8"))
     except OSError as exc:
@@ -138,7 +220,10 @@ def main(argv: list[str]) -> int:
         print("Invalid artifact root (expected JSON object).", file=sys.stderr)
         return 2
 
-    errors = validate_scan_artifact(artifact)
+    errors, migrated, source_schema_version = validate_scan_artifact(
+        artifact,
+        allow_legacy=not reject_legacy,
+    )
     if errors:
         for line in errors[:50]:
             print(line, file=sys.stderr)
@@ -146,7 +231,13 @@ def main(argv: list[str]) -> int:
             print(f"... ({len(errors) - 50} more)", file=sys.stderr)
         return 1
 
-    print(f"OK: validated artifact ({path.name})")
+    suffix = ""
+    if source_schema_version != str(migrated.get("schema_version")):
+        suffix = (
+            f"; migrated in-memory {source_schema_version} -> {migrated.get('schema_version')} "
+            f"(registers={count_register_entries(migrated)})"
+        )
+    print(f"OK: validated artifact ({path.name}{suffix})")
     return 0
 
 

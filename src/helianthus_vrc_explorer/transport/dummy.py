@@ -5,6 +5,7 @@ import struct
 from pathlib import Path
 from typing import Any
 
+from ..artifact_schema import migrate_artifact_schema
 from ..scanner.director import GROUP_CONFIG
 from .base import TransportError, TransportInterface, TransportTimeout
 
@@ -206,6 +207,7 @@ class DummyTransport(TransportInterface):
         data: Any = json.loads(raw)
         if not isinstance(data, dict):
             raise ValueError("Fixture root must be a JSON object")
+        data, _migration = migrate_artifact_schema(data)
 
         meta = data.get("meta", {})
         if not isinstance(meta, dict):

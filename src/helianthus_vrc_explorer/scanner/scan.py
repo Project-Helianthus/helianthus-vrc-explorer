@@ -14,6 +14,7 @@ from typing import Any, Literal, cast
 
 from rich.console import Console
 
+from ..artifact_schema import CURRENT_ARTIFACT_SCHEMA_VERSION
 from ..protocol.b524 import RegisterOpcode, build_constraint_probe_payload
 from ..schema.b524_constraints import (
     CONSTRAINT_SCOPE_DECISION,
@@ -1112,7 +1113,7 @@ def scan_b524(
     transport = counting_transport
 
     artifact: dict[str, Any] = {
-        "schema_version": "2.0",
+        "schema_version": CURRENT_ARTIFACT_SCHEMA_VERSION,
         "meta": {
             "scan_timestamp": scan_timestamp,
             "scan_duration_seconds": 0.0,

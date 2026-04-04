@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from rich.console import Console
 
+from helianthus_vrc_explorer.artifact_schema import CURRENT_ARTIFACT_SCHEMA_VERSION
 from helianthus_vrc_explorer.scanner.observer import ScanObserver
 from helianthus_vrc_explorer.scanner.plan import GroupScanPlan, make_plan_key
 from helianthus_vrc_explorer.scanner.scan import (
@@ -793,7 +794,7 @@ def test_scan_singleton_group_nonzero_descriptor(tmp_path: Path) -> None:
 def test_artifact_schema_version(tmp_path: Path) -> None:
     artifact = scan_b524(DummyTransport(_write_fixture_group_00(tmp_path)), dst=0x15)
 
-    assert artifact["schema_version"] == "2.0"
+    assert artifact["schema_version"] == CURRENT_ARTIFACT_SCHEMA_VERSION
     contract = artifact["meta"]["artifact_contract"]
     assert contract["namespace_identity_keys"] == "opcode_hex"
     assert contract["namespace_labels"] == "presentation_only"
@@ -1182,7 +1183,7 @@ def test_scan_b524_replays_dual_namespace_fixture_end_to_end(
         myvaillant_map=MyvaillantRegisterMap.from_path(map_path),
     )
 
-    assert artifact["schema_version"] == "2.0"
+    assert artifact["schema_version"] == CURRENT_ARTIFACT_SCHEMA_VERSION
     local_fw = artifact["groups"]["0x09"]["namespaces"]["0x02"]["instances"]["0x00"]["registers"][
         "0x0004"
     ]

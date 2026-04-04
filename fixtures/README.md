@@ -7,8 +7,19 @@ This directory contains **scan artifact fixtures** used for deterministic, offli
 
 A fixture is a JSON object with:
 
+- `schema_version`: Artifact schema version. Current: `2.1`.
 - `meta`: arbitrary metadata about the scan (timestamps, device info, etc.).
 - `groups`: mapping of group id -> group data.
+
+## Schema Compatibility Strategy
+
+- Writers emit `schema_version: "2.1"` (namespace-aware contract).
+- Readers support legacy artifacts by in-memory migration:
+  - unversioned fixtures (no `schema_version`)
+  - `schema_version: "2.0"`
+- Migration preserves register counts and register payload entries; no registers are dropped or
+  synthesized during migration.
+- Checked-in fixtures in this repository are migrated to `2.1` in lockstep.
 
 ### `groups`
 
@@ -43,10 +54,12 @@ Each register entry contains:
 
 ```json
 {
+  "schema_version": "2.1",
   "meta": {},
   "groups": {
     "0x02": {
       "descriptor_type": 1.0,
+      "dual_namespace": false,
       "instances": {
         "0x00": {
           "registers": {

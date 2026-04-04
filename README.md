@@ -65,6 +65,7 @@ Transport note:
 - Canonical namespace identity is always an opcode hex key (`0x02`, `0x06`, ...). Labels like `local`/`remote` are presentation metadata only.
 - Persisted `groups[*].dual_namespace` topology is authoritative for consumers. Do not infer or rewrite namespace shape from descriptors.
 - B524 browse/report row identity is namespace-aware even for single-namespace groups: dedupe key `<group>:<namespace>:<instance>:<register>` and path format `B524/<group-name>/<namespace-display>/<instance>/<register-name>` are round-trip stable.
+- Artifact schema contract is versioned (`schema_version: "2.1"` current). Readers keep backward compatibility by migrating unversioned and `2.0` artifacts in-memory.
 - CI enforces these rules with `python scripts/check_b524_namespace_guardrails.py`.
 
 Constraint note:

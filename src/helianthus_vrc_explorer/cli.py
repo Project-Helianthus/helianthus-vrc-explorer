@@ -17,6 +17,7 @@ from rich.console import Console
 from rich.text import Text
 
 from . import __version__
+from .artifact_schema import ArtifactSchemaError, migrate_artifact_schema
 from .ebusd import parse_ebusd_info_target_addresses
 from .protocol.b524 import build_directory_probe_payload
 from .protocol.basv import (
@@ -774,6 +775,12 @@ def scan(
             origin = fixture_source or "vrc720_full_scan.json"
             typer.echo(f"Invalid JSON fixture: {origin} ({exc})", err=True)
             raise typer.Exit(2) from exc
+        try:
+            artifact, _migration = migrate_artifact_schema(artifact)
+        except ArtifactSchemaError as exc:
+            origin = fixture_source or "vrc720_full_scan.json"
+            typer.echo(f"Unsupported dry-run fixture schema: {origin} ({exc})", err=True)
+            raise typer.Exit(2) from exc
         preface = _build_scan_session_preface(
             dst=dst_u8,
             endpoint="n/a (dry-run fixture)",
@@ -1128,6 +1135,11 @@ def browse(
     if not isinstance(artifact, dict):
         typer.echo(f"Invalid artifact root object: {file}", err=True)
         raise typer.Exit(2)
+    try:
+        artifact, _migration = migrate_artifact_schema(artifact)
+    except ArtifactSchemaError as exc:
+        typer.echo(f"Unsupported artifact schema: {file} ({exc})", err=True)
+        raise typer.Exit(2) from exc
 
     if not Console().is_terminal:
         console = Console(stderr=True)

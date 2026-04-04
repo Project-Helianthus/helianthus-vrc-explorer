@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from ..artifact_schema import migrate_artifact_schema
 from ..scanner.director import GROUP_CONFIG
 from .browse_models import BrowseTab, RegisterAddress, RegisterRow, TreeNodeRef
 from .register_semantics import entry_display_value_text, visible_rr_keys
@@ -337,6 +338,8 @@ class BrowseStore:
 
     @classmethod
     def from_artifact(cls, artifact: dict[str, Any]) -> BrowseStore:
+        artifact, _migration = migrate_artifact_schema(artifact)
+
         meta = artifact.get("meta")
         if not isinstance(meta, dict):
             meta = {}

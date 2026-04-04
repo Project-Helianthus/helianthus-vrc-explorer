@@ -1,5 +1,5 @@
 {
-  "schema_version": "2.0",
+  "schema_version": "2.1",
   "meta": {
     "destination_address": "0x15",
     "scan_timestamp": "2026-03-08T00:00:00Z",
@@ -11,6 +11,7 @@
     "0x00": {
       "name": "Regulator Parameters",
       "descriptor_observed": 3.0,
+      "dual_namespace": false,
       "instances": {
         "0x00": {
           "present": true,
@@ -131,6 +132,7 @@
     "0x0C": {
       "name": "Remote Accessories / FM5 Slots",
       "descriptor_observed": 1.0,
+      "dual_namespace": false,
       "instances": {
         "0x00": {
           "present": true,
