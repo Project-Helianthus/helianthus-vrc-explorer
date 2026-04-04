@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,7 @@ from helianthus_vrc_explorer.artifact_schema import (
 from helianthus_vrc_explorer.scanner.identity import make_register_identity
 from helianthus_vrc_explorer.scanner.plan import make_plan_key
 from helianthus_vrc_explorer.schema.b524_constraints import (
+    CONSTRAINT_SCOPE_DECISION,
     load_default_b524_constraints_catalog,
     lookup_static_constraint,
 )
@@ -47,6 +49,30 @@ def _register_identity_set(artifact: dict[str, Any]) -> set[tuple[Any, ...]]:
             )
         )
     return identities
+
+
+def _namespace_collision_index(artifact: dict[str, Any]) -> dict[tuple[str, str, str], set[str]]:
+    by_coordinate: dict[tuple[str, str, str], set[str]] = {}
+    for group_key, namespace_key, instance_key, register_key, _entry in iter_register_entries(artifact):
+        if not isinstance(namespace_key, str):
+            continue
+        coordinate = (group_key, instance_key, register_key)
+        if coordinate not in by_coordinate:
+            by_coordinate[coordinate] = set()
+        by_coordinate[coordinate].add(namespace_key)
+    return {coordinate: keys for coordinate, keys in by_coordinate.items() if len(keys) > 1}
+
+
+def _normalize_opcode_hex(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = int(value, 0)
+    except ValueError:
+        return None
+    if not (0x00 <= parsed <= 0xFF):
+        return None
+    return f"0x{parsed:02x}"
 
 
 def test_issue_208_identity_isolation_keeps_opcode_namespace_distinct() -> None:
@@ -88,10 +114,35 @@ def test_issue_208_constraint_scope_is_opcode_invariant_for_same_group_register(
     assert local is not None
     assert remote is not None
     assert local == remote
+    assert local.scope == CONSTRAINT_SCOPE_DECISION
+    assert local.kind == "f32_range"
+    assert local.min_value == 15
+    assert local.max_value == 30
+    assert local.step_value == 0.5
+
+    same_group_different_register = lookup_static_constraint(
+        catalog,
+        identity=make_register_identity(opcode=0x02, group=0x03, instance=0x00, register=0x0001),
+    )
+    assert same_group_different_register is not None
+    assert same_group_different_register != local
+    assert same_group_different_register.kind == "u16_range"
+
+    different_group_same_register = lookup_static_constraint(
+        catalog,
+        identity=make_register_identity(opcode=0x02, group=0x04, instance=0x00, register=0x0002),
+    )
+    assert different_group_same_register is not None
+    assert different_group_same_register != local
+    assert different_group_same_register.kind == "u8_range"
 
 
 def test_issue_208_fixture_backward_compatibility_migrates_legacy_shape() -> None:
-    current = _load_fixture("vrc720_full_scan.json")
+    current = _load_fixture("dual_namespace_scan.json")
+    collision_index = _namespace_collision_index(current)
+    assert collision_index
+    assert all(namespaces == {"0x02", "0x06"} for namespaces in collision_index.values())
+
     legacy = deepcopy(current)
     legacy.pop("schema_version", None)
     groups = legacy.get("groups")
@@ -108,6 +159,14 @@ def test_issue_208_fixture_backward_compatibility_migrates_legacy_shape() -> Non
     assert report.source_schema_version == LEGACY_UNVERSIONED_SCHEMA
     assert migrated["schema_version"] == CURRENT_ARTIFACT_SCHEMA_VERSION
     assert _register_identity_set(migrated) == _register_identity_set(current)
+    assert _namespace_collision_index(migrated) == collision_index
+
+    for group_key, namespace_key, instance_key, register_key, entry in iter_register_entries(migrated):
+        coordinate = (group_key, instance_key, register_key)
+        if coordinate not in collision_index:
+            continue
+        assert isinstance(namespace_key, str)
+        assert _normalize_opcode_hex(entry.get("read_opcode")) == namespace_key.lower()
 
 
 def test_issue_208_summary_namespace_totals_are_opcode_authoritative(tmp_path: Path) -> None:
@@ -186,9 +245,16 @@ def test_issue_208_html_namespace_isolation_avoids_single_namespace_sentinels() 
     html = render_html_report(artifact, title="issue-208")
 
     assert "activeNamespaceByGroup" in html
-    assert 'namespaceKey || "single"' not in html
-    assert '|| "single"' not in html
-    assert 'namespaceKey || "0x00"' not in html
+    forbidden_fallback_patterns = (
+        r"""namespaceKey\s*(?:\|\||\?\?)\s*(['"`])single\1""",
+        r"""namespaceKey\s*(?:\|\||\?\?)\s*(['"`])0x00\1""",
+        r"""fallbackNamespaceKey\s*(?:\|\||\?\?)\s*(['"`])single\1""",
+        r"""fallbackNamespaceKey\s*(?:\|\||\?\?)\s*(['"`])0x00\1""",
+        r"""read_opcode(?:_label)?\s*(?:\|\||\?\?)\s*(['"`])single\1""",
+        r"""read_opcode(?:_label)?\s*(?:\|\||\?\?)\s*(['"`])0x00\1""",
+    )
+    for pattern in forbidden_fallback_patterns:
+        assert re.search(pattern, html, flags=re.IGNORECASE) is None
 
 
 def test_issue_208_planner_opcode_fidelity_keeps_namespace_specific_keys() -> None:
