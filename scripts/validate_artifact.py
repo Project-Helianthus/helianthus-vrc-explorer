@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Any
 
 from helianthus_vrc_explorer.artifact_schema import (
-    LEGACY_VERSIONED_SCHEMAS,
     LEGACY_UNVERSIONED_SCHEMA,
+    LEGACY_VERSIONED_SCHEMAS,
     ArtifactSchemaError,
     count_register_entries,
     detect_schema_version,

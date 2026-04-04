@@ -11,8 +11,8 @@ import pytest
 
 from helianthus_vrc_explorer.artifact_schema import (
     CURRENT_ARTIFACT_SCHEMA_VERSION,
-    LEGACY_VERSIONED_SCHEMAS,
     LEGACY_UNVERSIONED_SCHEMA,
+    LEGACY_VERSIONED_SCHEMAS,
     count_register_entries,
     iter_register_entries,
     migrate_artifact_schema,
