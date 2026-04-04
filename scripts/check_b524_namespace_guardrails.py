@@ -50,9 +50,35 @@ FORBIDDEN_PATTERNS: tuple[ForbiddenPattern, ...] = (
         pattern=re.compile(r'namespace_key\s+or\s+"single"'),
     ),
     ForbiddenPattern(
+        description="B524 row identity sentinel fallback ('0x00') in browse store",
+        path="src/helianthus_vrc_explorer/ui/browse_store.py",
+        pattern=re.compile(
+            r"def\s+_single_namespace_key\s*\([\s\S]*?return\s+\"0x00\"",
+            re.MULTILINE,
+        ),
+    ),
+    ForbiddenPattern(
         description="B524 namespace sentinel fallback ('single') in HTML report",
         path="src/helianthus_vrc_explorer/ui/html_report.py",
         pattern=re.compile(r'\|\|\s*"single"'),
+    ),
+    ForbiddenPattern(
+        description="B524 namespace sentinel fallback ('0x00') in HTML report",
+        path="src/helianthus_vrc_explorer/ui/html_report.py",
+        pattern=re.compile(r'namespaceKey\s*\|\|\s*"0x00"'),
+    ),
+    ForbiddenPattern(
+        description="B524 read opcode sentinel fallback ('0x00') in HTML report",
+        path="src/helianthus_vrc_explorer/ui/html_report.py",
+        pattern=re.compile(r'read_opcode[^\n]*:\s*"0x00"'),
+    ),
+    ForbiddenPattern(
+        description="B524 namespace sentinel fallback ('0x00') in summary view",
+        path="src/helianthus_vrc_explorer/ui/summary.py",
+        pattern=re.compile(
+            r"def\s+_namespace_label_from_entry\s*\([\s\S]*?return\s+\"0x00\"",
+            re.MULTILINE,
+        ),
     ),
 )
 

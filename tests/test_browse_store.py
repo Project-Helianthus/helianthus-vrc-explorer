@@ -170,6 +170,47 @@ def test_browse_store_single_namespace_instance_node_uses_opcode_identity() -> N
     )
 
 
+def test_browse_store_instance_selection_keeps_mixed_opcode_rows_in_single_namespace_group(
+) -> None:
+    artifact = {
+        "meta": {"destination_address": "0x15", "scan_timestamp": "2026-02-11T12:00:00Z"},
+        "groups": {
+            "0x02": {
+                "name": "Heating Circuits",
+                "instances": {
+                    "0x00": {
+                        "registers": {
+                            "0x0001": {
+                                "value": 1,
+                                "raw_hex": "01",
+                                "flags_access": "stable_ro",
+                                "read_opcode": "0x02",
+                            },
+                            "0x0002": {
+                                "value": 2,
+                                "raw_hex": "02",
+                                "flags_access": "stable_ro",
+                                "read_opcode": "0x06",
+                            },
+                        }
+                    }
+                },
+            }
+        },
+    }
+
+    store = BrowseStore.from_artifact(artifact)
+    instance_node = next(
+        node for node in store.tree_nodes if node.node_id == "b524:inst:0x02:0x02:0x00"
+    )
+
+    rows = store.rows_for_selection(instance_node, tab="state")
+    assert {(row.register_key, row.namespace_key) for row in rows} == {
+        ("0x0001", "0x02"),
+        ("0x0002", "0x06"),
+    }
+
+
 def test_browse_store_builds_namespace_nodes_for_dual_namespace_groups() -> None:
     store = BrowseStore.from_artifact(_dual_namespace_artifact())
 

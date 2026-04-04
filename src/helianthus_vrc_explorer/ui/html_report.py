@@ -734,8 +734,18 @@ __ARTIFACT_JSON__
         state.overrides[groupKey][rrKey] = typeSpec;
       }
 
+      function normalizeOpcodeKey(opcodeRaw) {
+        if (typeof opcodeRaw !== "string") return null;
+        const trimmed = opcodeRaw.trim();
+        if (!trimmed) return null;
+        const parsed = Number(trimmed);
+        if (!Number.isInteger(parsed) || parsed < 0 || parsed > 0xff) return null;
+        return `0x${parsed.toString(16).padStart(2, "0")}`;
+      }
+
       function namespaceLabel(namespaceKey, label) {
-        const raw = typeof label === "string" && label ? label : (namespaceKey || "0x00");
+        const raw = typeof label === "string" && label ? label : namespaceKey;
+        if (!raw) return "";
         if (!namespaceKey) return raw;
         if (raw.startsWith("0x")) return raw;
         return `${raw.charAt(0).toUpperCase()}${raw.slice(1)} (${namespaceKey})`;
@@ -879,19 +889,18 @@ __ARTIFACT_JSON__
           }
 
           const instances = groupObj.instances && typeof groupObj.instances === "object" ? groupObj.instances : {};
-          for (const instanceObj of Object.values(instances)) {
-            if (!instanceObj || typeof instanceObj !== "object") continue;
-            const registers = instanceObj.registers && typeof instanceObj.registers === "object" ? instanceObj.registers : {};
-            for (const entry of Object.values(registers)) {
-              if (!entry || typeof entry !== "object") continue;
-              const label = typeof entry.read_opcode_label === "string" && entry.read_opcode_label
-                ? entry.read_opcode_label
-                : (typeof entry.read_opcode === "string" && entry.read_opcode ? entry.read_opcode : "0x00");
-              totalRegisters += 1;
-              totals.set(label, (totals.get(label) || 0) + 1);
+            for (const instanceObj of Object.values(instances)) {
+              if (!instanceObj || typeof instanceObj !== "object") continue;
+              const registers = instanceObj.registers && typeof instanceObj.registers === "object" ? instanceObj.registers : {};
+              for (const entry of Object.values(registers)) {
+                if (!entry || typeof entry !== "object") continue;
+                const label = normalizeOpcodeKey(entry.read_opcode) || normalizeOpcodeKey(entry.read_opcode_label);
+                if (!label) continue;
+                totalRegisters += 1;
+                totals.set(label, (totals.get(label) || 0) + 1);
+              }
             }
           }
-        }
 
         const chips = [["total", totalRegisters], ...Array.from(totals.entries())];
         for (const [label, count] of chips) {

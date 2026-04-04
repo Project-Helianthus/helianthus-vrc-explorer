@@ -299,3 +299,5 @@ def test_html_report_does_not_use_single_namespace_identity_sentinel() -> None:
     html = render_html_report(artifact, title="test")
     assert 'namespaceKey || "single"' not in html
     assert '|| "single"' not in html
+    assert 'namespaceKey || "0x00"' not in html
+    assert ': "0x00"' not in html

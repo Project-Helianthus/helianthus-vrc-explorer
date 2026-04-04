@@ -64,20 +64,17 @@ def _iter_register_entries(artifact: dict[str, Any]) -> Iterable[dict[str, Any]]
                     yield entry
 
 
-def _namespace_label_from_entry(entry: dict[str, Any]) -> str:
-    opcode = entry.get("read_opcode")
-    if isinstance(opcode, str) and opcode.strip():
+def _namespace_label_from_entry(entry: dict[str, Any]) -> str | None:
+    for raw in (entry.get("read_opcode"), entry.get("read_opcode_label")):
+        if not isinstance(raw, str) or not raw.strip():
+            continue
         try:
-            parsed = int(opcode.strip(), 0)
+            parsed = int(raw.strip(), 0)
         except ValueError:
-            pass
-        else:
-            if 0 <= parsed <= 0xFF:
-                return f"0x{parsed:02x}"
-    label = entry.get("read_opcode_label")
-    if isinstance(label, str) and label.strip():
-        return label.strip()
-    return "0x00"
+            continue
+        if 0 <= parsed <= 0xFF:
+            return f"0x{parsed:02x}"
+    return None
 
 
 def _compute_group_stats(artifact: dict[str, Any]) -> list[_GroupStats]:
@@ -157,9 +154,10 @@ def _compute_group_stats(artifact: dict[str, Any]) -> list[_GroupStats]:
                     if not isinstance(entry, dict):
                         continue
                     namespace_label = _namespace_label_from_entry(entry)
-                    namespace_registers[namespace_label] = (
-                        namespace_registers.get(namespace_label, 0) + 1
-                    )
+                    if namespace_label is not None:
+                        namespace_registers[namespace_label] = (
+                            namespace_registers.get(namespace_label, 0) + 1
+                        )
                     if entry.get("error") is not None:
                         registers_errors += 1
 
@@ -184,6 +182,8 @@ def _compute_namespace_totals(artifact: dict[str, Any]) -> dict[str, int]:
     totals: dict[str, int] = {}
     for entry in _iter_register_entries(artifact):
         label = _namespace_label_from_entry(entry)
+        if label is None:
+            continue
         totals[label] = totals.get(label, 0) + 1
     return dict(sorted(totals.items()))
 

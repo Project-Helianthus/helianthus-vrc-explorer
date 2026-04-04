@@ -160,7 +160,9 @@ def _normalize_opcode_hex(value: object) -> str | None:
     return _hex_u8(opcode)
 
 
-def _namespace_label_for_key(namespace_key: str) -> str:
+def _namespace_label_for_key(namespace_key: str | None) -> str | None:
+    if namespace_key is None:
+        return None
     opcode = _safe_int_hex(namespace_key)
     if opcode == 0x02:
         return "local"
@@ -169,13 +171,36 @@ def _namespace_label_for_key(namespace_key: str) -> str:
     return namespace_key
 
 
-def _single_namespace_key(group_key: str, group_obj: dict[str, Any]) -> str:
+def _single_namespace_key(group_key: str, group_obj: dict[str, Any]) -> str | None:
     discovery_advisory = group_obj.get("discovery_advisory")
     if isinstance(discovery_advisory, dict):
         proven = discovery_advisory.get("proven_register_opcodes")
         if isinstance(proven, list):
             for opcode in proven:
                 normalized = _normalize_opcode_hex(opcode)
+                if normalized is not None:
+                    return normalized
+
+    instances = group_obj.get("instances")
+    if isinstance(instances, dict):
+        for instance_key in sorted(
+            (k for k in instances if isinstance(k, str)),
+            key=_safe_int_hex,
+        ):
+            instance_obj = instances.get(instance_key)
+            if not isinstance(instance_obj, dict):
+                continue
+            registers = instance_obj.get("registers")
+            if not isinstance(registers, dict):
+                continue
+            for register_key in sorted(
+                (k for k in registers if isinstance(k, str)),
+                key=_safe_int_hex,
+            ):
+                entry = registers.get(register_key)
+                if not isinstance(entry, dict):
+                    continue
+                normalized = _normalize_opcode_hex(entry.get("read_opcode"))
                 if normalized is not None:
                     return normalized
 
@@ -187,7 +212,27 @@ def _single_namespace_key(group_key: str, group_obj: dict[str, Any]) -> str:
             for opcode in opcodes:
                 if isinstance(opcode, int):
                     return _hex_u8(opcode)
-    return "0x00"
+    return None
+
+
+def _build_b524_instance_node_id(
+    *, group_key: str, namespace_key: str | None, instance_key: str
+) -> str:
+    parts = ["b524", "inst", group_key]
+    if namespace_key is not None:
+        parts.append(namespace_key)
+    parts.append(instance_key)
+    return ":".join(parts)
+
+
+def _build_b524_row_id(
+    *, group_key: str, namespace_key: str | None, instance_key: str, register_key: str
+) -> str:
+    parts = [group_key]
+    if namespace_key is not None:
+        parts.append(namespace_key)
+    parts.extend([instance_key, register_key])
+    return ":".join(parts)
 
 
 def _group_namespace_views(
@@ -397,8 +442,10 @@ class BrowseStore:
                         continue
                     # For instanced groups, list instances as the leaf nodes (do not expand to RR).
                     if is_instanced:
-                        node_id = ":".join(
-                            ["b524", "inst", group_key, effective_namespace_key, instance_key]
+                        node_id = _build_b524_instance_node_id(
+                            group_key=group_key,
+                            namespace_key=effective_namespace_key,
+                            instance_key=instance_key,
                         )
                         tree_nodes.append(
                             TreeNodeRef(
@@ -474,8 +521,11 @@ class BrowseStore:
                             path_parts.append(entry_namespace_display)
                         path_parts.extend([instance_key, name])
                         path = "/".join(path_parts)
-                        row_id = ":".join(
-                            [group_key, entry_namespace_key, instance_key, register_key]
+                        row_id = _build_b524_row_id(
+                            group_key=group_key,
+                            namespace_key=entry_namespace_key,
+                            instance_key=instance_key,
+                            register_key=register_key,
                         )
                         access_flags = str(entry.get("flags_access") or "—")
                         row = RegisterRow(
@@ -936,14 +986,22 @@ class BrowseStore:
             and node.group_key is not None
             and node.instance_key is not None
         ):
-            return [
+            by_group_instance = [
                 row
                 for row in selected
                 if row.protocol == "b524"
                 and row.group_key == node.group_key
-                and row.namespace_key == node.namespace_key
                 and row.instance_key == node.instance_key
             ]
+            has_namespace_nodes = any(
+                tree.level == "namespace"
+                and tree.protocol == "b524"
+                and tree.group_key == node.group_key
+                for tree in self.tree_nodes
+            )
+            if node.namespace_key is None or not has_namespace_nodes:
+                return by_group_instance
+            return [row for row in by_group_instance if row.namespace_key == node.namespace_key]
         if node.level == "range" and node.protocol == "b509" and node.range_key is not None:
             parsed = _parse_range_key(node.range_key)
             if parsed is None:
