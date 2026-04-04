@@ -301,3 +301,69 @@ def test_html_report_does_not_use_single_namespace_identity_sentinel() -> None:
     assert '|| "single"' not in html
     assert 'namespaceKey || "0x00"' not in html
     assert ': "0x00"' not in html
+
+
+def test_html_report_namespace_helpers_are_opcode_key_authoritative() -> None:
+    artifact = {
+        "meta": {"destination_address": "0x15", "scan_timestamp": "2026-02-11T00:00:00Z"},
+        "groups": {
+            "0x09": {
+                "name": "Regulators",
+                "dual_namespace": True,
+                "namespaces": {
+                    "0x06": {
+                        "label": "local",
+                        "instances": {
+                            "0x00": {
+                                "registers": {
+                                    "0x0001": {
+                                        "raw_hex": "0000a841",
+                                        "type": "EXP",
+                                        "value": 21.0,
+                                        "read_opcode": "0x06",
+                                        "read_opcode_label": "local",
+                                    }
+                                }
+                            }
+                        },
+                    }
+                },
+            }
+        },
+    }
+
+    html = render_html_report(artifact, title="test")
+
+    assert "function canonicalNamespaceLabel(namespaceKey)" in html
+    assert 'if (trimmed === "local") return "0x02";' in html
+    assert 'if (trimmed === "remote") return "0x06";' in html
+    assert "if (canonical) {" in html
+    assert "(${namespaceKey})" in html
+
+
+def test_html_report_splits_mixed_legacy_group_by_namespace_and_scopes_overrides() -> None:
+    artifact = {
+        "meta": {"destination_address": "0x15", "scan_timestamp": "2026-02-11T00:00:00Z"},
+        "groups": {
+            "0x02": {
+                "name": "Heating Circuits",
+                "instances": {
+                    "0x00": {
+                        "registers": {
+                            "0x0001": {"raw_hex": "01", "read_opcode": "0x02"},
+                            "0x0002": {"raw_hex": "02", "read_opcode": "0x06"},
+                        }
+                    }
+                },
+            }
+        },
+    }
+
+    html = render_html_report(artifact, title="test")
+
+    assert "function splitInstancesByNamespace(instancesObj, fallbackNamespaceKey = null)" in html
+    assert "const splitNamespaces = splitInstancesByNamespace(groupObj.instances || {});" in html
+    assert "if (namespaceKeys.length > 1) {" in html
+    assert "${namespaceLabel(activeNamespace, activeNamespace)} Registers" in html
+    assert "if (namespaceKey) {" in html
+    assert "return null;" in html

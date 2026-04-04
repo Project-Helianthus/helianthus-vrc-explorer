@@ -56,7 +56,11 @@ def _fmt_group_label(group_key: str, group_name: str) -> str:
     return f"{group_name} ({group_key})"
 
 
-def _instance_display_base(*, group_key: str, group_name: str) -> str:
+def _instance_display_base(*, group_key: str, group_name: str, namespace_key: str | None) -> str:
+    if namespace_key == "0x06":
+        return "Remote Slot"
+    if namespace_key is not None and namespace_key != "0x02":
+        return f"Namespace {namespace_key} Slot"
     mapping: dict[int, str] = {
         0x02: "Heating Circuit",
         0x03: "Zone",
@@ -76,6 +80,7 @@ def _instance_label(
     *,
     group_key: str,
     group_name: str,
+    namespace_key: str | None,
     instance_key: str,
     instance_obj: dict[str, Any],
 ) -> str:
@@ -92,7 +97,11 @@ def _instance_label(
                 if isinstance(value, str) and value.strip():
                     return f"{value.strip()} ({instance_key})"
 
-    base = _instance_display_base(group_key=group_key, group_name=group_name)
+    base = _instance_display_base(
+        group_key=group_key,
+        group_name=group_name,
+        namespace_key=namespace_key,
+    )
     # Human-friendly numbering: show 1-based index, but always keep the instance ID too.
     ii = _safe_int_hex(instance_key)
     return f"{base} {ii + 1} ({instance_key})"
@@ -138,12 +147,15 @@ def _row_sort_key(row: RegisterRow) -> tuple[int, int, int, int, int]:
 def _namespace_display_label(namespace_key: str | None, namespace_label: str | None) -> str | None:
     if namespace_key is None:
         return None
-    label = (namespace_label or namespace_key).strip()
-    if not label:
-        label = namespace_key
-    if label.startswith("0x"):
-        return label
-    return f"{label[:1].upper()}{label[1:]} ({namespace_key})"
+    canonical_label = _namespace_label_for_key(namespace_key)
+    if canonical_label in {"local", "remote"}:
+        return f"{canonical_label[:1].upper()}{canonical_label[1:]} ({namespace_key})"
+    label = namespace_label.strip() if isinstance(namespace_label, str) else ""
+    if label and label.lower() != namespace_key.lower():
+        if label.startswith("0x"):
+            return namespace_key
+        return f"{label[:1].upper()}{label[1:]} ({namespace_key})"
+    return namespace_key
 
 
 def _normalize_opcode_hex(value: object) -> str | None:
@@ -159,6 +171,29 @@ def _normalize_opcode_hex(value: object) -> str | None:
     if opcode < 0x00 or opcode > 0xFF:
         return None
     return _hex_u8(opcode)
+
+
+def _namespace_key_from_label(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    raw = value.strip().lower()
+    if raw == "local":
+        return "0x02"
+    if raw == "remote":
+        return "0x06"
+    return _normalize_opcode_hex(value)
+
+
+def _entry_namespace_key(
+    entry: dict[str, Any], *, fallback_namespace_key: str | None = None
+) -> str | None:
+    namespace_key = _normalize_opcode_hex(entry.get("read_opcode"))
+    if namespace_key is not None:
+        return namespace_key
+    namespace_key = _namespace_key_from_label(entry.get("read_opcode_label"))
+    if namespace_key is not None:
+        return namespace_key
+    return fallback_namespace_key
 
 
 def _namespace_label_for_key(namespace_key: str | None) -> str | None:
@@ -237,6 +272,8 @@ def _build_b524_row_id(
 
 
 def _group_namespace_views(
+    *,
+    group_key: str,
     group_obj: dict[str, Any],
 ) -> list[tuple[str | None, str | None, dict[str, Any]]]:
     if bool(group_obj.get("dual_namespace")):
@@ -251,7 +288,11 @@ def _group_namespace_views(
             if not isinstance(namespace_obj, dict):
                 continue
             label_obj = namespace_obj.get("label")
-            namespace_label = label_obj if isinstance(label_obj, str) else namespace_key
+            namespace_label = (
+                label_obj
+                if isinstance(label_obj, str) and label_obj.strip()
+                else _namespace_label_for_key(namespace_key) or namespace_key
+            )
             instances = namespace_obj.get("instances")
             views.append(
                 (
@@ -263,7 +304,61 @@ def _group_namespace_views(
         return views
 
     instances = group_obj.get("instances")
-    return [(None, None, instances if isinstance(instances, dict) else {})]
+    if not isinstance(instances, dict):
+        return [(None, None, {})]
+
+    default_namespace_key = _single_namespace_key(group_key, group_obj)
+    split_instances: dict[str, dict[str, Any]] = {}
+    for instance_key in sorted(
+        (k for k in instances if isinstance(k, str)),
+        key=_safe_int_hex,
+    ):
+        instance_obj = instances.get(instance_key)
+        if not isinstance(instance_obj, dict):
+            continue
+        registers = instance_obj.get("registers")
+        if not isinstance(registers, dict):
+            continue
+        for register_key in sorted(
+            (k for k in registers if isinstance(k, str)),
+            key=_safe_int_hex,
+        ):
+            entry = registers.get(register_key)
+            if not isinstance(entry, dict):
+                continue
+            namespace_key = _entry_namespace_key(
+                entry,
+                fallback_namespace_key=default_namespace_key,
+            )
+            if namespace_key is None:
+                continue
+            namespace_instances = split_instances.setdefault(namespace_key, {})
+            namespace_instance = namespace_instances.get(instance_key)
+            if not isinstance(namespace_instance, dict):
+                namespace_instance = {
+                    "present": instance_obj.get("present"),
+                    "registers": {},
+                }
+                namespace_instances[instance_key] = namespace_instance
+            namespace_registers = namespace_instance.get("registers")
+            if not isinstance(namespace_registers, dict):
+                namespace_registers = {}
+                namespace_instance["registers"] = namespace_registers
+            namespace_registers[register_key] = entry
+
+    if len(split_instances) <= 1:
+        return [(None, None, instances)]
+
+    views = []
+    for namespace_key in sorted(split_instances, key=_safe_int_hex):
+        views.append(
+            (
+                namespace_key,
+                _namespace_label_for_key(namespace_key) or namespace_key,
+                split_instances[namespace_key],
+            )
+        )
+    return views
 
 
 def _parse_range_key(range_key: str) -> tuple[int, int] | None:
@@ -384,7 +479,7 @@ class BrowseStore:
             gg = _safe_int_hex(group_key)
             group_single_namespace_key = _single_namespace_key(group_key, group_obj)
             group_single_namespace_label = _namespace_label_for_key(group_single_namespace_key)
-            namespace_views = _group_namespace_views(group_obj)
+            namespace_views = _group_namespace_views(group_key=group_key, group_obj=group_obj)
             if not namespace_views:
                 continue
             all_instance_keys = sorted(
@@ -456,6 +551,7 @@ class BrowseStore:
                                 label=_instance_label(
                                     group_key=group_key,
                                     group_name=group_name,
+                                    namespace_key=effective_namespace_key,
                                     instance_key=instance_key,
                                     instance_obj=instance_obj,
                                 ),
@@ -494,13 +590,15 @@ class BrowseStore:
                             if isinstance(entry.get("read_opcode_label"), str)
                             else None
                         )
-                        if read_opcode_label:
-                            entry_namespace_label = read_opcode_label
+                        if entry_namespace_key is not None:
+                            entry_namespace_label = _namespace_label_for_key(entry_namespace_key)
                         elif (
                             namespace_key is not None
                             and entry_namespace_key == effective_namespace_key
                         ):
                             entry_namespace_label = effective_namespace_label
+                        elif read_opcode_label:
+                            entry_namespace_label = read_opcode_label
                         else:
                             entry_namespace_label = _namespace_label_for_key(entry_namespace_key)
                         address = RegisterAddress(

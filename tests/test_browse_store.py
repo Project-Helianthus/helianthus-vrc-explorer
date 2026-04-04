@@ -170,9 +170,7 @@ def test_browse_store_single_namespace_instance_node_uses_opcode_identity() -> N
     )
 
 
-def test_browse_store_instance_selection_keeps_mixed_opcode_rows_in_single_namespace_group() -> (
-    None
-):
+def test_browse_store_instance_selection_is_namespace_isolated_for_mixed_legacy_group() -> None:
     artifact = {
         "meta": {"destination_address": "0x15", "scan_timestamp": "2026-02-11T12:00:00Z"},
         "groups": {
@@ -201,15 +199,17 @@ def test_browse_store_instance_selection_keeps_mixed_opcode_rows_in_single_names
     }
 
     store = BrowseStore.from_artifact(artifact)
-    instance_node = next(
+    local_instance_node = next(
         node for node in store.tree_nodes if node.node_id == "b524:inst:0x02:0x02:0x00"
     )
+    remote_instance_node = next(
+        node for node in store.tree_nodes if node.node_id == "b524:inst:0x02:0x06:0x00"
+    )
 
-    rows = store.rows_for_selection(instance_node, tab="state")
-    assert {(row.register_key, row.namespace_key) for row in rows} == {
-        ("0x0001", "0x02"),
-        ("0x0002", "0x06"),
-    }
+    local_rows = store.rows_for_selection(local_instance_node, tab="state")
+    remote_rows = store.rows_for_selection(remote_instance_node, tab="state")
+    assert {(row.register_key, row.namespace_key) for row in local_rows} == {("0x0001", "0x02")}
+    assert {(row.register_key, row.namespace_key) for row in remote_rows} == {("0x0002", "0x06")}
 
 
 def test_browse_store_builds_namespace_nodes_for_dual_namespace_groups() -> None:
@@ -232,6 +232,44 @@ def test_browse_store_builds_namespace_nodes_for_dual_namespace_groups() -> None
     assert remote_row.namespace_label == "remote"
     assert local_row.access_flags == "stable_ro"
     assert remote_row.access_flags == "user_rw"
+
+
+def test_browse_store_remote_namespace_instance_label_drops_local_group_assumption() -> None:
+    artifact = {
+        "meta": {"destination_address": "0x15", "scan_timestamp": "2026-02-11T12:00:00Z"},
+        "groups": {
+            "0x02": {
+                "name": "Heating Circuits",
+                "dual_namespace": True,
+                "namespaces": {
+                    "0x06": {
+                        "label": "local",
+                        "instances": {
+                            "0x00": {
+                                "present": True,
+                                "registers": {
+                                    "0x0001": {
+                                        "value": 21.0,
+                                        "raw_hex": "0000a841",
+                                        "flags_access": "stable_ro",
+                                        "read_opcode": "0x06",
+                                        "read_opcode_label": "local",
+                                    }
+                                },
+                            }
+                        },
+                    }
+                },
+            }
+        },
+    }
+
+    store = BrowseStore.from_artifact(artifact)
+    by_node_id = {node.node_id: node for node in store.tree_nodes}
+    assert by_node_id["b524:ns:0x02:0x06"].label == "Remote (0x06)"
+    assert by_node_id["b524:inst:0x02:0x06:0x00"].label == "Remote Slot 1 (0x00)"
+    row = store.rows[0]
+    assert row.path == "B524/Heating Circuits/Remote (0x06)/0x00/0x0001"
 
 
 def test_browse_store_filters_rows_for_namespace_selection() -> None:

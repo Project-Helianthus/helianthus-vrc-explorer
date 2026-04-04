@@ -711,9 +711,12 @@ __ARTIFACT_JSON__
       function getRowOverride(groupKey, rrKey, namespaceKey = null) {
         const g = state.overrides && state.overrides[groupKey];
         if (!g || typeof g !== "object") return null;
-        if (namespaceKey && g.namespaces && typeof g.namespaces === "object") {
-          const ns = g.namespaces[namespaceKey];
-          if (ns && typeof ns === "object" && typeof ns[rrKey] === "string") return ns[rrKey];
+        if (namespaceKey) {
+          if (g.namespaces && typeof g.namespaces === "object") {
+            const ns = g.namespaces[namespaceKey];
+            if (ns && typeof ns === "object" && typeof ns[rrKey] === "string") return ns[rrKey];
+          }
+          return null;
         }
         return typeof g[rrKey] === "string" ? g[rrKey] : null;
       }
@@ -736,19 +739,66 @@ __ARTIFACT_JSON__
 
       function normalizeOpcodeKey(opcodeRaw) {
         if (typeof opcodeRaw !== "string") return null;
-        const trimmed = opcodeRaw.trim();
+        const trimmed = opcodeRaw.trim().toLowerCase();
         if (!trimmed) return null;
+        if (trimmed === "local") return "0x02";
+        if (trimmed === "remote") return "0x06";
         const parsed = Number(trimmed);
         if (!Number.isInteger(parsed) || parsed < 0 || parsed > 0xff) return null;
         return `0x${parsed.toString(16).padStart(2, "0")}`;
+      }
+
+      function canonicalNamespaceLabel(namespaceKey) {
+        if (namespaceKey === "0x02") return "local";
+        if (namespaceKey === "0x06") return "remote";
+        return null;
       }
 
       function namespaceLabel(namespaceKey, label) {
         const raw = typeof label === "string" && label ? label : namespaceKey;
         if (!raw) return "";
         if (!namespaceKey) return raw;
-        if (raw.startsWith("0x")) return raw;
+        const canonical = canonicalNamespaceLabel(namespaceKey);
+        if (canonical) {
+          return `${canonical.charAt(0).toUpperCase()}${canonical.slice(1)} (${namespaceKey})`;
+        }
+        if (raw.startsWith("0x")) return namespaceKey;
         return `${raw.charAt(0).toUpperCase()}${raw.slice(1)} (${namespaceKey})`;
+      }
+
+      function namespaceKeyFromEntry(entry, fallbackNamespaceKey = null) {
+        if (!entry || typeof entry !== "object") return fallbackNamespaceKey;
+        return (
+          normalizeOpcodeKey(entry.read_opcode)
+          || normalizeOpcodeKey(entry.read_opcode_label)
+          || fallbackNamespaceKey
+        );
+      }
+
+      function splitInstancesByNamespace(instancesObj, fallbackNamespaceKey = null) {
+        const split = {};
+        if (!instancesObj || typeof instancesObj !== "object") return split;
+        for (const iiKey of sortedHexKeys(Object.keys(instancesObj))) {
+          const inst = getInstanceObject(instancesObj[iiKey]);
+          const regs = inst.registers && typeof inst.registers === "object" ? inst.registers : {};
+          for (const rrKey of sortedHexKeys(Object.keys(regs))) {
+            const entry = regs[rrKey];
+            if (!entry || typeof entry !== "object") continue;
+            const namespaceKey = namespaceKeyFromEntry(entry, fallbackNamespaceKey);
+            if (!namespaceKey) continue;
+            if (!split[namespaceKey] || typeof split[namespaceKey] !== "object") {
+              split[namespaceKey] = {};
+            }
+            if (!split[namespaceKey][iiKey] || typeof split[namespaceKey][iiKey] !== "object") {
+              split[namespaceKey][iiKey] = {
+                present: inst.present,
+                registers: {},
+              };
+            }
+            split[namespaceKey][iiKey].registers[rrKey] = entry;
+          }
+        }
+        return split;
       }
 
       function entryStatusKind(entry) {
@@ -880,7 +930,8 @@ __ARTIFACT_JSON__
             for (const namespaceKey of sortedHexKeys(Object.keys(groupObj.namespaces))) {
               const namespaceObj = groupObj.namespaces[namespaceKey];
               if (!namespaceObj || typeof namespaceObj !== "object") continue;
-              const label = typeof namespaceObj.label === "string" ? namespaceObj.label : namespaceKey;
+              const normalizedKey = normalizeOpcodeKey(namespaceKey) || namespaceKey;
+              const label = namespaceLabel(normalizedKey, namespaceObj.label);
               const count = countRegisters(namespaceObj.instances);
               totalRegisters += count;
               totals.set(label, (totals.get(label) || 0) + count);
@@ -894,8 +945,9 @@ __ARTIFACT_JSON__
               const registers = instanceObj.registers && typeof instanceObj.registers === "object" ? instanceObj.registers : {};
               for (const entry of Object.values(registers)) {
                 if (!entry || typeof entry !== "object") continue;
-                const label = normalizeOpcodeKey(entry.read_opcode) || normalizeOpcodeKey(entry.read_opcode_label);
-                if (!label) continue;
+                const namespaceKey = namespaceKeyFromEntry(entry);
+                if (!namespaceKey) continue;
+                const label = namespaceLabel(namespaceKey, entry.read_opcode_label);
                 totalRegisters += 1;
                 totals.set(label, (totals.get(label) || 0) + 1);
               }
@@ -1656,10 +1708,11 @@ __ARTIFACT_JSON__
             for (const namespaceKey of namespaceKeys) {
               const namespaceObj = groupObj.namespaces[namespaceKey];
               if (!namespaceObj || typeof namespaceObj !== "object") continue;
+              const normalizedKey = normalizeOpcodeKey(namespaceKey) || namespaceKey;
               const btn = document.createElement("div");
               btn.className = "tab";
               if (namespaceKey === activeNamespace) btn.classList.add("active");
-              btn.textContent = namespaceLabel(namespaceKey, namespaceObj.label);
+              btn.textContent = namespaceLabel(normalizedKey, namespaceObj.label);
               btn.addEventListener("click", () => {
                 state.activeNamespaceByGroup[groupKey] = namespaceKey;
                 renderActiveGroup(groupKey);
@@ -1670,12 +1723,52 @@ __ARTIFACT_JSON__
 
             const namespaceObj = groupObj.namespaces[activeNamespace];
             if (namespaceObj && typeof namespaceObj === "object") {
-              const tableTitle = `${namespaceLabel(activeNamespace, namespaceObj.label)} Registers`;
+              const normalizedKey = normalizeOpcodeKey(activeNamespace) || activeNamespace;
+              const tableTitle = `${namespaceLabel(normalizedKey, namespaceObj.label)} Registers`;
               container.appendChild(buildGroupTable(tableTitle, namespaceObj.instances || {}, activeNamespace));
             }
           }
         } else {
-          container.appendChild(buildGroupTable("Registers", groupObj.instances || {}, null));
+          const splitNamespaces = splitInstancesByNamespace(groupObj.instances || {});
+          const namespaceKeys = sortedHexKeys(Object.keys(splitNamespaces));
+          if (namespaceKeys.length > 1) {
+            const subtabs = document.createElement("div");
+            subtabs.className = "subtabs";
+            let activeNamespace = state.activeNamespaceByGroup[groupKey];
+            if (!namespaceKeys.includes(activeNamespace)) activeNamespace = namespaceKeys[0];
+            state.activeNamespaceByGroup[groupKey] = activeNamespace;
+
+            for (const namespaceKey of namespaceKeys) {
+              const btn = document.createElement("div");
+              btn.className = "tab";
+              if (namespaceKey === activeNamespace) btn.classList.add("active");
+              btn.textContent = namespaceLabel(namespaceKey, namespaceKey);
+              btn.addEventListener("click", () => {
+                state.activeNamespaceByGroup[groupKey] = namespaceKey;
+                renderActiveGroup(groupKey);
+              });
+              subtabs.appendChild(btn);
+            }
+            container.appendChild(subtabs);
+            container.appendChild(
+              buildGroupTable(
+                `${namespaceLabel(activeNamespace, activeNamespace)} Registers`,
+                splitNamespaces[activeNamespace] || {},
+                activeNamespace,
+              ),
+            );
+          } else if (namespaceKeys.length === 1) {
+            const namespaceKey = namespaceKeys[0];
+            container.appendChild(
+              buildGroupTable(
+                `${namespaceLabel(namespaceKey, namespaceKey)} Registers`,
+                splitNamespaces[namespaceKey] || {},
+                namespaceKey,
+              ),
+            );
+          } else {
+            container.appendChild(buildGroupTable("Registers", groupObj.instances || {}, null));
+          }
         }
 
         sheetArea.innerHTML = "";
