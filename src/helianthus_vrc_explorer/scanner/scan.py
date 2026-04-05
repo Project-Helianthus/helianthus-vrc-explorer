@@ -1958,9 +1958,9 @@ def scan_b524(
             artifact["meta"]["constraint_rescan_recommended"] = True
             if observer is not None:
                 observer.log(
-                    "Observed opcode 0x02 register values outside the bundled static "
-                    "constraint catalog. Review meta.constraint_mismatches and rerun with "
-                    "--probe-constraints if you want live confirmation.",
+                    "Observed register values outside the scoped bundled static "
+                    "constraint catalog. Review meta.constraint_mismatches and rerun "
+                    "with --probe-constraints if you want live confirmation.",
                     level="warn",
                 )
 
