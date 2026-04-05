@@ -281,6 +281,10 @@ def _infer_single_namespace_key(
                     inferred_keys.add(namespace_key)
     if len(inferred_keys) == 1:
         return next(iter(inferred_keys))
+    if inferred_keys:
+        # Conflicting observed opcode evidence should not be collapsed by
+        # discovery fallback; keep the row in "Other Namespaces".
+        return None
 
     discovery_namespace_keys = _discovery_namespace_keys(group_obj)
     if len(discovery_namespace_keys) == 1:

@@ -11,6 +11,7 @@ from helianthus_vrc_explorer.scanner.observer import ScanObserver
 from helianthus_vrc_explorer.scanner.plan import GroupScanPlan, make_plan_key
 from helianthus_vrc_explorer.scanner.scan import (
     _apply_contextual_enum_annotations,
+    _planner_primary_opcode,
     _planner_source_opcodes,
     _probe_unknown_group_opcodes,
     scan_b524,
@@ -1624,6 +1625,19 @@ def test_planner_source_opcodes_surface_both_local_and_remote_for_planner_visibi
     assert _planner_source_opcodes(0x07) == (0x02, 0x06)
     assert _planner_source_opcodes(0x0B) == (0x02, 0x06)
     assert _planner_source_opcodes(0x0C) == (0x02, 0x06)
+
+
+def test_planner_primary_opcode_prefers_resolved_remote_only_namespace() -> None:
+    planner_opcodes = _planner_source_opcodes(0x0C)
+
+    assert (
+        _planner_primary_opcode(
+            group=0x0C,
+            planner_opcodes=planner_opcodes,
+            resolved_opcodes=(0x06,),
+        )
+        == 0x06
+    )
 
 
 def test_scan_b524_disabled_planner_skips_interactive_planner_even_on_tty(

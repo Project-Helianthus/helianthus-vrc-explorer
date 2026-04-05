@@ -529,3 +529,45 @@ def test_render_summary_prefers_observed_namespace_over_discovery_fallback(
     assert "Hot Water Circuit" in text
     assert "Local Devices (0x02)" not in text
     assert "Other Namespaces" not in text
+
+
+def test_render_summary_does_not_collapse_conflicting_observed_namespaces_with_discovery(
+    tmp_path: Path,
+) -> None:
+    artifact = {
+        "meta": {
+            "destination_address": "0x15",
+            "scan_timestamp": "2026-02-11T12:00:00Z",
+            "scan_duration_seconds": 1.0,
+        },
+        "groups": {
+            "0x01": {
+                "name": "Hot Water Circuit",
+                "descriptor_observed": 3.0,
+                "ii_max": "0x00",
+                "discovery_advisory": {
+                    "kind": "directory_probe",
+                    "semantic_authority": False,
+                    "proven_register_opcodes": ["0x02"],
+                },
+                "instances": {
+                    "0x00": {
+                        "present": True,
+                        "registers": {
+                            "0x0001": {"read_opcode": "0x02", "error": None},
+                            "0x0002": {"read_opcode": "0x06", "error": None},
+                        },
+                    }
+                },
+            }
+        },
+    }
+
+    console = Console(record=True, width=160)
+    render_summary(console, artifact, output_path=tmp_path / "artifact.json")
+    text = console.export_text()
+
+    assert "Other Namespaces" in text
+    assert "Hot Water Circuit" in text
+    assert "Local Devices (0x02)" not in text
+    assert "Remote Devices (0x06)" not in text

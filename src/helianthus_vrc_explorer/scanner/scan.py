@@ -148,6 +148,21 @@ def _planner_source_opcodes(group: int) -> tuple[RegisterOpcode, ...]:
     return _sorted_namespace_opcodes(tuple(candidate_opcodes))
 
 
+def _planner_primary_opcode(
+    *,
+    group: int,
+    planner_opcodes: tuple[RegisterOpcode, ...],
+    resolved_opcodes: tuple[RegisterOpcode, ...],
+) -> RegisterOpcode:
+    # Planner visibility can be broader than scan semantics. Preserve the
+    # semantic primary namespace from resolved opcodes when available.
+    if resolved_opcodes:
+        return resolved_opcodes[0]
+    if group in GROUP_CONFIG:
+        return _primary_opcode(group)
+    return planner_opcodes[0]
+
+
 def _primary_opcode(group: int) -> RegisterOpcode:
     return _group_opcodes(group)[0]
 
@@ -1800,12 +1815,17 @@ def scan_b524(
         for group in classified:
             config = GROUP_CONFIG.get(group.group)
             group_meta = metadata_map[group.group]
-            opcodes = resolved_group_opcodes.get(group.group, ())
+            resolved_opcodes = resolved_group_opcodes.get(group.group, ())
+            opcodes = resolved_opcodes
             if planner_mode != "disabled":
                 opcodes = _planner_source_opcodes(group.group)
             if not opcodes:
                 continue
-            primary_opcode = opcodes[0]
+            primary_opcode = _planner_primary_opcode(
+                group=group.group,
+                planner_opcodes=opcodes,
+                resolved_opcodes=resolved_opcodes,
+            )
             dual_namespace = len(opcodes) > 1
             for opcode in opcodes:
                 planner_ii_max = _planner_ii_max(
