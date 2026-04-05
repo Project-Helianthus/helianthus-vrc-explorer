@@ -172,11 +172,17 @@ def _compute_group_stats(artifact: dict[str, Any]) -> list[_GroupStats]:
             namespaces = group_obj.get("namespaces", {})
             if not isinstance(namespaces, dict):
                 namespaces = {}
+            namespace_group_names: list[str] = []
             instance_ids_total: set[str] = set()
             instance_ids_present: set[str] = set()
             for namespace_key, namespace_obj in namespaces.items():
                 if not isinstance(namespace_key, str) or not isinstance(namespace_obj, dict):
                     continue
+                namespace_group_name = namespace_obj.get("group_name")
+                if isinstance(namespace_group_name, str):
+                    cleaned_name = namespace_group_name.strip()
+                    if cleaned_name and cleaned_name not in namespace_group_names:
+                        namespace_group_names.append(cleaned_name)
                 namespace_key_norm = _normalize_namespace_key(namespace_key) or namespace_key
                 namespace_label = _namespace_display_label(
                     namespace_key_norm,
@@ -206,6 +212,8 @@ def _compute_group_stats(artifact: dict[str, Any]) -> list[_GroupStats]:
                 namespace_registers[namespace_label] = (
                     namespace_registers.get(namespace_label, 0) + namespace_count
                 )
+            if namespace_group_names:
+                name = " / ".join(namespace_group_names)
             instances_total = len(instance_ids_total)
             instances_present = len(instance_ids_present)
         else:

@@ -39,6 +39,7 @@ def test_render_summary_shows_namespace_totals_and_flags_distribution(tmp_path: 
                 "namespaces": {
                     "0x02": {
                         "label": "local",
+                        "group_name": "Unknown 0x09 (local)",
                         "instances": {
                             "0x00": {
                                 "present": True,
@@ -55,6 +56,7 @@ def test_render_summary_shows_namespace_totals_and_flags_distribution(tmp_path: 
                     },
                     "0x06": {
                         "label": "remote",
+                        "group_name": "Regulators",
                         "instances": {
                             "0x00": {
                                 "present": True,
@@ -87,7 +89,7 @@ def test_render_summary_shows_namespace_totals_and_flags_distribution(tmp_path: 
     assert "flags_access volatile_ro=0, stable_ro=2, technical_rw=0, user_rw=1" in text
     assert "b555 reads=4 errors=1 programs=2" in text
     assert "local (0x02)=1, remote (0x06)=1" in text
-    assert "Regulators" in text
+    assert "Unknown 0x09 (local) / Regulators" in text
     assert "2/2" not in text
 
 

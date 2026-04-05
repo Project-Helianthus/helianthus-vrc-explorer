@@ -43,6 +43,7 @@ from .director import (
     DiscoveredGroup,
     classify_groups,
     discover_groups,
+    group_name_for_opcode,
     group_namespace_profiles,
 )
 from .identity import make_register_identity, opcode_label
@@ -127,6 +128,23 @@ def _primary_opcode(group: int) -> RegisterOpcode:
 
 def _is_dual_namespace_group(group: int) -> bool:
     return len(_group_opcodes(group)) > 1
+
+
+def _group_name_for_opcode(group: int, opcode: RegisterOpcode) -> str:
+    return group_name_for_opcode(group, int(opcode))
+
+
+def _group_display_name_for_opcodes(
+    *, group: int, opcodes: tuple[RegisterOpcode, ...], fallback: str
+) -> str:
+    if not opcodes:
+        return fallback
+    names = [_group_name_for_opcode(group, opcode) for opcode in opcodes]
+    unique_names: list[str] = []
+    for name in names:
+        if name not in unique_names:
+            unique_names.append(name)
+    return " / ".join(unique_names) if unique_names else fallback
 
 
 def _rr_max_for_opcode(*, group: int, default_rr_max: int, opcode: int) -> int:
@@ -271,17 +289,23 @@ def _ensure_group_artifact(
     return cast(dict[str, Any], group_obj)
 
 
-def _ensure_namespace_artifact(group_obj: dict[str, Any], *, opcode: int) -> dict[str, Any]:
+def _ensure_namespace_artifact(
+    group_obj: dict[str, Any], *, group: int, opcode: int
+) -> dict[str, Any]:
     namespaces = group_obj.setdefault("namespaces", {})
     namespace_key = _hex_u8(opcode)
+    namespace_group_name = _group_name_for_opcode(group, cast(RegisterOpcode, opcode))
     namespace_obj = namespaces.setdefault(
         namespace_key,
         {
             "label": opcode_label(opcode),
+            "group_name": namespace_group_name,
             "instances": {},
         },
     )
     namespace_obj.setdefault("label", opcode_label(opcode))
+    if namespace_group_name is not None:
+        namespace_obj.setdefault("group_name", namespace_group_name)
     namespace_obj.setdefault("instances", {})
     return cast(dict[str, Any], namespace_obj)
 
@@ -294,7 +318,7 @@ def _instances_object(
 ) -> dict[str, Any]:
     group_obj = artifact["groups"][_hex_u8(group)]
     if bool(group_obj.get("dual_namespace")):
-        namespace_obj = _ensure_namespace_artifact(group_obj, opcode=opcode)
+        namespace_obj = _ensure_namespace_artifact(group_obj, group=group, opcode=opcode)
         return cast(dict[str, Any], namespace_obj.setdefault("instances", {}))
     return cast(dict[str, Any], group_obj.setdefault("instances", {}))
 
@@ -307,7 +331,7 @@ def _availability_object(
 ) -> dict[str, Any]:
     group_obj = artifact["groups"][_hex_u8(group)]
     if bool(group_obj.get("dual_namespace")):
-        return _ensure_namespace_artifact(group_obj, opcode=opcode)
+        return _ensure_namespace_artifact(group_obj, group=group, opcode=opcode)
     return cast(dict[str, Any], group_obj)
 
 
@@ -386,17 +410,20 @@ def _promote_group_artifact_to_dual_namespace(
         namespace_key,
         {
             "label": opcode_label(primary_opcode),
+            "group_name": _group_name_for_opcode(group, primary_opcode),
             "instances": {},
         },
     )
     if not isinstance(namespace_obj, dict):
         namespace_obj = {
             "label": opcode_label(primary_opcode),
+            "group_name": _group_name_for_opcode(group, primary_opcode),
             "instances": {},
         }
         namespaces[namespace_key] = namespace_obj
 
     namespace_obj.setdefault("label", opcode_label(primary_opcode))
+    namespace_obj.setdefault("group_name", _group_name_for_opcode(group, primary_opcode))
     if isinstance(flat_instances, dict) and flat_instances:
         namespace_obj["instances"] = flat_instances
     else:
@@ -1462,10 +1489,15 @@ def scan_b524(
                 discovery_advisory["descriptor_expected"] = group.expected_descriptor
             if group.descriptor_mismatch:
                 discovery_advisory["descriptor_mismatch"] = True
+            artifact_group_name = _group_display_name_for_opcodes(
+                group=group.group,
+                opcodes=opcodes,
+                fallback=group.name,
+            )
             _ensure_group_artifact(
                 artifact,
                 group=group.group,
-                name=group.name,
+                name=artifact_group_name,
                 descriptor_observed=desc_for_artifact,
                 dual_namespace=dual_namespace,
                 discovery_advisory=discovery_advisory,
@@ -1523,7 +1555,10 @@ def scan_b524(
                     )
                 if not _is_instanced_group(namespace_ii_max):
                     _mark_present_instances(instances_obj, instances=(0x00,))
-                    known_namespace_probe_counts.append(f"{opcode_label(opcode)} 1/1")
+                    known_namespace_probe_counts.append(
+                        f"{_group_name_for_opcode(group.group, opcode)} "
+                        f"[{opcode_label(opcode)}] 1/1"
+                    )
                     continue
 
                 assert namespace_ii_max is not None
@@ -1548,12 +1583,14 @@ def scan_b524(
                 present_instances = tuple(ii for ii, probe in probes.items() if probe.present)
                 _mark_present_instances(instances_obj, instances=present_instances)
                 known_namespace_probe_counts.append(
-                    f"{opcode_label(opcode)} {len(present_instances)}/{namespace_ii_max + 1}"
+                    f"{_group_name_for_opcode(group.group, opcode)} "
+                    f"[{opcode_label(opcode)}] "
+                    f"{len(present_instances)}/{namespace_ii_max + 1}"
                 )
 
             if observer is not None:
                 observer.log(
-                    f"GG=0x{group.group:02X} {group.name}: "
+                    f"GG=0x{group.group:02X}: "
                     f"{', '.join(known_namespace_probe_counts)} present, "
                     f"RR_max=0x{rr_max:04X} ({rr_max + 1} registers/instance)",
                     level="info",
@@ -1641,7 +1678,7 @@ def scan_b524(
                     PlannerGroup(
                         group=group.group,
                         opcode=opcode,
-                        name=group.name,
+                        name=_group_name_for_opcode(group.group, opcode),
                         descriptor=group.descriptor,
                         known=config is not None,
                         ii_max=planner_ii_max,

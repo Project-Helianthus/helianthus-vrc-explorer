@@ -972,6 +972,7 @@ def test_artifact_dual_namespace_structure(monkeypatch, tmp_path: Path) -> None:
     )
 
     group = artifact["groups"]["0x09"]
+    assert group["name"] == "Unknown 0x09 (local) / Regulators"
     assert group["dual_namespace"] is True
     assert "instances" not in group
     assert set(group["namespaces"]) == {"0x02", "0x06"}
@@ -980,6 +981,8 @@ def test_artifact_dual_namespace_structure(monkeypatch, tmp_path: Path) -> None:
     remote_ns = group["namespaces"]["0x06"]
     assert local_ns["label"] == "local"
     assert remote_ns["label"] == "remote"
+    assert local_ns["group_name"] == "Unknown 0x09 (local)"
+    assert remote_ns["group_name"] == "Regulators"
     assert (
         group["discovery_advisory"]["instance_discovery_decision"]["decision"]
         == "independent_per_namespace"
@@ -1624,12 +1627,55 @@ def test_scan_b524_textual_planner_receives_group_01_remote_and_keeps_group_00_l
     assert (0x01, 0x02) in planner_keys
     assert (0x01, 0x06) in planner_keys
 
+    name_by_key = {(group.group, group.opcode): group.name for group in planner_groups}
+    assert name_by_key[(0x00, 0x02)] == "Regulator Parameters"
+    assert name_by_key[(0x01, 0x02)] == "Hot Water Circuit"
+    assert name_by_key[(0x01, 0x06)] == "Hot Water Circuit"
+
     default_plan = captured["default_plan"]
     assert isinstance(default_plan, dict)
     assert make_plan_key(0x01, 0x02) in default_plan
     assert make_plan_key(0x01, 0x06) in default_plan
     assert make_plan_key(0x00, 0x06) not in default_plan
     assert artifact["meta"]["scan_plan"]["estimated_register_requests"] == 0
+
+
+def test_scan_b524_textual_planner_uses_namespace_owned_labels_for_groups_09_and_0a(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    import sys
+
+    captured: dict[str, object] = {}
+
+    def fake_run_textual_scan_plan(groups, **kwargs):
+        captured["groups"] = groups
+        captured["default_plan"] = kwargs["default_plan"]
+        return {}
+
+    monkeypatch.setattr(
+        "helianthus_vrc_explorer.ui.planner_textual.run_textual_scan_plan",
+        fake_run_textual_scan_plan,
+    )
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
+    artifact = scan_b524(
+        DummyTransport(_write_fixture_group_09(tmp_path)),
+        dst=0x15,
+        observer=_NoopObserver(),
+        console=Console(force_terminal=True),
+        planner_ui="textual",
+        planner_preset="recommended",
+    )
+
+    planner_groups = captured["groups"]
+    assert isinstance(planner_groups, list)
+    planner_label_map = {
+        (group.group, group.opcode): (group.name, group.namespace_label) for group in planner_groups
+    }
+    assert planner_label_map[(0x09, 0x02)] == ("Unknown 0x09 (local)", "local")
+    assert planner_label_map[(0x09, 0x06)] == ("Regulators", "remote")
+    assert artifact["groups"]["0x09"]["name"] == "Unknown 0x09 (local) / Regulators"
 
 
 def test_scan_b524_textual_failure_raises_in_forced_textual_mode(

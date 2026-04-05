@@ -26,6 +26,7 @@ class GroupConfig(TypedDict):
     ii_max: int
     rr_max: int
     opcodes: list[int]
+    name_by_opcode: NotRequired[dict[int, str]]
     # Namespace-capable opcode families known for this group. This can include
     # future namespaces even when active scanning still uses a conservative subset.
     namespace_opcodes: NotRequired[list[int]]
@@ -102,6 +103,7 @@ GROUP_CONFIG: Final[dict[int, GroupConfig]] = {
         "ii_max": 0x0A,
         "rr_max": 0x0035,
         "opcodes": [0x02, 0x06],
+        "name_by_opcode": {0x02: "Unknown 0x09 (local)", 0x06: "Regulators"},
         "rr_max_by_opcode": {0x02: 0x000F, 0x06: 0x0035},
     },
     0x0A: {
@@ -110,6 +112,7 @@ GROUP_CONFIG: Final[dict[int, GroupConfig]] = {
         "ii_max": 0x0A,
         "rr_max": 0x004D,
         "opcodes": [0x02, 0x06],
+        "name_by_opcode": {0x02: "Unknown 0x0A (local)", 0x06: "Thermostats"},
         "rr_max_by_opcode": {0x02: 0x004D, 0x06: 0x0035},
     },
     0x0C: {
@@ -182,6 +185,7 @@ KNOWN_CORE_GROUPS: Final[frozenset[int]] = frozenset({0x02, 0x03})
 @dataclass(frozen=True, slots=True)
 class NamespaceProfile:
     opcode: int
+    name: str
     ii_max: int
     rr_max: int
 
@@ -200,6 +204,8 @@ def group_namespace_profiles(group: int) -> dict[int, NamespaceProfile]:
     namespace_opcodes = config.get("namespace_opcodes", config["opcodes"])
     rr_overrides = config.get("rr_max_by_opcode", {})
     ii_overrides = config.get("ii_max_by_opcode", {})
+    name_overrides = config.get("name_by_opcode", {})
+    default_name = str(config["name"])
     default_rr = int(config["rr_max"])
     default_ii = int(config["ii_max"])
 
@@ -208,10 +214,22 @@ def group_namespace_profiles(group: int) -> dict[int, NamespaceProfile]:
         op = int(opcode)
         profiles[op] = NamespaceProfile(
             opcode=op,
+            name=str(name_overrides.get(op, default_name)),
             ii_max=int(ii_overrides.get(op, default_ii)),
             rr_max=int(rr_overrides.get(op, default_rr)),
         )
     return profiles
+
+
+def group_name_for_opcode(group: int, opcode: int) -> str:
+    profiles = group_namespace_profiles(group)
+    profile = profiles.get(int(opcode))
+    if profile is not None:
+        return profile.name
+    config = GROUP_CONFIG.get(group)
+    if config is None:
+        return f"Unknown 0x{group:02X}"
+    return str(config["name"])
 
 
 @dataclass(frozen=True, slots=True)

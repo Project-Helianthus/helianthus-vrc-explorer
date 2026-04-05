@@ -46,6 +46,8 @@ class PlannerGroup:
     def display_name(self) -> str:
         if self.namespace_label is None:
             return self.name
+        if self.name.lower().endswith(f"({self.namespace_label.lower()})"):
+            return self.name
         return f"{self.name} ({self.namespace_label})"
 
     @property

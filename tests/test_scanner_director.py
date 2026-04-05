@@ -12,6 +12,7 @@ from helianthus_vrc_explorer.scanner.director import (
     DiscoveredGroup,
     classify_groups,
     discover_groups,
+    group_name_for_opcode,
     group_namespace_profiles,
 )
 from helianthus_vrc_explorer.transport.base import (
@@ -288,6 +289,8 @@ def test_group_config_completeness() -> None:
 def test_group_namespace_profiles_support_opcode_first_identity() -> None:
     hw = group_namespace_profiles(0x01)
     hc = group_namespace_profiles(0x02)
+    regulators = group_namespace_profiles(0x09)
+    thermostats = group_namespace_profiles(0x0A)
 
     assert sorted(hw) == [0x02, 0x06]
     assert hw[0x02].rr_max == 0x0013
@@ -296,6 +299,17 @@ def test_group_namespace_profiles_support_opcode_first_identity() -> None:
     assert sorted(hc) == [0x02, 0x06]
     assert hc[0x02].ii_max == 0x0A
     assert hc[0x06].ii_max == 0x0A
+    assert regulators[0x02].name == "Unknown 0x09 (local)"
+    assert regulators[0x06].name == "Regulators"
+    assert thermostats[0x02].name == "Unknown 0x0A (local)"
+    assert thermostats[0x06].name == "Thermostats"
+
+
+def test_group_name_for_opcode_uses_namespace_owned_labels_for_09_and_0a() -> None:
+    assert group_name_for_opcode(0x09, 0x02) == "Unknown 0x09 (local)"
+    assert group_name_for_opcode(0x09, 0x06) == "Regulators"
+    assert group_name_for_opcode(0x0A, 0x02) == "Unknown 0x0A (local)"
+    assert group_name_for_opcode(0x0A, 0x06) == "Thermostats"
 
 
 def test_classify_groups_missing_desc() -> None:
