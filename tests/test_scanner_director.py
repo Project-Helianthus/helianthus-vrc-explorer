@@ -306,6 +306,10 @@ def test_group_namespace_profiles_support_opcode_first_identity() -> None:
 
 
 def test_group_name_for_opcode_uses_namespace_owned_labels_for_09_and_0a() -> None:
+    assert group_name_for_opcode(0x00, 0x02) == "Regulator Parameters"
+    assert group_name_for_opcode(0x00, 0x06) == "Primary Heating Sources"
+    assert group_name_for_opcode(0x01, 0x02) == "Hot Water Circuit"
+    assert group_name_for_opcode(0x01, 0x06) == "Secondary Heating Sources"
     assert group_name_for_opcode(0x09, 0x02) == "Unknown 0x09 (local)"
     assert group_name_for_opcode(0x09, 0x06) == "Regulators"
     assert group_name_for_opcode(0x0A, 0x02) == "Unknown 0x0A (local)"

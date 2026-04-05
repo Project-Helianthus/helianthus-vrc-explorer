@@ -461,8 +461,8 @@ def parse_b524_id(id_hex: str) -> dict:
 **Known groups (hardcoded reference, validated against CSV):**
 
     GROUP_CONFIG = {
-        0x00: {"desc": 3.0, "name": "Regulator Parameters", "ii_max": 0x00, "rr_max": 0x00FF, "opcodes": [0x02]},
-        0x01: {"desc": 3.0, "name": "Hot Water Circuit", "ii_max": 0x00, "rr_max": 0x13, "opcodes": [0x02]},
+        0x00: {"desc": 3.0, "name": "Regulator Parameters", "ii_max": 0x00, "rr_max": 0x00FF, "opcodes": [0x02], "name_by_opcode": {0x02: "Regulator Parameters", 0x06: "Primary Heating Sources"}},
+        0x01: {"desc": 3.0, "name": "Hot Water Circuit", "ii_max": 0x00, "rr_max": 0x13, "opcodes": [0x02], "name_by_opcode": {0x02: "Hot Water Circuit", 0x06: "Secondary Heating Sources"}, "namespace_opcodes": [0x02, 0x06], "rr_max_by_opcode": {0x02: 0x13, 0x06: 0x15}, "ii_max_by_opcode": {0x02: 0x00, 0x06: 0x00}},
         0x02: {"desc": 1.0, "name": "Heating Circuits", "ii_max": 0x0A, "rr_max": 0x25, "opcodes": [0x02]},
         0x03: {"desc": 1.0, "name": "Zones", "ii_max": 0x0A, "rr_max": 0x2E, "opcodes": [0x02]},
         0x04: {"desc": 6.0, "name": "Solar Circuit", "ii_max": 0x00, "rr_max": 0x0B, "opcodes": [0x02]},
@@ -477,8 +477,8 @@ def parse_b524_id(id_hex: str) -> dict:
 
     Group  | Opcode Family | Notes
     -------|---------------|-----------------------------------------------
-    0x00   | 0x02 (local)  | Regulator parameters (singleton)
-    0x01   | 0x02 (local)  | Singleton (no instances)
+    0x00   | 0x02 (local)  | Local namespace: Regulator parameters (singleton)
+    0x01   | 0x02 + 0x06   | 0x02: Hot Water Circuit, 0x06: Secondary Heating Sources
     0x02   | 0x02 (local)  | Heating circuits (instanced)
     0x03   | 0x02 (local)  | Zones (instanced)
     0x04   | 0x02 (local)  | Solar circuit (special Type 6 format)

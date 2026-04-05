@@ -1690,7 +1690,7 @@ def test_scan_b524_textual_planner_receives_group_01_remote_and_keeps_group_00_l
     name_by_key = {(group.group, group.opcode): group.name for group in planner_groups}
     assert name_by_key[(0x00, 0x02)] == "Regulator Parameters"
     assert name_by_key[(0x01, 0x02)] == "Hot Water Circuit"
-    assert name_by_key[(0x01, 0x06)] == "Hot Water Circuit"
+    assert name_by_key[(0x01, 0x06)] == "Secondary Heating Sources"
 
     default_plan = captured["default_plan"]
     assert isinstance(default_plan, dict)
