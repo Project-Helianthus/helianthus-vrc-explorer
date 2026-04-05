@@ -280,9 +280,8 @@ def discover_groups(
     """Phase A: Probe GG=0x00..0xFF via directory probe (opcode 0x00).
 
     Terminator logic: stop on the first NaN descriptor.
-    Directory descriptors are not semantic authority for group identity or namespace topology.
-    A descriptor of `0.0` is still used as a discovery-time negative hint for non-core groups,
-    while known core groups remain scan candidates.
+    Directory descriptors are not semantic authority for group identity, namespace topology,
+    or scan-plan inclusion. The only authoritative structural signal here is the NaN terminator.
     """
 
     discovered: list[DiscoveredGroup] = []
@@ -396,23 +395,6 @@ def discover_groups(
         if skip_group or descriptor is None:
             # Transport failures are not evidence of a NaN terminator; skip without advancing the
             # NaN streak.
-            continue
-
-        if descriptor == 0.0:
-            if gg in KNOWN_CORE_GROUPS:
-                discovered.append(DiscoveredGroup(group=gg, descriptor=descriptor))
-                if observer is not None:
-                    observer.log(
-                        f"GG=0x{gg:02X} descriptor=0.0 but known core group - included",
-                        level="info",
-                    )
-            elif observer is not None:
-                observer.log(
-                    "GG=0x"
-                    f"{gg:02X} descriptor=0.0, non-core group - skipped "
-                    "(discovery-time hint only; not semantic authority)",
-                    level="info",
-                )
             continue
 
         if math.isnan(descriptor):

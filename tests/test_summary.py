@@ -88,9 +88,11 @@ def test_render_summary_shows_namespace_totals_and_flags_distribution(tmp_path: 
     assert "namespaces local (0x02)=2, remote (0x06)=1" in text
     assert "flags_access volatile_ro=0, stable_ro=2, technical_rw=0, user_rw=1" in text
     assert "b555 reads=4 errors=1 programs=2" in text
-    assert "local (0x02)=1, remote (0x06)=1" in text
-    assert "Unknown 0x09 (local) / Regulators" in text
-    assert "2/2" not in text
+    assert "Local Devices (0x02)" in text
+    assert "Remote Devices (0x06)" in text
+    assert "Unknown 0x09 (local)" in text
+    assert "Regulators" in text
+    assert "Unknown 0x09 (local) / Regulators" not in text
 
 
 def test_render_summary_shows_b516_stats(tmp_path: Path) -> None:
@@ -294,7 +296,10 @@ def test_render_summary_uses_namespace_specific_topology_for_instances(tmp_path:
     render_summary(console, artifact, output_path=tmp_path / "artifact.json")
     text = console.export_text()
 
-    assert "local (0x02) singleton, remote (0x06) 1/11" in text
+    assert "Local Devices (0x02)" in text
+    assert "Remote Devices (0x06)" in text
+    assert "singleton" in text
+    assert "1/11" in text
     assert "remote (0x06) singleton" not in text
 
 

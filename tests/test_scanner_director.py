@@ -58,13 +58,14 @@ def _write_directory_fixture(
     return fixture_path
 
 
-def test_discover_groups_stops_after_first_nan_and_skips_holes(tmp_path: Path) -> None:
+def test_discover_groups_stops_after_first_nan_and_keeps_zero_descriptor_groups(
+    tmp_path: Path,
+) -> None:
     transport = RecordingTransport(DummyTransport(_write_directory_fixture(tmp_path)))
 
     discovered = discover_groups(transport, dst=0x15)
 
-    # Known core groups remain scan candidates even when descriptor==0.0.
-    assert [group.group for group in discovered] == [0x00, 0x02, 0x03]
+    assert [group.group for group in discovered] == [0x00, 0x01, 0x02, 0x03, 0x04]
 
     # Terminator is triggered by the first NaN (GG=0x05), so probing stops there.
     assert transport.probed_groups == [0x00, 0x01, 0x02, 0x03, 0x04, 0x05]
@@ -84,10 +85,10 @@ def test_discover_groups_includes_core_with_zero_descriptor(tmp_path: Path) -> N
     discovered = discover_groups(transport, dst=0x15)
 
     assert frozenset({0x02, 0x03}) == KNOWN_CORE_GROUPS
-    assert [group.group for group in discovered] == [0x00, 0x02, 0x03]
+    assert [group.group for group in discovered] == [0x00, 0x01, 0x02, 0x03]
 
 
-def test_discover_groups_uses_zero_descriptor_as_negative_hint_for_non_core_groups(
+def test_discover_groups_keeps_non_core_zero_descriptor_groups(
     tmp_path: Path,
 ) -> None:
     fixture_path = _write_directory_fixture(
@@ -102,12 +103,11 @@ def test_discover_groups_uses_zero_descriptor_as_negative_hint_for_non_core_grou
 
     discovered = discover_groups(transport, dst=0x15)
 
-    # Non-core groups still use a zero descriptor as a discovery-time negative hint.
-    assert [group.group for group in discovered] == [0x00, 0x02, 0x03]
+    assert 0x09 in [group.group for group in discovered]
     assert 0x09 in transport.probed_groups
 
 
-def test_discover_groups_uses_zero_descriptor_as_negative_hint_for_unknown_groups(
+def test_discover_groups_keeps_zero_descriptor_unknown_groups_until_nan(
     tmp_path: Path,
 ) -> None:
     fixture_path = _write_directory_fixture(tmp_path, groups={}, terminator_group=None)
@@ -115,11 +115,11 @@ def test_discover_groups_uses_zero_descriptor_as_negative_hint_for_unknown_group
 
     discovered = discover_groups(transport, dst=0x15)
 
-    # Unknown groups are still filtered by the directory probe in Phase A.
-    assert [group.group for group in discovered] == [0x02, 0x03]
+    assert len(discovered) == 0x100
+    assert discovered[0].group == 0x00
+    assert discovered[-1].group == 0xFF
     assert transport.probed_groups[0] == 0x00
     assert transport.probed_groups[-1] == 0xFF
-    assert 0xFF not in [group.group for group in discovered]
 
 
 def test_discover_groups_still_terminates_on_nan(tmp_path: Path) -> None:
@@ -189,7 +189,7 @@ def test_discover_groups_does_not_terminate_on_transient_transport_failures(tmp_
 
     discovered = discover_groups(transport, dst=0x15)
 
-    assert [group.group for group in discovered] == [0x00, 0x02, 0x03]
+    assert [group.group for group in discovered] == [0x00, 0x01, 0x02, 0x03, 0x07]
     # Failures at 0x04/0x05/0x06 must not terminate discovery early.
     assert transport.probed_groups[:4] == [0x00, 0x01, 0x02, 0x03]
     assert transport.probed_groups.count(0x04) == 3
@@ -205,7 +205,7 @@ def test_discover_groups_treats_status_only_gg00_as_transient(tmp_path: Path) ->
 
     discovered = discover_groups(transport, dst=0x15)
 
-    assert [group.group for group in discovered] == [0x02, 0x03]
+    assert [group.group for group in discovered] == [0x01, 0x02, 0x03, 0x04]
     assert transport.probed_groups.count(0x00) == 3
     assert transport.probed_groups[-5:] == [0x01, 0x02, 0x03, 0x04, 0x05]
 
@@ -217,7 +217,7 @@ def test_discover_groups_retries_known_group_after_single_timeout(tmp_path: Path
 
     discovered = discover_groups(transport, dst=0x15)
 
-    assert [group.group for group in discovered] == [0x00, 0x02, 0x03]
+    assert [group.group for group in discovered] == [0x00, 0x01, 0x02, 0x03, 0x04]
     assert transport.probed_groups.count(0x03) == 2
 
 

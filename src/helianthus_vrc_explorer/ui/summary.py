@@ -12,16 +12,16 @@ from rich.text import Text
 
 
 @dataclass(frozen=True, slots=True)
-class _GroupStats:
+class _SummaryRow:
     group: str
     name: str
+    namespace_key: str | None
     descriptor: float
     instances_total: int
     instances_present: int
     instances_display: str
     registers_scanned: int
     registers_errors: int
-    namespace_registers: dict[str, int]
 
 
 def _iter_register_entries(artifact: dict[str, Any]) -> Iterable[dict[str, Any]]:
@@ -114,7 +114,7 @@ def _namespace_display_label(namespace_key: str, namespace_label: object = None)
     return namespace_key
 
 
-def _namespace_label_from_entry(
+def _namespace_key_from_entry(
     entry: dict[str, Any], *, fallback_namespace_key: str | None = None
 ) -> str | None:
     namespace_key = _normalize_namespace_key(entry.get("read_opcode"))
@@ -122,6 +122,16 @@ def _namespace_label_from_entry(
         namespace_key = _normalize_namespace_key(fallback_namespace_key)
     if namespace_key is None:
         namespace_key = _namespace_key_from_label(entry.get("read_opcode_label"))
+    return namespace_key
+
+
+def _namespace_label_from_entry(
+    entry: dict[str, Any], *, fallback_namespace_key: str | None = None
+) -> str | None:
+    namespace_key = _namespace_key_from_entry(
+        entry,
+        fallback_namespace_key=fallback_namespace_key,
+    )
     if namespace_key is None:
         return None
     return _namespace_display_label(namespace_key, entry.get("read_opcode_label"))
@@ -186,11 +196,77 @@ def _format_instance_summary(
     return f"{present}/{total}"
 
 
-def _compute_group_stats(artifact: dict[str, Any]) -> list[_GroupStats]:
-    stats: list[_GroupStats] = []
+def _namespace_sort_key(namespace_key: str | None) -> tuple[int, int, str]:
+    if namespace_key is None:
+        return (3, 0, "")
+    parsed = _normalize_namespace_key(namespace_key)
+    if parsed == "0x02":
+        return (0, 0x02, parsed)
+    if parsed == "0x06":
+        return (1, 0x06, parsed)
+    if parsed is not None:
+        return (2, int(parsed, 0), parsed)
+    return (3, 0, str(namespace_key))
+
+
+def _scan_plan_namespace_keys(artifact: dict[str, Any], group_key: str) -> list[str]:
+    meta = artifact.get("meta")
+    if not isinstance(meta, dict):
+        return []
+    scan_plan = meta.get("scan_plan")
+    if not isinstance(scan_plan, dict):
+        return []
+    groups = scan_plan.get("groups")
+    if not isinstance(groups, dict):
+        return []
+    group_plan = groups.get(group_key)
+    if not isinstance(group_plan, dict):
+        return []
+    namespaces = group_plan.get("namespaces")
+    if isinstance(namespaces, dict) and namespaces:
+        return sorted(
+            (namespace_key for namespace_key in namespaces if isinstance(namespace_key, str)),
+            key=_namespace_sort_key,
+        )
+    namespace_key = _normalize_namespace_key(group_plan.get("namespace_key"))
+    return [namespace_key] if namespace_key is not None else []
+
+
+def _infer_single_namespace_key(
+    artifact: dict[str, Any],
+    *,
+    group_key: str,
+    group_obj: dict[str, Any],
+) -> str | None:
+    planned_namespace_keys = _scan_plan_namespace_keys(artifact, group_key)
+    if len(planned_namespace_keys) == 1:
+        return planned_namespace_keys[0]
+    inferred_keys: set[str] = set()
+    instances = group_obj.get("instances", {})
+    if not isinstance(instances, dict):
+        return None
+    for instance_obj in instances.values():
+        if not isinstance(instance_obj, dict):
+            continue
+        registers = instance_obj.get("registers", {})
+        if not isinstance(registers, dict):
+            continue
+        for entry in registers.values():
+            if not isinstance(entry, dict):
+                continue
+            namespace_key = _namespace_key_from_entry(entry)
+            if namespace_key is not None:
+                inferred_keys.add(namespace_key)
+    if len(inferred_keys) == 1:
+        return next(iter(inferred_keys))
+    return None
+
+
+def _compute_summary_rows(artifact: dict[str, Any]) -> list[_SummaryRow]:
+    rows: list[_SummaryRow] = []
     groups = artifact.get("groups", {})
     if not isinstance(groups, dict):
-        return stats
+        return rows
 
     for group_key, group_obj in groups.items():
         if not isinstance(group_key, str) or not isinstance(group_obj, dict):
@@ -209,29 +285,25 @@ def _compute_group_stats(artifact: dict[str, Any]) -> list[_GroupStats]:
         instances_display = "0"
         registers_scanned = 0
         registers_errors = 0
-        namespace_registers: dict[str, int] = {}
 
         if bool(group_obj.get("dual_namespace")):
             namespaces = group_obj.get("namespaces", {})
             if not isinstance(namespaces, dict):
                 namespaces = {}
-            namespace_instance_summaries: dict[str, str] = {}
-            known_totals = True
-            namespace_group_names: list[str] = []
-            for namespace_key, namespace_obj in namespaces.items():
+            for namespace_key in sorted(
+                (key for key in namespaces if isinstance(key, str)),
+                key=_namespace_sort_key,
+            ):
+                namespace_obj = namespaces.get(namespace_key)
                 if not isinstance(namespace_key, str) or not isinstance(namespace_obj, dict):
                     continue
                 namespace_group_name = namespace_obj.get("group_name")
-                if isinstance(namespace_group_name, str):
-                    cleaned_name = namespace_group_name.strip()
-                    if cleaned_name and cleaned_name not in namespace_group_names:
-                        namespace_group_names.append(cleaned_name)
-                namespace_key_norm = _normalize_namespace_key(namespace_key) or namespace_key
-                namespace_label = _namespace_display_label(
-                    namespace_key_norm,
-                    namespace_obj.get("label"),
+                namespace_name = (
+                    namespace_group_name.strip()
+                    if isinstance(namespace_group_name, str) and namespace_group_name.strip()
+                    else name
                 )
-                namespace_count = 0
+                namespace_key_norm = _normalize_namespace_key(namespace_key) or namespace_key
                 namespace_instances = namespace_obj.get("instances", {})
                 if not isinstance(namespace_instances, dict):
                     continue
@@ -239,8 +311,9 @@ def _compute_group_stats(artifact: dict[str, Any]) -> list[_GroupStats]:
                 namespace_total = _topology_total_from_ii_max(namespace_obj.get("ii_max"))
                 topology_authoritative = namespace_total is not None
                 if namespace_total is None:
-                    known_totals = False
                     namespace_total = len(namespace_instances)
+                namespace_registers_scanned = 0
+                namespace_registers_errors = 0
                 for instance_key, instance_obj in namespace_instances.items():
                     if not isinstance(instance_obj, dict):
                         continue
@@ -249,41 +322,29 @@ def _compute_group_stats(artifact: dict[str, Any]) -> list[_GroupStats]:
                     registers = instance_obj.get("registers", {})
                     if not isinstance(registers, dict):
                         continue
-                    namespace_count += len(registers)
-                    registers_scanned += len(registers)
+                    namespace_registers_scanned += len(registers)
                     for entry in registers.values():
                         if not isinstance(entry, dict):
                             continue
                         if entry.get("error") is not None:
-                            registers_errors += 1
-                namespace_registers[namespace_label] = (
-                    namespace_registers.get(namespace_label, 0) + namespace_count
+                            namespace_registers_errors += 1
+                rows.append(
+                    _SummaryRow(
+                        group=group_key,
+                        name=namespace_name,
+                        namespace_key=namespace_key_norm,
+                        descriptor=descriptor,
+                        instances_total=namespace_total,
+                        instances_present=namespace_present,
+                        instances_display=_format_instance_summary(
+                            present=namespace_present,
+                            total=namespace_total,
+                            topology_authoritative=topology_authoritative,
+                        ),
+                        registers_scanned=namespace_registers_scanned,
+                        registers_errors=namespace_registers_errors,
+                    )
                 )
-                namespace_instance_summaries[namespace_label] = _format_instance_summary(
-                    present=namespace_present,
-                    total=namespace_total,
-                    topology_authoritative=topology_authoritative,
-                )
-                instances_total += namespace_total
-                instances_present += namespace_present
-            if namespace_group_names:
-                name = " / ".join(namespace_group_names)
-            if namespace_instance_summaries:
-                ordered_items = sorted(
-                    namespace_instance_summaries.items(),
-                    key=lambda item: _display_namespace_sort_key(item[0]),
-                )
-                instances_display = ", ".join(
-                    f"{label} {summary}" for (label, summary) in ordered_items
-                )
-            elif known_totals:
-                instances_display = _format_instance_summary(
-                    present=instances_present,
-                    total=instances_total,
-                    topology_authoritative=True,
-                )
-            else:
-                instances_display = str(instances_present)
         else:
             group_total = _topology_total_from_ii_max(group_obj.get("ii_max"))
             topology_authoritative = group_total is not None
@@ -301,11 +362,6 @@ def _compute_group_stats(artifact: dict[str, Any]) -> list[_GroupStats]:
                 for entry in registers.values():
                     if not isinstance(entry, dict):
                         continue
-                    namespace_label_opt = _namespace_label_from_entry(entry)
-                    if namespace_label_opt is not None:
-                        namespace_registers[namespace_label_opt] = (
-                            namespace_registers.get(namespace_label_opt, 0) + 1
-                        )
                     if entry.get("error") is not None:
                         registers_errors += 1
             instances_total = group_total
@@ -314,23 +370,50 @@ def _compute_group_stats(artifact: dict[str, Any]) -> list[_GroupStats]:
                 total=instances_total,
                 topology_authoritative=topology_authoritative,
             )
-
-        stats.append(
-            _GroupStats(
-                group=group_key,
-                name=name,
-                descriptor=descriptor,
-                instances_total=instances_total,
-                instances_present=instances_present,
-                instances_display=instances_display,
-                registers_scanned=registers_scanned,
-                registers_errors=registers_errors,
-                namespace_registers=_sorted_namespace_counts(namespace_registers),
+            rows.append(
+                _SummaryRow(
+                    group=group_key,
+                    name=name,
+                    namespace_key=_infer_single_namespace_key(
+                        artifact,
+                        group_key=group_key,
+                        group_obj=group_obj,
+                    ),
+                    descriptor=descriptor,
+                    instances_total=instances_total,
+                    instances_present=instances_present,
+                    instances_display=instances_display,
+                    registers_scanned=registers_scanned,
+                    registers_errors=registers_errors,
+                )
             )
-        )
 
-    stats.sort(key=lambda s: int(s.group, 0))
-    return stats
+    rows.sort(key=lambda row: (*_namespace_sort_key(row.namespace_key), int(row.group, 0)))
+    return rows
+
+
+def _render_summary_block(console: Console, *, title: str, rows: list[_SummaryRow]) -> None:
+    if not rows:
+        return
+    console.print()
+    console.print(Text(title, style="bold"))
+    table = Table(show_header=True, header_style="bold", box=None)
+    table.add_column("Group", style="cyan", no_wrap=True)
+    table.add_column("Name", style="white")
+    table.add_column("Type", style="white", justify="right", no_wrap=True)
+    table.add_column("Instances", style="white", justify="right", no_wrap=True)
+    table.add_column("Registers", style="white", justify="right", no_wrap=True)
+    table.add_column("Errors", style="white", justify="right", no_wrap=True)
+    for row in rows:
+        table.add_row(
+            row.group,
+            row.name,
+            f"{row.descriptor:g}",
+            row.instances_display,
+            str(row.registers_scanned),
+            str(row.registers_errors),
+        )
+    console.print(table)
 
 
 def _compute_namespace_totals(artifact: dict[str, Any]) -> dict[str, int]:
@@ -389,15 +472,18 @@ def render_summary(console: Console, artifact: dict[str, Any], *, output_path: P
             header += f" reason={incomplete_reason}"
     console.print(header, style="dim")
 
-    group_stats = _compute_group_stats(artifact)
-    total_regs = sum(s.registers_scanned for s in group_stats)
-    total_errs = sum(s.registers_errors for s in group_stats)
+    summary_rows = _compute_summary_rows(artifact)
+    group_count = sum(
+        1
+        for group_key, group_obj in artifact.get("groups", {}).items()
+        if isinstance(group_key, str) and isinstance(group_obj, dict)
+    )
+    total_regs = sum(row.registers_scanned for row in summary_rows)
+    total_errs = sum(row.registers_errors for row in summary_rows)
     namespace_totals = _compute_namespace_totals(artifact)
     flags_distribution = _compute_flags_distribution(artifact)
 
-    console.print(
-        f"groups={len(group_stats)} registers={total_regs} errors={total_errs}", style="dim"
-    )
+    console.print(f"groups={group_count} registers={total_regs} errors={total_errs}", style="dim")
     console.print(f"namespaces {_format_counts(namespace_totals)}", style="dim")
     console.print(f"flags_access {_format_counts(flags_distribution)}", style="dim")
 
@@ -455,27 +541,12 @@ def render_summary(console: Console, artifact: dict[str, Any], *, output_path: P
                 b516_txt += " incomplete=true"
             console.print(b516_txt, style="dim")
 
-    table = Table(show_header=True, header_style="bold", box=None)
-    table.add_column("Group", style="cyan", no_wrap=True)
-    table.add_column("Name", style="white")
-    table.add_column("Type", style="white", justify="right", no_wrap=True)
-    table.add_column("Instances", style="white", justify="right", no_wrap=True)
-    table.add_column("Namespaces", style="white")
-    table.add_column("Registers", style="white", justify="right", no_wrap=True)
-    table.add_column("Errors", style="white", justify="right", no_wrap=True)
-
-    for s in group_stats:
-        table.add_row(
-            s.group,
-            s.name,
-            f"{s.descriptor:g}",
-            s.instances_display,
-            _format_counts(s.namespace_registers),
-            str(s.registers_scanned),
-            str(s.registers_errors),
-        )
-
-    console.print(table)
+    local_rows = [row for row in summary_rows if row.namespace_key == "0x02"]
+    remote_rows = [row for row in summary_rows if row.namespace_key == "0x06"]
+    other_rows = [row for row in summary_rows if row.namespace_key not in {"0x02", "0x06"}]
+    _render_summary_block(console, title="Local Devices (0x02)", rows=local_rows)
+    _render_summary_block(console, title="Remote Devices (0x06)", rows=remote_rows)
+    _render_summary_block(console, title="Other Namespaces", rows=other_rows)
     suggestion_obj = meta.get("issue_suggestion")
     if isinstance(suggestion_obj, dict) and suggestion_obj.get("suggest_issue") is True:
         groups_obj = suggestion_obj.get("unknown_groups")

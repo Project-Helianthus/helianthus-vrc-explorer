@@ -175,3 +175,39 @@ def test_plan_key_is_opcode_first_namespace_identity() -> None:
 
     assert key == (0x06, 0x09)
     assert format_plan_key(key) == "0x09/0x06"
+
+
+def test_recommended_preset_skips_non_core_namespaces_without_verified_presence_contract() -> None:
+    groups = [
+        PlannerGroup(
+            group=0x01,
+            opcode=0x02,
+            name="Hot Water Circuit",
+            descriptor=3.0,
+            known=True,
+            ii_max=None,
+            rr_max=0x0013,
+            rr_max_full=0x0013,
+            present_instances=(0x00,),
+            recommended=False,
+        ),
+        PlannerGroup(
+            group=0x01,
+            opcode=0x06,
+            name="Secondary Heating Sources",
+            descriptor=3.0,
+            known=True,
+            ii_max=None,
+            rr_max=0x0015,
+            rr_max_full=0x0015,
+            present_instances=(0x00,),
+            namespace_label="remote",
+            primary=False,
+            recommended=False,
+        ),
+    ]
+
+    assert build_plan_from_preset(groups, preset="recommended") == {}
+
+    full = build_plan_from_preset(groups, preset="full")
+    assert sorted(full) == [make_plan_key(0x01, 0x02), make_plan_key(0x01, 0x06)]

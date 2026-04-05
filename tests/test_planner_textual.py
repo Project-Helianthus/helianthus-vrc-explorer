@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from helianthus_vrc_explorer.ui.planner import PlannerGroup
+from helianthus_vrc_explorer.ui.planner import PlannerGroup, split_planner_groups_by_namespace
 from helianthus_vrc_explorer.ui.planner_textual import (
     _EditableGroup,
     _estimate_footer,
@@ -113,3 +113,40 @@ def test_table_row_values_show_explicit_namespace_column() -> None:
         "singleton",
         "0x00FF",
     )
+
+
+def test_split_planner_groups_by_namespace_prefers_local_then_remote() -> None:
+    local_group = PlannerGroup(
+        group=0x09,
+        opcode=0x02,
+        name="Unknown 0x09 (local)",
+        descriptor=1.0,
+        known=True,
+        ii_max=0x0A,
+        rr_max=0x000F,
+        rr_max_full=0x000F,
+        present_instances=(0x00,),
+        namespace_label="local",
+    )
+    remote_group = PlannerGroup(
+        group=0x01,
+        opcode=0x06,
+        name="Secondary Heating Sources",
+        descriptor=3.0,
+        known=True,
+        ii_max=None,
+        rr_max=0x0015,
+        rr_max_full=0x0015,
+        present_instances=(0x00,),
+        namespace_label="remote",
+        primary=False,
+    )
+
+    sections = split_planner_groups_by_namespace([remote_group, local_group])
+
+    assert [title for (title, _rows) in sections] == [
+        "Local Devices (0x02)",
+        "Remote Devices (0x06)",
+    ]
+    assert sections[0][1] == [local_group]
+    assert sections[1][1] == [remote_group]

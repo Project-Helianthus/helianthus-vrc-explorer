@@ -36,6 +36,7 @@ class PlannerGroup:
     present_instances: tuple[int, ...]
     namespace_label: str | None = None
     primary: bool = True
+    recommended: bool = True
     exhaustive_only: bool = False
 
     @property
@@ -73,6 +74,39 @@ def _hex_u8(value: int) -> str:
 
 def _hex_u16(value: int) -> str:
     return f"0x{value:04x}"
+
+
+def _namespace_opcode_rank(opcode: int) -> tuple[int, int]:
+    if opcode == 0x02:
+        return (0, opcode)
+    if opcode == 0x06:
+        return (1, opcode)
+    return (2, opcode)
+
+
+def planner_group_sort_key(group: PlannerGroup) -> tuple[int, int, int]:
+    return (*_namespace_opcode_rank(group.opcode), group.group)
+
+
+def planner_namespace_title(opcode: int) -> str:
+    if opcode == 0x02:
+        return "Local Devices (0x02)"
+    if opcode == 0x06:
+        return "Remote Devices (0x06)"
+    return f"Other Namespace ({_hex_u8(opcode)})"
+
+
+def split_planner_groups_by_namespace(
+    groups: list[PlannerGroup],
+) -> list[tuple[str, list[PlannerGroup]]]:
+    buckets: dict[int, list[PlannerGroup]] = {}
+    for group in sorted(groups, key=planner_group_sort_key):
+        buckets.setdefault(group.opcode, []).append(group)
+    return [
+        (planner_namespace_title(opcode), buckets[opcode])
+        for opcode in sorted(buckets, key=_namespace_opcode_rank)
+        if buckets[opcode]
+    ]
 
 
 def _format_seconds(seconds: float) -> str:
@@ -135,6 +169,8 @@ def _ask_yes_no(console: Console, prompt: str, *, default: bool) -> bool:
 def _build_default_plan(
     eligible: dict[PlanKey, PlannerGroup],
     default_plan: dict[PlanKey, GroupScanPlan] | None,
+    *,
+    default_preset: PlannerPreset,
 ) -> dict[PlanKey, GroupScanPlan]:
     if default_plan is not None:
         selected: dict[PlanKey, GroupScanPlan] = {}
@@ -144,17 +180,10 @@ def _build_default_plan(
         if selected:
             return selected
 
-    defaults: dict[PlanKey, GroupScanPlan] = {}
-    for g in eligible.values():
-        if not g.known:
-            continue
-        defaults[g.key] = GroupScanPlan(
-            group=g.group,
-            opcode=g.opcode,
-            rr_max=g.rr_max,
-            instances=((0x00,) if g.ii_max is None else g.present_instances),
-        )
-    return defaults
+    return build_plan_from_preset(
+        sorted(eligible.values(), key=planner_group_sort_key),
+        preset=default_preset,
+    )
 
 
 def _instances_for_preset(group: PlannerGroup, preset: PlannerPreset) -> tuple[int, ...]:
@@ -184,7 +213,7 @@ def build_plan_from_preset(
 ) -> dict[PlanKey, GroupScanPlan]:
     normalized_preset: PlannerPreset = "research" if preset == "exhaustive" else preset
     selected: dict[PlanKey, GroupScanPlan] = {}
-    for group in sorted(groups, key=lambda g: (g.group, g.opcode)):
+    for group in sorted(groups, key=planner_group_sort_key):
         if normalized_preset == "research":
             # Research mode: include all discovered groups with expanded
             # instance/rr_max defaults for reverse-engineering workflows.
@@ -201,6 +230,10 @@ def build_plan_from_preset(
             continue
         if not group.known:
             continue
+        if normalized_preset == "recommended" and not group.recommended:
+            continue
+        if normalized_preset == "conservative" and not group.recommended:
+            continue
         if normalized_preset == "conservative" and not group.primary:
             continue
         selected[group.key] = GroupScanPlan(
@@ -215,32 +248,33 @@ def build_plan_from_preset(
 def _render_table(title: str, rows: list[PlannerGroup], *, unknown: bool, console: Console) -> None:
     if not rows:
         return
-    console.print(Rule(title, style="dim"))
-    table = Table(show_lines=False, header_style="bold dim")
-    table.add_column("GG", style="cyan", no_wrap=True)
-    table.add_column("Name", style="white")
-    table.add_column("Type", style="dim", justify="right", no_wrap=True)
-    table.add_column("Instances", style="dim", justify="right", no_wrap=True)
-    table.add_column("RR_max", style="magenta", justify="right", no_wrap=True)
-    for g in rows:
-        if g.ii_max is None:
-            instances = "singleton"
-        elif unknown:
-            instances = f"0/{g.ii_max + 1} (est.)"
-        else:
-            instances = f"{len(g.present_instances)}/{g.ii_max + 1}"
-        name = g.display_name if not unknown else f"{g.display_name} (experimental)"
-        rr_max = _hex_u16(g.rr_max_full)
-        if g.rr_max_full != g.rr_max:
-            rr_max = f"{_hex_u16(g.rr_max)} / {rr_max}"
-        table.add_row(
-            _hex_u8(g.group),
-            name,
-            f"{g.descriptor:.1f}",
-            instances,
-            rr_max,
-        )
-    console.print(table)
+    for namespace_title, namespace_rows in split_planner_groups_by_namespace(rows):
+        console.print(Rule(f"{title} - {namespace_title}", style="dim"))
+        table = Table(show_lines=False, header_style="bold dim")
+        table.add_column("GG", style="cyan", no_wrap=True)
+        table.add_column("Name", style="white")
+        table.add_column("Type", style="dim", justify="right", no_wrap=True)
+        table.add_column("Instances", style="dim", justify="right", no_wrap=True)
+        table.add_column("RR_max", style="magenta", justify="right", no_wrap=True)
+        for g in namespace_rows:
+            if g.ii_max is None:
+                instances = "singleton"
+            elif unknown:
+                instances = f"0/{g.ii_max + 1} (est.)"
+            else:
+                instances = f"{len(g.present_instances)}/{g.ii_max + 1}"
+            name = g.display_name if not unknown else f"{g.display_name} (experimental)"
+            rr_max = _hex_u16(g.rr_max_full)
+            if g.rr_max_full != g.rr_max:
+                rr_max = f"{_hex_u16(g.rr_max)} / {rr_max}"
+            table.add_row(
+                _hex_u8(g.group),
+                name,
+                f"{g.descriptor:.1f}",
+                instances,
+                rr_max,
+            )
+        console.print(table)
 
 
 def _print_plan_breakdown(console: Console, plan: dict[PlanKey, GroupScanPlan]) -> None:
@@ -417,7 +451,11 @@ def prompt_scan_plan(
     for group in groups:
         eligible_groups.setdefault(group.group, []).append(group)
 
-    default_selected_plan = _build_default_plan(eligible, default_plan)
+    default_selected_plan = _build_default_plan(
+        eligible,
+        default_plan,
+        default_preset=default_preset,
+    )
 
     console.print(Rule("Scan Planner", style="dim"))
     console.print(

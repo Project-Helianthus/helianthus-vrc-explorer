@@ -910,16 +910,10 @@ def test_scan_singleton_group_nonzero_descriptor(tmp_path: Path) -> None:
     assert "descriptor_mismatch" not in group["discovery_advisory"]
     assert group["discovery_advisory"]["proven_register_opcodes"] == ["0x02"]
     assert set(group["instances"]) == {"0x00"}
-    plan = artifact["meta"]["scan_plan"]["groups"]["0x00"]
-    assert plan["instances"] == ["0x00"]
-    assert plan["dual_namespace"] is False
-    assert plan["namespace_key"] == "0x02"
-    assert plan["label"] == "local"
-    assert plan["namespace_identity_keys"] == "opcode_hex"
-    assert set(plan["namespaces"]) == {"0x02"}
+    assert "0x00" not in artifact["meta"]["scan_plan"]["groups"]
 
     scanned_instances = {ii for (_opcode, gg, ii, _rr) in transport.register_reads if gg == 0x00}
-    assert scanned_instances == {0x00}
+    assert scanned_instances == set()
 
 
 def test_artifact_schema_version(tmp_path: Path) -> None:
@@ -1485,6 +1479,70 @@ def test_scan_b524_recommended_plan_keeps_namespace_rr_max(tmp_path: Path) -> No
     assert artifact["meta"]["scan_plan"]["estimated_register_requests"] == 70
 
 
+def test_scan_b524_instance_discovery_runs_local_namespace_before_remote(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    import sys
+
+    import helianthus_vrc_explorer.scanner.scan as scan_mod
+    from helianthus_vrc_explorer.scanner.director import DiscoveredGroup
+
+    fixture = {
+        "meta": {"dummy_transport": {"directory_terminator_group": "0x0b"}},
+        "groups": {
+            "0x09": {
+                "descriptor_type": 1.0,
+                "namespaces": {
+                    "0x02": {"instances": {"0x00": {"registers": {"0x0001": {"raw_hex": "34"}}}}},
+                    "0x06": {"instances": {"0x00": {"registers": {"0x0001": {"raw_hex": "01"}}}}},
+                },
+            },
+            "0x0A": {
+                "descriptor_type": 1.0,
+                "namespaces": {
+                    "0x02": {"instances": {"0x00": {"registers": {"0x0001": {"raw_hex": "34"}}}}},
+                    "0x06": {"instances": {"0x00": {"registers": {"0x0001": {"raw_hex": "01"}}}}},
+                },
+            },
+        },
+    }
+    fixture_path = tmp_path / "fixture_group_09_0a_order.json"
+    fixture_path.write_text(json.dumps(fixture), encoding="utf-8")
+
+    transport = RecordingTransport(DummyTransport(fixture_path))
+
+    monkeypatch.setattr(
+        scan_mod,
+        "discover_groups",
+        lambda *_args, **_kwargs: [
+            DiscoveredGroup(group=0x09, descriptor=1.0),
+            DiscoveredGroup(group=0x0A, descriptor=1.0),
+        ],
+    )
+    monkeypatch.setattr(scan_mod, "prompt_scan_plan", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
+    scan_b524(
+        transport,
+        dst=0x15,
+        observer=_NoopObserver(),
+        console=Console(force_terminal=True),
+        planner_ui="classic",
+    )
+
+    presence_reads = [
+        opcode
+        for (opcode, gg, _ii, rr) in transport.register_reads
+        if gg in {0x09, 0x0A} and rr == 0x0001
+    ]
+    first_remote_index = next(
+        index for index, opcode in enumerate(presence_reads) if opcode == 0x06
+    )
+    assert all(opcode == 0x02 for opcode in presence_reads[:first_remote_index])
+    assert all(opcode == 0x06 for opcode in presence_reads[first_remote_index:])
+
+
 def test_planner_source_opcodes_include_staged_group_01_remote_but_keep_group_00_local_only() -> (
     None
 ):
@@ -1694,8 +1752,9 @@ def test_scan_b524_textual_planner_receives_group_01_remote_and_keeps_group_00_l
 
     default_plan = captured["default_plan"]
     assert isinstance(default_plan, dict)
-    assert make_plan_key(0x01, 0x02) in default_plan
-    assert make_plan_key(0x01, 0x06) in default_plan
+    assert make_plan_key(0x00, 0x02) not in default_plan
+    assert make_plan_key(0x01, 0x02) not in default_plan
+    assert make_plan_key(0x01, 0x06) not in default_plan
     assert make_plan_key(0x00, 0x06) not in default_plan
     assert artifact["meta"]["scan_plan"]["estimated_register_requests"] == 0
 

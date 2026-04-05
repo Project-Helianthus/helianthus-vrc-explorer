@@ -7,7 +7,7 @@ import struct
 import sys
 import time
 from collections import deque
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal, cast
@@ -40,6 +40,8 @@ from .b516 import scan_b516
 from .b555 import scan_b555
 from .director import (
     GROUP_CONFIG,
+    KNOWN_CORE_GROUPS,
+    ClassifiedGroup,
     DiscoveredGroup,
     classify_groups,
     discover_groups,
@@ -111,7 +113,18 @@ def _planner_ii_max(ii_max: int | None) -> int | None:
 
 
 def _group_opcodes(group: int) -> tuple[RegisterOpcode, ...]:
-    return tuple(opcodes_for_group(group))
+    return _sorted_namespace_opcodes(opcodes_for_group(group))
+
+
+def _namespace_opcode_sort_key(opcode: int) -> tuple[int, int]:
+    priority = 0 if opcode == 0x02 else 1 if opcode == 0x06 else 2
+    return priority, opcode
+
+
+def _sorted_namespace_opcodes(opcodes: Sequence[int]) -> tuple[RegisterOpcode, ...]:
+    unique = {int(opcode): cast(RegisterOpcode, opcode) for opcode in opcodes}
+    ordered = sorted(unique, key=_namespace_opcode_sort_key)
+    return tuple(unique[opcode] for opcode in ordered)
 
 
 def _planner_source_opcodes(group: int) -> tuple[RegisterOpcode, ...]:
@@ -121,7 +134,7 @@ def _planner_source_opcodes(group: int) -> tuple[RegisterOpcode, ...]:
     profiles = group_namespace_profiles(group)
     if not profiles:
         return _group_opcodes(group)
-    return tuple(cast(RegisterOpcode, opcode) for opcode in sorted(profiles))
+    return _sorted_namespace_opcodes(tuple(profiles))
 
 
 def _primary_opcode(group: int) -> RegisterOpcode:
@@ -130,6 +143,35 @@ def _primary_opcode(group: int) -> RegisterOpcode:
 
 def _is_dual_namespace_group(group: int) -> bool:
     return len(_group_opcodes(group)) > 1
+
+
+def _planner_group_is_recommended(*, group: int, opcode: RegisterOpcode) -> bool:
+    if group in KNOWN_CORE_GROUPS:
+        return True
+    config = GROUP_CONFIG.get(group)
+    if config is None or bool(config.get("exhaustive_only")):
+        return False
+    contract = namespace_availability_contract(group=group, opcode=opcode)
+    return contract.source == "heuristic_probe"
+
+
+def _instance_discovery_targets(
+    classified: list[ClassifiedGroup],
+    metadata_map: Mapping[int, GroupMetadata],
+    resolved_group_opcodes: Mapping[int, tuple[RegisterOpcode, ...]],
+) -> list[tuple[ClassifiedGroup, GroupMetadata, RegisterOpcode]]:
+    targets: list[tuple[ClassifiedGroup, GroupMetadata, RegisterOpcode]] = []
+    for opcode in (_LOCAL_REGISTER_OPCODE, _REMOTE_REGISTER_OPCODE):
+        for group in classified:
+            if opcode not in resolved_group_opcodes.get(group.group, ()):
+                continue
+            targets.append((group, metadata_map[group.group], opcode))
+    for group in classified:
+        for opcode in resolved_group_opcodes.get(group.group, ()):
+            if opcode in {_LOCAL_REGISTER_OPCODE, _REMOTE_REGISTER_OPCODE}:
+                continue
+            targets.append((group, metadata_map[group.group], opcode))
+    return targets
 
 
 def _group_name_for_opcode(group: int, opcode: RegisterOpcode) -> str:
@@ -1343,9 +1385,6 @@ def scan_b524(
             counting_transport.counters.send_calls - group_discovery_start_calls
         )
         classified = classify_groups(discovered, observer=observer)
-        unknown_groups = sorted(
-            group.group for group in classified if group.group not in GROUP_CONFIG
-        )
         unknown_descriptor_types = sorted(
             {
                 float(group.descriptor)
@@ -1354,13 +1393,6 @@ def scan_b524(
                 and float(group.descriptor) not in _KNOWN_DESCRIPTOR_TYPES
             }
         )
-        if unknown_groups and observer is not None:
-            unknown_text = ", ".join(f"0x{gg:02X}" for gg in unknown_groups)
-            observer.log(
-                f"Found {len(unknown_groups)} unknown groups ({unknown_text}); "
-                "deriving namespace coverage from opcode responsiveness probes.",
-                level="warn",
-            )
         if unknown_descriptor_types and observer is not None:
             descriptor_text = ", ".join(f"{value:g}" for value in unknown_descriptor_types)
             observer.log(
@@ -1368,17 +1400,6 @@ def scan_b524(
                 f"{descriptor_text}. Continue scan, then report with artifact JSON/HTML.",
                 level="warn",
             )
-        if unknown_groups or unknown_descriptor_types:
-            advisory: dict[str, Any] = {
-                "kind": "protocol_discovery",
-                "suggest_issue": True,
-                "attach_artifacts": ["scan_json", "scan_html"],
-            }
-            if unknown_groups:
-                advisory["unknown_groups"] = [f"0x{group:02X}" for group in unknown_groups]
-            if unknown_descriptor_types:
-                advisory["unknown_descriptor_types"] = unknown_descriptor_types
-            artifact["meta"]["issue_suggestion"] = advisory
         if observer is not None:
             observer.phase_finish("group_discovery")
             observer.log(f"Discovered {len(classified)} groups", level="info")
@@ -1483,40 +1504,36 @@ def scan_b524(
         group_dual_namespace_runtime: dict[int, bool] = {
             group: len(opcodes) > 1 for group, opcodes in resolved_group_opcodes.items()
         }
+        responsive_unknown_groups = sorted(
+            group.group
+            for group in classified
+            if group.group not in GROUP_CONFIG and resolved_group_opcodes.get(group.group, ())
+        )
+        if responsive_unknown_groups and observer is not None:
+            unknown_text = ", ".join(f"0x{gg:02X}" for gg in responsive_unknown_groups)
+            observer.log(
+                f"Found {len(responsive_unknown_groups)} unknown groups ({unknown_text}); "
+                "deriving namespace coverage from opcode responsiveness probes.",
+                level="warn",
+            )
+        if responsive_unknown_groups or unknown_descriptor_types:
+            advisory: dict[str, Any] = {
+                "kind": "protocol_discovery",
+                "suggest_issue": True,
+                "attach_artifacts": ["scan_json", "scan_html"],
+            }
+            if responsive_unknown_groups:
+                advisory["unknown_groups"] = [
+                    f"0x{group:02X}" for group in responsive_unknown_groups
+                ]
+            if unknown_descriptor_types:
+                advisory["unknown_descriptor_types"] = unknown_descriptor_types
+            artifact["meta"]["issue_suggestion"] = advisory
 
-        # Phase C: instance discovery (groups with ii_max > 0 only).
-        instance_total = 0
         for group in classified:
             meta = metadata_map[group.group]
-            opcodes = resolved_group_opcodes.get(group.group, ())
-            if GROUP_CONFIG.get(group.group) is None:
-                candidate_instances = (
-                    _UNKNOWN_GROUP_EXPANDED_INSTANCES
-                    if research_mode
-                    else _UNKNOWN_GROUP_INITIAL_INSTANCES
-                )
-                instance_total += len(candidate_instances) * len(opcodes)
-                continue
-            for opcode in opcodes:
-                namespace_ii_max = _ii_max_for_opcode(
-                    group=group.group,
-                    default_ii_max=meta.ii_max,
-                    opcode=opcode,
-                )
-                if _is_instanced_group(namespace_ii_max):
-                    assert namespace_ii_max is not None
-                    instance_total += namespace_ii_max + 1
-        if observer is not None:
-            observer.phase_start("instance_discovery", total=instance_total or 1)
-
-        instance_discovery_start = time.perf_counter()
-        instance_discovery_start_calls = counting_transport.counters.send_calls
-        for group in classified:
-            meta = metadata_map[group.group]
-            rr_max = meta.rr_max
             opcodes = resolved_group_opcodes.get(group.group, ())
             dual_namespace = len(opcodes) > 1
-            config = GROUP_CONFIG.get(group.group)
             # NaN descriptors come from synthetic research-mode injection;
             # store as None to keep JSON-serializable and avoid polluting analytics.
             desc_for_artifact = None if math.isnan(group.descriptor) else group.descriptor
@@ -1552,54 +1569,44 @@ def scan_b524(
                 discovery_advisory=discovery_advisory,
             )
 
-            if not opcodes:
+        instance_targets = _instance_discovery_targets(
+            classified,
+            metadata_map,
+            resolved_group_opcodes,
+        )
+
+        # Phase C: instance discovery (groups with ii_max > 0 only).
+        instance_total = 0
+        for group, meta, opcode in instance_targets:
+            if GROUP_CONFIG.get(group.group) is None:
+                candidate_instances = (
+                    _UNKNOWN_GROUP_EXPANDED_INSTANCES
+                    if research_mode
+                    else _UNKNOWN_GROUP_INITIAL_INSTANCES
+                )
+                instance_total += len(candidate_instances)
                 continue
+            namespace_ii_max = _ii_max_for_opcode(
+                group=group.group,
+                default_ii_max=meta.ii_max,
+                opcode=opcode,
+            )
+            if _is_instanced_group(namespace_ii_max):
+                assert namespace_ii_max is not None
+                instance_total += namespace_ii_max + 1
+        if observer is not None:
+            observer.phase_start("instance_discovery", total=instance_total or 1)
+
+        instance_discovery_start = time.perf_counter()
+        instance_discovery_start_calls = counting_transport.counters.send_calls
+        known_namespace_probe_counts: dict[int, list[str]] = {}
+        unknown_namespace_probe_counts: dict[int, list[str]] = {}
+        for group, meta, opcode in instance_targets:
+            rr_max = meta.rr_max
+            config = GROUP_CONFIG.get(group.group)
 
             if config is None:
-                namespace_probe_counts: list[str] = []
                 total_slots = len(_UNKNOWN_GROUP_EXPANDED_INSTANCES)
-                for opcode in opcodes:
-                    namespace_ii_max = _ii_max_for_opcode(
-                        group=group.group,
-                        default_ii_max=meta.ii_max,
-                        opcode=opcode,
-                    )
-                    _record_namespace_topology(
-                        artifact,
-                        group=group.group,
-                        opcode=opcode,
-                        ii_max=namespace_ii_max,
-                    )
-                    instances_obj = _instances_object(artifact, group=group.group, opcode=opcode)
-                    emit_trace_label(
-                        transport,
-                        "Exploring unknown group "
-                        f"0x{group.group:02X} ({opcode_label(opcode)}) "
-                        "across multiple instances",
-                    )
-                    present_instances = _probe_unknown_present_instances(
-                        transport,
-                        dst=dst,
-                        group=group.group,
-                        opcode=opcode,
-                        observer=observer,
-                        expand_fallback=research_mode,
-                    )
-                    _mark_present_instances(instances_obj, instances=present_instances)
-                    namespace_probe_counts.append(
-                        f"{opcode_label(opcode)} {len(present_instances)}/{total_slots}"
-                    )
-                if observer is not None:
-                    observer.log(
-                        f"GG=0x{group.group:02X} {group.name}: "
-                        f"{', '.join(namespace_probe_counts)} present (experimental), "
-                        f"RR_max=0x{rr_max:04X} ({rr_max + 1} registers/instance)",
-                        level="info",
-                    )
-                continue
-
-            known_namespace_probe_counts: list[str] = []
-            for opcode in opcodes:
                 namespace_ii_max = _ii_max_for_opcode(
                     group=group.group,
                     default_ii_max=meta.ii_max,
@@ -1611,57 +1618,101 @@ def scan_b524(
                     opcode=opcode,
                     ii_max=namespace_ii_max,
                 )
-                contract = namespace_availability_contract(group=group.group, opcode=opcode)
                 instances_obj = _instances_object(artifact, group=group.group, opcode=opcode)
-                if _is_instanced_group(namespace_ii_max):
-                    _record_availability_contract(
-                        artifact,
-                        group=group.group,
-                        opcode=opcode,
-                        contract=contract,
-                    )
-                if not _is_instanced_group(namespace_ii_max):
-                    _mark_present_instances(instances_obj, instances=(0x00,))
-                    known_namespace_probe_counts.append(
-                        f"{_group_name_for_opcode(group.group, opcode)} "
-                        f"[{opcode_label(opcode)}] 1/1"
-                    )
-                    continue
-
-                assert namespace_ii_max is not None
                 emit_trace_label(
                     transport,
-                    f"Identifying instances in group 0x{group.group:02X} ({opcode_label(opcode)})",
+                    "Exploring unknown group "
+                    f"0x{group.group:02X} ({opcode_label(opcode)}) "
+                    "across multiple instances",
                 )
-                probes = _probe_present_instances(
+                present_instances = _probe_unknown_present_instances(
                     transport,
                     dst=dst,
                     group=group.group,
                     opcode=opcode,
-                    ii_max=namespace_ii_max,
                     observer=observer,
+                    expand_fallback=research_mode,
                 )
-                _record_availability_probes(
+                _mark_present_instances(instances_obj, instances=present_instances)
+                unknown_namespace_probe_counts.setdefault(group.group, []).append(
+                    f"{opcode_label(opcode)} {len(present_instances)}/{total_slots}"
+                )
+                continue
+
+            namespace_ii_max = _ii_max_for_opcode(
+                group=group.group,
+                default_ii_max=meta.ii_max,
+                opcode=opcode,
+            )
+            _record_namespace_topology(
+                artifact,
+                group=group.group,
+                opcode=opcode,
+                ii_max=namespace_ii_max,
+            )
+            contract = namespace_availability_contract(group=group.group, opcode=opcode)
+            instances_obj = _instances_object(artifact, group=group.group, opcode=opcode)
+            if _is_instanced_group(namespace_ii_max):
+                _record_availability_contract(
                     artifact,
                     group=group.group,
                     opcode=opcode,
-                    probes=probes,
+                    contract=contract,
                 )
-                present_instances = tuple(ii for ii, probe in probes.items() if probe.present)
-                _mark_present_instances(instances_obj, instances=present_instances)
-                known_namespace_probe_counts.append(
-                    f"{_group_name_for_opcode(group.group, opcode)} "
-                    f"[{opcode_label(opcode)}] "
-                    f"{len(present_instances)}/{namespace_ii_max + 1}"
+            if not _is_instanced_group(namespace_ii_max):
+                _mark_present_instances(instances_obj, instances=(0x00,))
+                known_namespace_probe_counts.setdefault(group.group, []).append(
+                    f"{_group_name_for_opcode(group.group, opcode)} [{opcode_label(opcode)}] 1/1"
                 )
+                continue
 
-            if observer is not None:
-                observer.log(
-                    f"GG=0x{group.group:02X}: "
-                    f"{', '.join(known_namespace_probe_counts)} present, "
-                    f"RR_max=0x{rr_max:04X} ({rr_max + 1} registers/instance)",
-                    level="info",
-                )
+            assert namespace_ii_max is not None
+            emit_trace_label(
+                transport,
+                f"Identifying instances in group 0x{group.group:02X} ({opcode_label(opcode)})",
+            )
+            probes = _probe_present_instances(
+                transport,
+                dst=dst,
+                group=group.group,
+                opcode=opcode,
+                ii_max=namespace_ii_max,
+                observer=observer,
+            )
+            _record_availability_probes(
+                artifact,
+                group=group.group,
+                opcode=opcode,
+                probes=probes,
+            )
+            present_instances = tuple(ii for ii, probe in probes.items() if probe.present)
+            _mark_present_instances(instances_obj, instances=present_instances)
+            known_namespace_probe_counts.setdefault(group.group, []).append(
+                f"{_group_name_for_opcode(group.group, opcode)} "
+                f"[{opcode_label(opcode)}] "
+                f"{len(present_instances)}/{namespace_ii_max + 1}"
+            )
+
+        if observer is not None:
+            for group in classified:
+                rr_max = metadata_map[group.group].rr_max
+                unknown_counts = unknown_namespace_probe_counts.get(group.group)
+                if unknown_counts:
+                    observer.log(
+                        f"GG=0x{group.group:02X} {group.name}: "
+                        f"{', '.join(unknown_counts)} present (experimental), "
+                        f"RR_max=0x{rr_max:04X} ({rr_max + 1} registers/instance)",
+                        level="info",
+                    )
+                    continue
+                known_counts = known_namespace_probe_counts.get(group.group)
+                if known_counts:
+                    observer.log(
+                        f"GG=0x{group.group:02X}: "
+                        f"{', '.join(known_counts)} present, "
+                        f"RR_max=0x{rr_max:04X} ({rr_max + 1} registers/instance)",
+                        level="info",
+                    )
 
         if observer is not None:
             observer.phase_finish("instance_discovery")
@@ -1762,6 +1813,10 @@ def scan_b524(
                         present_instances=present_instances,
                         namespace_label=(opcode_label(opcode) if dual_namespace else None),
                         primary=(opcode == primary_opcode),
+                        recommended=_planner_group_is_recommended(
+                            group=group.group,
+                            opcode=opcode,
+                        ),
                         exhaustive_only=bool(config and config.get("exhaustive_only")),
                     )
                 )
