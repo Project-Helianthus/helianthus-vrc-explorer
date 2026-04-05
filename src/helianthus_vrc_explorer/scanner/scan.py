@@ -101,6 +101,8 @@ def _normalize_planner_preset(preset: str) -> PlannerPreset:
     normalized = preset.strip().lower()
     if normalized == "aggressive":
         normalized = "full"
+    if normalized == "exhaustive":
+        normalized = "research"
     return cast(PlannerPreset, normalized)
 
 
@@ -578,6 +580,7 @@ def _probe_unknown_present_instances(
     group: int,
     opcode: RegisterOpcode,
     observer: ScanObserver | None,
+    expand_fallback: bool,
 ) -> tuple[int, ...]:
     present_instances: list[int] = []
     probed: set[int] = set()
@@ -601,7 +604,7 @@ def _probe_unknown_present_instances(
         if observer is not None:
             observer.phase_advance("instance_discovery", advance=1)
 
-    if not should_expand:
+    if not should_expand or not expand_fallback:
         return tuple(present_instances)
 
     for ii in _UNKNOWN_GROUP_EXPANDED_INSTANCES:
@@ -1250,6 +1253,7 @@ def scan_b524(
     """
 
     planner_preset = _normalize_planner_preset(planner_preset)
+    research_mode = planner_preset == "research"
     start_perf = time.perf_counter()
     scan_timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     static_constraints, static_constraints_source = load_default_b524_constraints_catalog()
@@ -1287,8 +1291,14 @@ def scan_b524(
             observer.log(f"Starting scan dst={_hex_u8(dst)}", level="info")
             if planner_preset == "full":
                 observer.log(
-                    "Full preset selected: scan will expand all instance slots and full RR "
-                    "ranges. Expect multi-hour BASV2 runs.",
+                    "Full preset selected: scan will expand known groups to full instance "
+                    "slots and RR ranges.",
+                    level="warn",
+                )
+            if research_mode:
+                observer.log(
+                    "Research preset selected: scan enables broader non-core and "
+                    "underspecified fallback probing. Expect very long runs.",
                     level="warn",
                 )
             if probe_constraints:
@@ -1314,7 +1324,7 @@ def scan_b524(
 
         # Exhaustive mode: inject synthetic DiscoveredGroup entries for any GG in
         # 0x00..0x11 not already found by directory probing.
-        if planner_preset == "exhaustive":
+        if research_mode:
             discovered_ggs = {dg.group for dg in discovered}
             for gg in range(0x00, 0x12):
                 if gg not in discovered_ggs:
@@ -1480,7 +1490,12 @@ def scan_b524(
             meta = metadata_map[group.group]
             opcodes = resolved_group_opcodes.get(group.group, ())
             if GROUP_CONFIG.get(group.group) is None:
-                instance_total += len(_UNKNOWN_GROUP_EXPANDED_INSTANCES) * len(opcodes)
+                candidate_instances = (
+                    _UNKNOWN_GROUP_EXPANDED_INSTANCES
+                    if research_mode
+                    else _UNKNOWN_GROUP_INITIAL_INSTANCES
+                )
+                instance_total += len(candidate_instances) * len(opcodes)
                 continue
             for opcode in opcodes:
                 namespace_ii_max = _ii_max_for_opcode(
@@ -1502,7 +1517,7 @@ def scan_b524(
             opcodes = resolved_group_opcodes.get(group.group, ())
             dual_namespace = len(opcodes) > 1
             config = GROUP_CONFIG.get(group.group)
-            # NaN descriptors come from synthetic exhaustive-mode injection;
+            # NaN descriptors come from synthetic research-mode injection;
             # store as None to keep JSON-serializable and avoid polluting analytics.
             desc_for_artifact = None if math.isnan(group.descriptor) else group.descriptor
             discovery_advisory: dict[str, Any] = {
@@ -1568,6 +1583,7 @@ def scan_b524(
                         group=group.group,
                         opcode=opcode,
                         observer=observer,
+                        expand_fallback=research_mode,
                     )
                     _mark_present_instances(instances_obj, instances=present_instances)
                     namespace_probe_counts.append(

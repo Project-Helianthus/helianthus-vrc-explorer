@@ -74,6 +74,8 @@ def _normalize_planner_preset(raw: str) -> str:
     normalized = raw.strip().lower()
     if normalized == "aggressive":
         return "full"
+    if normalized == "exhaustive":
+        return "research"
     return normalized
 
 
@@ -674,9 +676,10 @@ def scan(
         "recommended",
         "--preset",
         help=(
-            "Planner preset: conservative, recommended, full, exhaustive, or custom. "
-            "`full` scans every instance slot and full RR ranges; "
-            "`exhaustive` also injects all GG 0x00-0x11 groups. Expect very long runs."
+            "Planner preset: conservative, recommended, full, research, or custom. "
+            "`full` expands known groups to full instance slots and RR ranges; "
+            "`research` enables broad non-core/underspecified fallback probing. "
+            "Legacy aliases: aggressive->full, exhaustive->research."
         ),
     ),
     no_tips: bool = typer.Option(  # noqa: B008
@@ -733,11 +736,12 @@ def scan(
         )
         raise typer.Exit(2)
     preset_value = _normalize_planner_preset(preset)
-    valid_presets = {"conservative", "recommended", "full", "exhaustive", "custom"}
+    valid_presets = {"conservative", "recommended", "full", "research", "custom"}
     if preset_value not in valid_presets:
         typer.echo(
             "Invalid --preset value. Expected one of: "
-            "conservative, recommended, aggressive, exhaustive, custom.",
+            "conservative, recommended, full, research, custom "
+            "(aliases: aggressive, exhaustive).",
             err=True,
         )
         raise typer.Exit(2)

@@ -32,9 +32,9 @@ class GroupConfig(TypedDict):
     namespace_opcodes: NotRequired[list[int]]
     rr_max_by_opcode: NotRequired[dict[int, int]]
     ii_max_by_opcode: NotRequired[dict[int, int]]
-    # When True, this group is only included in the exhaustive preset.
-    # It will NOT appear in conservative/recommended/full presets even if
-    # discovered by the directory probe.
+    # Legacy key name preserved for compatibility.
+    # When True, this group is only included in the research preset
+    # (and legacy exhaustive alias), never in conservative/recommended/full.
     exhaustive_only: NotRequired[bool]
 
 

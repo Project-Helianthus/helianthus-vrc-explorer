@@ -179,7 +179,7 @@ def namespace_availability_contract(
             probe_type_hint=None,
             positive_when="all configured slots are treated as present",
             description=(
-                "Exploratory exhaustive group without a verified namespace-specific heuristic."
+                "Exploratory research group without a verified namespace-specific heuristic."
             ),
         )
 

@@ -1387,19 +1387,59 @@ def test_scan_b524_normalizes_legacy_aggressive_preset_to_full_for_textual_defau
     assert captured["default_preset"] == "full"
     default_plan = captured["default_plan"]
     assert isinstance(default_plan, dict)
-    for key in (make_plan_key(0x69, 0x02), make_plan_key(0x69, 0x06)):
-        assert key in default_plan
-        group_plan = default_plan[key]
-        assert group_plan.rr_max == 0x30
-        assert group_plan.instances == tuple(range(0x0B))
+    assert make_plan_key(0x69, 0x02) not in default_plan
+    assert make_plan_key(0x69, 0x06) not in default_plan
 
 
-def test_scan_b524_applies_preset_in_non_interactive_mode(tmp_path: Path) -> None:
+def test_scan_b524_normalizes_exhaustive_preset_to_research_for_textual_default_plan(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    import sys
+
+    transport = DummyTransport(_write_fixture_unknown_group_69(tmp_path))
+    captured: dict[str, object] = {}
+
+    def fake_run_textual_scan_plan(
+        _groups,
+        *,
+        request_rate_rps,
+        default_plan,
+        default_preset,
+    ):
+        captured["default_preset"] = default_preset
+        captured["default_plan"] = default_plan
+        captured["request_rate_rps"] = request_rate_rps
+        return {}
+
+    monkeypatch.setattr(
+        "helianthus_vrc_explorer.ui.planner_textual.run_textual_scan_plan",
+        fake_run_textual_scan_plan,
+    )
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
+    scan_b524(
+        transport,
+        dst=0x15,
+        observer=_NoopObserver(),
+        console=Console(force_terminal=True),
+        planner_ui="textual",
+        planner_preset="exhaustive",
+    )
+
+    assert captured["default_preset"] == "research"
+    default_plan = captured["default_plan"]
+    assert isinstance(default_plan, dict)
+    assert make_plan_key(0x69, 0x02) in default_plan
+    assert make_plan_key(0x69, 0x06) in default_plan
+
+
+def test_scan_b524_applies_research_preset_in_non_interactive_mode(tmp_path: Path) -> None:
     artifact = scan_b524(
         DummyTransport(_write_fixture_unknown_group_69(tmp_path)),
         dst=0x15,
         planner_ui="auto",
-        planner_preset="full",
+        planner_preset="research",
     )
 
     scan_plan = artifact["meta"]["scan_plan"]["groups"]
@@ -1417,6 +1457,17 @@ def test_scan_b524_applies_preset_in_non_interactive_mode(tmp_path: Path) -> Non
     assert set(group["namespaces"]) == {"0x02", "0x06"}
     assert group["namespaces"]["0x02"]["instances"]["0x00"]["present"] is True
     assert group["namespaces"]["0x06"]["instances"]["0x00"]["present"] is True
+
+
+def test_scan_b524_full_preset_keeps_unknown_groups_out_of_default_plan(tmp_path: Path) -> None:
+    artifact = scan_b524(
+        DummyTransport(_write_fixture_unknown_group_69(tmp_path)),
+        dst=0x15,
+        planner_ui="auto",
+        planner_preset="full",
+    )
+
+    assert "0x69" not in artifact["meta"]["scan_plan"]["groups"]
 
 
 def test_scan_b524_recommended_plan_keeps_namespace_rr_max(tmp_path: Path) -> None:
@@ -1532,7 +1583,7 @@ def test_scan_unknown_group_expands_to_instance_ff_after_readable_probe(tmp_path
         transport,
         dst=0x15,
         planner_ui="auto",
-        planner_preset="recommended",
+        planner_preset="research",
     )
 
     group = artifact["groups"]["0x69"]
@@ -1542,7 +1593,10 @@ def test_scan_unknown_group_expands_to_instance_ff_after_readable_probe(tmp_path
     assert remote_instances["0x00"]["present"] is True
     assert remote_instances["0xff"]["present"] is True
 
-    assert "0x69" not in artifact["meta"]["scan_plan"]["groups"]
+    assert "0x69" in artifact["meta"]["scan_plan"]["groups"]
+    plan_group = artifact["meta"]["scan_plan"]["groups"]["0x69"]
+    assert plan_group["rr_max"] == "0x0030"
+    assert plan_group["instances"][-1] == "0xff"
 
     advisory = group["discovery_advisory"]
     assert advisory["proven_register_opcodes"] == ["0x06"]
