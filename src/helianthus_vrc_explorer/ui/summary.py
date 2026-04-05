@@ -263,27 +263,28 @@ def _infer_single_namespace_key(
     planned_namespace_keys = _scan_plan_namespace_keys(artifact, group_key)
     if len(planned_namespace_keys) == 1:
         return planned_namespace_keys[0]
+
+    inferred_keys: set[str] = set()
+    instances = group_obj.get("instances", {})
+    if isinstance(instances, dict):
+        for instance_obj in instances.values():
+            if not isinstance(instance_obj, dict):
+                continue
+            registers = instance_obj.get("registers", {})
+            if not isinstance(registers, dict):
+                continue
+            for entry in registers.values():
+                if not isinstance(entry, dict):
+                    continue
+                namespace_key = _namespace_key_from_entry(entry)
+                if namespace_key is not None:
+                    inferred_keys.add(namespace_key)
+    if len(inferred_keys) == 1:
+        return next(iter(inferred_keys))
+
     discovery_namespace_keys = _discovery_namespace_keys(group_obj)
     if len(discovery_namespace_keys) == 1:
         return discovery_namespace_keys[0]
-    inferred_keys: set[str] = set()
-    instances = group_obj.get("instances", {})
-    if not isinstance(instances, dict):
-        return None
-    for instance_obj in instances.values():
-        if not isinstance(instance_obj, dict):
-            continue
-        registers = instance_obj.get("registers", {})
-        if not isinstance(registers, dict):
-            continue
-        for entry in registers.values():
-            if not isinstance(entry, dict):
-                continue
-            namespace_key = _namespace_key_from_entry(entry)
-            if namespace_key is not None:
-                inferred_keys.add(namespace_key)
-    if len(inferred_keys) == 1:
-        return next(iter(inferred_keys))
     return None
 
 
