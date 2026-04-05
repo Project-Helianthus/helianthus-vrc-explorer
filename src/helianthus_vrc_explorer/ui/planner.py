@@ -57,7 +57,14 @@ class PlannerGroup:
         return f"{_hex_u8(self.group)} ({self.namespace_label})"
 
 
-PlannerPreset = Literal["conservative", "recommended", "full", "exhaustive", "custom"]
+PlannerPreset = Literal[
+    "conservative",
+    "recommended",
+    "full",
+    "research",
+    "exhaustive",
+    "custom",
+]
 
 
 def _hex_u8(value: int) -> str:
@@ -161,10 +168,13 @@ def _instances_for_preset(group: PlannerGroup, preset: PlannerPreset) -> tuple[i
     return full_range
 
 
-def _instances_for_exhaustive(ii_max: int | None) -> tuple[int, ...]:
-    if ii_max is None:
+def _instances_for_research(group: PlannerGroup) -> tuple[int, ...]:
+    if group.ii_max is None:
         return (0x00,)
-    return tuple(range(0x00, ii_max + 1))
+    full_range = tuple(range(0x00, group.ii_max + 1))
+    if 0xFF in group.present_instances:
+        return full_range + (0xFF,)
+    return full_range
 
 
 def build_plan_from_preset(
@@ -172,30 +182,32 @@ def build_plan_from_preset(
     *,
     preset: PlannerPreset,
 ) -> dict[PlanKey, GroupScanPlan]:
+    normalized_preset: PlannerPreset = "research" if preset == "exhaustive" else preset
     selected: dict[PlanKey, GroupScanPlan] = {}
     for group in sorted(groups, key=lambda g: (g.group, g.opcode)):
-        if preset == "exhaustive":
-            # Exhaustive: include ALL groups with rr_max_full and all instances.
+        if normalized_preset == "research":
+            # Research mode: include all discovered groups with expanded
+            # instance/rr_max defaults for reverse-engineering workflows.
             selected[group.key] = GroupScanPlan(
                 group=group.group,
                 opcode=group.opcode,
                 rr_max=group.rr_max_full,
-                instances=_instances_for_exhaustive(group.ii_max),
+                instances=_instances_for_research(group),
             )
             continue
         if group.exhaustive_only:
-            # exhaustive_only groups (GG 0x06..0x11 experimental)
-            # are only included under --preset exhaustive.
+            # `exhaustive_only` is a legacy key name retained for compatibility.
+            # These groups are intentionally restricted to research mode.
             continue
-        if not group.known and preset != "full":
+        if not group.known:
             continue
-        if preset == "conservative" and not group.primary:
+        if normalized_preset == "conservative" and not group.primary:
             continue
         selected[group.key] = GroupScanPlan(
             group=group.group,
             opcode=group.opcode,
-            rr_max=(group.rr_max_full if preset == "full" else group.rr_max),
-            instances=_instances_for_preset(group, preset),
+            rr_max=(group.rr_max_full if normalized_preset == "full" else group.rr_max),
+            instances=_instances_for_preset(group, normalized_preset),
         )
     return selected
 
@@ -251,11 +263,12 @@ def _print_plan_breakdown(console: Console, plan: dict[PlanKey, GroupScanPlan]) 
 
 
 def _ask_preset(console: Console, *, default_preset: PlannerPreset) -> PlannerPreset:
-    preset_hint = "Preset: (1) conservative, (2) recommended, (3) full, (4) exhaustive, (5) custom"
+    preset_hint = "Preset: (1) conservative, (2) recommended, (3) full, (4) research, (5) custom"
     default_token = {
         "conservative": "1",
         "recommended": "2",
         "full": "3",
+        "research": "4",
         "exhaustive": "4",
         "custom": "5",
     }[default_preset]
@@ -267,8 +280,9 @@ def _ask_preset(console: Console, *, default_preset: PlannerPreset) -> PlannerPr
         "3": "full",
         "full": "full",
         "aggressive": "full",
-        "4": "exhaustive",
-        "exhaustive": "exhaustive",
+        "4": "research",
+        "research": "research",
+        "exhaustive": "research",
         "5": "custom",
         "custom": "custom",
     }
@@ -443,8 +457,13 @@ def prompt_scan_plan(
 
     if preset == "full":
         console.print(
-            "[bold yellow]Warning:[/bold yellow] full preset expands all instance slots and full "
-            "RR ranges. Expect large multi-hour live scans on BASV2.",
+            "[bold yellow]Warning:[/bold yellow] full preset expands known groups to full "
+            "instance slots and RR ranges.",
+        )
+    if preset in {"research", "exhaustive"}:
+        console.print(
+            "[bold yellow]Warning:[/bold yellow] research preset enables broader non-core "
+            "and underspecified fallback scanning. Expect very long reverse-engineering runs.",
         )
 
     if preset == "custom":

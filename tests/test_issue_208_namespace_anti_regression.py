@@ -272,7 +272,7 @@ def test_issue_208_planner_opcode_fidelity_keeps_namespace_specific_keys() -> No
         ),
     ]
 
-    plan = build_plan_from_preset(groups, preset="full")
+    plan = build_plan_from_preset(groups, preset="research")
 
     local_key = make_plan_key(0x69, 0x02)
     remote_key = make_plan_key(0x69, 0x06)

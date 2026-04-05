@@ -629,9 +629,10 @@ CI enforces this via `python scripts/check_docs_sync.py`.
 │                                                               classic.                                               │
 │                                                               [default: disabled]                                    │
 │ --preset                                             TEXT     Planner preset: conservative, recommended, full,       │
-│                                                               exhaustive, or custom. `full` scans every instance     │
-│                                                               slot and full RR ranges; `exhaustive` also injects all │
-│                                                               GG 0x00-0x11 groups. Expect very long runs.            │
+│                                                               research, or custom. `full` expands known groups to    │
+│                                                               full instance slots and RR ranges; `research` enables  │
+│                                                               broad non-core/underspecified fallback probing. Legacy │
+│                                                               aliases: aggressive->full, exhaustive->research.       │
 │                                                               [default: recommended]                                 │
 │ --no-tips                                                     Hide scan header tips in interactive terminal mode.    │
 │ --redact                                                      Redact device identity fields (e.g. serial number) in  │
