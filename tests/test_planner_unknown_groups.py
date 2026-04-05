@@ -5,6 +5,7 @@ from rich.console import Console
 from helianthus_vrc_explorer.scanner.plan import GroupScanPlan, make_plan_key
 from helianthus_vrc_explorer.ui.planner import (
     PlannerGroup,
+    _print_plan_breakdown,
     build_plan_from_preset,
     prompt_scan_plan,
 )
@@ -146,3 +147,22 @@ def test_build_plan_from_preset_full_keeps_ff_when_present() -> None:
 
     plan = build_plan_from_preset(groups, preset="full")
     assert plan[make_plan_key(0x69, 0x06)].instances == tuple(range(0x0A + 1)) + (0xFF,)
+
+
+def test_print_plan_breakdown_does_not_infer_singleton_from_selected_instance() -> None:
+    console = Console(record=True, width=120)
+    _print_plan_breakdown(
+        console,
+        {
+            make_plan_key(0x09, 0x06): GroupScanPlan(
+                group=0x09,
+                opcode=0x06,
+                rr_max=0x0035,
+                instances=(0x00,),
+            )
+        },
+    )
+
+    text = console.export_text()
+    assert "instances=0" in text
+    assert "instances=singleton" not in text
