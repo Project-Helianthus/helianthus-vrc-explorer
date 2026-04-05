@@ -400,5 +400,7 @@ def test_render_summary_ignores_synthetic_instance_slots_in_topology_ratios(
     text = console.export_text()
 
     assert "2/11" not in text
+    assert "Local Devices (0x02)" in text
+    assert "Remote Devices (0x06)" in text
     assert "Unknown 0x69" in text and "1/11" in text
-    assert "local (0x02) singleton, remote (0x06) 1/11" in text
+    assert "Buffer / Solar Cylinder 2" in text and "singleton" in text

@@ -105,9 +105,7 @@ def _parse_constraint_read_opcodes(*, raw_scope: str, raw_opcodes: str) -> tuple
         if derived is not None:
             return derived
         if raw_scope.strip():
-            raise ValueError(
-                f"Unsupported constraint scope without read_opcodes: {raw_scope!r}"
-            )
+            raise ValueError(f"Unsupported constraint scope without read_opcodes: {raw_scope!r}")
         return _DEFAULT_STATIC_READ_OPCODES
     if value in {"all", "all_register_read_namespaces", "0x02+0x06"}:
         return (0x02, 0x06)
