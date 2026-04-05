@@ -47,6 +47,7 @@ GROUP_CONFIG: Final[dict[int, GroupConfig]] = {
         "ii_max": 0x00,
         "rr_max": 0x00FF,
         "opcodes": [0x02],
+        "name_by_opcode": {0x02: "Regulator Parameters", 0x06: "Primary Heating Sources"},
     },
     0x01: {
         "desc": 3.0,
@@ -54,6 +55,7 @@ GROUP_CONFIG: Final[dict[int, GroupConfig]] = {
         "ii_max": 0x00,
         "rr_max": 0x0013,
         "opcodes": [0x02],
+        "name_by_opcode": {0x02: "Hot Water Circuit", 0x06: "Secondary Heating Sources"},
         "namespace_opcodes": [0x02, 0x06],
         "rr_max_by_opcode": {0x02: 0x0013, 0x06: 0x0015},
         "ii_max_by_opcode": {0x02: 0x00, 0x06: 0x00},
@@ -222,13 +224,18 @@ def group_namespace_profiles(group: int) -> dict[int, NamespaceProfile]:
 
 
 def group_name_for_opcode(group: int, opcode: int) -> str:
+    config = GROUP_CONFIG.get(group)
+    if config is None:
+        return f"Unknown 0x{group:02X}"
+    name_overrides = config.get("name_by_opcode")
+    if isinstance(name_overrides, dict):
+        override = name_overrides.get(int(opcode))
+        if isinstance(override, str) and override.strip():
+            return override
     profiles = group_namespace_profiles(group)
     profile = profiles.get(int(opcode))
     if profile is not None:
         return profile.name
-    config = GROUP_CONFIG.get(group)
-    if config is None:
-        return f"Unknown 0x{group:02X}"
     return str(config["name"])
 
 

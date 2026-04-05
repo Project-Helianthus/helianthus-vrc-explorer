@@ -56,7 +56,7 @@ def test_table_row_values_show_explicit_namespace_column() -> None:
     remote_group = PlannerGroup(
         group=0x01,
         opcode=0x06,
-        name="Hot Water Circuit",
+        name="Secondary Heating Sources",
         descriptor=3.0,
         known=True,
         ii_max=None,
@@ -95,7 +95,15 @@ def test_table_row_values_show_explicit_namespace_column() -> None:
         )
     )
 
-    assert remote_row == ("✓", "0x01", "Hot Water Circuit", "remote", "3.0", "singleton", "0x0015")
+    assert remote_row == (
+        "✓",
+        "0x01",
+        "Secondary Heating Sources",
+        "remote",
+        "3.0",
+        "singleton",
+        "0x0015",
+    )
     assert local_row == (
         " ",
         "0x00",
