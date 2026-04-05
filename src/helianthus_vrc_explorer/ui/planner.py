@@ -38,6 +38,7 @@ class PlannerGroup:
     primary: bool = True
     recommended: bool = True
     exhaustive_only: bool = False
+    full_default: bool = True
 
     @property
     def key(self) -> PlanKey:
@@ -235,6 +236,8 @@ def build_plan_from_preset(
         if normalized_preset == "conservative" and not group.recommended:
             continue
         if normalized_preset == "conservative" and not group.primary:
+            continue
+        if normalized_preset == "full" and not group.full_default:
             continue
         selected[group.key] = GroupScanPlan(
             group=group.group,

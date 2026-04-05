@@ -1868,6 +1868,9 @@ def scan_b524(
                             opcode=opcode,
                         ),
                         exhaustive_only=bool(config and config.get("exhaustive_only")),
+                        # Keep planner rows broadly visible, but allow `full`
+                        # preset defaults to remain scoped to resolved namespaces.
+                        full_default=(opcode in resolved_opcodes),
                     )
                 )
 
