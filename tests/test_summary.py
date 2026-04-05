@@ -250,3 +250,82 @@ def test_render_summary_namespace_totals_use_namespace_container_when_opcode_mis
     assert "namespaces local (0x02)=1, remote (0x06)=1" in text
     assert "remote (0x02)" not in text
     assert "local (0x06)" not in text
+
+
+def test_render_summary_uses_namespace_specific_topology_for_instances(tmp_path: Path) -> None:
+    artifact = {
+        "meta": {
+            "destination_address": "0x15",
+            "scan_timestamp": "2026-02-11T12:00:00Z",
+            "scan_duration_seconds": 1.0,
+        },
+        "groups": {
+            "0x08": {
+                "name": "Buffer / Solar Cylinder 2",
+                "descriptor_observed": 1.0,
+                "dual_namespace": True,
+                "namespaces": {
+                    "0x02": {
+                        "label": "local",
+                        "ii_max": "0x00",
+                        "instances": {
+                            "0x00": {
+                                "present": True,
+                                "registers": {"0x0001": {"read_opcode": "0x02", "error": None}},
+                            }
+                        },
+                    },
+                    "0x06": {
+                        "label": "remote",
+                        "ii_max": "0x0a",
+                        "instances": {
+                            "0x00": {
+                                "present": True,
+                                "registers": {"0x0001": {"read_opcode": "0x06", "error": None}},
+                            }
+                        },
+                    },
+                },
+            }
+        },
+    }
+
+    console = Console(record=True, width=180)
+    render_summary(console, artifact, output_path=tmp_path / "artifact.json")
+    text = console.export_text()
+
+    assert "local (0x02) singleton, remote (0x06) 1/11" in text
+    assert "remote (0x06) singleton" not in text
+
+
+def test_render_summary_does_not_infer_singleton_from_observed_remote_count(
+    tmp_path: Path,
+) -> None:
+    artifact = {
+        "meta": {
+            "destination_address": "0x15",
+            "scan_timestamp": "2026-02-11T12:00:00Z",
+            "scan_duration_seconds": 1.0,
+        },
+        "groups": {
+            "0x69": {
+                "name": "Unknown 0x69",
+                "descriptor_observed": 1.0,
+                "ii_max": "0x0a",
+                "instances": {
+                    "0x00": {
+                        "present": True,
+                        "registers": {"0x0000": {"read_opcode": "0x06", "error": None}},
+                    }
+                },
+            }
+        },
+    }
+
+    console = Console(record=True, width=160)
+    render_summary(console, artifact, output_path=tmp_path / "artifact.json")
+    text = console.export_text()
+
+    assert "Unknown 0x69" in text
+    assert "1/11" in text
+    assert "Unknown 0x69" in text and "singleton" not in text

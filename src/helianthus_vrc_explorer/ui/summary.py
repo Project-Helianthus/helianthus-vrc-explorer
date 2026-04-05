@@ -18,6 +18,7 @@ class _GroupStats:
     descriptor: float
     instances_total: int
     instances_present: int
+    instances_display: str
     registers_scanned: int
     registers_errors: int
     namespace_registers: dict[str, int]
@@ -144,6 +145,47 @@ def _sorted_namespace_counts(counts: dict[str, int]) -> dict[str, int]:
     return dict(sorted(counts.items(), key=lambda item: _display_namespace_sort_key(item[0])))
 
 
+def _parse_u8_int(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        if 0 <= value <= 0xFF:
+            return value
+        return None
+    if not isinstance(value, str):
+        return None
+    raw = value.strip()
+    if not raw:
+        return None
+    try:
+        parsed = int(raw, 0)
+    except ValueError:
+        return None
+    if 0 <= parsed <= 0xFF:
+        return parsed
+    return None
+
+
+def _topology_total_from_ii_max(value: object) -> int | None:
+    ii_max = _parse_u8_int(value)
+    if ii_max is None:
+        return None
+    return ii_max + 1
+
+
+def _format_instance_summary(
+    *,
+    present: int,
+    total: int,
+    topology_authoritative: bool,
+) -> str:
+    if total <= 0:
+        return str(present)
+    if topology_authoritative and total == 1:
+        return "singleton"
+    return f"{present}/{total}"
+
+
 def _compute_group_stats(artifact: dict[str, Any]) -> list[_GroupStats]:
     stats: list[_GroupStats] = []
     groups = artifact.get("groups", {})
@@ -162,8 +204,9 @@ def _compute_group_stats(artifact: dict[str, Any]) -> list[_GroupStats]:
         if not isinstance(instances, dict):
             instances = {}
 
-        instances_total = len(instances)
+        instances_total = 0
         instances_present = 0
+        instances_display = "0"
         registers_scanned = 0
         registers_errors = 0
         namespace_registers: dict[str, int] = {}
@@ -172,9 +215,9 @@ def _compute_group_stats(artifact: dict[str, Any]) -> list[_GroupStats]:
             namespaces = group_obj.get("namespaces", {})
             if not isinstance(namespaces, dict):
                 namespaces = {}
+            namespace_instance_summaries: dict[str, str] = {}
+            known_totals = True
             namespace_group_names: list[str] = []
-            instance_ids_total: set[str] = set()
-            instance_ids_present: set[str] = set()
             for namespace_key, namespace_obj in namespaces.items():
                 if not isinstance(namespace_key, str) or not isinstance(namespace_obj, dict):
                     continue
@@ -192,13 +235,16 @@ def _compute_group_stats(artifact: dict[str, Any]) -> list[_GroupStats]:
                 namespace_instances = namespace_obj.get("instances", {})
                 if not isinstance(namespace_instances, dict):
                     continue
+                namespace_present = 0
+                namespace_total = _topology_total_from_ii_max(namespace_obj.get("ii_max"))
+                if namespace_total is None:
+                    known_totals = False
+                    namespace_total = len(namespace_instances)
                 for instance_key, instance_obj in namespace_instances.items():
-                    if isinstance(instance_key, str):
-                        instance_ids_total.add(instance_key)
                     if not isinstance(instance_obj, dict):
                         continue
                     if instance_obj.get("present") is True and isinstance(instance_key, str):
-                        instance_ids_present.add(instance_key)
+                        namespace_present += 1
                     registers = instance_obj.get("registers", {})
                     if not isinstance(registers, dict):
                         continue
@@ -214,9 +260,35 @@ def _compute_group_stats(artifact: dict[str, Any]) -> list[_GroupStats]:
                 )
             if namespace_group_names:
                 name = " / ".join(namespace_group_names)
-            instances_total = len(instance_ids_total)
-            instances_present = len(instance_ids_present)
+                namespace_instance_summaries[namespace_label] = _format_instance_summary(
+                    present=namespace_present,
+                    total=namespace_total,
+                    topology_authoritative=_topology_total_from_ii_max(namespace_obj.get("ii_max"))
+                    is not None,
+                )
+                instances_total += namespace_total
+                instances_present += namespace_present
+            if namespace_instance_summaries:
+                ordered_items = sorted(
+                    namespace_instance_summaries.items(),
+                    key=lambda item: _display_namespace_sort_key(item[0]),
+                )
+                instances_display = ", ".join(
+                    f"{label} {summary}" for (label, summary) in ordered_items
+                )
+            elif known_totals:
+                instances_display = _format_instance_summary(
+                    present=instances_present,
+                    total=instances_total,
+                    topology_authoritative=True,
+                )
+            else:
+                instances_display = str(instances_present)
         else:
+            group_total = _topology_total_from_ii_max(group_obj.get("ii_max"))
+            topology_authoritative = group_total is not None
+            if group_total is None:
+                group_total = len(instances)
             for instance_obj in instances.values():
                 if not isinstance(instance_obj, dict):
                     continue
@@ -236,6 +308,12 @@ def _compute_group_stats(artifact: dict[str, Any]) -> list[_GroupStats]:
                         )
                     if entry.get("error") is not None:
                         registers_errors += 1
+            instances_total = group_total
+            instances_display = _format_instance_summary(
+                present=instances_present,
+                total=instances_total,
+                topology_authoritative=topology_authoritative,
+            )
 
         stats.append(
             _GroupStats(
@@ -244,6 +322,7 @@ def _compute_group_stats(artifact: dict[str, Any]) -> list[_GroupStats]:
                 descriptor=descriptor,
                 instances_total=instances_total,
                 instances_present=instances_present,
+                instances_display=instances_display,
                 registers_scanned=registers_scanned,
                 registers_errors=registers_errors,
                 namespace_registers=_sorted_namespace_counts(namespace_registers),
@@ -386,17 +465,11 @@ def render_summary(console: Console, artifact: dict[str, Any], *, output_path: P
     table.add_column("Errors", style="white", justify="right", no_wrap=True)
 
     for s in group_stats:
-        if s.instances_total == 1 and s.instances_present == 1:
-            instances = "singleton"
-        elif s.instances_total > 0:
-            instances = f"{s.instances_present}/{s.instances_total}"
-        else:
-            instances = str(s.instances_present)
         table.add_row(
             s.group,
             s.name,
             f"{s.descriptor:g}",
-            instances,
+            s.instances_display,
             _format_counts(s.namespace_registers),
             str(s.registers_scanned),
             str(s.registers_errors),

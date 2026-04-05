@@ -262,6 +262,7 @@ def _ensure_group_artifact(
     name: str,
     descriptor_observed: float | None,
     dual_namespace: bool,
+    ii_max: int | None = None,
     discovery_advisory: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     group_key = _hex_u8(group)
@@ -270,6 +271,8 @@ def _ensure_group_artifact(
         "descriptor_observed": descriptor_observed,
         "dual_namespace": dual_namespace,
     }
+    if ii_max is not None:
+        default["ii_max"] = _hex_u8(ii_max)
     if dual_namespace:
         default["namespaces"] = {}
     else:
@@ -284,13 +287,21 @@ def _ensure_group_artifact(
     group_obj.setdefault("name", name)
     group_obj.setdefault("descriptor_observed", descriptor_observed)
     group_obj["dual_namespace"] = dual_namespace
+    if ii_max is not None:
+        group_obj["ii_max"] = _hex_u8(ii_max)
+    elif dual_namespace:
+        group_obj.pop("ii_max", None)
     if discovery_advisory is not None:
         group_obj["discovery_advisory"] = discovery_advisory
     return cast(dict[str, Any], group_obj)
 
 
 def _ensure_namespace_artifact(
-    group_obj: dict[str, Any], *, group: int, opcode: int
+    group_obj: dict[str, Any],
+    *,
+    group: int,
+    opcode: int,
+    ii_max: int | None = None,
 ) -> dict[str, Any]:
     namespaces = group_obj.setdefault("namespaces", {})
     namespace_key = _hex_u8(opcode)
@@ -307,6 +318,8 @@ def _ensure_namespace_artifact(
     if namespace_group_name is not None:
         namespace_obj.setdefault("group_name", namespace_group_name)
     namespace_obj.setdefault("instances", {})
+    if ii_max is not None:
+        namespace_obj["ii_max"] = _hex_u8(ii_max)
     return cast(dict[str, Any], namespace_obj)
 
 
@@ -389,6 +402,23 @@ def _record_availability_probes(
         probe_map[_hex_u8(instance)] = _serialize_availability_probe(probe)
 
 
+def _record_namespace_topology(
+    artifact: dict[str, Any],
+    *,
+    group: int,
+    opcode: int,
+    ii_max: int | None,
+) -> None:
+    group_obj = artifact["groups"].get(_hex_u8(group))
+    if not isinstance(group_obj, dict):
+        return
+    if bool(group_obj.get("dual_namespace")):
+        _ensure_namespace_artifact(group_obj, opcode=opcode, ii_max=ii_max)
+        return
+    if ii_max is not None:
+        group_obj["ii_max"] = _hex_u8(ii_max)
+
+
 def _promote_group_artifact_to_dual_namespace(
     artifact: dict[str, Any],
     *,
@@ -400,6 +430,7 @@ def _promote_group_artifact_to_dual_namespace(
         return
 
     flat_instances = group_obj.pop("instances", {})
+    flat_ii_max = group_obj.pop("ii_max", None)
     namespaces = group_obj.setdefault("namespaces", {})
     if not isinstance(namespaces, dict):
         namespaces = {}
@@ -423,6 +454,8 @@ def _promote_group_artifact_to_dual_namespace(
         namespaces[namespace_key] = namespace_obj
 
     namespace_obj.setdefault("label", opcode_label(primary_opcode))
+    if flat_ii_max is not None:
+        namespace_obj.setdefault("ii_max", flat_ii_max)
     namespace_obj.setdefault("group_name", _group_name_for_opcode(group, primary_opcode))
     if isinstance(flat_instances, dict) and flat_instances:
         namespace_obj["instances"] = flat_instances
@@ -1500,6 +1533,7 @@ def scan_b524(
                 name=artifact_group_name,
                 descriptor_observed=desc_for_artifact,
                 dual_namespace=dual_namespace,
+                ii_max=(meta.ii_max if not dual_namespace else None),
                 discovery_advisory=discovery_advisory,
             )
 
@@ -1510,6 +1544,17 @@ def scan_b524(
                 namespace_probe_counts: list[str] = []
                 total_slots = len(_UNKNOWN_GROUP_EXPANDED_INSTANCES)
                 for opcode in opcodes:
+                    namespace_ii_max = _ii_max_for_opcode(
+                        group=group.group,
+                        default_ii_max=meta.ii_max,
+                        opcode=opcode,
+                    )
+                    _record_namespace_topology(
+                        artifact,
+                        group=group.group,
+                        opcode=opcode,
+                        ii_max=namespace_ii_max,
+                    )
                     instances_obj = _instances_object(artifact, group=group.group, opcode=opcode)
                     emit_trace_label(
                         transport,
@@ -1543,6 +1588,12 @@ def scan_b524(
                     group=group.group,
                     default_ii_max=meta.ii_max,
                     opcode=opcode,
+                )
+                _record_namespace_topology(
+                    artifact,
+                    group=group.group,
+                    opcode=opcode,
+                    ii_max=namespace_ii_max,
                 )
                 contract = namespace_availability_contract(group=group.group, opcode=opcode)
                 instances_obj = _instances_object(artifact, group=group.group, opcode=opcode)
@@ -1978,6 +2029,18 @@ def scan_b524(
                     descriptor_observed=None,
                     dual_namespace=group_dual_namespace_effective.get(task.group, False),
                 )
+                task_group_meta = metadata_map.get(task.group)
+                if task_group_meta is not None:
+                    _record_namespace_topology(
+                        artifact,
+                        group=task.group,
+                        opcode=task.opcode,
+                        ii_max=_ii_max_for_opcode(
+                            group=task.group,
+                            default_ii_max=task_group_meta.ii_max,
+                            opcode=task.opcode,
+                        ),
+                    )
                 instances_obj = _instances_object(
                     artifact,
                     group=task.group,

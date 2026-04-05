@@ -983,6 +983,8 @@ def test_artifact_dual_namespace_structure(monkeypatch, tmp_path: Path) -> None:
     assert remote_ns["label"] == "remote"
     assert local_ns["group_name"] == "Unknown 0x09 (local)"
     assert remote_ns["group_name"] == "Regulators"
+    assert local_ns["ii_max"] == "0x0a"
+    assert remote_ns["ii_max"] == "0x0a"
     assert (
         group["discovery_advisory"]["instance_discovery_decision"]["decision"]
         == "independent_per_namespace"
@@ -1072,6 +1074,7 @@ def test_artifact_single_namespace_unchanged(tmp_path: Path) -> None:
     group = artifact["groups"]["0x02"]
     assert group["dual_namespace"] is False
     assert "namespaces" not in group
+    assert group["ii_max"] == "0x0a"
     assert set(group["instances"]) >= {"0x00"}
 
 
@@ -1146,6 +1149,8 @@ def test_group_08_remote_namespace_only_marks_present_instances(
 
     group = artifact["groups"]["0x08"]
     assert group["dual_namespace"] is True
+    assert group["namespaces"]["0x02"]["ii_max"] == "0x00"
+    assert group["namespaces"]["0x06"]["ii_max"] == "0x0a"
     assert set(group["namespaces"]["0x02"]["instances"]) == {"0x00"}
     assert set(group["namespaces"]["0x06"]["instances"]) == {"0x00"}
 
@@ -1532,6 +1537,7 @@ def test_scan_unknown_group_expands_to_instance_ff_after_readable_probe(tmp_path
 
     group = artifact["groups"]["0x69"]
     assert group["dual_namespace"] is False
+    assert group["ii_max"] == "0x0a"
     remote_instances = group["instances"]
     assert remote_instances["0x00"]["present"] is True
     assert remote_instances["0xff"]["present"] is True

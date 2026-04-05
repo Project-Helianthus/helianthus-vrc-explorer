@@ -238,8 +238,9 @@ def _print_plan_breakdown(console: Console, plan: dict[PlanKey, GroupScanPlan]) 
     console.print("[bold]Selected groups[/bold]")
     for key in sorted(plan.keys()):
         group_plan = plan[key]
-        instance_spec = "singleton"
-        if len(group_plan.instances) != 1 or group_plan.instances[0] != 0x00:
+        if not group_plan.instances:
+            instance_spec = "none"
+        else:
             instance_spec = format_int_set(list(group_plan.instances))
         console.print(
             "  • "
