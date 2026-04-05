@@ -139,7 +139,7 @@ def test_plan_dual_namespace_presets_keep_namespace_specific_ii_max() -> None:
             name="Buffer / Solar Cylinder 2",
             descriptor=1.0,
             known=True,
-            ii_max=None,
+            ii_max=0x0A,
             rr_max=0x0007,
             rr_max_full=0x0007,
             present_instances=(0x00,),
@@ -166,7 +166,7 @@ def test_plan_dual_namespace_presets_keep_namespace_specific_ii_max() -> None:
     assert recommended[make_plan_key(0x08, 0x06)].instances == (0x00, 0x02)
 
     full = build_plan_from_preset(groups, preset="full")
-    assert full[make_plan_key(0x08, 0x02)].instances == (0x00,)
+    assert full[make_plan_key(0x08, 0x02)].instances == tuple(range(0x0A + 1))
     assert full[make_plan_key(0x08, 0x06)].instances == tuple(range(0x0A + 1))
 
 

@@ -50,7 +50,7 @@ GROUP_CONFIG: Final[dict[int, GroupConfig]] = {
         "namespace_opcodes": [0x02, 0x06],
         "name_by_opcode": {0x02: "Regulator Parameters", 0x06: "Primary Heating Sources"},
         "rr_max_by_opcode": {0x02: 0x00FF, 0x06: 0x0015},
-        "ii_max_by_opcode": {0x02: 0x00, 0x06: 0x00},
+        "ii_max_by_opcode": {0x02: 0x00, 0x06: 0x07},
     },
     0x01: {
         "desc": 3.0,
@@ -61,7 +61,7 @@ GROUP_CONFIG: Final[dict[int, GroupConfig]] = {
         "name_by_opcode": {0x02: "Hot Water Circuit", 0x06: "Secondary Heating Sources"},
         "namespace_opcodes": [0x02, 0x06],
         "rr_max_by_opcode": {0x02: 0x0013, 0x06: 0x0015},
-        "ii_max_by_opcode": {0x02: 0x00, 0x06: 0x00},
+        "ii_max_by_opcode": {0x02: 0x00, 0x06: 0x07},
     },
     0x02: {
         "desc": 1.0,
@@ -94,7 +94,7 @@ GROUP_CONFIG: Final[dict[int, GroupConfig]] = {
         "name_by_opcode": {0x02: "Solar Circuit", 0x06: "Unknown 0x04 (remote)"},
         "namespace_opcodes": [0x02, 0x06],
         "rr_max_by_opcode": {0x02: 0x000B, 0x06: 0x000B},
-        "ii_max_by_opcode": {0x02: 0x00, 0x06: 0x0A},
+        "ii_max_by_opcode": {0x02: 0x0A, 0x06: 0x0A},
     },
     0x05: {
         "desc": 1.0,
@@ -113,7 +113,7 @@ GROUP_CONFIG: Final[dict[int, GroupConfig]] = {
         "rr_max": 0x0007,
         "opcodes": [0x02, 0x06],
         "rr_max_by_opcode": {0x02: 0x0007, 0x06: 0x0004},
-        "ii_max_by_opcode": {0x02: 0x00, 0x06: 0x0A},
+        "ii_max_by_opcode": {0x02: 0x0A, 0x06: 0x0A},
     },
     0x09: {
         "desc": 1.0,

@@ -1240,10 +1240,14 @@ def test_group_08_remote_namespace_only_marks_present_instances(
 
     group = artifact["groups"]["0x08"]
     assert group["dual_namespace"] is True
-    assert group["namespaces"]["0x02"]["ii_max"] == "0x00"
+    assert group["namespaces"]["0x02"]["ii_max"] == "0x0a"
     assert group["namespaces"]["0x06"]["ii_max"] == "0x0a"
-    assert set(group["namespaces"]["0x02"]["instances"]) == {"0x00"}
-    assert set(group["namespaces"]["0x06"]["instances"]) == {"0x00"}
+    local_instances = set(group["namespaces"]["0x02"]["instances"])
+    remote_instances = set(group["namespaces"]["0x06"]["instances"])
+    assert "0x00" in local_instances
+    assert "0x00" in remote_instances
+    # Regression guard: group 0x08 is no longer modeled as local singleton.
+    assert len(local_instances) > 1
 
 
 def test_type_hint_propagation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1865,6 +1869,9 @@ def test_scan_b524_textual_planner_receives_remote_heating_source_rows(
     assert name_by_key[(0x00, 0x06)] == "Primary Heating Sources"
     assert name_by_key[(0x01, 0x02)] == "Hot Water Circuit"
     assert name_by_key[(0x01, 0x06)] == "Secondary Heating Sources"
+    by_key = {(group.group, group.opcode): group for group in planner_groups}
+    assert by_key[(0x00, 0x06)].ii_max == 0x07
+    assert by_key[(0x01, 0x06)].ii_max == 0x07
 
     default_plan = captured["default_plan"]
     assert isinstance(default_plan, dict)
@@ -1911,6 +1918,7 @@ def test_scan_b524_textual_planner_includes_remote_exploratory_rows_for_groups_0
     assert by_key[(0x03, 0x06)].name == "Unknown 0x03 (remote)"
     assert by_key[(0x04, 0x06)].name == "Unknown 0x04 (remote)"
     assert by_key[(0x05, 0x06)].name == "Unknown 0x05 (remote)"
+    assert by_key[(0x04, 0x02)].ii_max == 0x0A
     assert by_key[(0x02, 0x06)].ii_max == 0x0A
     assert by_key[(0x03, 0x06)].ii_max == 0x0A
     assert by_key[(0x04, 0x06)].ii_max == 0x0A
@@ -2015,6 +2023,41 @@ def test_scan_b524_textual_full_preset_keeps_remote_only_group_selected_on_remot
     # Full should keep remote-only group selected on its resolved namespace.
     assert make_plan_key(0x0C, 0x06) in default_plan
     assert make_plan_key(0x0C, 0x02) not in default_plan
+
+
+def test_scan_b524_textual_planner_models_group_08_as_instanced_on_local_and_remote(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    import sys
+
+    captured: dict[str, object] = {}
+
+    def fake_run_textual_scan_plan(groups, **kwargs):
+        captured["groups"] = groups
+        captured["default_plan"] = kwargs["default_plan"]
+        return {}
+
+    monkeypatch.setattr(
+        "helianthus_vrc_explorer.ui.planner_textual.run_textual_scan_plan",
+        fake_run_textual_scan_plan,
+    )
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
+    scan_b524(
+        DummyTransport(_write_fixture_group_08(tmp_path)),
+        dst=0x15,
+        observer=_NoopObserver(),
+        console=Console(force_terminal=True),
+        planner_ui="textual",
+        planner_preset="recommended",
+    )
+
+    planner_groups = captured["groups"]
+    assert isinstance(planner_groups, list)
+    by_key = {(group.group, group.opcode): group for group in planner_groups}
+    assert by_key[(0x08, 0x02)].ii_max == 0x0A
+    assert by_key[(0x08, 0x06)].ii_max == 0x0A
 
 
 def test_scan_b524_textual_planner_uses_namespace_owned_labels_for_groups_09_and_0a(
