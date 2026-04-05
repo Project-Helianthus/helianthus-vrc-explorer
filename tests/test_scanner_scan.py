@@ -2039,8 +2039,7 @@ def test_scan_b524_replan_back_to_single_preserves_promoted_dual_namespace_data(
     assert "namespaces" in group
     assert "instances" not in group
     assert (
-        group["namespaces"]["0x02"]["instances"]["0x00"]["registers"]["0x0000"]["raw_hex"]
-        == "02"
+        group["namespaces"]["0x02"]["instances"]["0x00"]["registers"]["0x0000"]["raw_hex"] == "02"
     )
     assert transport.register_reads[0] == (0x02, 0x01, 0x00, 0x0000)
 
