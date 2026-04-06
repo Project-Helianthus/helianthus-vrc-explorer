@@ -237,3 +237,6 @@ group,instance,register,leaf,ebusd_name,register_class,type_hint,opcode
 0x0C,*,0x0004,device_firmware_version,,state,FW,0x06
 0x0C,*,0x0012,device_status,,state,,0x06
 *,*,0x0001,device_connected,,state,BOOL,0x06
+*,*,0x0002,device_class_address,,state,UCH,0x06
+*,*,0x0003,device_error_code,,state,UCH,0x06
+*,*,0x0004,device_firmware_version,,state,FW,0x06
