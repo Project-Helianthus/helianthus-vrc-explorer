@@ -131,6 +131,10 @@ def _derive_response_state(entry: dict[str, Any]) -> str | None:
             return "empty_reply"
         if lowered.startswith("transport_error:") and "nack" in lowered:
             return "nack"
+        if lowered.startswith("transport_error:"):
+            # Generic transport failures are not clean wire states and must not
+            # be inferred as "active" during migration.
+            return None
 
     flags_access = entry.get("flags_access")
     if isinstance(flags_access, str) and flags_access.strip().lower() == "dormant":

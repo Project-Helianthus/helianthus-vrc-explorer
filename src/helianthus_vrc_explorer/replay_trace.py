@@ -63,6 +63,7 @@ class TraceReplayMetadata:
     last_timestamp: datetime
     total_lines: int
     parsed_exchanges: int
+    truncated_hex_frames: int
 
 
 def _hex_u8(value: int) -> str:
@@ -83,20 +84,23 @@ def _parse_timestamp(raw: str) -> datetime:
     return dt.astimezone(UTC)
 
 
-def _parse_hex(raw: str, *, line_no: int, field_name: str) -> bytes:
+def _parse_hex(raw: str, *, line_no: int, field_name: str) -> tuple[bytes, bool]:
     text = raw.strip()
-    if "..." in text:
-        raise UnsupportedTraceFormatError(
-            f"Unsupported truncated hex in {field_name} at line {line_no}."
-        )
+    truncated = "..." in text
+    if truncated:
+        # Current ENH trace logs can truncate long hex payloads with "...".
+        # Replay keeps the deterministic prefix and marks metadata accordingly.
+        text = text.replace("...", "")
     if text == "":
-        return b""
+        return b"", truncated
+    if len(text) % 2 != 0 and truncated:
+        text = text[:-1]
     if len(text) % 2 != 0:
         raise TraceReplayError(
             f"Invalid odd-length hex in {field_name} at line {line_no}: {text!r}"
         )
     try:
-        return bytes.fromhex(text)
+        return bytes.fromhex(text), truncated
     except ValueError as exc:
         raise TraceReplayError(f"Invalid hex in {field_name} at line {line_no}: {text!r}") from exc
 
@@ -108,6 +112,7 @@ def _parse_enhanced_trace_lines(
     sequence_order: list[int] = []
     pending_labels: list[str] = []
     saw_enh_marker = False
+    truncated_hex_frames = 0
 
     first_ts: datetime | None = None
     last_ts: datetime | None = None
@@ -140,7 +145,13 @@ def _parse_enhanced_trace_lines(
         send_match = _SEND_PROTO_RE.match(body)
         if send_match is not None:
             seq = int(send_match.group("seq"), 10)
-            payload = _parse_hex(send_match.group("payload"), line_no=line_no, field_name="payload")
+            payload, payload_truncated = _parse_hex(
+                send_match.group("payload"),
+                line_no=line_no,
+                field_name="payload",
+            )
+            if payload_truncated:
+                truncated_hex_frames += 1
             exchange = _TraceExchange(
                 seq=seq,
                 timestamp=timestamp,
@@ -159,7 +170,13 @@ def _parse_enhanced_trace_lines(
         parsed_match = _PARSED_PROTO_RE.match(body)
         if parsed_match is not None:
             seq = int(parsed_match.group("seq"), 10)
-            parsed = _parse_hex(parsed_match.group("hex"), line_no=line_no, field_name="response")
+            parsed, parsed_truncated = _parse_hex(
+                parsed_match.group("hex"),
+                line_no=line_no,
+                field_name="response",
+            )
+            if parsed_truncated:
+                truncated_hex_frames += 1
             matched_exchange = exchange_by_seq.get(seq)
             if matched_exchange is not None:
                 matched_exchange.response = parsed
@@ -195,8 +212,13 @@ def _parse_enhanced_trace_lines(
         last_timestamp=last_ts,
         total_lines=len(lines),
         parsed_exchanges=len(exchanges),
+        truncated_hex_frames=truncated_hex_frames,
     )
     return exchanges, metadata
+
+
+def _response_state_implies_present(response_state: object) -> bool:
+    return isinstance(response_state, str) and response_state in {"active", "empty_reply"}
 
 
 def _opcode_from_payload(payload: bytes) -> int | None:
@@ -350,6 +372,11 @@ def replay_trace_to_artifact(trace_path: Path) -> dict[str, Any]:
         },
         "groups": {},
     }
+    limitations = cast(list[str], artifact["meta"]["replay_trace"]["limitations"])
+    if meta.truncated_hex_frames > 0:
+        limitations.append(
+            "Some trace hex frames were truncated ('...'); replay used deterministic prefixes only"
+        )
 
     b524_operations: dict[str, list[dict[str, Any]]] = {
         "group_directory": [],
@@ -375,7 +402,7 @@ def replay_trace_to_artifact(trace_path: Path) -> dict[str, Any]:
             )
             instances = namespace_obj.setdefault("instances", {})
             instance_key = _hex_u8(instance)
-            instance_obj = instances.setdefault(instance_key, {"present": True, "registers": {}})
+            instance_obj = instances.setdefault(instance_key, {"present": False, "registers": {}})
             registers = instance_obj.setdefault("registers", {})
             register_key = _hex_u16(register)
             entry = _decode_register_read_entry(
@@ -387,6 +414,8 @@ def replay_trace_to_artifact(trace_path: Path) -> dict[str, Any]:
             if exchange.op_label:
                 entry["trace_label"] = exchange.op_label
             registers[register_key] = entry
+            if _response_state_implies_present(entry.get("response_state")):
+                instance_obj["present"] = True
             continue
 
         if opcode == 0x00 and len(payload) >= 3:

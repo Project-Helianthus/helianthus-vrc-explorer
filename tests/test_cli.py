@@ -471,6 +471,24 @@ def test_scan_cli_b509_range_requires_b509_dump(tmp_path: Path) -> None:
     assert "--b509-range requires --b509-dump." in result.stderr
 
 
+def test_scan_cli_b509_range_requires_b509_dump_in_dry_run(tmp_path: Path) -> None:
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            "--dry-run",
+            "--b509-range",
+            "0x0000..0x0001",
+            "--output-dir",
+            str(tmp_path),
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "--b509-range requires --b509-dump." in result.stderr
+
+
 def test_scan_cli_passes_b509_dump_and_ranges(monkeypatch, tmp_path: Path) -> None:
     import helianthus_vrc_explorer.cli as cli_mod
 

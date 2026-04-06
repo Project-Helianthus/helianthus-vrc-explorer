@@ -118,3 +118,61 @@ def test_cli_replay_trace_generates_json_and_html(tmp_path: Path) -> None:
     artifact = json.loads(json_path.read_text(encoding="utf-8"))
     assert artifact["schema_version"] == "2.2"
     assert artifact["meta"]["replay_trace"]["format"] == "enhanced_v1"
+
+
+def test_replay_trace_accepts_truncated_hex_and_records_limitation(tmp_path: Path) -> None:
+    trace_path = _write_trace(
+        tmp_path,
+        "truncated.trace",
+        "\n".join(
+            [
+                "2026-04-06T10:00:00.000000Z INIT features=0x01",
+                "2026-04-06T10:00:00.050000Z START initiator=0xF7",
+                (
+                    "2026-04-06T10:00:00.100000Z #1 SEND_PROTO src=0xF7 dst=0x15 "
+                    "primary=0xB5 secondary=0x24 payload=020002000100"
+                ),
+                # Simulate current transport's shortened trace output.
+                "2026-04-06T10:00:00.150000Z #1 PARSED_PROTO len=52 hex=010201000100...",
+            ]
+        )
+        + "\n",
+    )
+
+    artifact = replay_trace_to_artifact(trace_path)
+    assert artifact["schema_version"] == "2.2"
+    limitations = artifact["meta"]["replay_trace"]["limitations"]
+    assert any("truncated ('...')" in item for item in limitations)
+
+
+def test_replay_trace_instance_presence_uses_response_state(tmp_path: Path) -> None:
+    trace_path = _write_trace(
+        tmp_path,
+        "presence.trace",
+        "\n".join(
+            [
+                "2026-04-06T10:00:00.000000Z INIT features=0x01",
+                "2026-04-06T10:00:00.050000Z START initiator=0xF7",
+                # Instance 0x00: no response lines => timeout => not present
+                (
+                    "2026-04-06T10:00:00.100000Z #1 SEND_PROTO src=0xF7 dst=0x15 "
+                    "primary=0xB5 secondary=0x24 payload=060009000100"
+                ),
+                # Instance 0x01: explicit empty reply => present
+                (
+                    "2026-04-06T10:00:00.200000Z #2 SEND_PROTO src=0xF7 dst=0x15 "
+                    "primary=0xB5 secondary=0x24 payload=060009010100"
+                ),
+                "2026-04-06T10:00:00.250000Z #2 PARSED_PROTO len=0 hex=",
+            ]
+        )
+        + "\n",
+    )
+
+    artifact = replay_trace_to_artifact(trace_path)
+    instances = artifact["groups"]["0x09"]["namespaces"]["0x06"]["instances"]
+
+    assert instances["0x00"]["present"] is False
+    assert instances["0x00"]["registers"]["0x0001"]["response_state"] == "timeout"
+    assert instances["0x01"]["present"] is True
+    assert instances["0x01"]["registers"]["0x0001"]["response_state"] == "empty_reply"

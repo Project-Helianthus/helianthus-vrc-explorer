@@ -237,6 +237,11 @@ def test_migrate_21_entries_derives_response_state_and_cleans_known_errors() -> 
                                 "error": "transport_error: nack received while reading",
                                 "flags_access": None,
                             },
+                            "0x0004": {
+                                "error": "transport_error: broken framing",
+                                "value": 42,
+                                "raw_hex": "2a",
+                            },
                         }
                     }
                 },
@@ -257,3 +262,5 @@ def test_migrate_21_entries_derives_response_state_and_cleans_known_errors() -> 
     assert regs["0x0002"]["reply_hex"] == ""
     assert regs["0x0003"]["response_state"] == "nack"
     assert regs["0x0003"]["error"] is None
+    assert regs["0x0004"].get("response_state") is None
+    assert regs["0x0004"]["error"] == "transport_error: broken framing"

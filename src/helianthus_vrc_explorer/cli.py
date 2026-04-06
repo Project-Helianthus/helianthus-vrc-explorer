@@ -780,6 +780,13 @@ def scan(
     else:
         myvaillant_map, myvaillant_map_source = _load_default_myvaillant_map()
 
+    if b509_range and not b509_dump:
+        typer.echo(
+            "--b509-range requires --b509-dump.",
+            err=True,
+        )
+        raise typer.Exit(2)
+
     if dry_run:
         dst_u8 = 0x15 if requested_dst == "auto" else cast(int, explicit_dst_u8)
         fixture_text, fixture_source = _load_default_dry_run_fixture_text()
@@ -816,12 +823,6 @@ def scan(
         )
         allow_transport_retry = _is_default_transport_settings(transport_settings)
         b509_ranges: list[tuple[int, int]] = []
-        if b509_range and not b509_dump:
-            typer.echo(
-                "--b509-range requires --b509-dump.",
-                err=True,
-            )
-            raise typer.Exit(2)
         if b509_dump:
             if b509_range:
                 for spec in b509_range:
