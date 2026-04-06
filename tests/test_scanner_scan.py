@@ -1751,6 +1751,29 @@ def test_probe_unknown_group_opcodes_ignores_absent_flags_access() -> None:
     assert probe_summary["candidates"]["0x02"]["responsive"] is False
 
 
+def test_probe_unknown_group_opcodes_ignores_empty_transport_no_response() -> None:
+    class _NoResponseProbeTransport(TransportInterface):
+        def send(self, dst: int, payload: bytes) -> bytes:  # noqa: ARG002
+            if payload == bytes((0x02, 0x00, 0x69, 0x00, 0x00, 0x00)):
+                return b""
+            if payload == bytes((0x06, 0x00, 0x69, 0x00, 0x00, 0x00)):
+                return b"\x01\x69\x00\x00\x01"
+            raise AssertionError(f"unexpected probe payload: {payload.hex()}")
+
+    opcodes, probe_summary = _probe_unknown_group_opcodes(
+        _NoResponseProbeTransport(),
+        dst=0x15,
+        group=0x69,
+        observer=None,
+    )
+
+    assert opcodes == (0x06,)
+    assert probe_summary["responsive_opcodes"] == ["0x06"]
+    assert probe_summary["candidates"]["0x02"]["error"] == "transport_error: no_response"
+    assert probe_summary["candidates"]["0x02"]["flags_access"] is None
+    assert probe_summary["candidates"]["0x02"]["responsive"] is False
+
+
 def test_scan_unknown_group_expands_to_instance_ff_after_readable_probe(tmp_path: Path) -> None:
     transport = RecordingTransport(
         DummyTransport(_write_fixture_unknown_group_69_with_ff(tmp_path))

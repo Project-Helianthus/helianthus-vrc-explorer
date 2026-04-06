@@ -22,6 +22,17 @@ _PRINTABLE_LATIN1: Final[set[int]] = set(range(0x20, 0x7F)) | set(range(0xA0, 0x
 _EMPTY_REPLY_FLAGS_ACCESS: Final[str] = "dormant"
 _I32_INVALID_SENTINEL: Final[int] = 0x7FFFFFFF
 _I32_INVALID_SENTINEL_RAW_HEX: Final[str] = "ffffff7f"
+_KNOWN_DORMANT_EMPTY_REPLY_KEYS: Final[frozenset[tuple[int, int, int]]] = frozenset(
+    {
+        # OP=0x02 / GG=0x00 registers that are known to ACK with zero-length payloads
+        # while the related feature is inactive.
+        (0x02, 0x00, 0x0006),  # manual_cooling_days
+        (0x02, 0x00, 0x0016),  # system_quick_mode_active
+        (0x02, 0x00, 0x0074),  # system_quick_mode_value
+        (0x02, 0x00, 0x00DA),  # manual_cooling_date_start
+        (0x02, 0x00, 0x00DB),  # manual_cooling_date_end
+    }
+)
 
 
 class RegisterEntry(TypedDict):
@@ -341,6 +352,15 @@ def _sentinel_value_display(*, value: object | None, raw_hex: str | None) -> str
     return None
 
 
+def _is_known_dormant_empty_reply(
+    *,
+    opcode: RegisterOpcode,
+    group: int,
+    register: int,
+) -> bool:
+    return (opcode, group, register) in _KNOWN_DORMANT_EMPTY_REPLY_KEYS
+
+
 def read_register(
     transport: TransportInterface,
     dst: int,
@@ -400,18 +420,32 @@ def read_register(
         }
 
     if len(response) == 0:
+        if _is_known_dormant_empty_reply(opcode=opcode, group=group, register=register):
+            return {
+                "read_opcode": read_opcode,
+                "read_opcode_label": read_opcode_label,
+                "reply_hex": "",
+                "flags": None,
+                "flags_access": _EMPTY_REPLY_FLAGS_ACCESS,
+                "ebusd_name": None,
+                "myvaillant_name": None,
+                "raw_hex": None,
+                "type": None,
+                "value": None,
+                "error": None,
+            }
         return {
             "read_opcode": read_opcode,
             "read_opcode_label": read_opcode_label,
-            "reply_hex": "",
+            "reply_hex": None,
             "flags": None,
-            "flags_access": _EMPTY_REPLY_FLAGS_ACCESS,
+            "flags_access": None,
             "ebusd_name": None,
             "myvaillant_name": None,
             "raw_hex": None,
             "type": None,
             "value": None,
-            "error": None,
+            "error": "transport_error: no_response",
         }
 
     reply_hex = response.hex()
