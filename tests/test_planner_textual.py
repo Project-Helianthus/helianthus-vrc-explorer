@@ -194,3 +194,47 @@ def test_run_textual_scan_plan_registers_enter_binding_for_rr_max(
     )
 
     assert "enter" in captured["key"]
+
+
+def test_run_textual_scan_plan_rr_dialog_registers_enter_submit_binding(
+    monkeypatch,
+) -> None:
+    from textual.app import App
+
+    captured: dict[str, str] = {}
+
+    def fake_run(self: App[object], *args: object, **kwargs: object) -> None:
+        key = next(iter(self._states))
+        self._focused_group = lambda: key  # type: ignore[method-assign]
+
+        def fake_push_screen(screen: object, *args: object, **kwargs: object) -> None:
+            for binding in screen.BINDINGS:
+                if binding.action == "submit":
+                    captured["key"] = binding.key
+                    return None
+            raise AssertionError("submit binding not found on rr dialog")
+
+        self.push_screen = fake_push_screen  # type: ignore[method-assign]
+        self.action_edit_rr_max()
+        return None
+
+    monkeypatch.setattr(App, "run", fake_run)
+
+    run_textual_scan_plan(
+        [
+            PlannerGroup(
+                group=0x00,
+                opcode=0x02,
+                name="Regulator Parameters",
+                descriptor=3.0,
+                known=True,
+                ii_max=None,
+                rr_max=0x00FF,
+                rr_max_full=0x00FF,
+                present_instances=(0x00,),
+            )
+        ],
+        request_rate_rps=None,
+    )
+
+    assert "enter" in captured["key"]

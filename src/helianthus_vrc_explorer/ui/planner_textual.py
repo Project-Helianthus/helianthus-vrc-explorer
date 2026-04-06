@@ -153,6 +153,13 @@ def run_textual_scan_plan(
 
     class _InputDialog(ModalScreen[str | None]):
         BINDINGS = [
+            Binding(
+                "enter,return,ctrl+j,ctrl+m",
+                "submit",
+                "Save",
+                show=False,
+                priority=True,
+            ),
             Binding("escape", "cancel", "Cancel"),
         ]
         CSS = """
@@ -188,6 +195,10 @@ def run_textual_scan_plan(
 
         def action_cancel(self) -> None:
             self.dismiss(None)
+
+        def action_submit(self) -> None:
+            value = self.query_one(Input).value.strip()
+            self.dismiss(value)
 
         def on_input_submitted(self, event: Input.Submitted) -> None:
             # Enter is handled by the Input widget first; submit explicitly so
