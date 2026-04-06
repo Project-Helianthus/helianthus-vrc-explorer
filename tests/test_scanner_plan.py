@@ -194,7 +194,7 @@ def test_recommended_preset_skips_non_core_namespaces_without_verified_presence_
         PlannerGroup(
             group=0x01,
             opcode=0x06,
-            name="Secondary Heating Sources",
+            name="Primary Heating Sources",
             descriptor=3.0,
             known=True,
             ii_max=None,

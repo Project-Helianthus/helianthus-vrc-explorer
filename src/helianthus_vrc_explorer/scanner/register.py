@@ -51,6 +51,9 @@ class RegisterEntry(TypedDict):
     reply_hex: str | None
     # FLAGS byte extracted from the reply, if present.
     flags: int | None
+    # Protocol-level DT byte interpretation:
+    # bit1=config-vs-simple; bit0 meaning depends on opcode namespace.
+    reply_kind: str | None
     # Access semantics derived from FLAGS and payload shape.
     flags_access: str | None
     # Optional register name annotations.
@@ -175,7 +178,7 @@ def namespace_availability_contract(
             description="Cylinder availability requires a decodable float payload.",
         )
 
-    if group in {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x08, 0x09, 0x0A, 0x0C} and opcode == 0x06:
+    if group in {0x01, 0x02, 0x03, 0x04, 0x05, 0x08, 0x09, 0x0A, 0x0C} and opcode == 0x06:
         return NamespaceAvailabilityContract(
             source="heuristic_probe",
             namespace_relationship=relationship,
@@ -244,6 +247,30 @@ def _interpret_flags(flags: int, *, response_len: int) -> str:
             return "user_rw"
         case _:
             return "unknown"
+
+
+def _reply_kind(
+    flags: int | None,
+    *,
+    response_len: int,
+    opcode: RegisterOpcode,
+) -> str | None:
+    """Return protocol-level DT byte semantics for the register reply."""
+
+    if flags is None:
+        return None
+    if response_len == 1:
+        return None
+    if flags not in {0x00, 0x01, 0x02, 0x03}:
+        return None
+    class_kind = "config" if flags & 0x02 else "simple"
+    if opcode == 0x06:
+        # Remote namespace: bit0 indicates validity vs sentinel/invalid payload.
+        value_kind = "valid" if flags & 0x01 else "invalid"
+        return f"{class_kind}_{value_kind}"
+    # Local namespace: bit0 indicates stable vs volatile.
+    value_kind = "stable" if flags & 0x01 else "volatile"
+    return f"{class_kind}_{value_kind}"
 
 
 def _looks_like_nul_terminated_latin1(value_bytes: bytes) -> bool:
@@ -411,6 +438,7 @@ def read_register(
             "read_opcode_label": read_opcode_label,
             "reply_hex": None,
             "flags": None,
+            "reply_kind": None,
             "flags_access": None,
             "ebusd_name": None,
             "myvaillant_name": None,
@@ -427,6 +455,7 @@ def read_register(
             "read_opcode_label": read_opcode_label,
             "reply_hex": None,
             "flags": None,
+            "reply_kind": None,
             "flags_access": None,
             "ebusd_name": None,
             "myvaillant_name": None,
@@ -443,6 +472,7 @@ def read_register(
                 "read_opcode_label": read_opcode_label,
                 "reply_hex": "",
                 "flags": None,
+                "reply_kind": None,
                 "flags_access": _EMPTY_REPLY_FLAGS_ACCESS,
                 "ebusd_name": None,
                 "myvaillant_name": None,
@@ -456,6 +486,7 @@ def read_register(
             "read_opcode_label": read_opcode_label,
             "reply_hex": None,
             "flags": None,
+            "reply_kind": None,
             "flags_access": None,
             "ebusd_name": None,
             "myvaillant_name": None,
@@ -467,6 +498,7 @@ def read_register(
 
     reply_hex = response.hex()
     flags: int | None = response[0] if response else None
+    reply_kind = _reply_kind(flags, response_len=len(response), opcode=opcode)
     flags_access: str | None = (
         _interpret_flags(flags, response_len=len(response)) if flags is not None else None
     )
@@ -479,6 +511,7 @@ def read_register(
             "read_opcode_label": read_opcode_label,
             "reply_hex": reply_hex,
             "flags": flags,
+            "reply_kind": reply_kind,
             "flags_access": flags_access,
             "ebusd_name": None,
             "myvaillant_name": None,
@@ -496,6 +529,7 @@ def read_register(
             "read_opcode_label": read_opcode_label,
             "reply_hex": reply_hex,
             "flags": flags,
+            "reply_kind": reply_kind,
             "flags_access": flags_access,
             "ebusd_name": None,
             "myvaillant_name": None,
@@ -514,6 +548,7 @@ def read_register(
                 "read_opcode_label": read_opcode_label,
                 "reply_hex": reply_hex,
                 "flags": flags,
+                "reply_kind": reply_kind,
                 "flags_access": flags_access,
                 "ebusd_name": None,
                 "myvaillant_name": None,
@@ -536,6 +571,7 @@ def read_register(
                 "read_opcode_label": read_opcode_label,
                 "reply_hex": reply_hex,
                 "flags": flags,
+                "reply_kind": reply_kind,
                 "flags_access": flags_access,
                 "ebusd_name": None,
                 "myvaillant_name": None,
@@ -551,6 +587,7 @@ def read_register(
         "read_opcode_label": read_opcode_label,
         "reply_hex": reply_hex,
         "flags": flags,
+        "reply_kind": reply_kind,
         "flags_access": flags_access,
         "ebusd_name": None,
         "myvaillant_name": None,
@@ -627,7 +664,7 @@ def probe_instance_availability(
         )
         return InstanceAvailabilityProbe(present=present, contract=contract, evidence=entry)
 
-    if group in {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x08, 0x09, 0x0A, 0x0C} and opcode == 0x06:
+    if group in {0x01, 0x02, 0x03, 0x04, 0x05, 0x08, 0x09, 0x0A, 0x0C} and opcode == 0x06:
         header_evidence = entry
         present = (
             entry["error"] is None

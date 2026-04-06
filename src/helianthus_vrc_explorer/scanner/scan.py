@@ -146,6 +146,10 @@ def _planner_source_opcodes(group: int) -> tuple[RegisterOpcode, ...]:
         candidate_opcodes.update(int(opcode) for opcode in profiles)
     else:
         candidate_opcodes.update(int(opcode) for opcode in config["opcodes"])
+    # BASV2 confirmed: GG=0x00 has no remote (0x06) namespace; keep it out of
+    # planner-visible candidates to avoid probing a nonexistent namespace.
+    if group == 0x00:
+        candidate_opcodes.discard(int(_REMOTE_REGISTER_OPCODE))
     return _sorted_namespace_opcodes(tuple(candidate_opcodes))
 
 

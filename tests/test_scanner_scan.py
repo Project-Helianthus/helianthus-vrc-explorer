@@ -1678,7 +1678,7 @@ def test_scan_b524_instance_discovery_runs_local_namespace_before_remote(
 def test_planner_source_opcodes_surface_both_local_and_remote_for_planner_visibility() -> None:
     # Planner visibility is intentionally broad:
     # "All groups must appear. Plain and simple."
-    assert _planner_source_opcodes(0x00) == (0x02, 0x06)
+    assert _planner_source_opcodes(0x00) == (0x02,)
     assert _planner_source_opcodes(0x01) == (0x02, 0x06)
     assert _planner_source_opcodes(0x02) == (0x02, 0x06)
     assert _planner_source_opcodes(0x06) == (0x02, 0x06)
@@ -1914,17 +1914,16 @@ def test_scan_b524_textual_planner_receives_remote_heating_source_rows(
     assert isinstance(planner_groups, list)
     planner_keys = {(group.group, group.opcode) for group in planner_groups}
     assert (0x00, 0x02) in planner_keys
-    assert (0x00, 0x06) in planner_keys
     assert (0x01, 0x02) in planner_keys
     assert (0x01, 0x06) in planner_keys
+    assert (0x00, 0x06) not in planner_keys
+    assert (0x02, 0x06) not in planner_keys
 
     name_by_key = {(group.group, group.opcode): group.name for group in planner_groups}
     assert name_by_key[(0x00, 0x02)] == "Regulator Parameters"
-    assert name_by_key[(0x00, 0x06)] == "Primary Heating Sources"
     assert name_by_key[(0x01, 0x02)] == "Hot Water Circuit"
-    assert name_by_key[(0x01, 0x06)] == "Secondary Heating Sources"
+    assert name_by_key[(0x01, 0x06)] == "Primary Heating Sources"
     by_key = {(group.group, group.opcode): group for group in planner_groups}
-    assert by_key[(0x00, 0x06)].ii_max == 0x07
     assert by_key[(0x01, 0x06)].ii_max == 0x07
 
     default_plan = captured["default_plan"]
@@ -1932,7 +1931,8 @@ def test_scan_b524_textual_planner_receives_remote_heating_source_rows(
     assert make_plan_key(0x00, 0x02) not in default_plan
     assert make_plan_key(0x01, 0x02) not in default_plan
     assert make_plan_key(0x01, 0x06) in default_plan
-    assert make_plan_key(0x00, 0x06) in default_plan
+    assert make_plan_key(0x02, 0x06) not in default_plan
+    assert make_plan_key(0x00, 0x06) not in default_plan
     assert artifact["meta"]["scan_plan"]["estimated_register_requests"] == 0
 
 
@@ -1968,12 +1968,12 @@ def test_scan_b524_textual_planner_includes_remote_exploratory_rows_for_groups_0
     assert isinstance(planner_groups, list)
 
     by_key = {(group.group, group.opcode): group for group in planner_groups}
-    assert by_key[(0x02, 0x06)].name == "Unknown 0x02 (remote)"
+    assert by_key[(0x02, 0x06)].name == "Secondary Heating Sources"
     assert by_key[(0x03, 0x06)].name == "Unknown 0x03 (remote)"
     assert by_key[(0x04, 0x06)].name == "Unknown 0x04 (remote)"
     assert by_key[(0x05, 0x06)].name == "Unknown 0x05 (remote)"
     assert by_key[(0x04, 0x02)].ii_max == 0x0A
-    assert by_key[(0x02, 0x06)].ii_max == 0x0A
+    assert by_key[(0x02, 0x06)].ii_max == 0x07
     assert by_key[(0x03, 0x06)].ii_max == 0x0A
     assert by_key[(0x04, 0x06)].ii_max == 0x0A
     assert by_key[(0x05, 0x06)].ii_max == 0x0A
@@ -2241,7 +2241,6 @@ def test_scan_b524_textual_planner_uses_remote_presence_for_op06_rows(
         return {}
 
     remote_present = {
-        (0x00, 0x06): {0x00},
         (0x01, 0x06): {0x01},
         (0x02, 0x06): {0x00, 0x01},
         (0x03, 0x06): {0x02},
@@ -2302,7 +2301,6 @@ def test_scan_b524_textual_planner_uses_remote_presence_for_op06_rows(
     assert isinstance(planner_groups, list)
     by_key = {(group.group, group.opcode): group for group in planner_groups}
 
-    assert by_key[(0x00, 0x06)].present_instances == (0x00,)
     assert by_key[(0x01, 0x06)].present_instances == (0x01,)
     assert by_key[(0x02, 0x06)].present_instances == (0x00, 0x01)
     assert by_key[(0x03, 0x06)].present_instances == (0x02,)

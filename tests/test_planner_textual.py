@@ -58,7 +58,7 @@ def test_table_row_values_show_explicit_namespace_column() -> None:
     remote_group = PlannerGroup(
         group=0x01,
         opcode=0x06,
-        name="Secondary Heating Sources",
+        name="Primary Heating Sources",
         descriptor=3.0,
         known=True,
         ii_max=None,
@@ -100,7 +100,7 @@ def test_table_row_values_show_explicit_namespace_column() -> None:
     assert remote_row == (
         "✓",
         "0x01",
-        "Secondary Heating Sources",
+        "Primary Heating Sources",
         "remote",
         "3.0",
         "singleton",
@@ -133,7 +133,7 @@ def test_split_planner_groups_by_namespace_prefers_local_then_remote() -> None:
     remote_group = PlannerGroup(
         group=0x01,
         opcode=0x06,
-        name="Secondary Heating Sources",
+        name="Primary Heating Sources",
         descriptor=3.0,
         known=True,
         ii_max=None,

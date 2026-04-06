@@ -308,11 +308,11 @@ def test_namespace_owned_required_tuple_rows_are_resolvable() -> None:
     assert remote_presence.leaf == "device_connected"
     assert remote_presence.type_hint == "BOOL"
     assert remote_gg01_rr0012 is not None
-    assert remote_gg01_rr0012.leaf == "device_status"
+    assert remote_gg01_rr0012.leaf == "heat_source_active_errors"
     assert remote_gg01_rr0012.type_hint == "UCH"
     assert remote_gg01_rr0015 is not None
-    assert remote_gg01_rr0015.leaf == "unknown_0015"
-    assert remote_gg01_rr0015.type_hint == "UIN"
+    assert remote_gg01_rr0015.leaf == "heat_source_flow_temperature"
+    assert remote_gg01_rr0015.type_hint == "EXP"
     assert remote_gg00_rr0002 is not None
     assert remote_gg00_rr0002.leaf == "device_class_address"
     assert remote_gg00_rr0002.type_hint == "UCH"
@@ -342,7 +342,7 @@ def test_namespace_owned_required_tuple_rows_are_resolvable() -> None:
     assert local_gg00_rr00db.type_hint == "HDA:3"
 
 
-def test_remote_namespace_does_not_inherit_local_generic_rows() -> None:
+def test_remote_namespace_maps_heat_source_rows_for_op06() -> None:
     csv_path = Path(__file__).resolve().parents[1] / "data" / "myvaillant_register_map.csv"
     schema = MyvaillantRegisterMap.from_path(csv_path)
 
@@ -351,7 +351,9 @@ def test_remote_namespace_does_not_inherit_local_generic_rows() -> None:
 
     assert local is not None
     assert local.leaf == "room_temperature_control_mode"
-    assert remote is None
+    assert remote is not None
+    assert remote.leaf == "heat_source_flow_temperature"
+    assert remote.type_hint == "EXP"
 
 
 def test_register_map_minimum_entry_count_and_no_duplicates() -> None:

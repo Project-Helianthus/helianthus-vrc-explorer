@@ -148,6 +148,17 @@ class _BoolTrueTransport(TransportInterface):
         return bytes((0x01, group)) + rr + b"\x01"
 
 
+class _FlagsU8Transport(TransportInterface):
+    def __init__(self, flags: int, value: int = 0x01) -> None:
+        self.flags = flags
+        self.value = value
+
+    def send(self, dst: int, payload: bytes) -> bytes:  # noqa: ARG002
+        group = payload[2]
+        rr = payload[4:6]
+        return bytes((self.flags, group)) + rr + bytes((self.value,))
+
+
 class _StatusOnlyTransport(TransportInterface):
     def send(self, dst: int, payload: bytes) -> bytes:  # noqa: ARG002
         return b"\x00"
@@ -301,6 +312,7 @@ def test_opcodes_for_group_unknown_group_requires_discovery_evidence() -> None:
 
 
 def test_namespace_opcodes_for_group_supports_staged_remote_namespaces() -> None:
+    assert namespace_opcodes_for_group(0x00) == [0x02]
     assert namespace_opcodes_for_group(0x01) == [0x02, 0x06]
     assert namespace_opcodes_for_group(0x02) == [0x02, 0x06]
     assert namespace_opcodes_for_group(0x0C) == [0x06]
@@ -330,6 +342,30 @@ def test_read_register_infers_hex_for_unparseable_u24_values() -> None:
     assert entry["type"] == "HEX:3"
     assert entry["value"] == "0x0e3803"
     assert entry["error"] is None
+
+
+def test_reply_kind_uses_opcode_specific_semantics_for_bit0() -> None:
+    local = read_register(
+        _FlagsU8Transport(flags=0x01),
+        0x15,
+        0x02,
+        group=0x00,
+        instance=0x00,
+        register=0x0001,
+        type_hint="BOOL",
+    )
+    remote = read_register(
+        _FlagsU8Transport(flags=0x01),
+        0x15,
+        0x06,
+        group=0x0C,
+        instance=0x00,
+        register=0x0001,
+        type_hint="BOOL",
+    )
+
+    assert local["reply_kind"] == "simple_stable"
+    assert remote["reply_kind"] == "simple_valid"
 
 
 def test_is_instance_present_group_0c_requires_valid_register_response() -> None:

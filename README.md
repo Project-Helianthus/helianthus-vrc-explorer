@@ -63,9 +63,12 @@ Transport note:
 - On `ebusd-tcp`, `ERR: no signal` now triggers a fixed 15-second quiet backoff before retry so the eBUS side can recover instead of being polled aggressively.
 - Classic GG directory-probe results are retained as advisory metadata for semantic identity and namespace topology. They are useful evidence for reverse-engineering and debugging, but they do not define those semantics once a group is a scan candidate (see `docs/b524-namespace-invariants.md`). A `descriptor_type == 0.0` result is still used as a discovery-time negative hint for non-core/unknown groups in Phase A.
 - Instance availability is namespace-specific. Dual-namespace radio groups (`0x09`, `0x0A`) are discovered independently per opcode namespace instead of sharing remote results across local and remote.
-- Artifacts retain the availability contract plus raw per-slot probe evidence under `availability_contract` and `availability_probes`, including the opcode `0x06` `RR=0x0001` `device_connected` probe used for remote namespaces.
-- Empty ACK / 0-byte B524 register replies are preserved as `flags_access="dormant"` (feature inactive) rather than treated as generic decode errors.
-- OP `0x06` register-map fallbacks now include a generic device header for `RR=0x0001..0x0004`; group-specific rows still override wildcard rows.
+- Artifacts retain the availability contract plus raw per-slot probe evidence under `availability_contract` and `availability_probes`, including the opcode `0x06` generic header block (`RR=0x0001..0x0004`) used for remote namespace occupancy.
+- Empty ACK / 0-byte B524 register replies are preserved as `flags_access="dormant"` (feature inactive) rather than treated as generic decode errors for known dormant identities.
+- B524 register replies expose protocol-level `reply_kind` annotations derived from the DT byte (`RK`, effective 2-bit domain `0..3`).
+  - `OP=0x02`: bit1=config, bit0=volatile/stable (`simple_volatile`, `simple_stable`, `config_volatile`, `config_stable`)
+  - `OP=0x06`: bit1=config, bit0=invalid/valid (`simple_invalid`, `simple_valid`, `config_invalid`, `config_valid`)
+- OP `0x06` register-map fallbacks include a generic device header for `RR=0x0001..0x0004`, but BASV2 heat-source inventory is 1-indexed on `GG=0x01` (primary / type 1) and `GG=0x02` (secondary / type 2). `GG=0x00` is local-only on BASV2.
 - GG `0x09` is intentionally dual-use: local/control semantics on `0x02`, remote radio-device semantics on `0x06`.
 - Scanner annotations include the integer sentinel `0x7FFFFFFF` as `value_display="sentinel_invalid_i32 (0x7FFFFFFF)"` when decoded in integer contexts.
 - Unknown groups are namespace-classified from live opcode responsiveness evidence. There is no implicit unknown-group `[0x02, 0x06]` fallback.

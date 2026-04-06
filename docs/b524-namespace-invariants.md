@@ -56,16 +56,36 @@ They are observational and do not replace the opcode-first identity contract abo
 1. OP `0x06` generic device-header registers (`RR=0x0001..0x0004`) are mapped experimentally.
    - Generic rows are provided for `device_connected`, `device_class_address`, `device_error_code`, and `device_firmware_version`.
    - Group-specific rows (for example GG `0x09`/`0x0A` radio fields) remain authoritative when present; wildcard header rows are fallback only.
+   - On BASV2, this generic header is not evidence for a remote `GG=0x00` namespace. Heat-source inventory is 1-indexed:
+     - `GG=0x01` / `OP=0x06` = primary heat source (type 1)
+     - `GG=0x02` / `OP=0x06` = secondary heat source (type 2)
+   - `GG=0x00` remains local-only on BASV2 and should not be scanned as a remote namespace.
 
 2. GG `0x09` is dual-use by opcode namespace.
    - OP `0x02`: local control/write-path style registers (for example quick-mode related control path).
    - OP `0x06`: remote radio-device inventory/status registers.
    - GG identity must never be merged across opcodes.
 
-3. Empty ACK/0-byte replies are treated as `dormant` in scanner artifacts.
+3. The DT byte (RK) is an effective 2-bit reply-kind field (`0..3`).
+   - The numeric domain is shared across opcodes, but bit0 semantics are opcode-specific.
+   - OP `0x02`: bit1=config, bit0=volatile/stable.
+     - `0`: `simple_volatile`
+     - `1`: `simple_stable`
+     - `2`: `config_volatile`
+     - `3`: `config_stable`
+   - OP `0x06`: bit1=config, bit0=invalid/valid data.
+     - `0`: `simple_invalid`
+     - `1`: `simple_valid`
+     - `2`: `config_invalid`
+     - `3`: `config_valid`
+   - Scanner artifacts expose `reply_kind` while preserving legacy `flags_access` labels for compatibility.
+
+4. Empty ACK/0-byte replies are treated as `dormant` in scanner artifacts only for known dormant identities.
    - Meaning: register exists but feature is currently inactive (not an absent-register NACK/timeout class).
    - This status is rendered distinctly from `absent` in explorer UI/report consumers.
 
-4. Sentinel `0x7FFFFFFF` is annotated when decoded as integer payload.
+5. Sentinel `0x7FFFFFFF` is annotated when decoded as integer payload.
    - Artifact entries expose `value_display="sentinel_invalid_i32 (0x7FFFFFFF)"` for this case.
    - This is scanner-layer annotation only; semantic/runtime policy outside explorer belongs to gateway/poller repos.
+
+6. The previous ISC KNX heat-source assumption is corrected for BASV2: the remote heat-source groups are 1-indexed, not 0-indexed.

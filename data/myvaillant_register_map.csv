@@ -104,8 +104,14 @@ group,instance,register,leaf,ebusd_name,register_class,type_hint,opcode
 0x01,0x00,0x000F,hwc_status,,state,,
 0x01,0x00,0x0010,hwc_holiday_start_time,,config,HTI,
 0x01,0x00,0x0011,hwc_holiday_end_time,,config,HTI,
-0x01,0x00,0x0012,device_status,,state,UCH,0x06
-0x01,0x00,0x0015,unknown_0015,,state,UIN,0x06
+0x01,*,0x0002,heat_source_device_address,,state,UCH,0x06
+0x01,*,0x0003,heat_source_device_status,,state,UCH,0x06
+0x01,*,0x0012,heat_source_active_errors,,state,UCH,0x06
+0x01,*,0x0015,heat_source_flow_temperature,,state,EXP,0x06
+0x02,*,0x0002,heat_source_device_address,,state,UCH,0x06
+0x02,*,0x0003,heat_source_device_status,,state,UCH,0x06
+0x02,*,0x0012,heat_source_active_errors,,state,UCH,0x06
+0x02,*,0x0015,heat_source_flow_temperature,,state,EXP,0x06
 0x02,*,0x0001,heating_circuit_type,Hc{hc}CircuitType,,,
 0x02,*,0x0002,mixer_circuit_type_external,Hc{hc}CircuitType,,,
 0x02,*,0x0003,room_influence_type,Hc{hc}RoomInfluenceType,config,,
