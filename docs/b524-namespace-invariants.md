@@ -47,3 +47,25 @@ Issues #120 and #125 remain useful exploratory context (how we reached the names
 - and this invariants contract.
 
 When historical notes conflict with current contract, follow current contract and open a corrective docs issue/PR.
+
+## Protocol Notes Implemented In Explorer
+
+These notes are scanner/register-map behaviors implemented in this repository only.
+They are observational and do not replace the opcode-first identity contract above.
+
+1. OP `0x06` generic device-header registers (`RR=0x0001..0x0004`) are mapped experimentally.
+   - Generic rows are provided for `device_connected`, `device_class_address`, `device_error_code`, and `device_firmware_version`.
+   - Group-specific rows (for example GG `0x09`/`0x0A` radio fields) remain authoritative when present; wildcard header rows are fallback only.
+
+2. GG `0x09` is dual-use by opcode namespace.
+   - OP `0x02`: local control/write-path style registers (for example quick-mode related control path).
+   - OP `0x06`: remote radio-device inventory/status registers.
+   - GG identity must never be merged across opcodes.
+
+3. Empty ACK/0-byte replies are treated as `dormant` in scanner artifacts.
+   - Meaning: register exists but feature is currently inactive (not an absent-register NACK/timeout class).
+   - This status is rendered distinctly from `absent` in explorer UI/report consumers.
+
+4. Sentinel `0x7FFFFFFF` is annotated when decoded as integer payload.
+   - Artifact entries expose `value_display="sentinel_invalid_i32 (0x7FFFFFFF)"` for this case.
+   - This is scanner-layer annotation only; semantic/runtime policy outside explorer belongs to gateway/poller repos.

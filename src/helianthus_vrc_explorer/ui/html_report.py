@@ -258,6 +258,12 @@ _TEMPLATE = """<!doctype html>
         border-color: rgba(255, 207, 110, 0.28);
       }
 
+      .status-dormant {
+        color: #bfe9ff;
+        background: rgba(122, 196, 255, 0.16);
+        border-color: rgba(122, 196, 255, 0.32);
+      }
+
       .status-transport {
         color: #ffb3b3;
         background: rgba(255, 122, 122, 0.16);
@@ -814,6 +820,7 @@ __ARTIFACT_JSON__
         }
         const access = typeof entry.flags_access === "string" ? entry.flags_access.trim().toLowerCase() : "";
         if (access === "absent") return "absent";
+        if (access === "dormant") return "dormant";
         const replyHex = typeof entry.reply_hex === "string" ? entry.reply_hex.trim().toLowerCase() : "";
         if (replyHex === "00") return "absent";
         return "ok";
@@ -822,6 +829,7 @@ __ARTIFACT_JSON__
       function entryStatusLabel(entry) {
         const kind = entryStatusKind(entry);
         if (kind === "absent") return "Absent / no data";
+        if (kind === "dormant") return "Dormant (feature inactive)";
         if (kind === "transport_failure") return "Transport failure";
         if (kind === "decode_error") return "Decode error";
         if (kind === "error") return "Error";
@@ -830,6 +838,7 @@ __ARTIFACT_JSON__
 
       function statusChipClass(kind) {
         if (kind === "absent") return "status-chip status-absent";
+        if (kind === "dormant") return "status-chip status-dormant";
         if (kind === "transport_failure") return "status-chip status-transport";
         if (kind === "decode_error") return "status-chip status-decode";
         return "status-chip status-error";
@@ -1608,10 +1617,12 @@ __ARTIFACT_JSON__
                 ? parseTypedValue(selectedType, valueBytes)
                 : { value: displayValue, error: null };
 
-              const valueTxt = statusKind === "absent" ? "absent" : formatValue(decoded.value);
+              const valueTxt = (statusKind === "absent" || statusKind === "dormant")
+                ? statusKind
+                : formatValue(decoded.value);
               const valueEl = document.createElement("div");
               valueEl.className = "cell-value";
-              if (statusKind === "absent") valueEl.classList.add("cell-value-muted");
+              if (statusKind === "absent" || statusKind === "dormant") valueEl.classList.add("cell-value-muted");
               valueEl.textContent = valueTxt;
               td.appendChild(valueEl);
 

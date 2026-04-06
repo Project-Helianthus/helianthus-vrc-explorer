@@ -294,7 +294,13 @@ def test_namespace_owned_required_tuple_rows_are_resolvable() -> None:
     remote_presence = schema.lookup(group=0x08, instance=0x00, register=0x0001, opcode=0x06)
     remote_gg01_rr0012 = schema.lookup(group=0x01, instance=0x00, register=0x0012, opcode=0x06)
     remote_gg01_rr0015 = schema.lookup(group=0x01, instance=0x00, register=0x0015, opcode=0x06)
+    remote_gg00_rr0002 = schema.lookup(group=0x00, instance=0x00, register=0x0002, opcode=0x06)
+    remote_gg00_rr0003 = schema.lookup(group=0x00, instance=0x00, register=0x0003, opcode=0x06)
+    remote_gg00_rr0004 = schema.lookup(group=0x00, instance=0x00, register=0x0004, opcode=0x06)
+    local_gg00_rr0006 = schema.lookup(group=0x00, instance=0x00, register=0x0006, opcode=0x02)
+    local_gg00_rr0016 = schema.lookup(group=0x00, instance=0x00, register=0x0016, opcode=0x02)
     local_gg00_rr0048 = schema.lookup(group=0x00, instance=0x00, register=0x0048, opcode=0x02)
+    local_gg00_rr0074 = schema.lookup(group=0x00, instance=0x00, register=0x0074, opcode=0x02)
     local_gg00_rr00da = schema.lookup(group=0x00, instance=0x00, register=0x00DA, opcode=0x02)
     local_gg00_rr00db = schema.lookup(group=0x00, instance=0x00, register=0x00DB, opcode=0x02)
 
@@ -307,14 +313,32 @@ def test_namespace_owned_required_tuple_rows_are_resolvable() -> None:
     assert remote_gg01_rr0015 is not None
     assert remote_gg01_rr0015.leaf == "unknown_0015"
     assert remote_gg01_rr0015.type_hint == "UIN"
+    assert remote_gg00_rr0002 is not None
+    assert remote_gg00_rr0002.leaf == "device_class_address"
+    assert remote_gg00_rr0002.type_hint == "UCH"
+    assert remote_gg00_rr0003 is not None
+    assert remote_gg00_rr0003.leaf == "device_error_code"
+    assert remote_gg00_rr0003.type_hint == "UCH"
+    assert remote_gg00_rr0004 is not None
+    assert remote_gg00_rr0004.leaf == "device_firmware_version"
+    assert remote_gg00_rr0004.type_hint == "FW"
+    assert local_gg00_rr0006 is not None
+    assert local_gg00_rr0006.leaf == "manual_cooling_days"
+    assert local_gg00_rr0006.type_hint == "UCH"
+    assert local_gg00_rr0016 is not None
+    assert local_gg00_rr0016.leaf == "system_quick_mode_active"
+    assert local_gg00_rr0016.type_hint == "BOOL"
     assert local_gg00_rr0048 is not None
-    assert local_gg00_rr0048.leaf == "unknown_0048"
+    assert local_gg00_rr0048.leaf == "system_status_bitmask"
     assert local_gg00_rr0048.type_hint == "UIN"
+    assert local_gg00_rr0074 is not None
+    assert local_gg00_rr0074.leaf == "system_quick_mode_value"
+    assert local_gg00_rr0074.type_hint == "UCH"
     assert local_gg00_rr00da is not None
-    assert local_gg00_rr00da.leaf == "unknown_00da_date"
+    assert local_gg00_rr00da.leaf == "manual_cooling_date_start"
     assert local_gg00_rr00da.type_hint == "HDA:3"
     assert local_gg00_rr00db is not None
-    assert local_gg00_rr00db.leaf == "unknown_00db_date"
+    assert local_gg00_rr00db.leaf == "manual_cooling_date_end"
     assert local_gg00_rr00db.type_hint == "HDA:3"
 
 

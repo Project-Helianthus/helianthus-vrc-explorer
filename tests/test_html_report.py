@@ -97,6 +97,38 @@ def test_html_report_supports_b555_tab() -> None:
     assert '"hc":"0x00"' in html
 
 
+def test_html_report_includes_dormant_status_rendering_logic() -> None:
+    artifact = {
+        "meta": {"destination_address": "0x15", "scan_timestamp": "2026-02-11T00:00:00Z"},
+        "groups": {
+            "0x00": {
+                "name": "Regulator Parameters",
+                "instances": {
+                    "0x00": {
+                        "registers": {
+                            "0x0006": {
+                                "raw_hex": None,
+                                "type": None,
+                                "value": None,
+                                "error": None,
+                                "flags_access": "dormant",
+                                "reply_hex": "",
+                                "read_opcode": "0x02",
+                            }
+                        }
+                    }
+                },
+            }
+        },
+    }
+
+    html = render_html_report(artifact, title="test")
+
+    assert "status-dormant" in html
+    assert 'if (access === "dormant") return "dormant";' in html
+    assert "Dormant (feature inactive)" in html
+
+
 def test_html_report_supports_b516_tab() -> None:
     artifact = {
         "meta": {"destination_address": "0x15", "scan_timestamp": "2026-02-11T00:00:00Z"},

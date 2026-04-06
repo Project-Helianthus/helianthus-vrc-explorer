@@ -153,6 +153,18 @@ class _StatusOnlyTransport(TransportInterface):
         return b"\x00"
 
 
+class _EmptyResponseTransport(TransportInterface):
+    def send(self, dst: int, payload: bytes) -> bytes:  # noqa: ARG002
+        return b""
+
+
+class _I32SentinelTransport(TransportInterface):
+    def send(self, dst: int, payload: bytes) -> bytes:  # noqa: ARG002
+        group = payload[2]
+        rr = payload[4:6]
+        return bytes((0x01, group)) + rr + b"\xff\xff\xff\x7f"
+
+
 class _UnparseableU24Transport(TransportInterface):
     def send(self, dst: int, payload: bytes) -> bytes:  # noqa: ARG002
         group = payload[2]
@@ -180,6 +192,84 @@ def test_read_register_status_only_response_is_not_decode_error() -> None:
     assert entry["type"] is None
     assert entry["value"] is None
     assert entry["error"] is None
+
+
+def test_read_register_empty_response_is_dormant_not_decode_error() -> None:
+    transport = _EmptyResponseTransport()
+
+    entry = read_register(
+        transport,
+        0x15,
+        0x02,
+        group=0x00,
+        instance=0x00,
+        register=0x0016,
+    )
+
+    assert entry["reply_hex"] == ""
+    assert entry["flags"] is None
+    assert entry["flags_access"] == "dormant"
+    assert entry["raw_hex"] is None
+    assert entry["type"] is None
+    assert entry["value"] is None
+    assert entry["error"] is None
+
+
+def test_read_register_empty_response_without_dormant_identity_is_transport_no_response() -> None:
+    transport = _EmptyResponseTransport()
+
+    entry = read_register(
+        transport,
+        0x15,
+        0x02,
+        group=0x00,
+        instance=0x00,
+        register=0x0000,
+    )
+
+    assert entry["reply_hex"] is None
+    assert entry["flags"] is None
+    assert entry["flags_access"] is None
+    assert entry["raw_hex"] is None
+    assert entry["type"] is None
+    assert entry["value"] is None
+    assert entry["error"] == "transport_error: no_response"
+
+
+def test_read_register_i32_sentinel_adds_value_display_annotation() -> None:
+    transport = _I32SentinelTransport()
+
+    entry = read_register(
+        transport,
+        0x15,
+        0x02,
+        group=0x00,
+        instance=0x00,
+        register=0x0048,
+        type_hint="I32",
+    )
+
+    assert entry["raw_hex"] == "ffffff7f"
+    assert entry["value"] == 0x7FFFFFFF
+    assert entry["value_display"] == "sentinel_invalid_i32 (0x7FFFFFFF)"
+
+
+def test_read_register_u32_max_does_not_add_i32_sentinel_annotation() -> None:
+    transport = _I32SentinelTransport()
+
+    entry = read_register(
+        transport,
+        0x15,
+        0x02,
+        group=0x00,
+        instance=0x00,
+        register=0x0048,
+        type_hint="U32",
+    )
+
+    assert entry["raw_hex"] == "ffffff7f"
+    assert entry["value"] == 0x7FFFFFFF
+    assert "value_display" not in entry
 
 
 def test_flags_interpretation_single_byte() -> None:

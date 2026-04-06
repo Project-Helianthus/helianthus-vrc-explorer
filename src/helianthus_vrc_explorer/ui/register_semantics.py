@@ -3,7 +3,9 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any, Literal
 
-RegisterStatusKind = Literal["ok", "absent", "transport_failure", "decode_error", "error"]
+RegisterStatusKind = Literal[
+    "ok", "absent", "dormant", "transport_failure", "decode_error", "error"
+]
 
 
 def _sorted_hex_keys(keys: Iterable[str]) -> list[str]:
@@ -39,6 +41,8 @@ def entry_status_kind(entry: dict[str, Any] | None) -> RegisterStatusKind:
     flags_access = entry.get("flags_access")
     if isinstance(flags_access, str) and flags_access.strip().lower() == "absent":
         return "absent"
+    if isinstance(flags_access, str) and flags_access.strip().lower() == "dormant":
+        return "dormant"
 
     reply_hex = entry.get("reply_hex")
     if isinstance(reply_hex, str) and reply_hex.strip().lower() == "00":
@@ -51,6 +55,8 @@ def entry_status_label(entry: dict[str, Any] | None) -> str:
     match entry_status_kind(entry):
         case "absent":
             return "Absent / no data"
+        case "dormant":
+            return "Dormant (feature inactive)"
         case "transport_failure":
             return "Transport failure"
         case "decode_error":
@@ -65,6 +71,8 @@ def entry_display_value_text(entry: dict[str, Any]) -> str:
     status = entry_status_kind(entry)
     if status == "absent":
         return "absent"
+    if status == "dormant":
+        return "dormant"
     if status == "transport_failure":
         return "transport failure"
     if status == "decode_error":

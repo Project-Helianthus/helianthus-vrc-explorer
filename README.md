@@ -64,6 +64,10 @@ Transport note:
 - Classic GG directory-probe results are retained as advisory metadata for semantic identity and namespace topology. They are useful evidence for reverse-engineering and debugging, but they do not define those semantics once a group is a scan candidate (see `docs/b524-namespace-invariants.md`). A `descriptor_type == 0.0` result is still used as a discovery-time negative hint for non-core/unknown groups in Phase A.
 - Instance availability is namespace-specific. Dual-namespace radio groups (`0x09`, `0x0A`) are discovered independently per opcode namespace instead of sharing remote results across local and remote.
 - Artifacts retain the availability contract plus raw per-slot probe evidence under `availability_contract` and `availability_probes`, including the opcode `0x06` `RR=0x0001` `device_connected` probe used for remote namespaces.
+- Empty ACK / 0-byte B524 register replies are preserved as `flags_access="dormant"` (feature inactive) rather than treated as generic decode errors.
+- OP `0x06` register-map fallbacks now include a generic device header for `RR=0x0001..0x0004`; group-specific rows still override wildcard rows.
+- GG `0x09` is intentionally dual-use: local/control semantics on `0x02`, remote radio-device semantics on `0x06`.
+- Scanner annotations include the integer sentinel `0x7FFFFFFF` as `value_display="sentinel_invalid_i32 (0x7FFFFFFF)"` when decoded in integer contexts.
 - Unknown groups are namespace-classified from live opcode responsiveness evidence. There is no implicit unknown-group `[0x02, 0x06]` fallback.
 - Contextual enum annotations are local-namespace scoped: group `0x02` local (`0x02`) register context never relabels remote (`0x06`) entries.
 - Canonical namespace identity is always an opcode hex key (`0x02`, `0x06`, ...). Labels like `local`/`remote` are presentation metadata only.

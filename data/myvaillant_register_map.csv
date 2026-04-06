@@ -3,6 +3,7 @@ group,instance,register,leaf,ebusd_name,register_class,type_hint,opcode
 0x00,0x00,0x0002,continuous_heating_start_setpoint,ContinuousHeating,config,,
 0x00,0x00,0x0003,frost_override_time,FrostOverRideTime,config,,
 0x00,0x00,0x0004,maximum_preheating_time,,config,,
+0x00,0x00,0x0006,manual_cooling_days,,state,UCH,0x02
 0x00,0x00,0x0007,system_off,SysOff,config,,
 0x00,0x00,0x0008,temporary_allow_backup_heater,,config,,
 0x00,0x00,0x0009,external_energy_management_activation,,config,,
@@ -11,6 +12,7 @@ group,instance,register,leaf,ebusd_name,register_class,type_hint,opcode
 0x00,0x00,0x0012,continuous_heating_room_setpoint,,config,,
 0x00,0x00,0x0014,adaptive_heating_curve,AdaptHeatCurve,config,,
 0x00,0x00,0x0015,parallel_tank_loading_allowed,HwcParallelLoading,config,,
+0x00,0x00,0x0016,system_quick_mode_active,,state,BOOL,0x02
 0x00,0x00,0x0017,dhw_maximum_loading_time,MaxCylinderChargeTime,config,,
 0x00,0x00,0x0018,hwc_lock_time,HwcLockTime,config,,
 0x00,0x00,0x0019,solar_flow_rate_quantity,,config,,
@@ -37,7 +39,7 @@ group,instance,register,leaf,ebusd_name,register_class,type_hint,opcode
 0x00,0x00,0x003E,environmental_yield_total,YieldTotal,state,U32,
 0x00,0x00,0x0045,esco_block_function,,config,,
 0x00,0x00,0x0046,hwc_max_flow_temp_desired,HwcMaxFlowTempDesired,config,,
-0x00,0x00,0x0048,unknown_0048,,state,UIN,0x02
+0x00,0x00,0x0048,system_status_bitmask,,state,UIN,0x02
 0x00,0x00,0x004B,system_flow_temperature,FlowTemp,,,
 0x00,0x00,0x004D,multi_relay_setting,MultiRelaySetting,config,,
 0x00,0x00,0x004E,fuel_consumption_heating_this_month,PrFuelSumHcThisMonth,state,U32,
@@ -61,6 +63,7 @@ group,instance,register,leaf,ebusd_name,register_class,type_hint,opcode
 0x00,0x00,0x006F,installer_phone_1,PhoneNumber1,state,,
 0x00,0x00,0x0070,installer_phone_2,PhoneNumber2,state,,
 0x00,0x00,0x0073,outdoor_temperature,OutdoorTemp,,,
+0x00,0x00,0x0074,system_quick_mode_value,,state,UCH,0x02
 0x00,0x00,0x0076,installer_menu_code,KeyCodeforConfigMenu,state,,
 0x00,0x00,0x0081,smart_photovoltaic_buffer_offset,,state,,
 0x00,0x00,0x0095,outdoor_temperature_avg_24h,OutsideTempAvg,state,,
@@ -81,8 +84,8 @@ group,instance,register,leaf,ebusd_name,register_class,type_hint,opcode
 0x00,0x00,0x00CA,fuel_heating_last_month_mirror,,state,U32,
 0x00,0x00,0x00CB,gas_total_combined,,state,U32,
 0x00,0x00,0x00CD,gas_total_combined_dup,,state,U32,
-0x00,0x00,0x00DA,unknown_00da_date,,config,HDA:3,0x02
-0x00,0x00,0x00DB,unknown_00db_date,,config,HDA:3,0x02
+0x00,0x00,0x00DA,manual_cooling_date_start,,config,HDA:3,0x02
+0x00,0x00,0x00DB,manual_cooling_date_end,,config,HDA:3,0x02
 0x00,0x00,0x00DD,heating_curve_day_1,,config,,
 0x00,0x00,0x00DE,heating_curve_day_2,,config,,
 0x00,0x00,0x00DF,heating_curve_day_3,,config,,
@@ -236,3 +239,6 @@ group,instance,register,leaf,ebusd_name,register_class,type_hint,opcode
 0x0C,*,0x0004,device_firmware_version,,state,FW,0x06
 0x0C,*,0x0012,device_status,,state,,0x06
 *,*,0x0001,device_connected,,state,BOOL,0x06
+*,*,0x0002,device_class_address,,state,UCH,0x06
+*,*,0x0003,device_error_code,,state,UCH,0x06
+*,*,0x0004,device_firmware_version,,state,FW,0x06

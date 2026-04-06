@@ -335,7 +335,7 @@ def _cell_text(entry: dict[str, Any] | None, *, selected: bool) -> Text:
 
     status_kind = entry_status_kind(entry)
     status_label = entry_status_label(entry)
-    val_txt = status_label.lower() if status_kind == "absent" else _format_value(value)
+    val_txt = status_label.lower() if status_kind in {"absent", "dormant"} else _format_value(value)
     raw_txt = raw_hex if isinstance(raw_hex, str) else ""
     raw_short = raw_txt[:16] + ("…" if len(raw_txt) > 16 else "")
 
@@ -343,7 +343,7 @@ def _cell_text(entry: dict[str, Any] | None, *, selected: bool) -> Text:
     err_short = err_txt.split(":", 1)[0] if err_txt else ""
 
     line2 = raw_short
-    if status_kind == "absent":
+    if status_kind in {"absent", "dormant"}:
         line2 = "valid no-data"
     elif err_short:
         line2 = f"{raw_short} !{err_short}"
@@ -351,6 +351,8 @@ def _cell_text(entry: dict[str, Any] | None, *, selected: bool) -> Text:
     style = "white"
     if status_kind == "absent":
         style = "yellow"
+    elif status_kind == "dormant":
+        style = "cyan"
     elif err_txt:
         style = "red"
 
