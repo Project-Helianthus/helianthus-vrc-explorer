@@ -244,7 +244,7 @@ def test_group_names_match_docs() -> None:
     assert len(GROUP_CONFIG) == 18
     assert GROUP_CONFIG[0x09]["name"] == "Regulators"
     assert GROUP_CONFIG[0x0A]["name"] == "Thermostats"
-    assert GROUP_CONFIG[0x0C]["name"] == "Functional Modules"
+    assert GROUP_CONFIG[0x0C]["name"] == "Unknown"
 
 
 def test_group_config_completeness() -> None:
@@ -268,7 +268,7 @@ def test_group_config_completeness() -> None:
         0x10,
         0x11,
     }
-    assert GROUP_CONFIG[0x08]["name"] == "Unknown 0x08"
+    assert GROUP_CONFIG[0x08]["name"] == "Unknown"
     assert GROUP_CONFIG[0x00]["namespace_opcodes"] == [0x02]
     assert GROUP_CONFIG[0x00]["rr_max_by_opcode"] == {0x02: 0x00FF}
     assert GROUP_CONFIG[0x00]["ii_max_by_opcode"] == {0x02: 0x00}
@@ -277,7 +277,7 @@ def test_group_config_completeness() -> None:
     assert GROUP_CONFIG[0x01]["ii_max_by_opcode"] == {0x02: 0x00, 0x06: 0x07}
     assert GROUP_CONFIG[0x02]["name_by_opcode"] == {
         0x02: "Heating Circuits",
-        0x06: "Secondary Heating Sources",
+        0x06: "Secondary Heating Source",
     }
     assert GROUP_CONFIG[0x02]["namespace_opcodes"] == [0x02, 0x06]
     assert GROUP_CONFIG[0x02]["ii_max_by_opcode"] == {0x02: 0x0A, 0x06: 0x07}
@@ -290,8 +290,8 @@ def test_group_config_completeness() -> None:
     assert GROUP_CONFIG[0x05]["ii_max_by_opcode"] == {0x02: 0x01, 0x06: 0x0A}
     assert GROUP_CONFIG[0x08]["opcodes"] == [0x02, 0x06]
     assert GROUP_CONFIG[0x08]["name_by_opcode"] == {
-        0x02: "Unknown 0x08 (local)",
-        0x06: "Unknown 0x08 (remote)",
+        0x02: "Unknown",
+        0x06: "Unknown",
     }
     assert GROUP_CONFIG[0x08]["rr_max_by_opcode"] == {0x02: 0x0007, 0x06: 0x0004}
     assert GROUP_CONFIG[0x08]["ii_max_by_opcode"] == {0x02: 0x0A, 0x06: 0x0A}
@@ -320,29 +320,29 @@ def test_group_namespace_profiles_support_opcode_first_identity() -> None:
 
     assert sorted(hw) == [0x02, 0x06]
     assert hw[0x02].rr_max == 0x0013
-    assert hw[0x06].name == "Primary Heating Sources"
+    assert hw[0x06].name == "Primary Heating Source"
     assert hw[0x06].ii_max == 0x07
     assert hw[0x06].rr_max == 0x0015
 
     assert sorted(hc) == [0x02, 0x06]
     assert hc[0x02].ii_max == 0x0A
     assert hc[0x06].ii_max == 0x07
-    assert hc[0x06].name == "Secondary Heating Sources"
-    assert zones[0x06].name == "Unknown 0x03 (remote)"
+    assert hc[0x06].name == "Secondary Heating Source"
+    assert zones[0x06].name == "Unknown"
     assert zones[0x06].ii_max == 0x0A
     assert solar[0x02].ii_max == 0x01
-    assert solar[0x06].name == "Unknown 0x04 (remote)"
+    assert solar[0x06].name == "Unknown"
     assert solar[0x06].ii_max == 0x0A
-    assert cylinders[0x06].name == "Unknown 0x05 (remote)"
+    assert cylinders[0x06].name == "Unknown"
     assert cylinders[0x06].ii_max == 0x0A
     buffer = group_namespace_profiles(0x08)
     assert buffer[0x02].ii_max == 0x0A
     assert buffer[0x06].ii_max == 0x0A
-    assert buffer[0x02].name == "Unknown 0x08 (local)"
-    assert buffer[0x06].name == "Unknown 0x08 (remote)"
+    assert buffer[0x02].name == "Unknown"
+    assert buffer[0x06].name == "Unknown"
     assert regulators[0x02].name == "System"
     assert regulators[0x06].name == "Regulators"
-    assert thermostats[0x02].name == "Unknown 0x0A (local)"
+    assert thermostats[0x02].name == "Unknown"
     assert thermostats[0x06].name == "Thermostats"
 
 
@@ -350,27 +350,27 @@ def test_group_name_for_opcode_uses_namespace_owned_labels_for_09_and_0a() -> No
     assert group_name_for_opcode(0x00, 0x02) == "Regulator Parameters"
     assert group_name_for_opcode(0x00, 0x06) == "Regulator Parameters"
     assert group_name_for_opcode(0x01, 0x02) == "Hot Water Circuit"
-    assert group_name_for_opcode(0x01, 0x06) == "Primary Heating Sources"
-    assert group_name_for_opcode(0x02, 0x06) == "Secondary Heating Sources"
-    assert group_name_for_opcode(0x03, 0x06) == "Unknown 0x03 (remote)"
-    assert group_name_for_opcode(0x04, 0x06) == "Unknown 0x04 (remote)"
-    assert group_name_for_opcode(0x05, 0x06) == "Unknown 0x05 (remote)"
-    assert group_name_for_opcode(0x08, 0x02) == "Unknown 0x08 (local)"
-    assert group_name_for_opcode(0x08, 0x06) == "Unknown 0x08 (remote)"
+    assert group_name_for_opcode(0x01, 0x06) == "Primary Heating Source"
+    assert group_name_for_opcode(0x02, 0x06) == "Secondary Heating Source"
+    assert group_name_for_opcode(0x03, 0x06) == "Unknown"
+    assert group_name_for_opcode(0x04, 0x06) == "Unknown"
+    assert group_name_for_opcode(0x05, 0x06) == "Unknown"
+    assert group_name_for_opcode(0x08, 0x02) == "Unknown"
+    assert group_name_for_opcode(0x08, 0x06) == "Unknown"
     assert group_name_for_opcode(0x09, 0x02) == "System"
     assert group_name_for_opcode(0x09, 0x06) == "Regulators"
-    assert group_name_for_opcode(0x0A, 0x02) == "Unknown 0x0A (local)"
+    assert group_name_for_opcode(0x0A, 0x02) == "Unknown"
     assert group_name_for_opcode(0x0A, 0x06) == "Thermostats"
-    assert group_name_for_opcode(0x0C, 0x02) == "Unknown 0x0C"
-    assert group_name_for_opcode(0x0C, 0x06) == "Functional Modules"
-    assert group_name_for_opcode(0x0D, 0x02) == "Unknown 0x0D"
-    assert group_name_for_opcode(0x0D, 0x06) == "Unknown 0x0D"
+    assert group_name_for_opcode(0x0C, 0x02) == "Unknown"
+    assert group_name_for_opcode(0x0C, 0x06) == "Unknown"
+    assert group_name_for_opcode(0x0D, 0x02) == "Unknown"
+    assert group_name_for_opcode(0x0D, 0x06) == "Unknown"
 
 
 def test_classify_groups_missing_desc() -> None:
     classified = classify_groups([DiscoveredGroup(group=0x08, descriptor=0.0)])
 
-    assert classified[0].name == "Unknown 0x08"
+    assert classified[0].name == "Unknown"
     assert classified[0].expected_descriptor is None
     assert classified[0].descriptor_mismatch is False
 

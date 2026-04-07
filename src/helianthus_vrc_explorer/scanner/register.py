@@ -204,6 +204,16 @@ def namespace_availability_contract(
             description="Local namespace presence is derived from a readable local slot register.",
         )
 
+    if group in {0x06, 0x07, 0x08, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10, 0x11} and opcode == 0x02:
+        return NamespaceAvailabilityContract(
+            source="heuristic_probe",
+            namespace_relationship=relationship,
+            probe_register=0x0000,
+            probe_type_hint=None,
+            positive_when="register read succeeds and is not absent",
+            description="Exploratory local namespace presence requires actual local evidence.",
+        )
+
     if group in {0x06, 0x07, 0x0B, 0x0D, 0x0E, 0x0F, 0x10, 0x11}:
         return NamespaceAvailabilityContract(
             source="always_present",
@@ -725,6 +735,12 @@ def probe_instance_availability(
         )
 
     if group in {0x09, 0x0A} and opcode == 0x02:
+        if response_state == "empty_reply":
+            return InstanceAvailabilityProbe(present=True, contract=contract, evidence=entry)
+        present = entry["error"] is None and entry.get("flags_access") != "absent"
+        return InstanceAvailabilityProbe(present=present, contract=contract, evidence=entry)
+
+    if group in {0x06, 0x07, 0x08, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10, 0x11} and opcode == 0x02:
         if response_state == "empty_reply":
             return InstanceAvailabilityProbe(present=True, contract=contract, evidence=entry)
         present = entry["error"] is None and entry.get("flags_access") != "absent"

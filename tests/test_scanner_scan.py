@@ -1094,7 +1094,7 @@ def test_artifact_dual_namespace_structure(monkeypatch, tmp_path: Path) -> None:
     )
 
     group = artifact["groups"]["0x09"]
-    assert group["name"] == "System / Regulators"
+    assert group["name"] == "Regulators"
     assert group["dual_namespace"] is True
     assert "instances" not in group
     assert set(group["namespaces"]) == {"0x02", "0x06"}
@@ -1283,8 +1283,9 @@ def test_group_08_remote_namespace_only_marks_present_instances(
     remote_instances = set(group["namespaces"]["0x06"]["instances"])
     assert "0x00" in local_instances
     assert "0x00" in remote_instances
-    # Regression guard: group 0x08 is no longer modeled as local singleton.
-    assert len(local_instances) > 1
+    # Regression guard: group 0x08 stays instanced via ii_max, without forcing
+    # all local slots into the artifact when only one local slot is evidenced.
+    assert local_instances == {"0x00"}
 
 
 def test_type_hint_propagation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1461,7 +1462,9 @@ def test_scan_b524_replays_dual_namespace_fixture_end_to_end(
     remote_fw = artifact["groups"]["0x09"]["namespaces"]["0x06"]["instances"]["0x00"]["registers"][
         "0x0004"
     ]
-    accessory_fw = artifact["groups"]["0x0c"]["instances"]["0x00"]["registers"]["0x0004"]
+    accessory_fw = artifact["groups"]["0x0c"]["namespaces"]["0x06"]["instances"]["0x00"][
+        "registers"
+    ]["0x0004"]
 
     assert local_fw["type"] == "FW"
     assert local_fw["value"] == "03.17.02"
@@ -1929,7 +1932,7 @@ def test_scan_b524_textual_planner_receives_remote_heating_source_rows(
     name_by_key = {(group.group, group.opcode): group.name for group in planner_groups}
     assert name_by_key[(0x00, 0x02)] == "Regulator Parameters"
     assert name_by_key[(0x01, 0x02)] == "Hot Water Circuit"
-    assert name_by_key[(0x01, 0x06)] == "Primary Heating Sources"
+    assert name_by_key[(0x01, 0x06)] == "Primary Heating Source"
     by_key = {(group.group, group.opcode): group for group in planner_groups}
     assert by_key[(0x01, 0x06)].ii_max == 0x07
 
@@ -1975,10 +1978,10 @@ def test_scan_b524_textual_planner_includes_remote_exploratory_rows_for_groups_0
     assert isinstance(planner_groups, list)
 
     by_key = {(group.group, group.opcode): group for group in planner_groups}
-    assert by_key[(0x02, 0x06)].name == "Secondary Heating Sources"
-    assert by_key[(0x03, 0x06)].name == "Unknown 0x03 (remote)"
-    assert by_key[(0x04, 0x06)].name == "Unknown 0x04 (remote)"
-    assert by_key[(0x05, 0x06)].name == "Unknown 0x05 (remote)"
+    assert by_key[(0x02, 0x06)].name == "Secondary Heating Source"
+    assert by_key[(0x03, 0x06)].name == "Unknown"
+    assert by_key[(0x04, 0x06)].name == "Unknown"
+    assert by_key[(0x05, 0x06)].name == "Unknown"
     assert by_key[(0x04, 0x02)].ii_max == 0x01
     assert by_key[(0x02, 0x06)].ii_max == 0x07
     assert by_key[(0x03, 0x06)].ii_max == 0x0A
@@ -2185,8 +2188,8 @@ def test_scan_b524_textual_planner_models_group_08_as_instanced_on_local_and_rem
     planner_groups = captured["groups"]
     assert isinstance(planner_groups, list)
     by_key = {(group.group, group.opcode): group for group in planner_groups}
-    assert by_key[(0x08, 0x02)].name == "Unknown 0x08 (local)"
-    assert by_key[(0x08, 0x06)].name == "Unknown 0x08 (remote)"
+    assert by_key[(0x08, 0x02)].name == "Unknown"
+    assert by_key[(0x08, 0x06)].name == "Unknown"
     assert by_key[(0x08, 0x02)].ii_max == 0x0A
     assert by_key[(0x08, 0x06)].ii_max == 0x0A
 
@@ -2226,7 +2229,7 @@ def test_scan_b524_textual_planner_uses_namespace_owned_labels_for_groups_09_and
     }
     assert planner_label_map[(0x09, 0x02)] == ("System", "local")
     assert planner_label_map[(0x09, 0x06)] == ("Regulators", "remote")
-    assert artifact["groups"]["0x09"]["name"] == "System / Regulators"
+    assert artifact["groups"]["0x09"]["name"] == "Regulators"
 
 
 def test_scan_b524_textual_planner_uses_remote_presence_for_op06_rows(

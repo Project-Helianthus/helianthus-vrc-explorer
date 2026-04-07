@@ -960,7 +960,7 @@ def scan(
     html_path.write_text(
         render_html_report(
             artifact,
-            title=f"helianthus-vrc-explorer scan report ({output_path.name})",
+            title="Regulator Scan Browser",
         ),
         encoding="utf-8",
     )
@@ -1046,7 +1046,7 @@ def replay_trace(
     html_path.write_text(
         render_html_report(
             artifact,
-            title=f"helianthus-vrc-explorer replay report ({output_path.name})",
+            title="Regulator Scan Browser",
         ),
         encoding="utf-8",
     )

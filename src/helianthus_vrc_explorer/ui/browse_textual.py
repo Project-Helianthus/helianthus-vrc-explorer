@@ -518,6 +518,23 @@ def run_browse_from_artifact(
                     instance_node = parent.add(node.label, data=node.node_id)
                     self._tree_node_by_ref[node.node_id] = instance_node
                     continue
+                if (
+                    node.level == "register"
+                    and node.group_key is not None
+                    and node.instance_key is not None
+                    and node.protocol is not None
+                ):
+                    section_key = node.section_key or ""
+                    parts = ["b524", "inst", section_key, node.group_key]
+                    if node.namespace_key is not None:
+                        parts.append(node.namespace_key)
+                    parts.append(node.instance_key)
+                    parent = self._tree_node_by_ref.get(":".join(parts))
+                    if parent is None:
+                        continue
+                    register_node = parent.add(node.label, data=node.node_id)
+                    self._tree_node_by_ref[node.node_id] = register_node
+                    continue
                 if node.level == "range" and node.protocol is not None:
                     parent = protocols.get(node.protocol)
                     if parent is None:

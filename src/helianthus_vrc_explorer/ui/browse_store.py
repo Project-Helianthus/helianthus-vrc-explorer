@@ -78,6 +78,20 @@ def _fmt_group_label(group_key: str, group_name: str) -> str:
     return f"{group_name} ({group_key})"
 
 
+def _fmt_register_label(register_key: str, entry: dict[str, Any]) -> str:
+    display_name = str(entry.get("myvaillant_name") or "").strip()
+    if not display_name:
+        display_name = str(entry.get("ebusd_name") or "").strip()
+    try:
+        rr = int(register_key, 0)
+        compact_rr = f"0x{rr:x}"
+    except ValueError:
+        compact_rr = register_key
+    if not display_name or display_name in {register_key, compact_rr}:
+        return compact_rr
+    return f"{display_name} ({compact_rr})"
+
+
 def _group_display_name(group_key: str, fallback_name: str, namespace_key: str | None) -> str:
     if namespace_key is None:
         return fallback_name
@@ -370,6 +384,21 @@ def _build_b524_instance_node_id(
     if namespace_key is not None:
         parts.append(namespace_key)
     parts.append(instance_key)
+    return ":".join(parts)
+
+
+def _build_b524_register_node_id(
+    *,
+    section_key: str,
+    group_key: str,
+    namespace_key: str | None,
+    instance_key: str,
+    register_key: str,
+) -> str:
+    parts = ["b524", "reg", section_key, group_key]
+    if namespace_key is not None:
+        parts.append(namespace_key)
+    parts.extend([instance_key, register_key])
     return ":".join(parts)
 
 
@@ -681,7 +710,6 @@ class BrowseStore:
                     instance_obj = instances.get(instance_key)
                     if not isinstance(instance_obj, dict):
                         instance_obj = {"present": False, "registers": {}}
-                    # For instanced groups, list instances as the leaf nodes (do not expand to RR).
                     if is_instanced:
                         node_id = _build_b524_instance_node_id(
                             section_key=section_key,
@@ -735,6 +763,30 @@ class BrowseStore:
                         entry_section_key = _b524_section_key_for_opcode(entry_namespace_key)
                         if entry_section_key not in {"controller_registers", "device_slots"}:
                             continue
+                        if is_instanced:
+                            node_id = _build_b524_register_node_id(
+                                section_key=section_key,
+                                group_key=group_key,
+                                namespace_key=effective_namespace_key,
+                                instance_key=instance_key,
+                                register_key=register_key,
+                            )
+                            if node_id not in seen_instance_nodes:
+                                seen_instance_nodes.add(node_id)
+                                tree_nodes.append(
+                                    TreeNodeRef(
+                                        node_id=node_id,
+                                        label=_fmt_register_label(register_key, entry),
+                                        level="register",
+                                        protocol="b524",
+                                        section_key=section_key,
+                                        group_key=group_key,
+                                        namespace_key=effective_namespace_key,
+                                        namespace_label=effective_namespace_label,
+                                        instance_key=instance_key,
+                                        register_key=register_key,
+                                    )
+                                )
                         if entry_namespace_key is not None:
                             entry_namespace_label = _namespace_label_for_key(entry_namespace_key)
                         else:
@@ -1298,6 +1350,23 @@ class BrowseStore:
             if node.namespace_key is None or not has_namespace_nodes:
                 return by_group_instance
             return [row for row in by_group_instance if row.namespace_key == node.namespace_key]
+        if (
+            node.level == "register"
+            and node.protocol == "b524"
+            and node.group_key is not None
+            and node.instance_key is not None
+            and node.register_key is not None
+        ):
+            return [
+                row
+                for row in selected
+                if row.protocol == "b524"
+                and row.group_key == node.group_key
+                and row.instance_key == node.instance_key
+                and row.register_key == node.register_key
+                and (node.namespace_key is None or row.namespace_key == node.namespace_key)
+                and (node.section_key is None or row.section_key == node.section_key)
+            ]
         if node.level == "range" and node.protocol == "b509" and node.range_key is not None:
             parsed = _parse_range_key(node.range_key)
             if parsed is None:

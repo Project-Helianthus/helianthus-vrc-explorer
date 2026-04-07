@@ -292,7 +292,7 @@ def test_html_report_renders_namespace_totals_and_flags_access_for_dual_namespac
 
     html = render_html_report(artifact, title="test")
 
-    assert "Namespace Totals" in html
+    assert "Namespace Totals" not in html
     assert "FLAGS Access" in html
     assert "Regulators" in html
     assert "activeNamespaceByGroup" in html

@@ -341,7 +341,7 @@ def test_browse_store_remote_namespace_instance_label_drops_local_group_assumpti
     assert by_node_id["b524:inst:device_slots:0x02:0x06:0x00"].label == "Remote Slot 1 (0x00)"
     row = store.rows[0]
     assert (
-        row.path == "B524/Device Slots/ReadDeviceSlotRegister/Secondary Heating Sources/0x00/0x0001"
+        row.path == "B524/Device Slots/ReadDeviceSlotRegister/Secondary Heating Source/0x00/0x0001"
     )
 
 
@@ -359,6 +359,23 @@ def test_browse_store_filters_rows_for_namespace_selection() -> None:
 
     assert [row.namespace_key for row in local_rows] == ["0x02"]
     assert [row.namespace_key for row in remote_rows] == ["0x06"]
+
+
+def test_browse_store_expands_instanced_b524_groups_to_register_nodes() -> None:
+    store = BrowseStore.from_artifact(_dual_namespace_artifact())
+
+    by_node_id = {node.node_id: node for node in store.tree_nodes}
+    local_register = by_node_id["b524:reg:controller_registers:0x09:0x02:0x00:0x0001"]
+    remote_register = by_node_id["b524:reg:device_slots:0x09:0x06:0x00:0x0001"]
+
+    assert local_register.label == "temperature_local (0x1)"
+    assert remote_register.label == "temperature_remote (0x1)"
+
+    local_rows = store.rows_for_selection(local_register, tab="state")
+    remote_rows = store.rows_for_selection(remote_register, tab="state")
+
+    assert [(row.namespace_key, row.register_key) for row in local_rows] == [("0x02", "0x0001")]
+    assert [(row.namespace_key, row.register_key) for row in remote_rows] == [("0x06", "0x0001")]
 
 
 def test_browse_store_prefers_register_class_over_flags_access_for_tab() -> None:

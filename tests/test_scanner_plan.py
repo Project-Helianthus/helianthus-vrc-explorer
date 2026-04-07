@@ -136,7 +136,7 @@ def test_plan_dual_namespace_presets_keep_namespace_specific_ii_max() -> None:
         PlannerGroup(
             group=0x08,
             opcode=0x02,
-            name="Unknown 0x08 (local)",
+            name="Unknown",
             descriptor=1.0,
             known=True,
             ii_max=0x0A,
@@ -149,7 +149,7 @@ def test_plan_dual_namespace_presets_keep_namespace_specific_ii_max() -> None:
         PlannerGroup(
             group=0x08,
             opcode=0x06,
-            name="Unknown 0x08 (remote)",
+            name="Unknown",
             descriptor=1.0,
             known=True,
             ii_max=0x0A,
@@ -194,7 +194,7 @@ def test_recommended_preset_skips_non_core_namespaces_without_verified_presence_
         PlannerGroup(
             group=0x01,
             opcode=0x06,
-            name="Primary Heating Sources",
+            name="Primary Heating Source",
             descriptor=3.0,
             known=True,
             ii_max=None,

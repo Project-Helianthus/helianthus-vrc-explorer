@@ -343,27 +343,6 @@ _TEMPLATE = """<!doctype html>
         font-weight: 650;
       }
 
-      .summary-grid {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
-      }
-
-      .summary-chip {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        padding: 6px 10px;
-        border-radius: 999px;
-        background: rgba(255, 255, 255, 0.04);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        font-size: 12px;
-      }
-
-      .summary-chip strong {
-        color: var(--ink);
-      }
-
       .identity-card {
         display: grid;
         gap: 10px;
@@ -449,7 +428,7 @@ _TEMPLATE = """<!doctype html>
   <body>
     <div class="page">
       <header>
-        <div class="title">B524 Scan Results</div>
+        <div class="title">Regulator Scan Browser</div>
         <div class="subtitle">
           This report is generated from the scan artifact.
           <span class="pill" id="metaDst"></span>
@@ -459,11 +438,6 @@ _TEMPLATE = """<!doctype html>
       </header>
 
 __IDENTITY_CARD__
-
-      <section class="sheet-card">
-        <div class="section-title">Namespace Totals</div>
-        <div class="summary-grid" id="summaryChips"></div>
-      </section>
 
       <section class="sheet-card">
         <div class="tabs" id="tabs"></div>
@@ -731,8 +705,6 @@ __ARTIFACT_JSON__
 
       const tabsEl = document.getElementById("tabs");
       const sheetArea = document.getElementById("sheetArea");
-      const summaryChips = document.getElementById("summaryChips");
-
       function getRowOverride(groupKey, rrKey, namespaceKey = null) {
         const g = state.overrides && state.overrides[groupKey];
         if (!g || typeof g !== "object") return null;
@@ -983,53 +955,6 @@ __ARTIFACT_JSON__
           count += Object.keys(registers).length;
         }
         return count;
-      }
-
-      function renderSummaryChips(groupsRoot) {
-        summaryChips.innerHTML = "";
-        const totals = new Map();
-        let totalRegisters = 0;
-
-        for (const groupKey of sortedHexKeys(Object.keys(groupsRoot || {}))) {
-          const groupObj = getGroupObject(groupsRoot[groupKey]);
-          if (groupObj.dual_namespace && groupObj.namespaces && typeof groupObj.namespaces === "object") {
-            for (const namespaceKey of sortedHexKeys(Object.keys(groupObj.namespaces))) {
-              const namespaceObj = groupObj.namespaces[namespaceKey];
-              if (!namespaceObj || typeof namespaceObj !== "object") continue;
-              const normalizedKey = normalizeOpcodeKey(namespaceKey) || namespaceKey;
-              const label = namespaceLabel(normalizedKey, namespaceObj.label);
-              const count = countRegisters(namespaceObj.instances);
-              totalRegisters += count;
-              totals.set(label, (totals.get(label) || 0) + count);
-            }
-            continue;
-          }
-
-          const instances = groupObj.instances && typeof groupObj.instances === "object" ? groupObj.instances : {};
-            for (const instanceObj of Object.values(instances)) {
-              if (!instanceObj || typeof instanceObj !== "object") continue;
-              const registers = instanceObj.registers && typeof instanceObj.registers === "object" ? instanceObj.registers : {};
-              for (const entry of Object.values(registers)) {
-                if (!entry || typeof entry !== "object") continue;
-                const namespaceKey = namespaceKeyFromEntry(entry);
-                if (!namespaceKey) continue;
-                const label = namespaceLabel(namespaceKey, entry.read_opcode_label);
-                totalRegisters += 1;
-                totals.set(label, (totals.get(label) || 0) + 1);
-              }
-            }
-          }
-
-        const chips = [["total", totalRegisters], ...Array.from(totals.entries())];
-        for (const [label, count] of chips) {
-          const chip = document.createElement("div");
-          chip.className = "summary-chip";
-          const strong = document.createElement("strong");
-          strong.textContent = label;
-          chip.appendChild(strong);
-          chip.appendChild(document.createTextNode(` ${count}`));
-          summaryChips.appendChild(chip);
-        }
       }
 
       function _isB509Tab(tabId) {
@@ -1912,7 +1837,7 @@ __ARTIFACT_JSON__
         const container = document.createElement("div");
         const title = document.createElement("div");
         title.className = "section-title";
-        title.textContent = `${groupKey} · ${resolvedGroupName}`;
+        title.textContent = `${resolvedGroupName} (${groupKey})`;
         container.appendChild(title);
 
         const filters = document.createElement("div");
@@ -2082,7 +2007,7 @@ __ARTIFACT_JSON__
             if (groupKey === activeGroup) btn.classList.add("active");
             const groupObj = getGroupObject(groupsRoot[groupKey]);
             const groupName = typeof groupObj.name === "string" && groupObj.name ? groupObj.name : "Unknown";
-            btn.textContent = `${groupKey} (${groupLabelForSection(groupKey, sectionKey, groupName)})`;
+              btn.textContent = `${groupLabelForSection(groupKey, sectionKey, groupName)} (${groupKey})`;
             btn.addEventListener("click", () => {
               state.activeB524GroupBySection[sectionKey] = groupKey;
               renderB524Tab();
@@ -2129,7 +2054,6 @@ __ARTIFACT_JSON__
       const hasB555 = !!(artifact && typeof artifact === "object" && artifact.b555_dump && typeof artifact.b555_dump === "object");
       const hasB516 = !!(artifact && typeof artifact === "object" && artifact.b516_dump && typeof artifact.b516_dump === "object");
       const hasB509 = !!(artifact && typeof artifact === "object" && artifact.b509_dump && typeof artifact.b509_dump === "object");
-      renderSummaryChips(groupsRoot);
       buildTabs(hasB524, hasB555, hasB516, hasB509);
       renderActiveTab();
     </script>
@@ -2190,7 +2114,7 @@ def render_html_report(artifact: dict[str, Any], *, title: str | None = None) ->
                     f'<div class="identity-grid">{cards}</div>'
                     "</section>"
                 )
-    page_title = title or "helianthus-vrc-explorer scan report"
+    page_title = title or "Regulator Scan Browser"
     return (
         _TEMPLATE.replace("__TITLE__", _escape_html(page_title))
         .replace("__IDENTITY_CARD__", identity_html)

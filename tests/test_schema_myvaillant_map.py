@@ -269,7 +269,7 @@ def test_radio_firmware_entry_exposes_type_hint_and_opcode() -> None:
     entry = schema.lookup(group=0x09, instance=0x01, register=0x0004, opcode=0x06)
 
     assert entry is not None
-    assert entry.leaf == "radio_device_firmware"
+    assert entry.leaf == "device_firmware_version"
     assert entry.type_hint == "FW"
     assert entry.opcode == 0x06
 

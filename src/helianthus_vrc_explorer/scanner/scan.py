@@ -219,7 +219,16 @@ def _group_display_name_for_opcodes(
     for name in names:
         if name not in unique_names:
             unique_names.append(name)
-    return " / ".join(unique_names) if unique_names else fallback
+    if not unique_names:
+        return fallback
+    if len(unique_names) == 1:
+        return unique_names[0]
+    config = GROUP_CONFIG.get(group)
+    if config is not None:
+        configured = str(config["name"]).strip()
+        if configured:
+            return configured
+    return unique_names[0]
 
 
 def _rr_max_for_opcode(*, group: int, default_rr_max: int, opcode: int) -> int:
