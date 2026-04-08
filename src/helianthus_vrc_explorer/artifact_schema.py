@@ -318,7 +318,7 @@ def _migrate_v22_to_v23(artifact: dict[str, Any]) -> bool:
             for target_op in sorted(_seen_opcodes):
                 op_obj = operations.setdefault(target_op, {})
                 op_groups = op_obj.setdefault("groups", {})
-                new_group: dict[str, Any] = dict(_shared)
+                new_group = dict(_shared)
                 new_instances: dict[str, Any] = {}
                 if isinstance(instances, dict):
                     for inst_key, inst_obj in instances.items():
