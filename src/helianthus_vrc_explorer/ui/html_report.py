@@ -482,47 +482,42 @@ __ARTIFACT_JSON__
           });
       }
 
-      // Build a flat group view from operations-first structure.
-      // Each operation/group pair gets its own entry; the op_key acts as the
-      // namespace identifier for rendering purposes.
-      function buildGroupsFromOperations(ops) {
-        const groups = {};
-        if (!ops || typeof ops !== "object") return groups;
-        for (const opKey of Object.keys(ops)) {
-          const opObj = ops[opKey];
+      // Look up a group directly from artifact.operations[opKey].groups[groupKey].
+      // Returns the group object or null.
+      function getOperationGroup(opKey, groupKey) {
+        const ops = artifact && typeof artifact === "object" ? artifact.operations : null;
+        if (!ops || typeof ops !== "object") return null;
+        const opObj = ops[opKey];
+        if (!opObj || typeof opObj !== "object") return null;
+        const opGroups = opObj.groups;
+        if (!opGroups || typeof opGroups !== "object") return null;
+        const g = opGroups[groupKey];
+        return g && typeof g === "object" ? g : null;
+      }
+
+      // Collect all unique group keys across all operations.
+      function allGroupKeys() {
+        const ops = artifact && typeof artifact === "object" ? artifact.operations : null;
+        if (!ops || typeof ops !== "object") return [];
+        const keys = new Set();
+        for (const opObj of Object.values(ops)) {
           if (!opObj || typeof opObj !== "object") continue;
           const opGroups = opObj.groups;
           if (!opGroups || typeof opGroups !== "object") continue;
-          for (const groupKey of Object.keys(opGroups)) {
-            const groupObj = opGroups[groupKey];
-            if (!groupObj || typeof groupObj !== "object") continue;
-            if (!groups[groupKey]) {
-              // First operation for this group: store directly with instances
-              groups[groupKey] = Object.assign({}, groupObj, { _op_key: opKey });
-            } else {
-              // Multiple operations share this group: split by read_opcode in instances
-              const existing = groups[groupKey];
-              const newInstances = groupObj.instances || {};
-              const existingInstances = existing.instances || {};
-              // Merge instances from additional operations
-              for (const iiKey of Object.keys(newInstances)) {
-                if (!existingInstances[iiKey]) {
-                  existingInstances[iiKey] = newInstances[iiKey];
-                } else {
-                  // Merge registers
-                  const existRegs = existingInstances[iiKey].registers || {};
-                  const newRegs = (newInstances[iiKey] || {}).registers || {};
-                  for (const rrKey of Object.keys(newRegs)) {
-                    existRegs[rrKey] = newRegs[rrKey];
-                  }
-                  existingInstances[iiKey].registers = existRegs;
-                }
-              }
-              existing.instances = existingInstances;
-            }
-          }
+          for (const k of Object.keys(opGroups)) keys.add(k);
         }
-        return groups;
+        return sortedHexKeys(Array.from(keys));
+      }
+
+      // Collect group keys that exist in a specific operation.
+      function groupKeysForOp(opKey) {
+        const ops = artifact && typeof artifact === "object" ? artifact.operations : null;
+        if (!ops || typeof ops !== "object") return [];
+        const opObj = ops[opKey];
+        if (!opObj || typeof opObj !== "object") return [];
+        const opGroups = opObj.groups;
+        if (!opGroups || typeof opGroups !== "object") return [];
+        return sortedHexKeys(Object.keys(opGroups));
       }
 
       function getGroupObject(groupObj) {
@@ -826,40 +821,7 @@ __ARTIFACT_JSON__
         return null;
       }
 
-      function namespaceKeyFromEntry(entry, fallbackNamespaceKey = null) {
-        if (!entry || typeof entry !== "object") return fallbackNamespaceKey;
-        return (
-          normalizeOpcodeKey(entry.read_opcode)
-          || normalizeOpcodeKey(fallbackNamespaceKey)
-          || normalizeOpcodeKey(entry.read_opcode_label)
-        );
-      }
 
-      function splitInstancesByNamespace(instancesObj, fallbackNamespaceKey = null) {
-        const split = {};
-        if (!instancesObj || typeof instancesObj !== "object") return split;
-        for (const iiKey of sortedHexKeys(Object.keys(instancesObj))) {
-          const inst = getInstanceObject(instancesObj[iiKey]);
-          const regs = inst.registers && typeof inst.registers === "object" ? inst.registers : {};
-          for (const rrKey of sortedHexKeys(Object.keys(regs))) {
-            const entry = regs[rrKey];
-            if (!entry || typeof entry !== "object") continue;
-            const namespaceKey = namespaceKeyFromEntry(entry, fallbackNamespaceKey);
-            if (!namespaceKey) continue; // Keep namespace views isolated; do not force-assign unknown rows.
-            if (!split[namespaceKey] || typeof split[namespaceKey] !== "object") {
-              split[namespaceKey] = {};
-            }
-            if (!split[namespaceKey][iiKey] || typeof split[namespaceKey][iiKey] !== "object") {
-              split[namespaceKey][iiKey] = {
-                present: inst.present,
-                registers: {},
-              };
-            }
-            split[namespaceKey][iiKey].registers[rrKey] = entry;
-          }
-        }
-        return split;
-      }
 
       function entryStatusKind(entry) {
         if (!entry || typeof entry !== "object") return "error";
@@ -1454,30 +1416,15 @@ __ARTIFACT_JSON__
         sheetArea.appendChild(card);
       }
 
-      function groupHasNamespace(groupObj, targetNamespaceKey) {
-        if (!groupObj || typeof groupObj !== "object" || !targetNamespaceKey) return false;
-        // Operations-first: check whether the group was produced by the target
-        // operation, or whether its instances contain entries with read_opcode
-        // matching the target.
-        if (groupObj._op_key === targetNamespaceKey) return true;
-        const split = splitInstancesByNamespace(groupObj.instances || {}, null);
-        return !!split[targetNamespaceKey];
-      }
-
-      function b524GroupKeysForSection(groupsRoot, sectionKey) {
+      function b524GroupKeysForSection(sectionKey) {
         const required = requiredNamespaceForSection(sectionKey);
         if (!required) return [];
-        const keys = [];
-        for (const groupKey of sortedHexKeys(Object.keys(groupsRoot || {}))) {
-          const groupObj = getGroupObject(groupsRoot[groupKey]);
-          if (groupHasNamespace(groupObj, required)) keys.push(groupKey);
-        }
-        return keys;
+        return groupKeysForOp(required);
       }
 
-      function b524SectionHasContent(sectionKey, groupsRoot, operations, metaObj) {
+      function b524SectionHasContent(sectionKey, operations, metaObj) {
         if (sectionKey === "controller_registers" || sectionKey === "device_slots") {
-          return b524GroupKeysForSection(groupsRoot, sectionKey).length > 0;
+          return b524GroupKeysForSection(sectionKey).length > 0;
         }
         if (sectionKey === "group_directory") {
           return !!(operations && typeof operations === "object" && Array.isArray(operations.group_directory) && operations.group_directory.length);
@@ -1489,14 +1436,13 @@ __ARTIFACT_JSON__
         return !!(operations && typeof operations === "object" && Array.isArray(operations[sectionKey]) && operations[sectionKey].length);
       }
 
-      function visibleB524Sections(groupsRoot, operations, metaObj) {
-        return B524_SECTIONS.filter((section) => b524SectionHasContent(section.key, groupsRoot, operations, metaObj));
+      function visibleB524Sections(operations, metaObj) {
+        return B524_SECTIONS.filter((section) => b524SectionHasContent(section.key, operations, metaObj));
       }
 
       function renderB524OperationRows(sectionKey, mountTarget) {
         const operations = artifact && typeof artifact === "object" ? artifact.b524_operations : null;
         const metaObj = artifact && typeof artifact === "object" ? artifact.meta : null;
-        const groupsRoot = artifact && typeof artifact === "object" ? buildGroupsFromOperations(artifact.operations) : {};
         const container = document.createElement("div");
         const title = document.createElement("div");
         title.className = "section-title";
@@ -1508,8 +1454,19 @@ __ARTIFACT_JSON__
           if (operations && typeof operations === "object" && Array.isArray(operations.group_directory)) {
             for (const row of operations.group_directory) rows.push(row);
           } else {
-            for (const groupKey of sortedHexKeys(Object.keys(groupsRoot))) {
-              const groupObj = getGroupObject(groupsRoot[groupKey]);
+            // Derive from operations-first structure: each unique group key
+            // gets one directory row, picking the first operation that has it.
+            for (const groupKey of allGroupKeys()) {
+              let groupObj = null;
+              const artOps = artifact && typeof artifact === "object" ? artifact.operations : null;
+              if (artOps && typeof artOps === "object") {
+                for (const opObj of Object.values(artOps)) {
+                  if (!opObj || typeof opObj !== "object") continue;
+                  const g = opObj.groups && typeof opObj.groups === "object" ? opObj.groups[groupKey] : null;
+                  if (g && typeof g === "object") { groupObj = getGroupObject(g); break; }
+                }
+              }
+              if (!groupObj) continue;
               rows.push({
                 group: groupKey,
                 descriptor: groupObj.descriptor_observed,
@@ -1631,18 +1588,18 @@ __ARTIFACT_JSON__
         mountTarget.appendChild(container);
       }
 
-      function renderActiveGroup(groupKey, forcedNamespaceKey = null, mountTarget = sheetArea) {
-        const groupsRoot = artifact && typeof artifact === "object" ? buildGroupsFromOperations(artifact.operations) : {};
-        if (!groupKey || !groupsRoot[groupKey]) {
+      function renderActiveGroup(groupKey, opKey, mountTarget = sheetArea) {
+        const rawGroup = getOperationGroup(opKey, groupKey);
+        if (!groupKey || !rawGroup) {
           mountTarget.innerHTML = "<div class='subtitle'>No groups.</div>";
           return;
         }
 
-        const groupObj = getGroupObject(groupsRoot[groupKey]);
+        const groupObj = getGroupObject(rawGroup);
         const groupName = typeof groupObj.name === "string" && groupObj.name ? groupObj.name : "Unknown";
-        const resolvedGroupName = forcedNamespaceKey === "0x02"
+        const resolvedGroupName = opKey === "0x02"
           ? groupLabelForSection(groupKey, "controller_registers", groupName)
-          : forcedNamespaceKey === "0x06"
+          : opKey === "0x06"
             ? groupLabelForSection(groupKey, "device_slots", groupName)
             : groupName;
 
@@ -1651,7 +1608,7 @@ __ARTIFACT_JSON__
           if (!inst || typeof inst !== "object") return false;
           const regs = inst.registers;
           if (!regs || typeof regs !== "object") return false;
-          if (namespaceKey === "0x06" || forcedNamespaceKey === "0x06") {
+          if (namespaceKey === "0x06" || opKey === "0x06") {
             // OP=0x06: RR=0x0001 (device_connected) is the universal indicator
             const r1 = regs["0x0001"];
             if (!r1 || typeof r1 !== "object") return false;
@@ -1798,8 +1755,8 @@ __ARTIFACT_JSON__
               }
               if (selectedType) sel.value = selectedType;
               sel.addEventListener("change", () => {
-                setRowOverride(groupKey, rrKey, sel.value, namespaceKey);
-                renderActiveGroup(groupKey, forcedNamespaceKey, mountTarget);
+                setRowOverride(groupKey, rrKey, sel.value, opKey);
+                renderActiveGroup(groupKey, opKey, mountTarget);
               });
               td0.appendChild(sel);
             }
@@ -1908,7 +1865,7 @@ __ARTIFACT_JSON__
         hideAbsentCb.checked = !!state.b524Filters.hideAbsent;
         hideAbsentCb.addEventListener("change", () => {
           state.b524Filters.hideAbsent = !!hideAbsentCb.checked;
-          renderActiveGroup(groupKey, forcedNamespaceKey, mountTarget);
+          renderActiveGroup(groupKey, opKey, mountTarget);
         });
         hideAbsentLabel.appendChild(hideAbsentCb);
         hideAbsentLabel.appendChild(document.createTextNode("Hide absent"));
@@ -1921,7 +1878,7 @@ __ARTIFACT_JSON__
         hideDormantCb.checked = !!state.b524Filters.hideDormant;
         hideDormantCb.addEventListener("change", () => {
           state.b524Filters.hideDormant = !!hideDormantCb.checked;
-          renderActiveGroup(groupKey, forcedNamespaceKey, mountTarget);
+          renderActiveGroup(groupKey, opKey, mountTarget);
         });
         hideDormantLabel.appendChild(hideDormantCb);
         hideDormantLabel.appendChild(document.createTextNode("Hide dormant"));
@@ -1934,7 +1891,7 @@ __ARTIFACT_JSON__
         hideMissingCb.checked = !!state.b524Filters.hideMissingInstances;
         hideMissingCb.addEventListener("change", () => {
           state.b524Filters.hideMissingInstances = !!hideMissingCb.checked;
-          renderActiveGroup(groupKey, forcedNamespaceKey, mountTarget);
+          renderActiveGroup(groupKey, opKey, mountTarget);
         });
         hideMissingLabel.appendChild(hideMissingCb);
         hideMissingLabel.appendChild(document.createTextNode("Hide missing instances"));
@@ -1942,35 +1899,13 @@ __ARTIFACT_JSON__
 
         mountTarget.appendChild(filters);
 
-        // Resolve the active namespace and build the table directly.
-        // Operations-first: split instances by read_opcode to isolate views.
-        let activeInstances = null;
-        let activeNsKey = forcedNamespaceKey;
-
-        const splitNamespaces = splitInstancesByNamespace(groupObj.instances || {}, null);
-        let namespaceKeys = sortedHexKeys(Object.keys(splitNamespaces));
-        if (forcedNamespaceKey) {
-          namespaceKeys = namespaceKeys.filter((key) => key === forcedNamespaceKey);
-        }
-        if (namespaceKeys.length) {
-          activeNsKey = namespaceKeys[0];
-          activeInstances = splitNamespaces[activeNsKey] || {};
-        } else {
-          activeInstances = groupObj.instances || {};
-        }
-
-        if (activeInstances) {
-          mountTarget.appendChild(buildGroupTable(activeInstances, activeNsKey));
-        } else {
-          const empty = document.createElement("div");
-          empty.className = "subtitle";
-          empty.textContent = "No data for this namespace.";
-          mountTarget.appendChild(empty);
-        }
+        // Operations-first: instances come directly from the operation's group.
+        // No merging or namespace splitting needed.
+        const activeInstances = groupObj.instances || {};
+        mountTarget.appendChild(buildGroupTable(activeInstances, opKey));
       }
 
       function renderB524Tab() {
-        const groupsRoot = artifact && typeof artifact === "object" ? buildGroupsFromOperations(artifact.operations) : {};
         const operations = artifact && typeof artifact === "object" ? artifact.b524_operations : null;
         const metaObj = artifact && typeof artifact === "object" ? artifact.meta : null;
         const host = document.createElement("div");
@@ -1978,7 +1913,7 @@ __ARTIFACT_JSON__
         sectionTabs.className = "subtabs";
         sectionTabs.id = "b524-section-tabs";
 
-        const renderedSections = visibleB524Sections(groupsRoot, operations, metaObj);
+        const renderedSections = visibleB524Sections(operations, metaObj);
         const allowedSections = renderedSections.map((item) => item.key);
         if (!allowedSections.length) {
           host.innerHTML = "<div class='subtitle'>No B524 sections with scanned content in artifact.</div>";
@@ -2009,9 +1944,9 @@ __ARTIFACT_JSON__
         sheetArea.appendChild(host);
 
         const sectionKey = state.activeB524Section;
-        const requiredNamespace = requiredNamespaceForSection(sectionKey);
-        if (requiredNamespace) {
-          const groupKeys = b524GroupKeysForSection(groupsRoot, sectionKey);
+        const requiredOp = requiredNamespaceForSection(sectionKey);
+        if (requiredOp) {
+          const groupKeys = b524GroupKeysForSection(sectionKey);
           if (!groupKeys.length) {
             sectionBody.innerHTML = `<div class='subtitle'>No ${sectionLabel(sectionKey)} groups in artifact.</div>`;
             return;
@@ -2028,7 +1963,8 @@ __ARTIFACT_JSON__
             const btn = document.createElement("div");
             btn.className = "tab";
             if (groupKey === activeGroup) btn.classList.add("active");
-            const groupObj = getGroupObject(groupsRoot[groupKey]);
+            const rawGroup = getOperationGroup(requiredOp, groupKey);
+            const groupObj = rawGroup ? getGroupObject(rawGroup) : { name: "Unknown", instances: {} };
             const groupName = typeof groupObj.name === "string" && groupObj.name ? groupObj.name : "Unknown";
             const friendlyName = groupLabelForSection(groupKey, sectionKey, groupName);
             const ggNum = parseInt(groupKey, 16);
@@ -2044,7 +1980,7 @@ __ARTIFACT_JSON__
 
           const groupMount = document.createElement("div");
           sectionBody.appendChild(groupMount);
-          renderActiveGroup(activeGroup, requiredNamespace, groupMount);
+          renderActiveGroup(activeGroup, requiredOp, groupMount);
           return;
         }
 
@@ -2071,9 +2007,8 @@ __ARTIFACT_JSON__
         sheetArea.innerHTML = "<div class='subtitle'>No tab selected.</div>";
       }
 
-      const groupsRoot = artifact && typeof artifact === "object" ? buildGroupsFromOperations(artifact.operations) : {};
       const hasB524 = !!(
-        (groupsRoot && typeof groupsRoot === "object" && Object.keys(groupsRoot).length > 0)
+        allGroupKeys().length > 0
         || (artifact && typeof artifact === "object" && artifact.b524_operations && typeof artifact.b524_operations === "object")
         || (meta && typeof meta === "object" && meta.constraint_dictionary && typeof meta.constraint_dictionary === "object")
       );

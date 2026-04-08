@@ -398,7 +398,7 @@ def test_html_report_namespace_helpers_are_opcode_key_authoritative() -> None:
     assert "(${namespaceKey})" in html
 
 
-def test_html_report_splits_mixed_legacy_group_by_namespace_and_scopes_overrides() -> None:
+def test_html_report_operations_first_direct_lookup_and_scopes_overrides() -> None:
     artifact = {
         "meta": {"destination_address": "0x15", "scan_timestamp": "2026-02-11T00:00:00Z"},
         "groups": {
@@ -418,14 +418,16 @@ def test_html_report_splits_mixed_legacy_group_by_namespace_and_scopes_overrides
 
     html = render_html_report(artifact, title="test")
 
-    assert "function splitInstancesByNamespace(instancesObj, fallbackNamespaceKey = null)" in html
-    assert (
-        "const splitNamespaces = splitInstancesByNamespace(groupObj.instances || {}, null);" in html
-    )
+    # Operations-first: JS uses direct operation group lookup, not merging
+    assert "function getOperationGroup(opKey, groupKey)" in html
+    assert "function groupKeysForOp(opKey)" in html
     assert "function buildGroupTable(instancesObj" in html
+    # Deleted merge/split functions must NOT be present
+    assert "buildGroupsFromOperations" not in html
+    assert "splitInstancesByNamespace" not in html
 
 
-def test_html_report_split_views_keep_unknown_namespace_entries_unassigned() -> None:
+def test_html_report_legacy_entries_without_read_opcode_present_after_migration() -> None:
     artifact = {
         "meta": {"destination_address": "0x15", "scan_timestamp": "2026-02-11T00:00:00Z"},
         "groups": {
@@ -449,7 +451,6 @@ def test_html_report_split_views_keep_unknown_namespace_entries_unassigned() -> 
     # Migration adds response_state to entries; check the entry is present
     assert '"0x0003":{' in html
     assert '"raw_hex":"03"' in html
-    assert (
-        "const splitNamespaces = splitInstancesByNamespace(groupObj.instances || {}, null);" in html
-    )
-    assert "if (!namespaceKey) continue;" in html
+    # Operations-first: direct lookup, no merging
+    assert "function getOperationGroup(opKey, groupKey)" in html
+    assert "buildGroupsFromOperations" not in html
