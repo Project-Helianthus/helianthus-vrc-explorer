@@ -4,9 +4,9 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
-CURRENT_ARTIFACT_SCHEMA_VERSION = "2.2"
+CURRENT_ARTIFACT_SCHEMA_VERSION = "2.3"
 LEGACY_UNVERSIONED_SCHEMA = "legacy-unversioned"
-LEGACY_VERSIONED_SCHEMAS = frozenset({"2.0", "2.1"})
+LEGACY_VERSIONED_SCHEMAS = frozenset({"2.0", "2.1", "2.2"})
 
 
 class ArtifactSchemaError(ValueError):
@@ -39,6 +39,41 @@ def detect_schema_version(artifact: dict[str, Any]) -> str:
 def iter_register_entries(
     artifact: dict[str, Any],
 ):
+    """Iterate register entries from a v2.3 (operations-first) artifact.
+
+    Yields: (op_key, group_key, instance_key, register_key, entry)
+
+    Also supports legacy v2.2 (groups-first) structure for backward
+    compatibility during migration.
+    """
+    # v2.3 path: operations → groups → instances → registers
+    operations = artifact.get("operations")
+    if isinstance(operations, dict) and operations:
+        for op_key, op_obj in operations.items():
+            if not isinstance(op_key, str) or not isinstance(op_obj, dict):
+                continue
+            op_groups = op_obj.get("groups")
+            if not isinstance(op_groups, dict):
+                continue
+            for group_key, group_obj in op_groups.items():
+                if not isinstance(group_key, str) or not isinstance(group_obj, dict):
+                    continue
+                instances = group_obj.get("instances")
+                if not isinstance(instances, dict):
+                    continue
+                for instance_key, instance_obj in instances.items():
+                    if not isinstance(instance_key, str) or not isinstance(instance_obj, dict):
+                        continue
+                    registers = instance_obj.get("registers")
+                    if not isinstance(registers, dict):
+                        continue
+                    for register_key, entry in registers.items():
+                        if not isinstance(register_key, str) or not isinstance(entry, dict):
+                            continue
+                        yield op_key, group_key, instance_key, register_key, entry
+        return
+
+    # Legacy v2.2 path: groups → (namespaces →) instances → registers
     groups = artifact.get("groups")
     if not isinstance(groups, dict):
         return
@@ -63,7 +98,7 @@ def iter_register_entries(
                     for register_key, entry in registers.items():
                         if not isinstance(register_key, str) or not isinstance(entry, dict):
                             continue
-                        yield group_key, namespace_key, instance_key, register_key, entry
+                        yield namespace_key, group_key, instance_key, register_key, entry
             continue
 
         instances = group_obj.get("instances")
@@ -78,7 +113,75 @@ def iter_register_entries(
             for register_key, entry in registers.items():
                 if not isinstance(register_key, str) or not isinstance(entry, dict):
                     continue
-                yield group_key, None, instance_key, register_key, entry
+                yield None, group_key, instance_key, register_key, entry
+
+
+def flatten_operations_to_groups(artifact: dict[str, Any]) -> dict[str, Any]:
+    """Build a virtual groups dict from v2.3 operations-first structure.
+
+    For consumers that iterate groups with dual_namespace branching,
+    this reconstructs a v2.2-compatible view. Groups appearing under
+    multiple operations get dual_namespace=True with namespaces.
+    Falls back to legacy ``artifact["groups"]`` when no operations key exists.
+    """
+    operations = artifact.get("operations")
+    if not isinstance(operations, dict):
+        groups = artifact.get("groups")
+        return groups if isinstance(groups, dict) else {}
+
+    groups: dict[str, Any] = {}
+    group_ops: dict[str, list[str]] = {}
+    for op_key, op_obj in operations.items():
+        if not isinstance(op_obj, dict):
+            continue
+        op_groups = op_obj.get("groups")
+        if not isinstance(op_groups, dict):
+            continue
+        for group_key in op_groups:
+            group_ops.setdefault(group_key, []).append(op_key)
+
+    for op_key, op_obj in operations.items():
+        if not isinstance(op_obj, dict):
+            continue
+        op_groups = op_obj.get("groups")
+        if not isinstance(op_groups, dict):
+            continue
+        for group_key, group_obj in op_groups.items():
+            if not isinstance(group_key, str) or not isinstance(group_obj, dict):
+                continue
+            is_multi_op = len(group_ops.get(group_key, [])) > 1
+            if is_multi_op:
+                if group_key not in groups:
+                    groups[group_key] = {
+                        "name": group_obj.get("name"),
+                        "descriptor_observed": group_obj.get("descriptor_observed"),
+                        "dual_namespace": True,
+                        "namespaces": {},
+                    }
+                _opcode = 0
+                try:
+                    _opcode = int(op_key, 0)
+                except ValueError:
+                    pass
+                _label = "local" if _opcode == 0x02 else ("remote" if _opcode == 0x06 else op_key)
+                ns_obj: dict[str, Any] = {
+                    "label": _label,
+                    "instances": group_obj.get("instances", {}),
+                }
+                ii_max = group_obj.get("ii_max")
+                if ii_max is not None:
+                    ns_obj["ii_max"] = ii_max
+                for k in ("group_name", "availability_contract", "availability_probes"):
+                    if k in group_obj:
+                        ns_obj[k] = group_obj[k]
+                groups[group_key]["namespaces"][op_key] = ns_obj
+                for k in ("discovery_advisory",):
+                    if k in group_obj and k not in groups[group_key]:
+                        groups[group_key][k] = group_obj[k]
+            else:
+                groups[group_key] = dict(group_obj)
+                groups[group_key]["dual_namespace"] = False
+    return groups
 
 
 def count_register_entries(artifact: dict[str, Any]) -> int:
@@ -191,6 +294,93 @@ def _migrate_entry(entry: dict[str, Any]) -> bool:
     return changed
 
 
+def _migrate_v22_to_v23(artifact: dict[str, Any]) -> bool:
+    """Restructure groups-first (v2.2) to operations-first (v2.3).
+
+    For each group in artifact["groups"]:
+    - If dual_namespace=true: for each namespace, move group data to
+      operations[opcode].groups[group_key]
+    - If dual_namespace=false (or missing): move to
+      operations["0x02"].groups[group_key] (flat groups default to OP=0x02)
+
+    Also moves register_constraints to operations["0x01"].constraints.
+    """
+    groups = artifact.get("groups")
+    if not isinstance(groups, dict):
+        return False
+
+    operations: dict[str, Any] = {}
+
+    for group_key, group_obj in groups.items():
+        if not isinstance(group_key, str) or not isinstance(group_obj, dict):
+            continue
+
+        # Collect fields to copy (excluding dual_namespace/namespaces/namespace_identity_keys)
+        _skip_keys = {"dual_namespace", "namespaces", "namespace_identity_keys", "instances"}
+
+        if bool(group_obj.get("dual_namespace")):
+            namespaces = group_obj.get("namespaces")
+            if not isinstance(namespaces, dict):
+                continue
+            for ns_key, ns_obj in namespaces.items():
+                if not isinstance(ns_key, str) or not isinstance(ns_obj, dict):
+                    continue
+                op_obj = operations.setdefault(ns_key, {})
+                op_groups = op_obj.setdefault("groups", {})
+                new_group: dict[str, Any] = {}
+                # Copy group-level fields (name, descriptor_observed, discovery_advisory, etc.)
+                for k, v in group_obj.items():
+                    if k not in _skip_keys:
+                        new_group[k] = v
+                # Copy namespace-level fields (instances, ii_max, availability_*, etc.)
+                for k, v in ns_obj.items():
+                    if k in {"label", "operation_label", "group_name"}:
+                        continue
+                    new_group[k] = v
+                op_groups[group_key] = new_group
+        else:
+            # Flat group: determine opcode from entry evidence or default to 0x02
+            op_key = "0x02"
+            instances = group_obj.get("instances")
+            if isinstance(instances, dict):
+                for inst_obj in instances.values():
+                    if not isinstance(inst_obj, dict):
+                        continue
+                    regs = inst_obj.get("registers")
+                    if not isinstance(regs, dict):
+                        continue
+                    for entry in regs.values():
+                        if isinstance(entry, dict):
+                            read_opcode = entry.get("read_opcode")
+                            if isinstance(read_opcode, str) and read_opcode.startswith("0x"):
+                                op_key = read_opcode
+                                break
+                    else:
+                        continue
+                    break
+
+            op_obj = operations.setdefault(op_key, {})
+            op_groups = op_obj.setdefault("groups", {})
+            new_group = {}
+            for k, v in group_obj.items():
+                if k not in _skip_keys:
+                    new_group[k] = v
+            if isinstance(instances, dict):
+                new_group["instances"] = instances
+            op_groups[group_key] = new_group
+
+    # Move register_constraints to operations["0x01"].constraints
+    register_constraints = artifact.get("register_constraints")
+    if isinstance(register_constraints, dict) and register_constraints:
+        op_01 = operations.setdefault("0x01", {})
+        op_01["constraints"] = register_constraints
+
+    artifact["operations"] = operations
+    artifact.pop("groups", None)
+    artifact.pop("register_constraints", None)
+    return True
+
+
 def migrate_artifact_schema(
     artifact: dict[str, Any],
 ) -> tuple[dict[str, Any], ArtifactMigrationReport]:
@@ -213,14 +403,20 @@ def migrate_artifact_schema(
     register_count_before = count_register_entries(migrated)
     changed = False
 
-    if source_schema_version in {LEGACY_UNVERSIONED_SCHEMA, *LEGACY_VERSIONED_SCHEMAS}:
-        migrated["schema_version"] = CURRENT_ARTIFACT_SCHEMA_VERSION
+    # Step 1: migrate legacy unversioned / 2.0 / 2.1 to 2.2 shape first
+    if source_schema_version in {LEGACY_UNVERSIONED_SCHEMA, "2.0", "2.1"}:
+        migrated["schema_version"] = "2.2"
         changed = True
         groups = migrated.get("groups")
         if isinstance(groups, dict):
             for group_obj in groups.values():
                 if isinstance(group_obj, dict):
                     changed = _migrate_group(group_obj) or changed
+
+    # Step 2: migrate 2.2 to 2.3 (groups-first to operations-first)
+    if detect_schema_version(migrated) == "2.2":
+        changed = _migrate_v22_to_v23(migrated) or changed
+        migrated["schema_version"] = CURRENT_ARTIFACT_SCHEMA_VERSION
 
     for *_path, entry in iter_register_entries(migrated):
         if isinstance(entry, dict):

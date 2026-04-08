@@ -263,47 +263,36 @@ def _namespace_profile(group: int, opcode: int) -> NamespaceProfile | None:
     return group_namespace_profiles(group).get(opcode)
 
 
-def _ensure_group_namespace(
-    groups: dict[str, Any],
+def _ensure_operation_group(
+    operations: dict[str, Any],
     *,
     group: int,
     opcode: int,
-) -> tuple[dict[str, Any], dict[str, Any]]:
+) -> dict[str, Any]:
+    """Ensure operations[op_hex].groups[group_key] exists and return the group object."""
+    op_key = _hex_u8(opcode)
     group_key = _hex_u8(group)
     config = GROUP_CONFIG.get(group)
     profile = _namespace_profile(group, opcode)
     default_name = str(config.get("name")) if isinstance(config, dict) else f"Unknown {group_key}"
     descriptor = config.get("desc") if isinstance(config, dict) else None
-    group_obj = groups.setdefault(
+    op_obj = operations.setdefault(op_key, {})
+    op_groups = op_obj.setdefault("groups", {})
+    group_obj = op_groups.setdefault(
         group_key,
         {
             "name": default_name,
             "descriptor_observed": float(descriptor)
             if isinstance(descriptor, (int, float)) and not isinstance(descriptor, bool)
             else 0.0,
-            "dual_namespace": True,
-            "namespaces": {},
-        },
-    )
-    namespaces = group_obj.setdefault("namespaces", {})
-    namespace_key = _hex_u8(opcode)
-    namespace_group_name = (
-        profile.name if profile is not None else _group_name_for_opcode(group, opcode)
-    )
-    namespace_obj = namespaces.setdefault(
-        namespace_key,
-        {
-            "label": opcode_label(opcode),
-            "operation_label": operation_label(opcode=opcode, optype=0x00),
-            "group_name": namespace_group_name,
             "instances": {},
         },
     )
-    namespace_obj["group_name"] = namespace_group_name
+    group_obj.setdefault("instances", {})
     if profile is not None:
-        namespace_obj["ii_max"] = _hex_u8(profile.ii_max)
-        namespace_obj["rr_max"] = _hex_u16(profile.rr_max)
-    return group_obj, namespace_obj
+        group_obj["ii_max"] = _hex_u8(profile.ii_max)
+        group_obj["rr_max"] = _hex_u16(profile.rr_max)
+    return group_obj
 
 
 def _decode_register_read_entry(
@@ -482,7 +471,7 @@ def replay_trace_to_artifact(trace_path: Path) -> dict[str, Any]:
                 ],
             },
         },
-        "groups": {},
+        "operations": {},
     }
     limitations = cast(list[str], artifact["meta"]["replay_trace"]["limitations"])
     if meta.truncated_hex_frames > 0:
@@ -524,10 +513,10 @@ def replay_trace_to_artifact(trace_path: Path) -> dict[str, Any]:
                 continue
             if register > profile.rr_max:
                 continue
-            _group_obj, namespace_obj = _ensure_group_namespace(
-                artifact["groups"], group=group, opcode=opcode
+            group_obj = _ensure_operation_group(
+                artifact["operations"], group=group, opcode=opcode
             )
-            instances = namespace_obj.setdefault("instances", {})
+            instances = group_obj.setdefault("instances", {})
             instance_key = _hex_u8(instance)
             instance_obj = instances.setdefault(instance_key, {"present": False, "registers": {}})
             registers = instance_obj.setdefault("registers", {})
@@ -631,28 +620,30 @@ def replay_trace_to_artifact(trace_path: Path) -> dict[str, Any]:
     artifact["b524_operations"] = b524_operations
 
     # Enrich register entries with myvaillant register names.
-    _enrich_register_names(artifact["groups"])
+    _enrich_register_names(artifact["operations"])
 
     # Derive rr_max / ii_max from observed trace data so that metadata
     # reflects the actual scan range, not the GROUP_CONFIG profile defaults.
-    _update_namespace_bounds_from_observed(artifact["groups"])
+    _update_namespace_bounds_from_observed(artifact["operations"])
 
     return artifact
 
 
-def _update_namespace_bounds_from_observed(groups: dict[str, Any]) -> None:
+def _update_namespace_bounds_from_observed(operations: dict[str, Any]) -> None:
     """Override rr_max / ii_max with observed trace bounds.
 
     The replay initially sets these from GROUP_CONFIG profiles, but the
-    trace is the source of truth — the user may have scanned well beyond
+    trace is the source of truth -- the user may have scanned well beyond
     the profile defaults.
     """
-    for _group_key, group_obj in groups.items():
-        namespaces = group_obj.get("namespaces")
-        if not isinstance(namespaces, dict):
+    for _op_key, op_obj in operations.items():
+        if not isinstance(op_obj, dict):
             continue
-        for _ns_key, ns_obj in namespaces.items():
-            instances = ns_obj.get("instances")
+        op_groups = op_obj.get("groups")
+        if not isinstance(op_groups, dict):
+            continue
+        for _group_key, group_obj in op_groups.items():
+            instances = group_obj.get("instances")
             if not isinstance(instances, dict) or not instances:
                 continue
             observed_ii_max = max(int(ii_key, 16) for ii_key in instances)
@@ -664,25 +655,27 @@ def _update_namespace_bounds_from_observed(groups: dict[str, Any]) -> None:
                         rr = int(rr_key, 16)
                         if rr > observed_rr_max:
                             observed_rr_max = rr
-            ns_obj["rr_max"] = _hex_u16(observed_rr_max)
-            ns_obj["ii_max"] = _hex_u8(observed_ii_max)
+            group_obj["rr_max"] = _hex_u16(observed_rr_max)
+            group_obj["ii_max"] = _hex_u8(observed_ii_max)
 
 
-def _enrich_register_names(groups: dict[str, Any]) -> None:
+def _enrich_register_names(operations: dict[str, Any]) -> None:
     """Apply myvaillant_register_map labels to all register entries."""
     csv_path = Path(__file__).parent / "data" / "myvaillant_register_map.csv"
     if not csv_path.exists():
         return
     mv_map = MyvaillantRegisterMap.from_path(csv_path)
 
-    for group_key, group_obj in groups.items():
-        group = int(group_key, 16)
-        namespaces = group_obj.get("namespaces")
-        if not isinstance(namespaces, dict):
+    for op_key, op_obj in operations.items():
+        if not isinstance(op_obj, dict):
             continue
-        for ns_key, ns_obj in namespaces.items():
-            opcode = int(ns_key, 16)
-            instances = ns_obj.get("instances")
+        opcode = int(op_key, 16)
+        op_groups = op_obj.get("groups")
+        if not isinstance(op_groups, dict):
+            continue
+        for group_key, group_obj in op_groups.items():
+            group = int(group_key, 16)
+            instances = group_obj.get("instances")
             if not isinstance(instances, dict):
                 continue
             for ii_key, inst_obj in instances.items():

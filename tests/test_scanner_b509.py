@@ -124,7 +124,7 @@ def test_scan_vrc_keeps_b509_when_first_directory_probe_is_status_only(tmp_path:
 
     assert "b524_supported" not in artifact["meta"]
     assert "b524_skip_reason" not in artifact["meta"]
-    assert "0x02" in artifact["groups"]
+    assert "0x02" in artifact.get("operations", {}).get("0x02", {}).get("groups", {})
     assert artifact["meta"]["incomplete"] is False
 
     b509_dump = artifact.get("b509_dump")

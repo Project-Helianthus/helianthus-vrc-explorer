@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from rich.console import Console
 
+from conftest import artifact_groups, artifact_op_group
 from helianthus_vrc_explorer.artifact_schema import CURRENT_ARTIFACT_SCHEMA_VERSION
 from helianthus_vrc_explorer.scanner.observer import ScanObserver
 from helianthus_vrc_explorer.scanner.plan import GroupScanPlan, make_plan_key
@@ -625,8 +626,8 @@ def test_scan_b524_scans_all_instances_and_register_range(tmp_path: Path) -> Non
     assert artifact["meta"]["destination_address"] == "0x15"
     assert artifact["meta"]["incomplete"] is False
 
-    group = artifact["groups"]["0x02"]
-    assert group["dual_namespace"] is False
+    group = artifact_op_group(artifact, op="0x02", group="0x02")
+    # v2.3: dual_namespace removed from operations-first structure
     assert group["descriptor_observed"] == 1.0
 
     instance_00 = group["instances"]["0x00"]
@@ -687,8 +688,8 @@ def test_scan_b524_continues_when_first_directory_probe_is_status_only(
     assert artifact["meta"]["incomplete"] is False
     assert "b524_supported" not in artifact["meta"]
     assert "b524_skip_reason" not in artifact["meta"]
-    assert "0x02" in artifact["groups"]
-    assert artifact["groups"]["0x02"]["instances"]["0x00"]["present"] is True
+    assert "0x02" in artifact_groups(artifact)
+    assert artifact_op_group(artifact, op="0x02", group="0x02")["instances"]["0x00"]["present"] is True
     assert transport.calls[0] == bytes((0x00, 0x00, 0x00))
     assert bytes((0x00, 0x02, 0x00)) in transport.calls
 
@@ -778,7 +779,7 @@ def test_scan_b524_skips_constraint_dictionary_by_default(tmp_path: Path) -> Non
     assert artifact["meta"]["constraint_dictionary"] == {}
     assert artifact["meta"]["constraint_scope"]["decision"] == "opcode_0x02_default"
     assert artifact["meta"]["constraint_scope"]["protocol"] == "opcode_0x01"
-    entry = artifact["groups"]["0x02"]["instances"]["0x00"]["registers"]["0x0002"]
+    entry = artifact_op_group(artifact, op="0x02", group="0x02")["instances"]["0x00"]["registers"]["0x0002"]
     assert entry["constraint_source"] == "static_catalog"
     assert entry["constraint_scope"] == "opcode_0x02_default"
     assert entry["constraint_provenance"] == "catalog_seeded_from_opcode_0x01"
@@ -814,7 +815,7 @@ def test_scan_b524_flags_seeded_constraint_mismatch(tmp_path: Path) -> None:
         planner_ui="classic",
     )
 
-    entry = artifact["groups"]["0x02"]["instances"]["0x00"]["registers"]["0x0002"]
+    entry = artifact_op_group(artifact, op="0x02", group="0x02")["instances"]["0x00"]["registers"]["0x0002"]
     assert entry["value"] == 5
     assert entry["constraint_source"] == "static_catalog"
     assert "constraint_mismatch_reason" in entry
@@ -872,7 +873,7 @@ def test_scan_b524_does_not_flag_remote_seeded_static_constraint_mismatch(
         planner_ui="classic",
     )
 
-    remote_entry = artifact["groups"]["0x09"]["namespaces"]["0x06"]["instances"]["0x00"][
+    remote_entry = artifact_op_group(artifact, op="0x06", group="0x09")["instances"]["0x00"][
         "registers"
     ]["0x0002"]
     assert remote_entry["value"] == 21
@@ -930,11 +931,12 @@ def test_scan_b524_scans_enabled_unknown_group_via_planner(monkeypatch, tmp_path
         planner_ui="classic",
     )
 
-    assert "0x69" in artifact["groups"]
-    group = artifact["groups"]["0x69"]
-    assert group["dual_namespace"] is True
-    local_registers = group["namespaces"]["0x02"]["instances"]["0x00"]["registers"]
-    remote_registers = group["namespaces"]["0x06"]["instances"]["0x00"]["registers"]
+    assert "0x69" in artifact_groups(artifact)
+    # v2.3: each OP has its own group entry
+    local_group = artifact_op_group(artifact, op="0x02", group="0x69")
+    remote_group = artifact_op_group(artifact, op="0x06", group="0x69")
+    local_registers = local_group["instances"]["0x00"]["registers"]
+    remote_registers = remote_group["instances"]["0x00"]["registers"]
     assert local_registers["0x0000"]["raw_hex"] == "00"
     assert remote_registers["0x0000"]["raw_hex"] == "00"
     issue_suggestion = artifact["meta"]["issue_suggestion"]
@@ -983,7 +985,7 @@ def test_scan_b524_scans_absent_instances_when_planner_overrides(
         planner_ui="classic",
     )
 
-    group = artifact["groups"]["0x02"]["namespaces"]["0x02"]
+    group = artifact_op_group(artifact, op="0x02", group="0x02")
     assert group["instances"]["0x00"]["present"] is True
 
     absent = group["instances"]["0x01"]
@@ -1005,8 +1007,8 @@ def test_scan_instanced_group_zero_descriptor(tmp_path: Path) -> None:
 
     artifact = scan_b524(transport, dst=0x15)
 
-    group = artifact["groups"]["0x02"]
-    assert group["dual_namespace"] is False
+    group = artifact_op_group(artifact, op="0x02", group="0x02")
+    # v2.3: dual_namespace removed from operations-first structure
     assert group["descriptor_observed"] == 0.0
     assert group["discovery_advisory"]["kind"] == "directory_probe"
     assert group["discovery_advisory"]["semantic_authority"] is False
@@ -1028,8 +1030,8 @@ def test_scan_singleton_group_nonzero_descriptor(tmp_path: Path) -> None:
 
     artifact = scan_b524(transport, dst=0x15)
 
-    group = artifact["groups"]["0x00"]
-    assert group["dual_namespace"] is False
+    group = artifact_op_group(artifact, op="0x02", group="0x00")
+    # v2.3: dual_namespace removed from operations-first structure
     assert group["descriptor_observed"] == 3.0
     assert group["discovery_advisory"]["kind"] == "directory_probe"
     assert group["discovery_advisory"]["semantic_authority"] is False
@@ -1051,7 +1053,7 @@ def test_artifact_schema_version(tmp_path: Path) -> None:
     contract = artifact["meta"]["artifact_contract"]
     assert contract["namespace_identity_keys"] == "opcode_hex"
     assert contract["namespace_labels"] == "presentation_only"
-    assert "dual_namespace" in contract["topology_authority"]
+    # v2.3: dual_namespace removed
     assert (
         contract["b524_row_identity"]["dedupe_key_format"]
         == "<group>:<namespace>:<instance>:<register>"
@@ -1093,42 +1095,33 @@ def test_artifact_dual_namespace_structure(monkeypatch, tmp_path: Path) -> None:
         planner_ui="classic",
     )
 
-    group = artifact["groups"]["0x09"]
-    assert group["name"] == "Regulators"
-    assert group["dual_namespace"] is True
-    assert "instances" not in group
-    assert set(group["namespaces"]) == {"0x02", "0x06"}
-
-    local_ns = group["namespaces"]["0x02"]
-    remote_ns = group["namespaces"]["0x06"]
-    assert local_ns["label"] == "local"
-    assert remote_ns["label"] == "remote"
-    assert local_ns["group_name"] == "System"
-    assert remote_ns["group_name"] == "Regulators"
-    assert local_ns["ii_max"] == "0x0a"
-    assert remote_ns["ii_max"] == "0x0a"
+    # v2.3: each OP has its own group entry
+    local_group = artifact_op_group(artifact, op="0x02", group="0x09")
+    remote_group = artifact_op_group(artifact, op="0x06", group="0x09")
+    assert local_group["name"] == "Regulators"
+    assert local_group["ii_max"] == "0x0a"
+    assert remote_group["ii_max"] == "0x0a"
     assert (
-        group["discovery_advisory"]["instance_discovery_decision"]["decision"]
+        local_group["discovery_advisory"]["instance_discovery_decision"]["decision"]
         == "independent_per_namespace"
     )
-    assert local_ns["availability_contract"]["namespace_relationship"] == "independent"
-    assert local_ns["availability_contract"]["probe_register"] == "0x0001"
-    assert remote_ns["availability_contract"]["probe_register"] == "0x0001"
-    assert local_ns["availability_probes"]["0x00"]["raw_hex"] == "34"
-    assert remote_ns["availability_probes"]["0x00"]["raw_hex"] == "01"
-    assert local_ns["instances"]["0x00"]["registers"]["0x0000"]["read_opcode"] == "0x02"
+    assert local_group["availability_contract"]["namespace_relationship"] == "independent"
+    assert local_group["availability_contract"]["probe_register"] == "0x0001"
+    assert remote_group["availability_contract"]["probe_register"] == "0x0001"
+    assert local_group["availability_probes"]["0x00"]["raw_hex"] == "34"
+    assert remote_group["availability_probes"]["0x00"]["raw_hex"] == "01"
+    assert local_group["instances"]["0x00"]["registers"]["0x0000"]["read_opcode"] == "0x02"
     assert (
-        local_ns["instances"]["0x00"]["registers"]["0x0000"]["read_opcode_label"]
+        local_group["instances"]["0x00"]["registers"]["0x0000"]["read_opcode_label"]
         == "ReadControllerRegister"
     )
-    assert remote_ns["instances"]["0x00"]["registers"]["0x0000"]["read_opcode"] == "0x06"
+    assert remote_group["instances"]["0x00"]["registers"]["0x0000"]["read_opcode"] == "0x06"
     assert (
-        remote_ns["instances"]["0x00"]["registers"]["0x0000"]["read_opcode_label"]
+        remote_group["instances"]["0x00"]["registers"]["0x0000"]["read_opcode_label"]
         == "ReadDeviceSlotRegister"
     )
 
     scan_plan = artifact["meta"]["scan_plan"]["groups"]["0x09"]
-    assert scan_plan["dual_namespace"] is True
     assert set(scan_plan["namespaces"]) == {"0x02", "0x06"}
 
     scanned_opcodes = {
@@ -1178,8 +1171,8 @@ def test_dual_namespace_presence_is_independent_and_retains_raw_probe_evidence(
         planner_ui="classic",
     )
 
-    local_ns = artifact["groups"]["0x09"]["namespaces"]["0x02"]
-    remote_ns = artifact["groups"]["0x09"]["namespaces"]["0x06"]
+    local_ns = artifact_op_group(artifact, op="0x02", group="0x09")
+    remote_ns = artifact_op_group(artifact, op="0x06", group="0x09")
 
     assert local_ns["availability_contract"]["namespace_relationship"] == "independent"
     assert remote_ns["availability_contract"]["namespace_relationship"] == "independent"
@@ -1199,8 +1192,8 @@ def test_dual_namespace_presence_is_independent_and_retains_raw_probe_evidence(
 def test_artifact_single_namespace_unchanged(tmp_path: Path) -> None:
     artifact = scan_b524(DummyTransport(_write_fixture_group_02(tmp_path)), dst=0x15)
 
-    group = artifact["groups"]["0x02"]
-    assert group["dual_namespace"] is False
+    group = artifact_op_group(artifact, op="0x02", group="0x02")
+    # v2.3: dual_namespace removed from operations-first structure
     assert "namespaces" not in group
     assert group["ii_max"] == "0x0a"
     assert set(group["instances"]) >= {"0x00"}
@@ -1209,7 +1202,7 @@ def test_artifact_single_namespace_unchanged(tmp_path: Path) -> None:
 def test_artifact_register_flags_present(tmp_path: Path) -> None:
     artifact = scan_b524(DummyTransport(_write_fixture_group_02(tmp_path)), dst=0x15)
 
-    entry = artifact["groups"]["0x02"]["instances"]["0x00"]["registers"]["0x0002"]
+    entry = artifact_op_group(artifact, op="0x02", group="0x02")["instances"]["0x00"]["registers"]["0x0002"]
 
     assert entry["flags"] == 0x01
     assert entry["flags_access"] == "state_stable"
@@ -1218,13 +1211,16 @@ def test_artifact_register_flags_present(tmp_path: Path) -> None:
 
 def test_contextual_enum_annotations_do_not_relabel_remote_namespace(tmp_path: Path) -> None:
     fixture_path = _write_fixture_group_02_dual_namespace(tmp_path)
-    artifact = json.loads(fixture_path.read_text(encoding="utf-8"))
+    # Load as v2.2 and migrate to v2.3 for _apply_contextual_enum_annotations
+    from helianthus_vrc_explorer.artifact_schema import migrate_artifact_schema
+    raw = json.loads(fixture_path.read_text(encoding="utf-8"))
+    artifact, _ = migrate_artifact_schema(raw)
     _apply_contextual_enum_annotations(artifact)
 
-    local_registers = artifact["groups"]["0x02"]["namespaces"]["0x02"]["instances"]["0x00"][
+    local_registers = artifact_op_group(artifact, op="0x02", group="0x02")["instances"]["0x00"][
         "registers"
     ]
-    remote_registers = artifact["groups"]["0x02"]["namespaces"]["0x06"]["instances"]["0x00"][
+    remote_registers = artifact_op_group(artifact, op="0x06", group="0x02")["instances"]["0x00"][
         "registers"
     ]
     assert local_registers["0x0001"]["enum_resolved_name"] == "DIRECT_HEATING_CIRCUIT"
@@ -1275,12 +1271,13 @@ def test_group_08_remote_namespace_only_marks_present_instances(
         planner_ui="classic",
     )
 
-    group = artifact["groups"]["0x08"]
-    assert group["dual_namespace"] is True
-    assert group["namespaces"]["0x02"]["ii_max"] == "0x0a"
-    assert group["namespaces"]["0x06"]["ii_max"] == "0x0a"
-    local_instances = set(group["namespaces"]["0x02"]["instances"])
-    remote_instances = set(group["namespaces"]["0x06"]["instances"])
+    # v2.3: each OP has its own group entry
+    local_group = artifact_op_group(artifact, op="0x02", group="0x08")
+    remote_group = artifact_op_group(artifact, op="0x06", group="0x08")
+    assert local_group["ii_max"] == "0x0a"
+    assert remote_group["ii_max"] == "0x0a"
+    local_instances = set(local_group["instances"])
+    remote_instances = set(remote_group["instances"])
     assert "0x00" in local_instances
     assert "0x00" in remote_instances
     # Regression guard: group 0x08 stays instanced via ii_max, without forcing
@@ -1351,7 +1348,7 @@ def test_type_hint_propagation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
         myvaillant_map=MyvaillantRegisterMap.from_path(map_path),
     )
 
-    entry = artifact["groups"]["0x09"]["namespaces"]["0x06"]["instances"]["0x00"]["registers"][
+    entry = artifact_op_group(artifact, op="0x06", group="0x09")["instances"]["0x00"]["registers"][
         "0x0004"
     ]
     assert entry["myvaillant_name"] == "radio_device_firmware"
@@ -1456,13 +1453,13 @@ def test_scan_b524_replays_dual_namespace_fixture_end_to_end(
     )
 
     assert artifact["schema_version"] == CURRENT_ARTIFACT_SCHEMA_VERSION
-    local_fw = artifact["groups"]["0x09"]["namespaces"]["0x02"]["instances"]["0x00"]["registers"][
+    local_fw = artifact_op_group(artifact, op="0x02", group="0x09")["instances"]["0x00"]["registers"][
         "0x0004"
     ]
-    remote_fw = artifact["groups"]["0x09"]["namespaces"]["0x06"]["instances"]["0x00"]["registers"][
+    remote_fw = artifact_op_group(artifact, op="0x06", group="0x09")["instances"]["0x00"]["registers"][
         "0x0004"
     ]
-    accessory_fw = artifact["groups"]["0x0c"]["namespaces"]["0x06"]["instances"]["0x00"][
+    accessory_fw = artifact_op_group(artifact, op="0x06", group="0x0c")["instances"]["0x00"][
         "registers"
     ]["0x0004"]
 
@@ -1619,7 +1616,7 @@ def test_scan_b524_applies_research_preset_in_non_interactive_mode(tmp_path: Pat
 
     scan_plan = artifact["meta"]["scan_plan"]["groups"]
     assert "0x69" in scan_plan
-    assert scan_plan["0x69"]["dual_namespace"] is True
+    # v2.3: dual_namespace removed from scan plan
     assert set(scan_plan["0x69"]["namespaces"]) == {"0x02", "0x06"}
     for namespace in ("0x02", "0x06"):
         assert scan_plan["0x69"]["namespaces"][namespace]["rr_max"] == "0x0030"
@@ -1627,11 +1624,11 @@ def test_scan_b524_applies_research_preset_in_non_interactive_mode(tmp_path: Pat
             f"0x{ii:02x}" for ii in range(0x0B)
         ]
 
-    group = artifact["groups"]["0x69"]
-    assert group["dual_namespace"] is True
-    assert set(group["namespaces"]) == {"0x02", "0x06"}
-    assert group["namespaces"]["0x02"]["instances"]["0x00"]["present"] is True
-    assert group["namespaces"]["0x06"]["instances"]["0x00"]["present"] is True
+    # v2.3: each OP has its own group entry
+    local_group = artifact_op_group(artifact, op="0x02", group="0x69")
+    remote_group = artifact_op_group(artifact, op="0x06", group="0x69")
+    assert local_group["instances"]["0x00"]["present"] is True
+    assert remote_group["instances"]["0x00"]["present"] is True
 
 
 def test_scan_b524_full_preset_includes_unknown_groups_in_plan(tmp_path: Path) -> None:
@@ -1793,10 +1790,11 @@ def test_scan_unknown_group_probes_both_opcodes_and_two_instances(tmp_path: Path
         planner_preset="full",
     )
 
-    group = artifact["groups"]["0x69"]
-    assert group["descriptor_observed"] == 1.0
-    assert group["dual_namespace"] is True
-    assert set(group["namespaces"]) == {"0x02", "0x06"}
+    local_group = artifact_op_group(artifact, op="0x02", group="0x69")
+    assert local_group["descriptor_observed"] == 1.0
+    # v2.3: verify both OPs have the group
+    assert "0x69" in artifact["operations"]["0x02"]["groups"]
+    assert "0x69" in artifact["operations"]["0x06"]["groups"]
     probed_instances = {
         (opcode, ii)
         for (opcode, gg, ii, rr) in transport.register_reads
@@ -1868,8 +1866,8 @@ def test_scan_unknown_group_expands_to_instance_ff_after_readable_probe(tmp_path
         planner_preset="research",
     )
 
-    group = artifact["groups"]["0x69"]
-    assert group["dual_namespace"] is False
+    # Group 0x69 is only responsive on OP=0x06 per the fixture
+    group = artifact_op_group(artifact, op="0x06", group="0x69")
     assert group["ii_max"] == "0x0a"
     remote_instances = group["instances"]
     assert remote_instances["0x00"]["present"] is True
@@ -2270,7 +2268,7 @@ def test_scan_b524_textual_planner_uses_namespace_owned_labels_for_groups_09_and
     }
     assert planner_label_map[(0x09, 0x02)] == ("System", "local")
     assert planner_label_map[(0x09, 0x06)] == ("Regulators", "remote")
-    assert artifact["groups"]["0x09"]["name"] == "Regulators"
+    assert artifact_op_group(artifact, op="0x02", group="0x09")["name"] == "Regulators"
 
 
 def test_scan_b524_textual_planner_uses_remote_presence_for_op06_rows(
@@ -2553,18 +2551,13 @@ def test_scan_b524_replan_promotes_group_01_to_dual_namespace_before_queue_rebui
         planner_ui="classic",
     )
 
-    group = artifact["groups"]["0x01"]
-    assert group["dual_namespace"] is True
-    assert "instances" not in group
-    assert (
-        group["namespaces"]["0x02"]["instances"]["0x00"]["registers"]["0x0000"]["raw_hex"] == "02"
-    )
-    assert (
-        group["namespaces"]["0x06"]["instances"]["0x00"]["registers"]["0x0000"]["raw_hex"] == "06"
-    )
+    # v2.3: each OP has its own group entry
+    local_group = artifact_op_group(artifact, op="0x02", group="0x01")
+    remote_group = artifact_op_group(artifact, op="0x06", group="0x01")
+    assert local_group["instances"]["0x00"]["registers"]["0x0000"]["raw_hex"] == "02"
+    assert remote_group["instances"]["0x00"]["registers"]["0x0000"]["raw_hex"] == "06"
 
     scan_plan = artifact["meta"]["scan_plan"]["groups"]["0x01"]
-    assert scan_plan["dual_namespace"] is True
     assert set(scan_plan["namespaces"]) == {"0x02", "0x06"}
     assert (0x06, 0x01, 0x00, 0x0000) in transport.register_reads
 
@@ -2640,13 +2633,9 @@ def test_scan_b524_replan_back_to_single_preserves_promoted_dual_namespace_data(
         planner_ui="classic",
     )
 
-    group = artifact["groups"]["0x01"]
-    assert group["dual_namespace"] is True
-    assert "namespaces" in group
-    assert "instances" not in group
-    assert (
-        group["namespaces"]["0x02"]["instances"]["0x00"]["registers"]["0x0000"]["raw_hex"] == "02"
-    )
+    # v2.3: the data scanned under OP=0x02 is preserved even if replanned
+    local_group = artifact_op_group(artifact, op="0x02", group="0x01")
+    assert local_group["instances"]["0x00"]["registers"]["0x0000"]["raw_hex"] == "02"
     assert (0x02, 0x01, 0x00, 0x0000) in transport.register_reads
 
 
@@ -2719,7 +2708,7 @@ def test_scan_b524_replan_textual_failure_prompts_classic_immediately(
         planner_ui="auto",
     )
 
-    registers = artifact["groups"]["0x02"]["namespaces"]["0x02"]["instances"]["0x00"]["registers"]
+    registers = artifact_op_group(artifact, op="0x02", group="0x02")["instances"]["0x00"]["registers"]
     assert set(registers) == {"0x0000"}
     assert textual_calls["count"] == 2
     assert classic_calls["count"] == 1

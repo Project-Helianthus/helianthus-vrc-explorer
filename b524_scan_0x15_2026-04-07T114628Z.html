@@ -1,30 +1,9 @@
-# ruff: noqa: E501
-
-from __future__ import annotations
-
-import json
-from html import escape as _escape_html
-from typing import Any
-
-from ..artifact_schema import flatten_operations_to_groups
-from ..scanner.director import group_name_for_opcode
-from .emphasis import html_star_bold
-
-
-def _json_for_html(obj: Any) -> str:
-    """Dump JSON in a form that is safe to embed inside an HTML <script> tag."""
-
-    raw = json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
-    # Prevent `</script>` breaks and avoid HTML parser surprises.
-    return raw.replace("&", "\\u0026").replace("<", "\\u003c").replace(">", "\\u003e")
-
-
-_TEMPLATE = """<!doctype html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>__TITLE__</title>
+    <title>Regulator Scan Browser</title>
     <style>
       :root {
         --bg: #0f1115;
@@ -426,7 +405,7 @@ _TEMPLATE = """<!doctype html>
       </div>
     </header>
 
-__IDENTITY_CARD__
+
 
     <section class="sheet-card">
       <div class="tabs" id="tabs"></div>
@@ -434,12 +413,12 @@ __IDENTITY_CARD__
     </section>
 
     <script id="artifact-data" type="application/json">
-__ARTIFACT_JSON__
+{"schema_version":"2.2","meta":{"scan_timestamp":"2026-04-07T11:46:28Z","scan_duration_seconds":3.2577,"destination_address":"0x15","schema_sources":["myvaillant_map:myvaillant_register_map.csv"],"incomplete":true,"artifact_contract":{"namespace_identity_keys":"opcode_hex","namespace_labels":"presentation_only","topology_authority":"persisted groups[*].dual_namespace and groups[*].namespaces are authoritative for consumers","b524_row_identity":{"dedupe_key_format":"\u003cgroup\u003e:\u003cnamespace\u003e:\u003cinstance\u003e:\u003cregister\u003e","path_format":"B524/\u003cgroup-name\u003e/\u003cnamespace-display\u003e/\u003cinstance\u003e/\u003cregister-name\u003e","round_trip_stability":"namespace keys and persisted topology must be preserved without sentinel rewrite"}},"ebusd_host":"192.168.100.2","ebusd_port":9999,"constraint_catalog_source":"static_constraints:b524_constraints_catalog.csv","constraint_catalog_entries":47,"constraint_scope":{"decision":"opcode_0x02_default","protocol":"opcode_0x01","applies_to":"opcode_0x02_by_default_unless_explicitly_scoped","rationale":"The bundled static catalog is seeded from opcode-0x01 probe evidence, but it is only applied to opcode 0x02 by default. Remote opcode 0x06 requires explicit scope or live confirmation."},"incomplete_reason":"user_interrupt","identity":{"device":"n/a","model":"n/a","serial":"n/a","firmware":"n/a"},"resolved_identity":{"device":"n/a","model":"n/a","serial":"n/a","firmware":"n/a"}},"groups":{}}
     </script>
 
     <script>
       const artifact = JSON.parse(document.getElementById("artifact-data").textContent || "{}");
-      const B524_GROUP_NAMES = __B524_GROUP_NAMES__;
+      const B524_GROUP_NAMES = {};
 
       const metaDst = document.getElementById("metaDst");
       const metaTs = document.getElementById("metaTs");
@@ -661,7 +640,7 @@ __ARTIFACT_JSON__
       function formatValue(v) {
         if (v === null || typeof v === "undefined") return "null";
         if (typeof v === "number" && !Number.isFinite(v)) return String(v);
-        if (typeof v === "number") return Number.isInteger(v) ? String(v) : v.toFixed(6).replace(/0+$/, "").replace(/\\.$/, "");
+        if (typeof v === "number") return Number.isInteger(v) ? String(v) : v.toFixed(6).replace(/0+$/, "").replace(/\.$/, "");
         return String(v);
       }
 
@@ -1145,7 +1124,7 @@ __ARTIFACT_JSON__
             tr.appendChild(td);
           }
           if (row.requestHex) {
-            tr.title = `request_hex=${row.requestHex}${row.replyHex ? `\\nreply_hex=${row.replyHex}` : ""}`;
+            tr.title = `request_hex=${row.requestHex}${row.replyHex ? `\nreply_hex=${row.replyHex}` : ""}`;
           }
           tbody.appendChild(tr);
         }
@@ -1401,7 +1380,7 @@ __ARTIFACT_JSON__
           const errTd = appendText(errTxt || "—", errTxt ? "cell-error" : "");
           if (errTxt) errTd.parentElement.classList.add("cell-bad");
           if (replyHex && rawHex && replyHex !== rawHex) {
-            tr.title = `reply_hex=${replyHex}\\nraw_hex=${rawHex}`;
+            tr.title = `reply_hex=${replyHex}\nraw_hex=${rawHex}`;
           }
           tbody.appendChild(tr);
         }
@@ -1539,10 +1518,10 @@ __ARTIFACT_JSON__
               rows.push({
                 group: typeof row.group === "string" ? row.group : "n/a",
                 register: typeof row.register_selector === "string" ? row.register_selector : "n/a",
-                type: typeof row.kind === "string" ? row.kind : (typeof row.reply_hex === "string" && row.reply_hex ? "raw" : "—"),
-                min: typeof row.min_value === "number" ? String(row.min_value) : "—",
-                max: typeof row.max_value === "number" ? String(row.max_value) : "—",
-                step: typeof row.step_value === "number" ? String(row.step_value) : "—",
+                type: "replayed",
+                min: "n/a",
+                max: "n/a",
+                step: typeof row.reply_hex === "string" && row.reply_hex ? row.reply_hex : "—",
               });
             }
           }
@@ -1844,7 +1823,7 @@ __ARTIFACT_JSON__
               if (entry.constraint_tt) tipParts.push(`constraint_tt=${entry.constraint_tt}`);
               if (entry.constraint_scope) tipParts.push(`constraint_scope=${entry.constraint_scope}`);
               if (entry.constraint_provenance) tipParts.push(`constraint_provenance=${entry.constraint_provenance}`);
-              if (tipParts.length) td.title = tipParts.join("\\n");
+              if (tipParts.length) td.title = tipParts.join("\n");
 
               tr.appendChild(td);
             }
@@ -2057,71 +2036,3 @@ __ARTIFACT_JSON__
     </script>
   </body>
 </html>
-"""
-
-
-def render_html_report(artifact: dict[str, Any], *, title: str | None = None) -> str:
-    meta = artifact.get("meta")
-    groups = flatten_operations_to_groups(artifact)
-    group_name_map: dict[str, dict[str, str]] = {}
-    if isinstance(groups, dict):
-        for group_key in groups:
-            if not isinstance(group_key, str):
-                continue
-            try:
-                group = int(group_key, 0)
-            except ValueError:
-                continue
-            group_name_map[group_key] = {
-                "0x02": group_name_for_opcode(group, 0x02),
-                "0x06": group_name_for_opcode(group, 0x06),
-            }
-    identity_html = ""
-    if isinstance(meta, dict):
-        identity_obj = meta.get("identity")
-        if not isinstance(identity_obj, dict):
-            identity_obj = meta.get("resolved_identity")
-        if isinstance(identity_obj, dict):
-            rows: list[tuple[str, str]] = []
-            for label, key in (
-                ("Device", "device"),
-                ("Model", "model"),
-                ("Serial", "serial"),
-                ("Firmware", "firmware"),
-            ):
-                value = identity_obj.get(key)
-                if not isinstance(value, str):
-                    continue
-                text = value.strip()
-                if not text or text == "n/a":
-                    continue
-                rows.append((label, text))
-            if rows:
-                cards = "".join(
-                    (
-                        '<div class="identity-row">'
-                        f'<div class="identity-label">{_escape_html(label)}</div>'
-                        f'<div class="identity-value">{html_star_bold(value)}</div>'
-                        "</div>"
-                    )
-                    for label, value in rows
-                )
-                identity_html = (
-                    '<section class="sheet-card identity-card">'
-                    '<div class="section-title">Scan Identity</div>'
-                    f'<div class="identity-grid">{cards}</div>'
-                    "</section>"
-                )
-    page_title = title or "Regulator Scan Browser"
-    # Inject flattened groups for JavaScript traversal compatibility
-    artifact_for_html = dict(artifact)
-    if "groups" not in artifact_for_html and isinstance(groups, dict):
-        artifact_for_html["groups"] = groups
-    return (
-        _TEMPLATE.replace("__TITLE__", _escape_html(page_title))
-        .replace("__IDENTITY_CARD__", identity_html)
-        .replace("__ARTIFACT_JSON__", _json_for_html(artifact_for_html))
-        .replace("__B524_GROUP_NAMES__", _json_for_html(group_name_map))
-        .rstrip()
-        + "\n"
-    )

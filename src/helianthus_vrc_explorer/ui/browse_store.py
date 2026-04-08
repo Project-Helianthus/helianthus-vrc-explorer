@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from ..artifact_schema import migrate_artifact_schema
+from ..artifact_schema import flatten_operations_to_groups, migrate_artifact_schema
 from ..scanner.director import GROUP_CONFIG, group_name_for_opcode, group_namespace_profiles
 from ..scanner.identity import operation_label
 from .browse_models import BrowseTab, RegisterAddress, RegisterRow, TreeNodeRef
@@ -593,9 +593,7 @@ class BrowseStore:
             TreeNodeRef(node_id="root", label=device_label, level="root")
         ]
         row_by_id: dict[str, RegisterRow] = {}
-        groups = artifact.get("groups")
-        if not isinstance(groups, dict):
-            groups = {}
+        groups = flatten_operations_to_groups(artifact)
 
         group_keys = sorted((k for k in groups if isinstance(k, str)), key=_safe_int_hex)
         b524_operations = artifact.get("b524_operations")

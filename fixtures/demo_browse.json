@@ -1,5 +1,5 @@
 {
-  "schema_version": "2.2",
+  "schema_version": "2.3",
   "meta": {
     "destination_address": "0x15",
     "device_info": {
@@ -21,198 +21,198 @@
     ],
     "source_address": "0x31"
   },
-  "groups": {
-    "0x00": {
-      "descriptor_observed": 3.0,
-      "dual_namespace": false,
-      "instances": {
-        "0x00": {
-          "present": true,
-          "registers": {
-            "0x0035": {
-              "ebusd_name": null,
-              "error": null,
-              "myvaillant_name": "time",
-              "raw_hex": "122109",
-              "read_opcode": "0x02",
-              "reply_hex": null,
-              "flags": 1,
-              "flags_access": "stable_ro",
-              "type": "HTI",
-              "value": "12:21:09"
-            },
-            "0x0040": {
-              "ebusd_name": null,
-              "error": null,
-              "myvaillant_name": "child_lock",
-              "raw_hex": "01",
-              "read_opcode": "0x02",
-              "reply_hex": null,
-              "flags": 3,
-              "flags_access": "user_rw",
-              "type": "BOOL",
-              "value": true
-            },
-            "0x00da": {
-              "ebusd_name": null,
-              "error": null,
-              "myvaillant_name": "commissioning_date",
-              "raw_hex": "010113",
-              "read_opcode": "0x02",
-              "reply_hex": null,
-              "flags": 3,
-              "flags_access": "user_rw",
-              "type": "HDA:3",
-              "value": "2019-01-01"
-            }
-          }
-        }
-      },
-      "name": "Regulator Parameters"
-    },
-    "0x01": {
-      "descriptor_observed": 3.0,
-      "dual_namespace": false,
-      "instances": {
-        "0x00": {
-          "present": true,
-          "registers": {
-            "0x0000": {
-              "ebusd_name": "DhwMode",
-              "error": null,
-              "myvaillant_name": "dhw_mode",
-              "raw_hex": "01",
-              "read_opcode": "0x02",
-              "reply_hex": null,
-              "flags": 3,
-              "flags_access": "user_rw",
-              "type": "UCH",
-              "value": 1
-            },
-            "0x0001": {
-              "ebusd_name": "DhwTempDesired",
-              "error": null,
-              "myvaillant_name": "dhw_temperature_setpoint",
-              "raw_hex": "00004842",
-              "read_opcode": "0x02",
-              "reply_hex": null,
-              "flags": 2,
-              "flags_access": "technical_rw",
-              "type": "EXP",
-              "value": 50.0
-            },
-            "0x0002": {
-              "ebusd_name": "DhwTemp",
-              "error": null,
-              "myvaillant_name": "dhw_temperature",
-              "raw_hex": "00004242",
-              "read_opcode": "0x02",
-              "reply_hex": null,
-              "flags": 1,
-              "flags_access": "stable_ro",
-              "type": "EXP",
-              "value": 48.5
-            }
-          }
-        }
-      },
-      "name": "Hot Water Circuit"
-    },
+  "operations": {
     "0x02": {
-      "descriptor_observed": 1.0,
-      "dual_namespace": false,
-      "instances": {
+      "groups": {
         "0x00": {
-          "present": true,
-          "registers": {
-            "0x0007": {
-              "ebusd_name": "Hc1FlowTempDesired",
-              "error": null,
-              "myvaillant_name": "heating_circuit_flow_setpoint",
-              "raw_hex": "00003642",
-              "read_opcode": "0x02",
-              "reply_hex": null,
-              "flags": 1,
-              "flags_access": "stable_ro",
-              "type": "EXP",
-              "value": 45.5
-            },
-            "0x000f": {
-              "ebusd_name": "Hc1HeatingCurve",
-              "error": null,
-              "myvaillant_name": "heating_curve",
-              "raw_hex": "9a99d93f",
-              "read_opcode": "0x02",
-              "reply_hex": null,
-              "flags": 3,
-              "flags_access": "user_rw",
-              "type": "EXP",
-              "value": 1.7
-            },
-            "0x0010": {
-              "ebusd_name": "Hc1FlowTempMax",
-              "error": null,
-              "myvaillant_name": "max_flow_temperature",
-              "raw_hex": "00008c42",
-              "read_opcode": "0x02",
-              "reply_hex": null,
-              "flags": 2,
-              "flags_access": "technical_rw",
-              "type": "EXP",
-              "value": 70.0
+          "descriptor_observed": 3.0,
+          "instances": {
+            "0x00": {
+              "present": true,
+              "registers": {
+                "0x0035": {
+                  "ebusd_name": null,
+                  "error": null,
+                  "myvaillant_name": "time",
+                  "raw_hex": "122109",
+                  "read_opcode": "0x02",
+                  "reply_hex": null,
+                  "flags": 1,
+                  "flags_access": "stable_ro",
+                  "type": "HTI",
+                  "value": "12:21:09"
+                },
+                "0x0040": {
+                  "ebusd_name": null,
+                  "error": null,
+                  "myvaillant_name": "child_lock",
+                  "raw_hex": "01",
+                  "read_opcode": "0x02",
+                  "reply_hex": null,
+                  "flags": 3,
+                  "flags_access": "user_rw",
+                  "type": "BOOL",
+                  "value": true
+                },
+                "0x00da": {
+                  "ebusd_name": null,
+                  "error": null,
+                  "myvaillant_name": "commissioning_date",
+                  "raw_hex": "010113",
+                  "read_opcode": "0x02",
+                  "reply_hex": null,
+                  "flags": 3,
+                  "flags_access": "user_rw",
+                  "type": "HDA:3",
+                  "value": "2019-01-01"
+                }
+              }
             }
-          }
-        }
-      },
-      "name": "Heating Circuits"
-    },
-    "0x03": {
-      "descriptor_observed": 1.0,
-      "dual_namespace": false,
-      "instances": {
-        "0x00": {
-          "present": true,
-          "registers": {
-            "0x0007": {
-              "ebusd_name": "Zone1RoomTempDesired",
-              "error": null,
-              "myvaillant_name": "room_setpoint",
-              "raw_hex": "0000b041",
-              "read_opcode": "0x02",
-              "reply_hex": null,
-              "flags": 2,
-              "flags_access": "technical_rw",
-              "type": "EXP",
-              "value": 22.0
-            },
-            "0x000f": {
-              "ebusd_name": "Zone1RoomTemp",
-              "error": null,
-              "myvaillant_name": "current_room_temperature",
-              "raw_hex": "0000a841",
-              "read_opcode": "0x02",
-              "reply_hex": null,
-              "flags": 1,
-              "flags_access": "stable_ro",
-              "type": "EXP",
-              "value": 21.0
-            },
-            "0x0016": {
-              "ebusd_name": "Zone1Name",
-              "error": null,
-              "myvaillant_name": "name",
-              "raw_hex": "5a6f6e65203100",
-              "read_opcode": "0x02",
-              "reply_hex": null,
-              "flags": 3,
-              "flags_access": "user_rw",
-              "type": "STR:*",
-              "value": "Zone 1"
+          },
+          "name": "Regulator Parameters"
+        },
+        "0x01": {
+          "descriptor_observed": 3.0,
+          "instances": {
+            "0x00": {
+              "present": true,
+              "registers": {
+                "0x0000": {
+                  "ebusd_name": "DhwMode",
+                  "error": null,
+                  "myvaillant_name": "dhw_mode",
+                  "raw_hex": "01",
+                  "read_opcode": "0x02",
+                  "reply_hex": null,
+                  "flags": 3,
+                  "flags_access": "user_rw",
+                  "type": "UCH",
+                  "value": 1
+                },
+                "0x0001": {
+                  "ebusd_name": "DhwTempDesired",
+                  "error": null,
+                  "myvaillant_name": "dhw_temperature_setpoint",
+                  "raw_hex": "00004842",
+                  "read_opcode": "0x02",
+                  "reply_hex": null,
+                  "flags": 2,
+                  "flags_access": "technical_rw",
+                  "type": "EXP",
+                  "value": 50.0
+                },
+                "0x0002": {
+                  "ebusd_name": "DhwTemp",
+                  "error": null,
+                  "myvaillant_name": "dhw_temperature",
+                  "raw_hex": "00004242",
+                  "read_opcode": "0x02",
+                  "reply_hex": null,
+                  "flags": 1,
+                  "flags_access": "stable_ro",
+                  "type": "EXP",
+                  "value": 48.5
+                }
+              }
             }
-          }
+          },
+          "name": "Hot Water Circuit"
+        },
+        "0x02": {
+          "descriptor_observed": 1.0,
+          "instances": {
+            "0x00": {
+              "present": true,
+              "registers": {
+                "0x0007": {
+                  "ebusd_name": "Hc1FlowTempDesired",
+                  "error": null,
+                  "myvaillant_name": "heating_circuit_flow_setpoint",
+                  "raw_hex": "00003642",
+                  "read_opcode": "0x02",
+                  "reply_hex": null,
+                  "flags": 1,
+                  "flags_access": "stable_ro",
+                  "type": "EXP",
+                  "value": 45.5
+                },
+                "0x000f": {
+                  "ebusd_name": "Hc1HeatingCurve",
+                  "error": null,
+                  "myvaillant_name": "heating_curve",
+                  "raw_hex": "9a99d93f",
+                  "read_opcode": "0x02",
+                  "reply_hex": null,
+                  "flags": 3,
+                  "flags_access": "user_rw",
+                  "type": "EXP",
+                  "value": 1.7
+                },
+                "0x0010": {
+                  "ebusd_name": "Hc1FlowTempMax",
+                  "error": null,
+                  "myvaillant_name": "max_flow_temperature",
+                  "raw_hex": "00008c42",
+                  "read_opcode": "0x02",
+                  "reply_hex": null,
+                  "flags": 2,
+                  "flags_access": "technical_rw",
+                  "type": "EXP",
+                  "value": 70.0
+                }
+              }
+            }
+          },
+          "name": "Heating Circuits"
+        },
+        "0x03": {
+          "descriptor_observed": 1.0,
+          "instances": {
+            "0x00": {
+              "present": true,
+              "registers": {
+                "0x0007": {
+                  "ebusd_name": "Zone1RoomTempDesired",
+                  "error": null,
+                  "myvaillant_name": "room_setpoint",
+                  "raw_hex": "0000b041",
+                  "read_opcode": "0x02",
+                  "reply_hex": null,
+                  "flags": 2,
+                  "flags_access": "technical_rw",
+                  "type": "EXP",
+                  "value": 22.0
+                },
+                "0x000f": {
+                  "ebusd_name": "Zone1RoomTemp",
+                  "error": null,
+                  "myvaillant_name": "current_room_temperature",
+                  "raw_hex": "0000a841",
+                  "read_opcode": "0x02",
+                  "reply_hex": null,
+                  "flags": 1,
+                  "flags_access": "stable_ro",
+                  "type": "EXP",
+                  "value": 21.0
+                },
+                "0x0016": {
+                  "ebusd_name": "Zone1Name",
+                  "error": null,
+                  "myvaillant_name": "name",
+                  "raw_hex": "5a6f6e65203100",
+                  "read_opcode": "0x02",
+                  "reply_hex": null,
+                  "flags": 3,
+                  "flags_access": "user_rw",
+                  "type": "STR:*",
+                  "value": "Zone 1"
+                }
+              }
+            }
+          },
+          "name": "Zones"
         }
-      },
-      "name": "Zones"
+      }
     }
   }
 }

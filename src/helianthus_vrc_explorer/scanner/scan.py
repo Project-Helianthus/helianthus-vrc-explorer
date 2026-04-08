@@ -346,70 +346,33 @@ def _ensure_group_artifact(
     artifact: dict[str, Any],
     *,
     group: int,
+    opcode: int,
     name: str,
     descriptor_observed: float | None,
-    dual_namespace: bool,
     ii_max: int | None = None,
     discovery_advisory: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Ensure operations[op_hex].groups[group_key] exists in the artifact."""
+    op_hex = _hex_u8(opcode)
     group_key = _hex_u8(group)
+    op_obj = artifact["operations"].setdefault(op_hex, {})
+    op_groups = op_obj.setdefault("groups", {})
     default: dict[str, Any] = {
         "name": name,
         "descriptor_observed": descriptor_observed,
-        "dual_namespace": dual_namespace,
+        "instances": {},
     }
     if ii_max is not None:
         default["ii_max"] = _hex_u8(ii_max)
-    if dual_namespace:
-        default["namespaces"] = {}
-    else:
-        default["instances"] = {}
-    group_obj = artifact["groups"].setdefault(group_key, default)
-    if dual_namespace:
-        group_obj.setdefault("namespaces", {})
-        group_obj.pop("instances", None)
-    else:
-        group_obj.setdefault("instances", {})
-        group_obj.pop("namespaces", None)
+    group_obj = op_groups.setdefault(group_key, default)
+    group_obj.setdefault("instances", {})
     group_obj.setdefault("name", name)
     group_obj.setdefault("descriptor_observed", descriptor_observed)
-    group_obj["dual_namespace"] = dual_namespace
     if ii_max is not None:
         group_obj["ii_max"] = _hex_u8(ii_max)
-    elif dual_namespace:
-        group_obj.pop("ii_max", None)
     if discovery_advisory is not None:
         group_obj["discovery_advisory"] = discovery_advisory
     return cast(dict[str, Any], group_obj)
-
-
-def _ensure_namespace_artifact(
-    group_obj: dict[str, Any],
-    *,
-    group: int,
-    opcode: int,
-    ii_max: int | None = None,
-) -> dict[str, Any]:
-    namespaces = group_obj.setdefault("namespaces", {})
-    namespace_key = _hex_u8(opcode)
-    namespace_group_name = _group_name_for_opcode(group, cast(RegisterOpcode, opcode))
-    namespace_obj = namespaces.setdefault(
-        namespace_key,
-        {
-            "label": opcode_label(opcode),
-            "operation_label": operation_label(opcode=opcode, optype=0x00),
-            "group_name": namespace_group_name,
-            "instances": {},
-        },
-    )
-    namespace_obj.setdefault("label", opcode_label(opcode))
-    namespace_obj.setdefault("operation_label", operation_label(opcode=opcode, optype=0x00))
-    if namespace_group_name is not None:
-        namespace_obj.setdefault("group_name", namespace_group_name)
-    namespace_obj.setdefault("instances", {})
-    if ii_max is not None:
-        namespace_obj["ii_max"] = _hex_u8(ii_max)
-    return cast(dict[str, Any], namespace_obj)
 
 
 def _instances_object(
@@ -418,10 +381,12 @@ def _instances_object(
     group: int,
     opcode: int,
 ) -> dict[str, Any]:
-    group_obj = artifact["groups"][_hex_u8(group)]
-    if bool(group_obj.get("dual_namespace")):
-        namespace_obj = _ensure_namespace_artifact(group_obj, group=group, opcode=opcode)
-        return cast(dict[str, Any], namespace_obj.setdefault("instances", {}))
+    """Return operations[op_hex].groups[group_key].instances, creating if needed."""
+    op_hex = _hex_u8(opcode)
+    group_key = _hex_u8(group)
+    op_obj = artifact["operations"].setdefault(op_hex, {})
+    op_groups = op_obj.setdefault("groups", {})
+    group_obj = op_groups.setdefault(group_key, {"instances": {}})
     return cast(dict[str, Any], group_obj.setdefault("instances", {}))
 
 
@@ -431,10 +396,12 @@ def _availability_object(
     group: int,
     opcode: int,
 ) -> dict[str, Any]:
-    group_obj = artifact["groups"][_hex_u8(group)]
-    if bool(group_obj.get("dual_namespace")):
-        return _ensure_namespace_artifact(group_obj, group=group, opcode=opcode)
-    return cast(dict[str, Any], group_obj)
+    """Return operations[op_hex].groups[group_key] for availability data."""
+    op_hex = _hex_u8(opcode)
+    group_key = _hex_u8(group)
+    op_obj = artifact["operations"].setdefault(op_hex, {})
+    op_groups = op_obj.setdefault("groups", {})
+    return cast(dict[str, Any], op_groups.setdefault(group_key, {"instances": {}}))
 
 
 def _serialize_availability_contract(
@@ -498,107 +465,20 @@ def _record_namespace_topology(
     opcode: int,
     ii_max: int | None,
 ) -> None:
-    group_obj = artifact["groups"].get(_hex_u8(group))
-    if not isinstance(group_obj, dict):
+    """Write ii_max to operations[op_hex].groups[group_key]."""
+    op_hex = _hex_u8(opcode)
+    group_key = _hex_u8(group)
+    op_obj = artifact["operations"].get(op_hex)
+    if not isinstance(op_obj, dict):
         return
-    if bool(group_obj.get("dual_namespace")):
-        _ensure_namespace_artifact(group_obj, group=group, opcode=opcode, ii_max=ii_max)
+    op_groups = op_obj.get("groups")
+    if not isinstance(op_groups, dict):
+        return
+    group_obj = op_groups.get(group_key)
+    if not isinstance(group_obj, dict):
         return
     if ii_max is not None:
         group_obj["ii_max"] = _hex_u8(ii_max)
-
-
-def _promote_group_artifact_to_dual_namespace(
-    artifact: dict[str, Any],
-    *,
-    group: int,
-    primary_opcode: RegisterOpcode,
-) -> None:
-    group_obj = artifact["groups"].get(_hex_u8(group))
-    if not isinstance(group_obj, dict) or bool(group_obj.get("dual_namespace")):
-        return
-
-    flat_instances = group_obj.pop("instances", {})
-    flat_ii_max = group_obj.pop("ii_max", None)
-    namespaces = group_obj.setdefault("namespaces", {})
-    if not isinstance(namespaces, dict):
-        namespaces = {}
-        group_obj["namespaces"] = namespaces
-
-    namespace_key = _hex_u8(primary_opcode)
-    namespace_obj = namespaces.setdefault(
-        namespace_key,
-        {
-            "label": opcode_label(primary_opcode),
-            "group_name": _group_name_for_opcode(group, primary_opcode),
-            "instances": {},
-        },
-    )
-    if not isinstance(namespace_obj, dict):
-        namespace_obj = {
-            "label": opcode_label(primary_opcode),
-            "group_name": _group_name_for_opcode(group, primary_opcode),
-            "instances": {},
-        }
-        namespaces[namespace_key] = namespace_obj
-
-    namespace_obj.setdefault("label", opcode_label(primary_opcode))
-    if flat_ii_max is not None:
-        namespace_obj.setdefault("ii_max", flat_ii_max)
-    namespace_obj.setdefault("group_name", _group_name_for_opcode(group, primary_opcode))
-    if isinstance(flat_instances, dict) and flat_instances:
-        namespace_obj["instances"] = flat_instances
-    else:
-        namespace_obj.setdefault("instances", {})
-    group_obj["dual_namespace"] = True
-
-
-def _apply_effective_namespace_topology(
-    artifact: dict[str, Any],
-    *,
-    group_dual_namespace_runtime: Mapping[int, bool],
-    plan: Mapping[PlanKey, GroupScanPlan],
-) -> dict[int, bool]:
-    effective = dict(group_dual_namespace_runtime)
-    groups_obj = artifact.get("groups")
-    if isinstance(groups_obj, dict):
-        for group_key, group_obj in groups_obj.items():
-            if not isinstance(group_obj, dict):
-                continue
-            if not isinstance(group_key, str):
-                continue
-            namespaces_obj = group_obj.get("namespaces")
-            has_namespace_data = isinstance(namespaces_obj, dict) and bool(namespaces_obj)
-            if not (bool(group_obj.get("dual_namespace")) or has_namespace_data):
-                continue
-            try:
-                group_id = int(group_key, 0)
-            except ValueError:
-                continue
-            # Topology is monotonic once promoted: hotkey replans must not demote groups
-            # back to flat storage and drop already-captured namespace data.
-            effective[group_id] = True
-    planned_opcodes_by_group: dict[int, set[RegisterOpcode]] = {}
-    for group_plan in plan.values():
-        group_id = group_plan.group
-        planned_opcodes = planned_opcodes_by_group.setdefault(group_id, set())
-        planned_opcodes.add(group_plan.opcode)
-
-    for group_id, planned_opcodes in planned_opcodes_by_group.items():
-        if len(planned_opcodes) <= 1:
-            continue
-        effective[group_id] = True
-        primary_opcode = (
-            _primary_opcode(group_id)
-            if group_id in GROUP_CONFIG
-            else cast(RegisterOpcode, min(planned_opcodes))
-        )
-        _promote_group_artifact_to_dual_namespace(
-            artifact,
-            group=group_id,
-            primary_opcode=primary_opcode,
-        )
-    return effective
 
 
 def _present_instances_for_opcode(
@@ -607,22 +487,20 @@ def _present_instances_for_opcode(
     group: int,
     opcode: int,
 ) -> tuple[int, ...]:
-    group_obj = artifact["groups"].get(_hex_u8(group))
-    if isinstance(group_obj, dict) and not bool(group_obj.get("dual_namespace")):
-        discovery_advisory = group_obj.get("discovery_advisory")
-        proven_opcodes = (
-            discovery_advisory.get("proven_register_opcodes")
-            if isinstance(discovery_advisory, dict)
-            else None
-        )
-        if (
-            isinstance(proven_opcodes, list)
-            and proven_opcodes
-            and _hex_u8(opcode)
-            not in {opcode_key for opcode_key in proven_opcodes if isinstance(opcode_key, str)}
-        ):
-            return ()
-    instances_obj = _instances_object(artifact, group=group, opcode=opcode)
+    op_hex = _hex_u8(opcode)
+    group_key = _hex_u8(group)
+    op_obj = artifact["operations"].get(op_hex)
+    if not isinstance(op_obj, dict):
+        return ()
+    op_groups = op_obj.get("groups")
+    if not isinstance(op_groups, dict):
+        return ()
+    group_obj = op_groups.get(group_key)
+    if not isinstance(group_obj, dict):
+        return ()
+    instances_obj = group_obj.get("instances")
+    if not isinstance(instances_obj, dict):
+        return ()
     return tuple(
         sorted(
             int(ii_key, 0)
@@ -1004,21 +882,10 @@ def _constraint_for_register(
 def _iter_group_namespace_instance_maps(
     group_obj: dict[str, Any],
 ) -> list[tuple[str | None, dict[str, Any]]]:
-    if bool(group_obj.get("dual_namespace")):
-        namespaces = group_obj.get("namespaces")
-        if not isinstance(namespaces, dict):
-            return []
-        instance_maps: list[tuple[str | None, dict[str, Any]]] = []
-        for namespace_key, namespace_obj in namespaces.items():
-            if not isinstance(namespace_key, str):
-                continue
-            if not isinstance(namespace_obj, dict):
-                continue
-            instances = namespace_obj.get("instances")
-            if isinstance(instances, dict):
-                instance_maps.append((namespace_key, instances))
-        return instance_maps
+    """Iterate instance maps for a group object.
 
+    In v2.3, each group_obj under an operation simply has instances directly.
+    """
     instances = group_obj.get("instances")
     if isinstance(instances, dict):
         return [(None, instances)]
@@ -1028,18 +895,10 @@ def _iter_group_namespace_instance_maps(
 def _group_instances_for_namespace(
     group_obj: dict[str, Any], *, namespace_key: str | None = None
 ) -> dict[str, Any] | None:
-    instance_maps = _iter_group_namespace_instance_maps(group_obj)
-    if namespace_key is None:
-        return instance_maps[0][1] if instance_maps else None
-
-    for candidate_namespace, instances in instance_maps:
-        if candidate_namespace == namespace_key:
-            return instances
-    if not bool(group_obj.get("dual_namespace")) and namespace_key == _hex_u8(
-        _LOCAL_REGISTER_OPCODE
-    ):
-        # Single-namespace artifacts are local by definition.
-        return instance_maps[0][1] if instance_maps else None
+    """Return instances from a group object (v2.3: direct access)."""
+    instances = group_obj.get("instances")
+    if isinstance(instances, dict):
+        return instances
     return None
 
 
@@ -1173,29 +1032,26 @@ def _resolve_room_influence_type_name(raw_value: int) -> tuple[str, str]:
 
 
 def _apply_contextual_enum_annotations(artifact: dict[str, Any]) -> None:
-    groups = artifact.get("groups")
-    if not isinstance(groups, dict):
+    # v2.3: look up GG=0x02 under OP=0x02
+    op_02 = artifact.get("operations", {}).get(_hex_u8(_LOCAL_REGISTER_OPCODE))
+    if not isinstance(op_02, dict):
+        return
+    op_02_groups = op_02.get("groups")
+    if not isinstance(op_02_groups, dict):
         return
 
-    gg02 = groups.get("0x02")
+    gg02 = op_02_groups.get("0x02")
     if not isinstance(gg02, dict):
         return
     gg02_namespace_maps = _iter_group_namespace_instance_maps(gg02)
-    if bool(gg02.get("dual_namespace")):
-        gg02_instance_maps = [
-            instances
-            for namespace_key, instances in gg02_namespace_maps
-            if namespace_key == _hex_u8(_LOCAL_REGISTER_OPCODE)
-        ]
-    else:
-        gg02_instance_maps = [instances for _namespace_key, instances in gg02_namespace_maps]
+    gg02_instance_maps = [instances for _namespace_key, instances in gg02_namespace_maps]
     if not gg02_instance_maps:
         return
 
-    gg00 = groups.get("0x00")
+    gg00 = op_02_groups.get("0x00")
     system_schema: int | None = None
     if isinstance(gg00, dict):
-        gg00_instances = _group_instances_for_namespace(gg00, namespace_key="0x02")
+        gg00_instances = _group_instances_for_namespace(gg00)
         if isinstance(gg00_instances, dict):
             ii00 = gg00_instances.get("0x00")
             if isinstance(ii00, dict):
@@ -1205,7 +1061,7 @@ def _apply_contextual_enum_annotations(artifact: dict[str, Any]) -> None:
                     if isinstance(entry, dict):
                         system_schema = _entry_int_value(entry)
 
-    gg05_present = "0x05" in groups
+    gg05_present = "0x05" in op_02_groups
     pool_sensor_present = False
 
     for gg02_instances in gg02_instance_maps:
@@ -1400,7 +1256,7 @@ def scan_b524(
             "incomplete": False,
             "artifact_contract": _artifact_contract_metadata(),
         },
-        "groups": {},
+        "operations": {},
     }
     if ebusd_host is not None:
         artifact["meta"]["ebusd_host"] = ebusd_host
@@ -1607,9 +1463,7 @@ def scan_b524(
                     level="warn",
                 )
 
-        group_dual_namespace_runtime: dict[int, bool] = {
-            group: len(opcodes) > 1 for group, opcodes in availability_group_opcodes.items()
-        }
+        # (v2.3: dual_namespace tracking removed -- operations are top-level)
         responsive_unknown_groups = sorted(
             group.group
             for group in classified
@@ -1639,7 +1493,7 @@ def scan_b524(
         for group in classified:
             meta = metadata_map[group.group]
             opcodes = availability_group_opcodes.get(group.group, ())
-            dual_namespace = len(opcodes) > 1
+            multi_op = len(opcodes) > 1
             # NaN descriptors come from synthetic research-mode injection;
             # store as None to keep JSON-serializable and avoid polluting analytics.
             desc_for_artifact = None if math.isnan(group.descriptor) else group.descriptor
@@ -1652,7 +1506,7 @@ def scan_b524(
                 discovery_advisory["opcode_probe"] = unknown_opcode_probe_map[group.group]
             discovery_advisory["instance_discovery_decision"] = _instance_discovery_decision(
                 group=group.group,
-                dual_namespace=dual_namespace,
+                dual_namespace=multi_op,
             )
             if desc_for_artifact is not None:
                 discovery_advisory["descriptor_observed"] = desc_for_artifact
@@ -1665,15 +1519,21 @@ def scan_b524(
                 opcodes=opcodes,
                 fallback=group.name,
             )
-            _ensure_group_artifact(
-                artifact,
-                group=group.group,
-                name=artifact_group_name,
-                descriptor_observed=desc_for_artifact,
-                dual_namespace=dual_namespace,
-                ii_max=(meta.ii_max if not dual_namespace else None),
-                discovery_advisory=discovery_advisory,
-            )
+            for opcode in opcodes:
+                namespace_ii_max = _ii_max_for_opcode(
+                    group=group.group,
+                    default_ii_max=meta.ii_max,
+                    opcode=opcode,
+                )
+                _ensure_group_artifact(
+                    artifact,
+                    group=group.group,
+                    opcode=opcode,
+                    name=artifact_group_name,
+                    descriptor_observed=desc_for_artifact,
+                    ii_max=namespace_ii_max,
+                    discovery_advisory=discovery_advisory,
+                )
 
         instance_targets = _instance_discovery_targets(
             classified,
@@ -1876,7 +1736,7 @@ def scan_b524(
                 planner_opcodes=opcodes,
                 resolved_opcodes=resolved_opcodes,
             )
-            dual_namespace = len(opcodes) > 1
+            multi_op = len(opcodes) > 1
             for opcode in opcodes:
                 planner_ii_max = _planner_ii_max(
                     _ii_max_for_opcode(
@@ -1911,7 +1771,7 @@ def scan_b524(
                             opcode=opcode,
                         ),
                         present_instances=present_instances,
-                        namespace_label=(opcode_label(opcode) if dual_namespace else None),
+                        namespace_label=(opcode_label(opcode) if multi_op else None),
                         recommended=_planner_group_is_recommended(
                             group=group.group,
                             opcode=opcode,
@@ -1971,12 +1831,6 @@ def scan_b524(
                         default_plan=planner_default_plan,
                         default_preset=planner_preset,
                     )
-
-        group_dual_namespace_effective = _apply_effective_namespace_topology(
-            artifact,
-            group_dual_namespace_runtime=group_dual_namespace_runtime,
-            plan=plan,
-        )
 
         artifact["meta"]["scan_plan"] = {
             "groups": _scan_plan_meta_groups(plan),
@@ -2053,11 +1907,6 @@ def scan_b524(
                                 default_plan=plan,
                                 default_preset=planner_preset,
                             )
-                    group_dual_namespace_effective = _apply_effective_namespace_topology(
-                        artifact,
-                        group_dual_namespace_runtime=group_dual_namespace_runtime,
-                        plan=plan,
-                    )
                     artifact["meta"]["scan_plan"]["groups"] = _scan_plan_meta_groups(plan)
                     artifact["meta"]["scan_plan"]["estimated_register_requests"] = (
                         estimate_register_requests(plan)
@@ -2194,9 +2043,9 @@ def scan_b524(
                 _ensure_group_artifact(
                     artifact,
                     group=task.group,
+                    opcode=task.opcode,
                     name="Unknown",
                     descriptor_observed=None,
-                    dual_namespace=group_dual_namespace_effective.get(task.group, False),
                 )
                 task_group_meta = metadata_map.get(task.group)
                 if task_group_meta is not None:

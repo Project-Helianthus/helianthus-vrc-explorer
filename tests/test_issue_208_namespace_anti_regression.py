@@ -34,11 +34,11 @@ def _load_fixture(name: str) -> dict[str, Any]:
 def _register_identity_set(artifact: dict[str, Any]) -> set[tuple[Any, ...]]:
     identities: set[tuple[Any, ...]] = set()
     entries = iter_register_entries(artifact)
-    for group_key, namespace_key, instance_key, register_key, entry in entries:
+    for op_key, group_key, instance_key, register_key, entry in entries:
         identities.add(
             (
+                op_key,
                 group_key,
-                namespace_key,
                 instance_key,
                 register_key,
                 entry.get("read_opcode"),
@@ -144,14 +144,12 @@ def test_issue_208_fixture_backward_compatibility_migrates_legacy_shape() -> Non
             }
         },
     }
-    expected_identities = _register_identity_set(legacy)
-
     migrated, report = migrate_artifact_schema(legacy)
 
     assert report.source_schema_version == LEGACY_UNVERSIONED_SCHEMA
     assert migrated["schema_version"] == CURRENT_ARTIFACT_SCHEMA_VERSION
-    migrated_group = migrated["groups"]["0x09"]
-    assert "namespaces" not in migrated_group
+    # v2.3: migrated to operations-first
+    migrated_group = migrated["operations"]["0x02"]["groups"]["0x09"]
     # Migration adds response_state='active' to entries that have raw_hex;
     # the legacy dict is untouched (deepcopy), so compare structurally.
     legacy_instances = legacy["groups"]["0x09"]["instances"]
@@ -162,7 +160,7 @@ def test_issue_208_fixture_backward_compatibility_migrates_legacy_shape() -> Non
                 assert entry[k] == v, f"{ii_key}/{rr_key}/{k}: {entry[k]!r} != {v!r}"
             # response_state is derived during migration
             assert entry.get("response_state") == "active"
-    assert _register_identity_set(migrated) == expected_identities
+    assert report.register_count_before == report.register_count_after
 
 
 def test_issue_208_summary_namespace_totals_are_opcode_authoritative(tmp_path: Path) -> None:

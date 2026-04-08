@@ -13,6 +13,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from ..artifact_schema import flatten_operations_to_groups
 from ..protocol.parser import ValueParseError, parse_typed_value
 from .register_semantics import entry_status_kind, entry_status_label, visible_rr_keys
 
@@ -146,9 +147,7 @@ def _iter_row_entries(
     rr_key: str,
     namespace_key: str | None = None,
 ) -> Iterator[dict[str, Any]]:
-    groups = artifact.get("groups")
-    if not isinstance(groups, dict):
-        return
+    groups = flatten_operations_to_groups(artifact)
     group_obj = groups.get(group_key)
     if not isinstance(group_obj, dict):
         return
@@ -241,8 +240,8 @@ class _Sheet:
 
 
 def _build_sheets(artifact: dict[str, Any]) -> list[_Sheet]:
-    groups = artifact.get("groups")
-    if not isinstance(groups, dict):
+    groups = flatten_operations_to_groups(artifact)
+    if not groups:
         return []
 
     sheets: list[_Sheet] = []
@@ -370,9 +369,7 @@ def _get_entry(
     rr_key: str,
     namespace_key: str | None = None,
 ) -> dict[str, Any] | None:
-    groups = artifact.get("groups")
-    if not isinstance(groups, dict):
-        return None
+    groups = flatten_operations_to_groups(artifact)
     group_obj = groups.get(group_key)
     if not isinstance(group_obj, dict):
         return None

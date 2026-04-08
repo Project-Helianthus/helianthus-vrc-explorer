@@ -50,14 +50,14 @@ def test_replay_trace_to_artifact_reconstructs_b524_register_reads(tmp_path: Pat
     )
 
     artifact = replay_trace_to_artifact(trace_path)
-    assert artifact["schema_version"] == "2.2"
+    assert artifact["schema_version"] == "2.3"
     assert artifact["meta"]["destination_address"] == "0x15"
     assert artifact["meta"]["replay_trace"]["format"] == "enhanced_v1"
 
-    local_entry = artifact["groups"]["0x02"]["namespaces"]["0x02"]["instances"]["0x00"][
+    local_entry = artifact["operations"]["0x02"]["groups"]["0x02"]["instances"]["0x00"][
         "registers"
     ]["0x0001"]
-    remote_entry = artifact["groups"]["0x09"]["namespaces"]["0x06"]["instances"]["0x01"][
+    remote_entry = artifact["operations"]["0x06"]["groups"]["0x09"]["instances"]["0x01"][
         "registers"
     ]["0x0001"]
 
@@ -116,7 +116,7 @@ def test_cli_replay_trace_generates_json_and_html(tmp_path: Path) -> None:
     assert html_path.exists()
 
     artifact = json.loads(json_path.read_text(encoding="utf-8"))
-    assert artifact["schema_version"] == "2.2"
+    assert artifact["schema_version"] == "2.3"
     assert artifact["meta"]["replay_trace"]["format"] == "enhanced_v1"
 
 
@@ -140,7 +140,7 @@ def test_replay_trace_accepts_truncated_hex_and_records_limitation(tmp_path: Pat
     )
 
     artifact = replay_trace_to_artifact(trace_path)
-    assert artifact["schema_version"] == "2.2"
+    assert artifact["schema_version"] == "2.3"
     limitations = artifact["meta"]["replay_trace"]["limitations"]
     assert any("truncated ('...')" in item for item in limitations)
 
@@ -170,7 +170,7 @@ def test_replay_trace_instance_presence_uses_response_state(tmp_path: Path) -> N
     )
 
     artifact = replay_trace_to_artifact(trace_path)
-    instances = artifact["groups"]["0x09"]["namespaces"]["0x06"]["instances"]
+    instances = artifact["operations"]["0x06"]["groups"]["0x09"]["instances"]
 
     assert instances["0x00"]["present"] is False
     assert instances["0x00"]["registers"]["0x0001"]["response_state"] == "timeout"
@@ -197,7 +197,7 @@ def test_replay_trace_marks_nack_when_retry_evidence_is_nack_or_crc(tmp_path: Pa
     )
 
     artifact = replay_trace_to_artifact(trace_path)
-    entry = artifact["groups"]["0x09"]["namespaces"]["0x06"]["instances"]["0x00"]["registers"][
+    entry = artifact["operations"]["0x06"]["groups"]["0x09"]["instances"]["0x00"]["registers"][
         "0x0001"
     ]
     assert entry["response_state"] == "nack"
@@ -237,8 +237,8 @@ def test_replay_trace_applies_current_namespace_profiles(tmp_path: Path) -> None
 
     # OP=0x06 GG=0x00 is filtered out because GG=0x00 has no remote (0x06)
     # namespace in its profile.
-    assert "0x00" not in artifact["groups"]
-    local_ns = artifact["groups"]["0x04"]["namespaces"]["0x02"]
+    assert "0x00" not in artifact.get("operations", {}).get("0x02", {}).get("groups", {})
+    local_ns = artifact["operations"]["0x02"]["groups"]["0x04"]
     # II=0x02 exceeds ii_max=0x01 for GG=0x04 OP=0x02 and is filtered out.
     # rr_max / ii_max are derived from observed trace data within profile bounds.
     assert local_ns["ii_max"] == "0x00"

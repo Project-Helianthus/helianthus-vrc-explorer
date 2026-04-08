@@ -777,8 +777,8 @@ def test_scan_dry_run_writes_scan_artifact(tmp_path: Path) -> None:
     artifact = json.loads(output_path.read_text(encoding="utf-8"))
     assert isinstance(artifact, dict)
     assert "meta" in artifact
-    assert "groups" in artifact
-    assert isinstance(artifact["groups"], dict)
+    assert "operations" in artifact
+    assert isinstance(artifact["operations"], dict)
 
     # myVaillant mapping is loaded when a CSV path is provided (even in --dry-run mode).
     schema_sources = artifact.get("meta", {}).get("schema_sources")
@@ -786,24 +786,27 @@ def test_scan_dry_run_writes_scan_artifact(tmp_path: Path) -> None:
     assert "myvaillant_map:myvaillant_register_map.csv" in schema_sources
 
     raw_hex_values: list[str] = []
-    for group in artifact["groups"].values():
-        if not isinstance(group, dict):
+    for op_obj in artifact["operations"].values():
+        if not isinstance(op_obj, dict):
             continue
-        instances = group.get("instances", {})
-        if not isinstance(instances, dict):
-            continue
-        for instance in instances.values():
-            if not isinstance(instance, dict):
+        for group in op_obj.get("groups", {}).values():
+            if not isinstance(group, dict):
                 continue
-            registers = instance.get("registers", {})
-            if not isinstance(registers, dict):
+            instances = group.get("instances", {})
+            if not isinstance(instances, dict):
                 continue
-            for register in registers.values():
-                if not isinstance(register, dict):
+            for instance in instances.values():
+                if not isinstance(instance, dict):
                     continue
-                raw_hex = register.get("raw_hex")
-                if isinstance(raw_hex, str):
-                    raw_hex_values.append(raw_hex)
+                registers = instance.get("registers", {})
+                if not isinstance(registers, dict):
+                    continue
+                for register in registers.values():
+                    if not isinstance(register, dict):
+                        continue
+                    raw_hex = register.get("raw_hex")
+                    if isinstance(raw_hex, str):
+                        raw_hex_values.append(raw_hex)
 
     assert raw_hex_values
     bytes.fromhex(raw_hex_values[0])

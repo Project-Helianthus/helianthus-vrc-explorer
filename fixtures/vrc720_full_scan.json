@@ -1,5 +1,5 @@
 {
-  "schema_version": "2.2",
+  "schema_version": "2.3",
   "meta": {
     "scan_timestamp": "1970-01-01T00:00:00Z",
     "scan_duration_seconds": 0.0,
@@ -19,15 +19,18 @@
     "schema_sources": [],
     "incomplete": false
   },
-  "groups": {
+  "operations": {
     "0x02": {
-      "descriptor_observed": 1.0,
-      "dual_namespace": false,
-      "instances": {
-        "0x00": {
-          "registers": {
-            "0x000f": {
-              "raw_hex": "3412"
+      "groups": {
+        "0x02": {
+          "descriptor_observed": 1.0,
+          "instances": {
+            "0x00": {
+              "registers": {
+                "0x000f": {
+                  "raw_hex": "3412"
+                }
+              }
             }
           }
         }

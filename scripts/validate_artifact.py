@@ -43,9 +43,36 @@ def _normalize_opcode_hex(value: object) -> str | None:
 
 def _validate_schema_shape(artifact: dict[str, Any]) -> list[str]:
     errors: list[str] = []
+
+    # v2.3 operations-first structure
+    operations = artifact.get("operations")
+    if isinstance(operations, dict) and operations:
+        for op_key, op_obj in operations.items():
+            if not isinstance(op_key, str) or not isinstance(op_obj, dict):
+                errors.append(f"{op_key!r}: operation entry must be an object keyed by hex string")
+                continue
+            op_groups = op_obj.get("groups")
+            if not isinstance(op_groups, dict):
+                # Operations like 0x01 may have "constraints" instead of "groups"
+                if op_obj.get("constraints") is not None:
+                    continue
+                errors.append(f"{op_key}: operation missing groups object")
+                continue
+            for group_key, group_obj in op_groups.items():
+                if not isinstance(group_key, str) or not isinstance(group_obj, dict):
+                    errors.append(
+                        f"{op_key}/{group_key!r}: group entry must be an object keyed by hex string"
+                    )
+                    continue
+                has_instances = isinstance(group_obj.get("instances"), dict)
+                if not has_instances:
+                    errors.append(f"{op_key}/{group_key}: group missing instances object")
+        return errors
+
+    # Legacy v2.2 groups-first structure
     groups = artifact.get("groups")
     if not isinstance(groups, dict):
-        return ['groups: missing required top-level object "groups"']
+        return ['missing required top-level "operations" or "groups" object']
 
     for group_key, group_obj in groups.items():
         if not isinstance(group_key, str) or not isinstance(group_obj, dict):
@@ -109,9 +136,9 @@ def validate_scan_artifact(
 
     errors.extend(_validate_schema_shape(migrated))
 
-    for group_key, namespace_key, instance_key, rr_key, entry in iter_register_entries(migrated):
-        namespace_loc = namespace_key if namespace_key is not None else "flat"
-        loc = f"{group_key}/{namespace_loc}/{instance_key}/{rr_key}"
+    for op_key, group_key, instance_key, rr_key, entry in iter_register_entries(migrated):
+        op_loc = op_key if op_key is not None else "flat"
+        loc = f"{op_loc}/{group_key}/{instance_key}/{rr_key}"
         gg = _parse_hex_key(group_key)
         rr = _parse_hex_key(rr_key)
         if gg is None:
@@ -121,15 +148,15 @@ def validate_scan_artifact(
             errors.append(f"{loc}: invalid register key")
             continue
 
-        if namespace_key is not None:
-            namespace_opcode = _normalize_opcode_hex(namespace_key)
-            if namespace_opcode is None:
-                errors.append(f"{loc}: invalid namespace key")
+        if op_key is not None:
+            op_opcode = _normalize_opcode_hex(op_key)
+            if op_opcode is None:
+                errors.append(f"{loc}: invalid operation key")
                 continue
             read_opcode = _normalize_opcode_hex(entry.get("read_opcode"))
-            if read_opcode is not None and read_opcode != namespace_opcode:
+            if read_opcode is not None and read_opcode != op_opcode:
                 errors.append(
-                    f"{loc}: read_opcode {read_opcode} does not match namespace {namespace_opcode}"
+                    f"{loc}: read_opcode {read_opcode} does not match namespace {op_opcode}"
                 )
 
         reply_hex = entry.get("reply_hex")

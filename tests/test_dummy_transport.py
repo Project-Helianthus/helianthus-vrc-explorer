@@ -94,7 +94,7 @@ def test_dummy_transport_legacy_remote_only_group_defaults_to_group_opcode(
                 "instances": {
                     "0x00": {
                         "registers": {
-                            "0x0004": {"raw_hex": "080500"},
+                            "0x0004": {"raw_hex": "080500", "read_opcode": "0x06"},
                         }
                     }
                 },
@@ -136,10 +136,9 @@ def test_dummy_transport_legacy_dual_group_flat_fixture_supports_both_opcodes(
 
     transport = DummyTransport(fixture_path)
     local_payload = build_register_read_payload(0x02, group=0x09, instance=0x00, register=0x0004)
-    remote_payload = build_register_read_payload(0x06, group=0x09, instance=0x00, register=0x0004)
 
+    # v2.3: flat group without read_opcode defaults to OP=0x02 only
     assert transport.send(0x15, local_payload) == bytes.fromhex("01090400021703")
-    assert transport.send(0x15, remote_payload) == bytes.fromhex("01090400021703")
 
 
 def test_dummy_transport_artifact_v2_namespaces_do_not_require_dual_namespace_flag(
@@ -234,5 +233,9 @@ def test_dummy_transport_unknown_group_flat_fixture_requires_explicit_namespace(
     fixture_path = tmp_path / "fixture_unknown_flat.json"
     fixture_path.write_text(json.dumps(fixture), encoding="utf-8")
 
-    with pytest.raises(ValueError, match="implicit \\[0x02, 0x06\\] fallback is forbidden"):
-        DummyTransport(fixture_path)
+    # v2.3: migration assigns OP=0x02 by default to flat unknown groups,
+    # so DummyTransport no longer raises for this case.
+    transport = DummyTransport(fixture_path)
+    # The register should be loadable under opcode 0x02
+    response = transport.send(0x15, bytes((0x02, 0x00, 0x69, 0x00, 0x00, 0x00)))
+    assert response[4:] == bytes.fromhex("00")

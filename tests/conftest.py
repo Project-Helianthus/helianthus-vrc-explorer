@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
+
+from helianthus_vrc_explorer.artifact_schema import flatten_operations_to_groups
 
 
 @pytest.fixture(autouse=True)
@@ -25,3 +28,18 @@ def dual_namespace_scan_path() -> Path:
 @pytest.fixture
 def dual_namespace_scan_artifact(dual_namespace_scan_path: Path) -> dict[str, object]:
     return json.loads(dual_namespace_scan_path.read_text(encoding="utf-8"))
+
+
+def artifact_groups(artifact: dict[str, Any]) -> dict[str, Any]:
+    """Extract flattened groups from a v2.3 operations-first artifact.
+
+    Test helper: use this instead of artifact["groups"] to access scan output.
+    """
+    return flatten_operations_to_groups(artifact)
+
+
+def artifact_op_group(
+    artifact: dict[str, Any], *, op: str, group: str
+) -> dict[str, Any]:
+    """Access operations[op].groups[group] directly in a v2.3 artifact."""
+    return artifact["operations"][op]["groups"][group]

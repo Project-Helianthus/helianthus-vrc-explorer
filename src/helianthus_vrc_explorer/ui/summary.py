@@ -10,6 +10,8 @@ from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 
+from ..artifact_schema import flatten_operations_to_groups
+
 
 @dataclass(frozen=True, slots=True)
 class _SummaryRow:
@@ -32,8 +34,8 @@ def _iter_register_entries(artifact: dict[str, Any]) -> Iterable[dict[str, Any]]
 def _iter_register_entries_with_namespace_hint(
     artifact: dict[str, Any],
 ) -> Iterable[tuple[dict[str, Any], str | None]]:
-    groups = artifact.get("groups", {})
-    if not isinstance(groups, dict):
+    groups = flatten_operations_to_groups(artifact)
+    if not groups:
         return
     for group_obj in groups.values():
         if not isinstance(group_obj, dict):
@@ -298,8 +300,8 @@ def _infer_single_namespace_key(
 
 def _compute_summary_rows(artifact: dict[str, Any]) -> list[_SummaryRow]:
     rows: list[_SummaryRow] = []
-    groups = artifact.get("groups", {})
-    if not isinstance(groups, dict):
+    groups = flatten_operations_to_groups(artifact)
+    if not groups:
         return rows
 
     for group_key, group_obj in groups.items():
@@ -516,9 +518,10 @@ def render_summary(console: Console, artifact: dict[str, Any], *, output_path: P
     console.print(header, style="dim")
 
     summary_rows = _compute_summary_rows(artifact)
+    _flattened_groups = flatten_operations_to_groups(artifact)
     group_count = sum(
         1
-        for group_key, group_obj in artifact.get("groups", {}).items()
+        for group_key, group_obj in _flattened_groups.items()
         if isinstance(group_key, str) and isinstance(group_obj, dict)
     )
     total_regs = sum(row.registers_scanned for row in summary_rows)
