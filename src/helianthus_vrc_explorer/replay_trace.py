@@ -41,7 +41,7 @@ _RECV_NO_RESPONSE_RE = re.compile(
 )
 _RETRY_RE = re.compile(r"^#(?P<seq>\d+)\s+RETRY\s+type=(?P<kind>[a-zA-Z0-9_]+)(?:\s+|$)")
 _OP_LABEL_RE = re.compile(r"^OP\s+(?P<label>.+)$")
-_SUPPORTED_ENH_MARKERS: tuple[str, ...] = ("INIT ", "START ")
+_SUPPORTED_ENH_MARKERS: tuple[str, ...] = ("INIT ",)
 
 
 class TraceReplayError(ValueError):
@@ -542,7 +542,10 @@ def replay_trace_to_artifact(trace_path: Path) -> dict[str, Any]:
                 or existing.get("response_state") in {None, "timeout", "nack", "nack_or_crc"}
             ):
                 registers[register_key] = entry
-            if _response_state_implies_present(entry.get("response_state")):
+            if (
+                _response_state_implies_present(entry.get("response_state"))
+                and entry.get("flags_access") != "absent"
+            ):
                 instance_obj["present"] = True
             continue
 

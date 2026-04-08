@@ -343,7 +343,8 @@ def _migrate_v22_to_v23(artifact: dict[str, Any]) -> bool:
                             )
                             if effective_op == target_op:
                                 filtered_regs[rr_key] = entry
-                        if filtered_regs:
+                        non_reg_keys = {k for k in inst_obj if k != "registers"}
+                        if filtered_regs or non_reg_keys:
                             new_inst = {k: v for k, v in inst_obj.items() if k != "registers"}
                             new_inst["registers"] = filtered_regs
                             new_instances[inst_key] = new_inst
