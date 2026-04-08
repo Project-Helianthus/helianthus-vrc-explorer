@@ -315,6 +315,9 @@ def _migrate_v22_to_v23(artifact: dict[str, Any]) -> bool:
                 if k not in _skip_keys:
                     _shared[k] = v
 
+            # Default OP for entries without read_opcode: first sorted OP.
+            _default_op = sorted(_seen_opcodes)[0]
+
             for target_op in sorted(_seen_opcodes):
                 op_obj = operations.setdefault(target_op, {})
                 op_groups = op_obj.setdefault("groups", {})
@@ -335,7 +338,7 @@ def _migrate_v22_to_v23(artifact: dict[str, Any]) -> bool:
                             effective_op = (
                                 entry_op
                                 if isinstance(entry_op, str) and entry_op.startswith("0x")
-                                else "0x02"
+                                else _default_op
                             )
                             if effective_op == target_op:
                                 filtered_regs[rr_key] = entry

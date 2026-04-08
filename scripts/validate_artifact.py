@@ -53,8 +53,8 @@ def _validate_schema_shape(artifact: dict[str, Any]) -> list[str]:
                 continue
             op_groups = op_obj.get("groups")
             if not isinstance(op_groups, dict):
-                # Operations like 0x01 may have "constraints" instead of "groups"
-                if op_obj.get("constraints") is not None:
+                # Only opcode 0x01 may have "constraints" instead of "groups"
+                if op_key == "0x01" and op_obj.get("constraints") is not None:
                     continue
                 errors.append(f"{op_key}: operation missing groups object")
                 continue
