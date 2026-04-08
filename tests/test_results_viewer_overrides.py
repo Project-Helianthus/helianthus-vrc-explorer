@@ -152,8 +152,10 @@ def test_apply_row_type_override_can_target_one_operation_only() -> None:
         == "HEX:3"
     )
 
-    local_entry = artifact["operations"]["0x02"]["groups"]["0x09"]["instances"]["0x00"]["registers"]["0x0004"]
-    remote_entry = artifact["operations"]["0x06"]["groups"]["0x09"]["instances"]["0x00"]["registers"]["0x0004"]
+    local_regs = artifact["operations"]["0x02"]["groups"]["0x09"]["instances"]["0x00"]["registers"]
+    remote_regs = artifact["operations"]["0x06"]["groups"]["0x09"]["instances"]["0x00"]["registers"]
+    local_entry = local_regs["0x0004"]
+    remote_entry = remote_regs["0x0004"]
     assert local_entry["type"] == "HDA:3"
     assert local_entry["value"] == "2026-12-05"
     assert remote_entry["type"] == "HEX:3"

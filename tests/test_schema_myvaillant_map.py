@@ -8,9 +8,17 @@ import pytest
 from helianthus_vrc_explorer.scanner.director import GROUP_CONFIG
 from helianthus_vrc_explorer.schema.myvaillant_map import MyvaillantRegisterMap
 
+_CSV_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "src"
+    / "helianthus_vrc_explorer"
+    / "data"
+    / "myvaillant_register_map.csv"
+)
+
 
 def test_default_zone_desired_room_setpoint_mapping_uses_rr_0x0022() -> None:
-    csv_path = Path(__file__).resolve().parents[1] / "src" / "helianthus_vrc_explorer" / "data" / "myvaillant_register_map.csv"
+    csv_path = _CSV_PATH
     schema = MyvaillantRegisterMap.from_path(csv_path)
 
     desired = schema.lookup(group=0x03, instance=0x00, register=0x0022)
@@ -24,7 +32,7 @@ def test_default_zone_desired_room_setpoint_mapping_uses_rr_0x0022() -> None:
 
 
 def test_default_heating_circuit_curve_mapping_uses_wildcard_instances() -> None:
-    csv_path = Path(__file__).resolve().parents[1] / "src" / "helianthus_vrc_explorer" / "data" / "myvaillant_register_map.csv"
+    csv_path = _CSV_PATH
     schema = MyvaillantRegisterMap.from_path(csv_path)
 
     curve_ii0 = schema.lookup(group=0x02, instance=0x00, register=0x000F)
@@ -36,7 +44,7 @@ def test_default_heating_circuit_curve_mapping_uses_wildcard_instances() -> None
 
 
 def test_default_heating_circuit_mapping_resolves_ebusd_name_templates() -> None:
-    csv_path = Path(__file__).resolve().parents[1] / "src" / "helianthus_vrc_explorer" / "data" / "myvaillant_register_map.csv"
+    csv_path = _CSV_PATH
     schema = MyvaillantRegisterMap.from_path(csv_path)
 
     flow = schema.lookup(group=0x02, instance=0x01, register=0x0007)
@@ -50,7 +58,7 @@ def test_default_heating_circuit_mapping_resolves_ebusd_name_templates() -> None
 
 
 def test_default_heating_circuit_type_mapping_uses_rr_0x0001() -> None:
-    csv_path = Path(__file__).resolve().parents[1] / "src" / "helianthus_vrc_explorer" / "data" / "myvaillant_register_map.csv"
+    csv_path = _CSV_PATH
     schema = MyvaillantRegisterMap.from_path(csv_path)
 
     circuit_type = schema.lookup(group=0x02, instance=0x00, register=0x0001)
@@ -62,7 +70,7 @@ def test_default_heating_circuit_type_mapping_uses_rr_0x0001() -> None:
 
 
 def test_default_mixer_circuit_type_external_mapping_uses_rr_0x0002() -> None:
-    csv_path = Path(__file__).resolve().parents[1] / "src" / "helianthus_vrc_explorer" / "data" / "myvaillant_register_map.csv"
+    csv_path = _CSV_PATH
     schema = MyvaillantRegisterMap.from_path(csv_path)
 
     mixer_type = schema.lookup(group=0x02, instance=0x00, register=0x0002)
@@ -74,7 +82,7 @@ def test_default_mixer_circuit_type_external_mapping_uses_rr_0x0002() -> None:
 
 
 def test_default_room_influence_type_mapping_uses_rr_0x0003() -> None:
-    csv_path = Path(__file__).resolve().parents[1] / "src" / "helianthus_vrc_explorer" / "data" / "myvaillant_register_map.csv"
+    csv_path = _CSV_PATH
     schema = MyvaillantRegisterMap.from_path(csv_path)
 
     room_influence = schema.lookup(group=0x02, instance=0x00, register=0x0003)
@@ -87,7 +95,7 @@ def test_default_room_influence_type_mapping_uses_rr_0x0003() -> None:
 
 
 def test_default_hc_new_register_mappings_include_class_hints() -> None:
-    csv_path = Path(__file__).resolve().parents[1] / "src" / "helianthus_vrc_explorer" / "data" / "myvaillant_register_map.csv"
+    csv_path = _CSV_PATH
     schema = MyvaillantRegisterMap.from_path(csv_path)
 
     frost = schema.lookup(group=0x02, instance=0x00, register=0x001D)
@@ -263,7 +271,7 @@ def test_loader_rejects_duplicate_group_instance_register_opcode_rows(tmp_path: 
 
 
 def test_radio_firmware_entry_exposes_type_hint_and_opcode() -> None:
-    csv_path = Path(__file__).resolve().parents[1] / "src" / "helianthus_vrc_explorer" / "data" / "myvaillant_register_map.csv"
+    csv_path = _CSV_PATH
     schema = MyvaillantRegisterMap.from_path(csv_path)
 
     entry = schema.lookup(group=0x09, instance=0x01, register=0x0004, opcode=0x06)
@@ -275,7 +283,7 @@ def test_radio_firmware_entry_exposes_type_hint_and_opcode() -> None:
 
 
 def test_zone_name_suffix_entry_exposes_string_type_hint() -> None:
-    csv_path = Path(__file__).resolve().parents[1] / "src" / "helianthus_vrc_explorer" / "data" / "myvaillant_register_map.csv"
+    csv_path = _CSV_PATH
     schema = MyvaillantRegisterMap.from_path(csv_path)
 
     suffix = schema.lookup(group=0x03, instance=0x00, register=0x0018)
@@ -288,7 +296,7 @@ def test_zone_name_suffix_entry_exposes_string_type_hint() -> None:
 
 
 def test_namespace_owned_required_tuple_rows_are_resolvable() -> None:
-    csv_path = Path(__file__).resolve().parents[1] / "src" / "helianthus_vrc_explorer" / "data" / "myvaillant_register_map.csv"
+    csv_path = _CSV_PATH
     schema = MyvaillantRegisterMap.from_path(csv_path)
 
     remote_presence = schema.lookup(group=0x08, instance=0x00, register=0x0001, opcode=0x06)
@@ -343,7 +351,7 @@ def test_namespace_owned_required_tuple_rows_are_resolvable() -> None:
 
 
 def test_remote_namespace_maps_heat_source_rows_for_op06() -> None:
-    csv_path = Path(__file__).resolve().parents[1] / "src" / "helianthus_vrc_explorer" / "data" / "myvaillant_register_map.csv"
+    csv_path = _CSV_PATH
     schema = MyvaillantRegisterMap.from_path(csv_path)
 
     local = schema.lookup(group=0x02, instance=0x00, register=0x0015, opcode=0x02)
@@ -357,7 +365,7 @@ def test_remote_namespace_maps_heat_source_rows_for_op06() -> None:
 
 
 def test_register_map_minimum_entry_count_and_no_duplicates() -> None:
-    csv_path = Path(__file__).resolve().parents[1] / "src" / "helianthus_vrc_explorer" / "data" / "myvaillant_register_map.csv"
+    csv_path = _CSV_PATH
 
     rows: list[tuple[str, str, int, int | None]] = []
     with csv_path.open(newline="", encoding="utf-8") as f:
@@ -379,7 +387,7 @@ def test_register_map_minimum_entry_count_and_no_duplicates() -> None:
 
 
 def test_register_map_all_groups_represented() -> None:
-    csv_path = Path(__file__).resolve().parents[1] / "src" / "helianthus_vrc_explorer" / "data" / "myvaillant_register_map.csv"
+    csv_path = _CSV_PATH
     schema = MyvaillantRegisterMap.from_path(csv_path)
 
     groups_in_csv = {group for (group, _instance, _register, _opcode) in schema._exact} | {

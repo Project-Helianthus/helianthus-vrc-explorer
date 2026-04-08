@@ -689,7 +689,8 @@ def test_scan_b524_continues_when_first_directory_probe_is_status_only(
     assert "b524_supported" not in artifact["meta"]
     assert "b524_skip_reason" not in artifact["meta"]
     assert "0x02" in artifact_groups(artifact)
-    assert artifact_op_group(artifact, op="0x02", group="0x02")["instances"]["0x00"]["present"] is True
+    grp = artifact_op_group(artifact, op="0x02", group="0x02")
+    assert grp["instances"]["0x00"]["present"] is True
     assert transport.calls[0] == bytes((0x00, 0x00, 0x00))
     assert bytes((0x00, 0x02, 0x00)) in transport.calls
 
@@ -779,7 +780,8 @@ def test_scan_b524_skips_constraint_dictionary_by_default(tmp_path: Path) -> Non
     assert artifact["meta"]["constraint_dictionary"] == {}
     assert artifact["meta"]["constraint_scope"]["decision"] == "opcode_0x02_default"
     assert artifact["meta"]["constraint_scope"]["protocol"] == "opcode_0x01"
-    entry = artifact_op_group(artifact, op="0x02", group="0x02")["instances"]["0x00"]["registers"]["0x0002"]
+    regs = artifact_op_group(artifact, op="0x02", group="0x02")["instances"]["0x00"]["registers"]
+    entry = regs["0x0002"]
     assert entry["constraint_source"] == "static_catalog"
     assert entry["constraint_scope"] == "opcode_0x02_default"
     assert entry["constraint_provenance"] == "catalog_seeded_from_opcode_0x01"
@@ -815,7 +817,8 @@ def test_scan_b524_flags_seeded_constraint_mismatch(tmp_path: Path) -> None:
         planner_ui="classic",
     )
 
-    entry = artifact_op_group(artifact, op="0x02", group="0x02")["instances"]["0x00"]["registers"]["0x0002"]
+    regs = artifact_op_group(artifact, op="0x02", group="0x02")["instances"]["0x00"]["registers"]
+    entry = regs["0x0002"]
     assert entry["value"] == 5
     assert entry["constraint_source"] == "static_catalog"
     assert "constraint_mismatch_reason" in entry
@@ -1202,7 +1205,8 @@ def test_artifact_single_namespace_unchanged(tmp_path: Path) -> None:
 def test_artifact_register_flags_present(tmp_path: Path) -> None:
     artifact = scan_b524(DummyTransport(_write_fixture_group_02(tmp_path)), dst=0x15)
 
-    entry = artifact_op_group(artifact, op="0x02", group="0x02")["instances"]["0x00"]["registers"]["0x0002"]
+    regs = artifact_op_group(artifact, op="0x02", group="0x02")["instances"]["0x00"]["registers"]
+    entry = regs["0x0002"]
 
     assert entry["flags"] == 0x01
     assert entry["flags_access"] == "state_stable"
@@ -1453,12 +1457,10 @@ def test_scan_b524_replays_dual_namespace_fixture_end_to_end(
     )
 
     assert artifact["schema_version"] == CURRENT_ARTIFACT_SCHEMA_VERSION
-    local_fw = artifact_op_group(artifact, op="0x02", group="0x09")["instances"]["0x00"]["registers"][
-        "0x0004"
-    ]
-    remote_fw = artifact_op_group(artifact, op="0x06", group="0x09")["instances"]["0x00"]["registers"][
-        "0x0004"
-    ]
+    local_inst = artifact_op_group(artifact, op="0x02", group="0x09")["instances"]["0x00"]
+    local_fw = local_inst["registers"]["0x0004"]
+    remote_inst = artifact_op_group(artifact, op="0x06", group="0x09")["instances"]["0x00"]
+    remote_fw = remote_inst["registers"]["0x0004"]
     accessory_fw = artifact_op_group(artifact, op="0x06", group="0x0c")["instances"]["0x00"][
         "registers"
     ]["0x0004"]
@@ -2708,7 +2710,8 @@ def test_scan_b524_replan_textual_failure_prompts_classic_immediately(
         planner_ui="auto",
     )
 
-    registers = artifact_op_group(artifact, op="0x02", group="0x02")["instances"]["0x00"]["registers"]
+    grp = artifact_op_group(artifact, op="0x02", group="0x02")
+    registers = grp["instances"]["0x00"]["registers"]
     assert set(registers) == {"0x0000"}
     assert textual_calls["count"] == 2
     assert classic_calls["count"] == 1

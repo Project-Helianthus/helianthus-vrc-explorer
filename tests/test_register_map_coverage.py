@@ -3,9 +3,17 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
+_CSV_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "src"
+    / "helianthus_vrc_explorer"
+    / "data"
+    / "myvaillant_register_map.csv"
+)
+
 
 def _register_map_rows() -> list[dict[str, str]]:
-    csv_path = Path(__file__).resolve().parents[1] / "src" / "helianthus_vrc_explorer" / "data" / "myvaillant_register_map.csv"
+    csv_path = _CSV_PATH
     with csv_path.open("r", encoding="utf-8", newline="") as handle:
         return list(csv.DictReader(handle))
 

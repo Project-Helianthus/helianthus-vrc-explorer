@@ -176,7 +176,7 @@ def test_validator_accepts_legacy_when_enabled() -> None:
     legacy.pop("schema_version", None)
     operations = legacy.pop("operations", {})
     groups: dict[str, Any] = {}
-    for op_key, op_obj in operations.items():
+    for _op_key, op_obj in operations.items():
         for group_key, group_obj in op_obj.get("groups", {}).items():
             g = deepcopy(group_obj)
             g["descriptor_type"] = g.pop("descriptor_observed", 0.0)
