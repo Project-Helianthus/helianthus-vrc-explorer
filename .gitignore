@@ -33,3 +33,4 @@ artifacts/readme/*.txt
 AGENTS-local.md
 AGENT-local.md
 .env
+b524_scan_*
