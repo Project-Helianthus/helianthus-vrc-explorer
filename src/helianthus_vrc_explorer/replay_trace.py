@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import math
 import re
 import struct
@@ -16,7 +17,7 @@ from .scanner.director import (
     group_name_for_opcode,
     group_namespace_profiles,
 )
-from .scanner.identity import opcode_label, operation_label
+from .scanner.identity import operation_label
 from .scanner.register import (
     _interpret_flags,
     _parse_inferred_value,
@@ -576,10 +577,8 @@ def replay_trace_to_artifact(trace_path: Path) -> dict[str, Any]:
                 #   byte 2: RR echo
                 #   byte 3: reserved
                 #   byte 4+: body (shape depends on TT)
-                try:
+                with contextlib.suppress(struct.error, IndexError, ValueError):
                     _decode_constraint_response(response, constraint_entry)
-                except (struct.error, IndexError, ValueError):
-                    pass
             dedup_key = (group_key, reg_sel)
             # Keep the entry with actual parsed data; don't overwrite with empty
             existing = _constraint_dedup.get(dedup_key)

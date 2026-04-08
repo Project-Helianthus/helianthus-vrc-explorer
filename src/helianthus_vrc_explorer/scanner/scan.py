@@ -332,7 +332,10 @@ def _artifact_contract_metadata() -> dict[str, Any]:
         ),
         "b524_row_identity": {
             "dedupe_key_format": "<group>:<operation>:<instance>:<register>",
-            "path_format": "B524/<section>/<operation>/<group-name>/<operation-display>/<instance>/<register-name>",
+            "path_format": (
+                "B524/<section>/<operation>/<group-name>"
+                "/<operation-display>/<instance>/<register-name>"
+            ),
             "round_trip_stability": (
                 "operation keys and persisted topology must be preserved without sentinel rewrite"
             ),
@@ -1729,11 +1732,6 @@ def scan_b524(
                 opcodes = _planner_source_opcodes(group.group)
             if not opcodes:
                 continue
-            primary_opcode = _planner_primary_opcode(
-                group=group.group,
-                planner_opcodes=opcodes,
-                resolved_opcodes=resolved_opcodes,
-            )
             multi_op = len(opcodes) > 1
             for opcode in opcodes:
                 planner_ii_max = _planner_ii_max(
