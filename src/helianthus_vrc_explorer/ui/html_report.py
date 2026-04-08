@@ -1538,9 +1538,9 @@ __ARTIFACT_JSON__
                 group: typeof row.group === "string" ? row.group : "n/a",
                 register: typeof row.register_selector === "string" ? row.register_selector : "n/a",
                 type: typeof row.kind === "string" ? row.kind : (typeof row.reply_hex === "string" && row.reply_hex ? "raw" : "—"),
-                min: typeof row.min_value === "number" ? String(row.min_value) : "—",
-                max: typeof row.max_value === "number" ? String(row.max_value) : "—",
-                step: typeof row.step_value === "number" ? String(row.step_value) : "—",
+                min: (typeof row.min_value === "number" || typeof row.min_value === "string") ? String(row.min_value) : "—",
+                max: (typeof row.max_value === "number" || typeof row.max_value === "string") ? String(row.max_value) : "—",
+                step: (typeof row.step_value === "number" || typeof row.step_value === "string") ? String(row.step_value) : "—",
               });
             }
           }
