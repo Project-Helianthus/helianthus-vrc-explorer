@@ -13,7 +13,7 @@ class TransportTimeout(TransportError):
 
 
 class TransportNack(TransportError):
-    """Raised when the slave explicitly NACKs (0xFF) the request.
+    """Raised when the target explicitly NACKs (0xFF) the request.
 
     This is a definitive protocol-level rejection for the specific telegram.
     """
