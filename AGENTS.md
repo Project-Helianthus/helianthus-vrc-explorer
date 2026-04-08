@@ -573,9 +573,10 @@ CI enforces this via `python scripts/check_docs_sync.py`.
 │ --help     -h        Show this message and exit.                                                                     │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ scan      Scan a VRC regulator using B524 (GetExtendedRegisters).                                                    │
-│ discover  Discover eBUS devices via QueryExistence broadcast and per-address scan (0704).                            │
-│ browse    Browse scan results in fullscreen Textual UI (file mode).                                                  │
+│ scan          Scan a VRC regulator using B524 (GetExtendedRegisters).                                                │
+│ replay-trace  Replay an ENH/ENS trace into a fresh schema-2.2 JSON artifact + HTML report.                           │
+│ discover      Discover eBUS devices via QueryExistence broadcast and per-address scan (0704).                        │
+│ browse        Browse scan results in fullscreen Textual UI (file mode).                                              │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -615,8 +616,11 @@ CI enforces this via `python scripts/check_docs_sync.py`.
 │                                                               file.                                                  │
 │                                                               [env var: HELIA_EBUSD_TRACE_PATH]                      │
 │ --b509-range                                         TEXT     B509 register range to dump (repeatable), format:      │
-│                                                               0x0000..0x00FF. If omitted, defaults to                │
-│                                                               0x0000..0x00FF.                                        │
+│                                                               0x0000..0x00FF. Requires --b509-dump. If omitted,      │
+│                                                               defaults to 0x0000..0x00FF.                            │
+│ --b509-dump                --no-b509-dump                     Opt-in B509 register dump (disabled by default). Use   │
+│                                                               --b509-range to narrow/expand ranges.                  │
+│                                                               [default: no-b509-dump]                                │
 │ --b555-dump                --no-b555-dump                     Opt-in read-only B555 timer dump (A3/A4/A5). Disabled  │
 │                                                               by default to keep the standard B524/B509 scan path    │
 │                                                               unchanged.                                             │
