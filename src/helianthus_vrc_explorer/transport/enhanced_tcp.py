@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import random
 import socket
+import threading
 import time
 from collections import deque
 from collections.abc import Callable, Iterator
@@ -437,6 +438,7 @@ class EnhancedTcpTransport(TransportInterface):
         self._session: _EnhancedTcpSession | None = None
         self._messages = deque[tuple[str, int, int]]()
         self._enh_pending_first: int | None = None
+        self._lock = threading.RLock()
 
     def _trace(self, message: str) -> None:
         session = self._session
@@ -458,9 +460,10 @@ class EnhancedTcpTransport(TransportInterface):
         self._enh_pending_first = None
 
     def close(self) -> None:
-        session = self._session
-        self._session = None
-        self._reset_parser()
+        with self._lock:
+            session = self._session
+            self._session = None
+            self._reset_parser()
         if session is None:
             return
         if session.trace_handle is not None:
@@ -471,22 +474,21 @@ class EnhancedTcpTransport(TransportInterface):
 
     @contextlib.contextmanager
     def session(self) -> Iterator[EnhancedTcpTransport]:
-        self._session_depth += 1
-        if self._session_depth == 1:
-            try:
-                self._open_session()
-            except Exception:
-                self._session_depth -= 1
-                if self._session_depth < 0:
-                    self._session_depth = 0
-                raise
+        with self._lock:
+            self._session_depth += 1
+            if self._session_depth == 1:
+                try:
+                    self._open_session()
+                except Exception:
+                    self._session_depth = max(0, self._session_depth - 1)
+                    raise
         try:
             yield self
         finally:
-            self._session_depth -= 1
-            if self._session_depth <= 0:
-                self._session_depth = 0
-                self.close()
+            with self._lock:
+                self._session_depth = max(0, self._session_depth - 1)
+                if self._session_depth == 0:
+                    self.close()
 
     def _open_session(self) -> None:
         try:
@@ -728,20 +730,21 @@ class EnhancedTcpTransport(TransportInterface):
         if len(payload) > 0xFF:
             raise ValueError(f"payload too large for eBUS telegram: {len(payload)} bytes")
 
-        self._trace_seq += 1
-        seq = self._trace_seq
-        payload_bytes = bytes(payload)
-        return self._send_with_policy(
-            seq,
-            lambda: self._send_proto_once(
+        with self._lock:
+            self._trace_seq += 1
+            seq = self._trace_seq
+            payload_bytes = bytes(payload)
+            return self._send_with_policy(
                 seq,
-                dst=dst,
-                primary=primary,
-                secondary=secondary,
-                payload=payload_bytes,
-                expect_response=expect_response,
-            ),
-        )
+                lambda: self._send_proto_once(
+                    seq,
+                    dst=dst,
+                    primary=primary,
+                    secondary=secondary,
+                    payload=payload_bytes,
+                    expect_response=expect_response,
+                ),
+            )
 
     def _reconnect(self, seq: int, attempt: int) -> None:
         """Close the current session and re-establish a fresh TCP + INIT handshake."""

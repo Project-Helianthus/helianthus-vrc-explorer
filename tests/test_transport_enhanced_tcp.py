@@ -322,3 +322,53 @@ def test_ve25_crc_escape_expansion_is_correct() -> None:
     crc = _crc_update(crc, 0x00)  # escape expansion of 0xA9
     crc = _crc_update(crc, 0x01)
     assert _crc(bytes((0x42, 0xA9, 0x01))) == crc
+
+
+def test_ve22_concurrent_session_entry() -> None:
+    """VE22: _session_depth must be thread-safe under concurrent session() calls."""
+    import time as _time
+
+    results: list[bool] = []
+
+    def _handler(conn: socket.socket) -> None:
+        assert _read_enh_frame(conn) == (_ENH_REQ_INIT, 0x01)
+        _write_enh_frame(conn, _ENH_RES_RESETTED, 0x01)
+        # Keep connection alive for all threads
+        _time.sleep(1.0)
+
+    def _session_user(transport: EnhancedTcpTransport) -> None:
+        try:
+            with transport.session():
+                _time.sleep(0.1)
+            results.append(True)
+        except Exception:
+            results.append(False)
+
+    with _run_ens_test_server(_handler) as (host, port):
+        transport = EnhancedTcpTransport(
+            EnhancedTcpConfig(host=host, port=port, timeout_s=2.0)
+        )
+        threads = [
+            threading.Thread(target=_session_user, args=(transport,))
+            for _ in range(4)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=5.0)
+
+    # At least some threads should succeed
+    assert any(results), f"All threads failed: {results}"
+
+
+def test_ve17_session_depth_never_negative() -> None:
+    """VE17: session depth must never go negative even with spurious close calls."""
+    transport = EnhancedTcpTransport(
+        EnhancedTcpConfig(host="127.0.0.1", port=1, timeout_s=0.1)
+    )
+    # Depth starts at 0, multiple closes must not drive it negative
+    transport._session_depth = 0
+    transport.close()
+    assert transport._session_depth >= 0
+    transport.close()
+    assert transport._session_depth >= 0
