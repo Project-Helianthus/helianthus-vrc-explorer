@@ -55,6 +55,21 @@ def parse_int_set(spec: str, *, min_value: int, max_value: int) -> list[int]:
         token = part.strip()
         if not token:
             continue
+        # VE23-R3: Support ".." as the primary range separator (unambiguous for hex).
+        # Fall back to "-" only when ".." is absent.
+        if ".." in token:
+            start_s, end_s = token.split("..", 1)
+            start = parse_int_token(start_s)
+            end = parse_int_token(end_s)
+            if start > end:
+                start, end = end, start
+            for value in range(start, end + 1):
+                if value < min_value or value > max_value:
+                    raise ValueError(
+                        f"Value out of range: {value} (allowed {min_value}-{max_value})"
+                    )
+                result.add(value)
+            continue
         if "-" in token:
             start_s, end_s = token.split("-", 1)
             start = parse_int_token(start_s)

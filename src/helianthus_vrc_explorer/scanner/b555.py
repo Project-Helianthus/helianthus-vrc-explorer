@@ -199,6 +199,9 @@ def scan_b555(
     }
     programs = artifact["programs"]
 
+    # VE25-R2: discovered_slot_reads intentionally accumulates across programs.
+    # Each program contributes its own timer reads; the running total feeds
+    # the progress bar so the observer sees monotonically increasing progress.
     discovered_slot_reads = 0
     base_reads = len(DEFAULT_B555_PROGRAMS) * 2
 

@@ -22,6 +22,9 @@ logger = logging.getLogger(__name__)
 _PRINTABLE_LATIN1: Final[set[int]] = set(range(0x20, 0x7F)) | set(range(0xA0, 0x100))
 _I32_INVALID_SENTINEL: Final[int] = 0x7FFFFFFF
 _I32_INVALID_SENTINEL_RAW_HEX: Final[str] = "ffffff7f"
+# VE24-R3: U32 sentinel — same raw pattern, different semantic type.
+_U32_INVALID_SENTINEL: Final[int] = 0xFFFFFFFF
+_U32_INVALID_SENTINEL_RAW_HEX: Final[str] = "ffffffff"
 _REMOTE_HEADER_PROBE_REGISTERS: Final[tuple[tuple[int, str], ...]] = (
     (0x0001, "BOOL"),
     (0x0002, "UCH"),
@@ -424,14 +427,22 @@ def _parse_inferred_value(value_bytes: bytes) -> tuple[str | None, object | None
 def _sentinel_value_display(
     *, value: object | None, raw_hex: str | None, value_type: str | None
 ) -> str | None:
-    if value_type != "I32":
-        return None
-    if raw_hex != _I32_INVALID_SENTINEL_RAW_HEX:
-        return None
     if isinstance(value, bool):
         return None
-    if isinstance(value, int) and value == _I32_INVALID_SENTINEL:
-        return "sentinel_invalid_i32 (0x7FFFFFFF)"
+    # I32 sentinel: 0x7FFFFFFF
+    if value_type == "I32":
+        if raw_hex != _I32_INVALID_SENTINEL_RAW_HEX:
+            return None
+        if isinstance(value, int) and value == _I32_INVALID_SENTINEL:
+            return "sentinel_invalid_i32 (0x7FFFFFFF)"
+        return None
+    # VE24-R3: U32 sentinel: 0xFFFFFFFF
+    if value_type == "U32":
+        if raw_hex != _U32_INVALID_SENTINEL_RAW_HEX:
+            return None
+        if isinstance(value, int) and value == _U32_INVALID_SENTINEL:
+            return "sentinel_invalid_u32 (0xFFFFFFFF)"
+        return None
     return None
 
 
@@ -510,7 +521,8 @@ def read_register(
             "raw_hex": None,
             "type": None,
             "value": None,
-            "error": f"transport_error: {exc}",
+            # VE18-R2: Sanitise — strip endpoint details from error text.
+            "error": f"transport_error: {type(exc).__name__}",
         }
 
     if len(response) == 0:
@@ -737,6 +749,18 @@ def probe_instance_availability(
             and entry_reply_kind.endswith("_valid")
             and entry["value"] is True
         )
+        # VE13: Device explicitly reports as disconnected — skip further probes.
+        if (
+            not present
+            and entry["error"] is None
+            and entry.get("flags_access") != "absent"
+            and entry["value"] is False
+        ):
+            return InstanceAvailabilityProbe(
+                present=False,
+                contract=contract,
+                evidence=header_evidence,
+            )
         if not present:
             for register_id, type_hint in _REMOTE_HEADER_PROBE_REGISTERS[1:]:
                 header_entry = read_register(

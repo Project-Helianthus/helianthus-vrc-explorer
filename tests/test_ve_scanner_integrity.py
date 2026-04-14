@@ -1,4 +1,4 @@
-"""Tests for VE27, VE29, VE30 — scanner data integrity guards."""
+"""Tests for VE27, VE29, VE30, and C7 scanner subsystem fixes."""
 from __future__ import annotations
 
 import math
@@ -6,6 +6,9 @@ import struct
 
 import pytest
 
+from helianthus_vrc_explorer.scanner.b509 import parse_b509_range
+from helianthus_vrc_explorer.scanner.plan import parse_int_set
+from helianthus_vrc_explorer.scanner.register import _sentinel_value_display
 from helianthus_vrc_explorer.scanner.scan import (
     ConstraintEntry,
     _decode_constraint_date,
@@ -128,3 +131,103 @@ class TestVE30StepZero:
         response = _make_response(0x09, body)
         entry = _parse_constraint_entry(group=GG, register=RR, response=response)
         assert entry.step_value == 10
+
+
+# ---- C7 scanner subsystem fixes ----
+
+
+class TestVE27R2B509Opcode:
+    """VE27-R2: B509 opcode field must be 0x09, not 0x0d."""
+
+    def test_b509_register_entry_uses_0x09(self) -> None:
+        """The B509RegisterEntry TypedDict uses '0x09' in the op field."""
+        # We verify at the source level: the hardcoded literal in scan_b509
+        # is "0x09" (not the old incorrect "0x0d").
+        import inspect
+
+        from helianthus_vrc_explorer.scanner import b509
+
+        source = inspect.getsource(b509.scan_b509)
+        assert '"0x09"' in source or "'0x09'" in source
+        assert '"0x0d"' not in source and "'0x0d'" not in source
+
+
+class TestVE16R2B509RangeCap:
+    """VE16-R2: B509 scan range must be capped at 4096."""
+
+    def test_range_within_cap_accepted(self) -> None:
+        start, end = parse_b509_range("0x2700..0x27FF")
+        assert end - start + 1 == 256
+
+    def test_range_at_cap_accepted(self) -> None:
+        start, end = parse_b509_range("0x0000..0x0FFF")
+        assert end - start + 1 == 4096
+
+    def test_range_exceeding_cap_rejected(self) -> None:
+        with pytest.raises(ValueError, match="too large"):
+            parse_b509_range("0x0000..0x1000")  # 4097 addresses
+
+    def test_full_address_space_rejected(self) -> None:
+        with pytest.raises(ValueError, match="too large"):
+            parse_b509_range("0x0000..0xFFFF")
+
+
+class TestVE23R3ParseIntSetDotDotRange:
+    """VE23-R3: parse_int_set supports '..' as unambiguous hex range separator."""
+
+    def test_dot_dot_hex_range(self) -> None:
+        result = parse_int_set("0x0A..0x0F", min_value=0, max_value=255)
+        assert result == [10, 11, 12, 13, 14, 15]
+
+    def test_dot_dot_decimal_range(self) -> None:
+        result = parse_int_set("10..15", min_value=0, max_value=255)
+        assert result == [10, 11, 12, 13, 14, 15]
+
+    def test_dot_dot_mixed_with_commas(self) -> None:
+        result = parse_int_set("0x00..0x02,5,0x0A..0x0C", min_value=0, max_value=255)
+        assert result == [0, 1, 2, 5, 10, 11, 12]
+
+
+class TestVE24R3U32Sentinel:
+    """VE24-R3: U32 sentinel 0xFFFFFFFF must be annotated."""
+
+    def test_u32_sentinel_detected(self) -> None:
+        result = _sentinel_value_display(
+            value=0xFFFFFFFF,
+            raw_hex="ffffffff",
+            value_type="U32",
+        )
+        assert result is not None
+        assert "sentinel" in result
+        assert "0xFFFFFFFF" in result
+
+    def test_u32_non_sentinel_returns_none(self) -> None:
+        result = _sentinel_value_display(
+            value=42,
+            raw_hex="2a000000",
+            value_type="U32",
+        )
+        assert result is None
+
+    def test_i32_sentinel_still_works(self) -> None:
+        result = _sentinel_value_display(
+            value=0x7FFFFFFF,
+            raw_hex="ffffff7f",
+            value_type="I32",
+        )
+        assert result is not None
+        assert "0x7FFFFFFF" in result
+
+
+class TestVE18R2ErrorSanitisation:
+    """VE18-R2: Transport error text must not leak endpoint details."""
+
+    def test_error_format_uses_class_name_only(self) -> None:
+        """Verify the error string template uses type(exc).__name__."""
+        import inspect
+
+        from helianthus_vrc_explorer.scanner import register
+
+        source = inspect.getsource(register.read_register)
+        # Must use the sanitised form, not the raw exc string.
+        assert "type(exc).__name__" in source

@@ -1398,18 +1398,26 @@ def scan_b524(
                 )
                 observer.phase_start("constraint_probe", total=probe_total or 1)
 
-            for group in classified:
-                group_meta = metadata_map[group.group]
-                constraints = _probe_group_constraints(
-                    transport,
-                    dst=dst,
-                    group=group.group,
-                    rr_max=group_meta.rr_max,
-                    observer=observer,
-                    progress_phase="constraint_probe",
-                )
-                if constraints:
-                    constraint_map[group.group] = constraints
+            try:
+                for group in classified:
+                    group_meta = metadata_map[group.group]
+                    constraints = _probe_group_constraints(
+                        transport,
+                        dst=dst,
+                        group=group.group,
+                        rr_max=group_meta.rr_max,
+                        observer=observer,
+                        progress_phase="constraint_probe",
+                    )
+                    if constraints:
+                        constraint_map[group.group] = constraints
+            except KeyboardInterrupt:
+                # VE32: Preserve partial constraint results on interrupt.
+                if observer is not None:
+                    observer.log(
+                        "Constraint probe interrupted — partial results preserved.",
+                        level="warn",
+                    )
             if observer is not None:
                 observer.phase_finish("constraint_probe")
                 if not constraint_map:

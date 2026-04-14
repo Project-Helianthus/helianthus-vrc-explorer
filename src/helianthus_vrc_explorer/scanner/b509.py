@@ -84,6 +84,10 @@ def parse_b509_range(spec: str) -> tuple[int, int]:
         raise ValueError(f"range end out of bounds: {end_s!r}")
     if start > end:
         start, end = end, start
+    # VE16-R2: Cap maximum range to prevent accidental full-address-space scans.
+    span = end - start + 1
+    if span > 4096:
+        raise ValueError(f"B509 range too large: {span} addresses (max 4096)")
     return start, end
 
 
@@ -182,7 +186,7 @@ def scan_b509(
 
                 registers[_hex_u16(register)] = B509RegisterEntry(
                     addr=_hex_u16(register),
-                    op="0x0d",
+                    op="0x09",
                     reply_hex=reply_hex,
                     raw_hex=raw_hex,
                     type=value_type,
