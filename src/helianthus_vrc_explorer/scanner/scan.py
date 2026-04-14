@@ -697,8 +697,12 @@ def _decode_constraint_date(value: bytes) -> str:
     day = value[0]
     month = value[1]
     year = 2000 + value[2]
-    if not (1 <= month <= 12 and 1 <= day <= 31):
-        raise ValueError(f"Invalid date triplet: {value.hex()}")
+    try:
+        import datetime as _dt_mod
+
+        _dt_mod.date(year, month, day)
+    except ValueError:
+        raise ValueError(f"Invalid date triplet: {value.hex()} ({year:04d}-{month:02d}-{day:02d})")
     return f"{year:04d}-{month:02d}-{day:02d}"
 
 
@@ -727,7 +731,7 @@ def _parse_constraint_entry(
             kind="u8_range",
             min_value=min_u8,
             max_value=max_u8,
-            step_value=step_u8,
+            step_value=step_u8 if step_u8 != 0 else None,
             raw_hex=response.hex(),
         )
     if tt == 0x09:
@@ -741,7 +745,7 @@ def _parse_constraint_entry(
             kind="u16_range",
             min_value=min_u16,
             max_value=max_u16,
-            step_value=step_u16,
+            step_value=step_u16 if step_u16 != 0 else None,
             raw_hex=response.hex(),
         )
     if tt == 0x0F:
@@ -753,9 +757,9 @@ def _parse_constraint_entry(
         return ConstraintEntry(
             tt=tt,
             kind="f32_range",
-            min_value=min_f32,
-            max_value=max_f32,
-            step_value=step_f32,
+            min_value=min_f32 if math.isfinite(min_f32) else None,
+            max_value=max_f32 if math.isfinite(max_f32) else None,
+            step_value=step_f32 if math.isfinite(step_f32) else None,
             raw_hex=response.hex(),
         )
     if tt == 0x0C:
