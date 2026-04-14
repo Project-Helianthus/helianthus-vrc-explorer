@@ -7,7 +7,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from queue import Queue
 
-from helianthus_vrc_explorer.transport.base import TransportNack
+from helianthus_vrc_explorer.transport.base import TransportError, TransportNack, TransportTimeout
 from helianthus_vrc_explorer.transport.enhanced_tcp import (
     _ENH_REQ_INIT,
     _ENH_REQ_SEND,
@@ -447,3 +447,168 @@ def test_ve2_host_error_not_retried() -> None:
 
     # Should have been called exactly once — no retry
     assert call_count == 1
+
+
+def test_ve6_src_escape_rejected() -> None:
+    """VE6: src=0xA9 (ESCAPE) must be rejected."""
+    import pytest
+    with pytest.raises(ValueError, match="reserved address"):
+        EnhancedTcpTransport(EnhancedTcpConfig(src=0xA9))
+
+
+def test_ve6_src_syn_rejected() -> None:
+    """VE6: src=0xAA (SYN) must be rejected."""
+    import pytest
+    with pytest.raises(ValueError, match="reserved address"):
+        EnhancedTcpTransport(EnhancedTcpConfig(src=0xAA))
+
+
+def test_ve6_src_zero_rejected() -> None:
+    """VE6: src=0x00 must be rejected."""
+    import pytest
+    with pytest.raises(ValueError, match="reserved address"):
+        EnhancedTcpTransport(EnhancedTcpConfig(src=0x00))
+
+
+def test_ve6_src_0xff_rejected() -> None:
+    """VE6: src=0xFF must be rejected."""
+    import pytest
+    with pytest.raises(ValueError, match="reserved address"):
+        EnhancedTcpTransport(EnhancedTcpConfig(src=0xFF))
+
+
+def test_ve7_dst_escape_rejected() -> None:
+    """VE7: dst=0xA9 (ESCAPE) must be rejected."""
+    import pytest
+    transport = EnhancedTcpTransport(EnhancedTcpConfig())
+    with pytest.raises(ValueError, match="reserved address"):
+        transport.send_proto(0xA9, 0x07, 0x04, b"")
+
+
+def test_ve7_dst_syn_rejected() -> None:
+    """VE7: dst=0xAA (SYN) must be rejected."""
+    import pytest
+    transport = EnhancedTcpTransport(EnhancedTcpConfig())
+    with pytest.raises(ValueError, match="reserved address"):
+        transport.send_proto(0xAA, 0x07, 0x04, b"")
+
+
+def test_ve19r2_negative_timeout_rejected() -> None:
+    """VE19-R2: timeout_s <= 0 must be rejected."""
+    import pytest
+    with pytest.raises(ValueError, match="timeout_s"):
+        EnhancedTcpTransport(EnhancedTcpConfig(timeout_s=-1.0))
+
+
+def test_ve19r2_zero_timeout_rejected() -> None:
+    """VE19-R2: timeout_s=0 must be rejected."""
+    import pytest
+    with pytest.raises(ValueError, match="timeout_s"):
+        EnhancedTcpTransport(EnhancedTcpConfig(timeout_s=0.0))
+
+
+def test_ve19r2_nan_timeout_rejected() -> None:
+    """VE19-R2: timeout_s=NaN must be rejected."""
+    import pytest
+    with pytest.raises(ValueError, match="timeout_s"):
+        EnhancedTcpTransport(EnhancedTcpConfig(timeout_s=float("nan")))
+
+
+def test_ve19r2_port_zero_rejected() -> None:
+    """VE19-R2: port=0 must be rejected."""
+    import pytest
+    with pytest.raises(ValueError, match="port"):
+        EnhancedTcpTransport(EnhancedTcpConfig(port=0))
+
+
+def test_ve19r2_port_too_large_rejected() -> None:
+    """VE19-R2: port=99999 must be rejected."""
+    import pytest
+    with pytest.raises(ValueError, match="port"):
+        EnhancedTcpTransport(EnhancedTcpConfig(port=99999))
+
+
+def test_ve4_nack_retry_without_rearbitration() -> None:
+    """VE4: After NACK, retry telegram without re-arbitrating."""
+    src = 0xF1
+    dst = 0x15
+    request_without_crc = bytes((src, dst, 0x07, 0x04, 0x00))
+    request = request_without_crc + bytes((_crc(request_without_crc),))
+    response = bytes((0x01,))
+    response_segment = bytes((len(response),)) + response
+    response_crc = _crc(response_segment)
+
+    start_count = 0
+
+    def _handler(conn: socket.socket) -> None:
+        nonlocal start_count
+        assert _read_enh_frame(conn) == (_ENH_REQ_INIT, 0x01)
+        _write_enh_frame(conn, _ENH_RES_RESETTED, 0x01)
+
+        # First (and only) arbitration
+        assert _read_enh_frame(conn) == (_ENH_REQ_START, src)
+        _write_enh_frame(conn, _ENH_RES_STARTED, src)
+        start_count += 1
+
+        # First telegram send — will be NACKed
+        for expected in request[1:]:
+            assert _read_enh_frame(conn) == (_ENH_REQ_SEND, expected)
+            _write_bus_symbol(conn, expected)
+        _write_bus_symbol(conn, 0xFF)  # NACK
+
+        # Local retry — same telegram, NO re-arbitration
+        for expected in request[1:]:
+            assert _read_enh_frame(conn) == (_ENH_REQ_SEND, expected)
+            _write_bus_symbol(conn, expected)
+        _write_bus_symbol(conn, 0x00)  # ACK this time
+
+        # Response
+        for value in response_segment:
+            _write_bus_symbol(conn, value)
+        _write_bus_symbol(conn, response_crc)
+        assert _read_enh_frame(conn) == (_ENH_REQ_SEND, 0x00)  # ACK
+        _write_bus_symbol(conn, 0x00)
+        assert _read_enh_frame(conn) == (_ENH_REQ_SEND, 0xAA)  # SYN
+        _write_bus_symbol(conn, 0xAA)
+
+    with _run_ens_test_server(_handler) as (host, port):
+        transport = EnhancedTcpTransport(
+            EnhancedTcpConfig(host=host, port=port, timeout_s=2.0, src=src, nack_max_retries=1)
+        )
+        result = transport.send_proto(dst, 0x07, 0x04, b"")
+
+    assert result == response
+    assert start_count == 1  # Only ONE arbitration
+
+
+def test_ve23_timeout_retries_accumulate_across_reconnect() -> None:
+    """VE23: timeout_retries must not reset after reconnect."""
+    import time as _time
+
+    import pytest
+
+    connect_count = 0
+
+    def _handler(conn: socket.socket) -> None:
+        nonlocal connect_count
+        connect_count += 1
+        assert _read_enh_frame(conn) == (_ENH_REQ_INIT, 0x01)
+        _write_enh_frame(conn, _ENH_RES_RESETTED, 0x01)
+        # Never respond to START — causes timeout
+        _time.sleep(5.0)
+
+    with _run_ens_test_server(_handler) as (host, port):
+        transport = EnhancedTcpTransport(
+            EnhancedTcpConfig(
+                host=host, port=port, timeout_s=0.3, src=0xF1,
+                timeout_max_retries=1, reconnect_max_retries=1,
+                reconnect_delay_s=0.1,
+            )
+        )
+        with pytest.raises((TransportTimeout, TransportError)):
+            transport.send_proto(0x15, 0x07, 0x04, b"")
+
+    # With timeout_max_retries=1, reconnect_max_retries=1:
+    # Without VE23 fix (timeout reset): would loop indefinitely
+    # With VE23 fix: bounded number of connections
+    assert connect_count <= 3  # Bounded, not infinite

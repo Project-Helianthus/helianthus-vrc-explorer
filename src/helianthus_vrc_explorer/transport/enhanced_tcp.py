@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import math
 import random
 import socket
 import threading
@@ -428,6 +429,11 @@ class EnhancedTcpTransport(TransportInterface):
 
     def __init__(self, config: EnhancedTcpConfig) -> None:
         _validate_u8("src", config.src)
+        if config.src in (0x00, _EBUS_ESCAPE, _EBUS_SYN, 0xFF):
+            raise ValueError(
+                f"src 0x{config.src:02X} is a reserved address "
+                f"(0x00, 0xA9/ESCAPE, 0xAA/SYN, 0xFF are not valid initiator addresses)"
+            )
         if config.timeout_max_retries < 0:
             raise ValueError("timeout_max_retries must be >= 0")
         if config.collision_max_retries < 0:
@@ -438,6 +444,10 @@ class EnhancedTcpTransport(TransportInterface):
             raise ValueError("collision backoff must be >= 0 ms")
         if config.collision_backoff_max_ms < config.collision_backoff_min_ms:
             raise ValueError("collision_backoff_max_ms must be >= collision_backoff_min_ms")
+        if config.timeout_s <= 0 or not math.isfinite(config.timeout_s):
+            raise ValueError(f"timeout_s must be positive and finite, got {config.timeout_s}")
+        if not (1 <= config.port <= 65535):
+            raise ValueError(f"port must be in range 1..65535, got {config.port}")
 
         self._config = config
         self._trace_seq = 0
@@ -658,6 +668,11 @@ class EnhancedTcpTransport(TransportInterface):
             kind, command, data = self._read_message()
             if kind != "frame":
                 continue
+            if command == _ENH_RES_RECEIVED:
+                # VE11: Bus traffic extends deadline — received frames are
+                # normal activity and should not consume arbitration budget.
+                deadline = time.monotonic() + self._config.timeout_s
+                continue
             if command == _ENH_RES_STARTED and data == initiator:
                 self._trace(f"START_RESP started initiator=0x{data:02X}")
                 self._reset_parser()
@@ -748,6 +763,11 @@ class EnhancedTcpTransport(TransportInterface):
         expect_response: bool = True,
     ) -> bytes:
         _validate_u8("dst", dst)
+        if dst in (0x00, _EBUS_ESCAPE, _EBUS_SYN):
+            raise ValueError(
+                f"dst 0x{dst:02X} is a reserved address "
+                f"(0x00, 0xA9/ESCAPE, 0xAA/SYN are not valid destination addresses)"
+            )
         _validate_u8("primary", primary)
         _validate_u8("secondary", secondary)
         if not isinstance(payload, (bytes, bytearray, memoryview)):
@@ -811,7 +831,14 @@ class EnhancedTcpTransport(TransportInterface):
                             ) from exc
                         time.sleep(self._config.reconnect_delay_s)
                         continue
-                    timeout_retries = 0
+                    # VE23: Do NOT reset timeout_retries — counter must be
+                    # cumulative across the entire _send_with_policy invocation
+                    # to prevent unbounded retry loops.
+                    # VE33: Reset collision/nack counters — reconnect establishes
+                    # a fresh bus context where old collision/nack state is
+                    # meaningless.
+                    collision_retries = 0
+                    nack_retries = 0
                     continue
                 # First timeout: reset parser and retry on the same session.
                 self._reset_parser()
@@ -907,58 +934,68 @@ class EnhancedTcpTransport(TransportInterface):
             f"primary=0x{primary:02X} secondary=0x{secondary:02X} payload={_short_hex(payload)}"
         )
 
-        for symbol in telegram[1:]:
-            self._send_symbol_with_echo(symbol)
+        # VE4: Local NACK retry without re-arbitration (per eBUS spec 7.4).
+        # After NACK the bus is still owned — retry the telegram directly.
+        for nack_attempt in range(2):  # original + 1 retry
+            if nack_attempt > 0:
+                self._trace(f"#{seq} LOCAL_NACK_RETRY attempt={nack_attempt}")
 
-        if dst == _ADDRESS_BROADCAST or not expect_response:
-            self._send_end_of_message()
-            self._trace(f"#{seq} RECV_PROTO broadcast_or_no_response")
-            return b""
+            for symbol in telegram[1:]:
+                self._send_symbol_with_echo(symbol)
 
-        ack = self._recv_bus_symbol()
-        if ack == _EBUS_NACK:
-            raise _EnhancedNack("nack received while waiting for command ack")
-        if ack == _EBUS_SYN:
-            raise TransportTimeout("syn received while waiting for command ack")
-        if ack != _EBUS_ACK:
-            raise TransportError(f"unexpected symbol 0x{ack:02X} while waiting for command ack")
-
-        if _is_initiator_capable_address(dst):
-            self._send_end_of_message()
-            self._trace(f"#{seq} RECV_PROTO initiator_initiator=no_response")
-            return b""
-
-        for response_attempt in range(2):
-            length = self._recv_bus_symbol()
-            if length == _EBUS_SYN:
-                raise TransportTimeout("syn received while waiting for response length")
-
-            response = bytearray()
-            for _ in range(length):
-                value = self._recv_bus_symbol()
-                if value == _EBUS_SYN:
-                    raise TransportTimeout("syn received while waiting for response data")
-                response.append(value)
-
-            crc_value = self._recv_bus_symbol()
-            if crc_value == _EBUS_SYN:
-                raise TransportTimeout("syn received while waiting for response crc")
-
-            segment = bytes((length,)) + bytes(response)
-            if _crc(segment) != crc_value:
-                self._send_symbol_with_echo(_EBUS_NACK)
-                if response_attempt == 0:
-                    continue
+            if dst == _ADDRESS_BROADCAST or not expect_response:
                 self._send_end_of_message()
-                raise _EnhancedCrcMismatch("response crc mismatch")
+                self._trace(f"#{seq} RECV_PROTO broadcast_or_no_response")
+                return b""
 
-            self._send_symbol_with_echo(_EBUS_ACK)
-            self._send_end_of_message()
-            parsed = bytes(response)
-            self._trace(f"#{seq} PARSED_PROTO len={len(parsed)} hex={_short_hex(parsed)}")
-            return parsed
+            ack = self._recv_bus_symbol()
+            if ack == _EBUS_NACK:
+                if nack_attempt == 0:
+                    continue  # retry without re-arbitration
+                raise _EnhancedNack("nack received (local retry exhausted)")
+            if ack == _EBUS_SYN:
+                raise TransportTimeout("syn received while waiting for command ack")
+            if ack != _EBUS_ACK:
+                raise TransportError(f"unexpected symbol 0x{ack:02X} while waiting for command ack")
 
-        raise TransportTimeout("unreachable enhanced response loop")
+            if _is_initiator_capable_address(dst):
+                self._send_end_of_message()
+                self._trace(f"#{seq} RECV_PROTO initiator_initiator=no_response")
+                return b""
+
+            for response_attempt in range(2):
+                length = self._recv_bus_symbol()
+                if length == _EBUS_SYN:
+                    raise TransportTimeout("syn received while waiting for response length")
+
+                response = bytearray()
+                for _ in range(length):
+                    value = self._recv_bus_symbol()
+                    if value == _EBUS_SYN:
+                        raise TransportTimeout("syn received while waiting for response data")
+                    response.append(value)
+
+                crc_value = self._recv_bus_symbol()
+                if crc_value == _EBUS_SYN:
+                    raise TransportTimeout("syn received while waiting for response crc")
+
+                segment = bytes((length,)) + bytes(response)
+                if _crc(segment) != crc_value:
+                    self._send_symbol_with_echo(_EBUS_NACK)
+                    if response_attempt == 0:
+                        continue
+                    self._send_end_of_message()
+                    raise _EnhancedCrcMismatch("response crc mismatch")
+
+                self._send_symbol_with_echo(_EBUS_ACK)
+                self._send_end_of_message()
+                parsed = bytes(response)
+                self._trace(f"#{seq} PARSED_PROTO len={len(parsed)} hex={_short_hex(parsed)}")
+                return parsed
+
+            raise TransportTimeout("unreachable enhanced response loop")
+
+        raise TransportTimeout("unreachable enhanced nack retry loop")
 
     def command_lines(self, command: str, *, read_all: bool = False) -> list[str]:
         _ = read_all
