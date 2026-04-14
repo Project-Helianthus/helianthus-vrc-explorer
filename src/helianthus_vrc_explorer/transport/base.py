@@ -27,6 +27,21 @@ class TransportCommandNotEnabled(TransportError):
     """
 
 
+class TransportHostError(TransportError):
+    """Raised when the adapter reports a host-side error (invalid command/parameter).
+
+    Host errors are non-retryable — the request was malformed from the adapter's
+    perspective.  Retrying the identical request would produce the same error.
+    """
+
+
+class TransportDisconnected(TransportError):
+    """Raised when the TCP connection is cleanly closed by the peer (EOF).
+
+    Distinguished from TransportError to allow targeted reconnect handling.
+    """
+
+
 class TransportInterface(ABC):
     """Transport interface for sending B524 payloads and receiving raw responses."""
 

@@ -12,6 +12,7 @@ from helianthus_vrc_explorer.transport.enhanced_tcp import (
     _ENH_REQ_INIT,
     _ENH_REQ_SEND,
     _ENH_REQ_START,
+    _ENH_RES_ERROR_HOST,
     _ENH_RES_RECEIVED,
     _ENH_RES_RESETTED,
     _ENH_RES_STARTED,
@@ -372,3 +373,77 @@ def test_ve17_session_depth_never_negative() -> None:
     assert transport._session_depth >= 0
     transport.close()
     assert transport._session_depth >= 0
+
+
+def test_ve15_malformed_enh_byte_no_immediate_close() -> None:
+    """VE15: A single malformed ENH byte should not close the transport."""
+
+    src = 0xF1
+    dst = 0x15
+    request_without_crc = bytes((src, dst, 0x07, 0x04, 0x00))
+    request = request_without_crc + bytes((_crc(request_without_crc),))
+    response = bytes((0x01, 0x02))
+    response_segment = bytes((len(response),)) + response
+    response_crc = _crc(response_segment)
+
+    def _handler(conn: socket.socket) -> None:
+        assert _read_enh_frame(conn) == (_ENH_REQ_INIT, 0x01)
+        _write_enh_frame(conn, _ENH_RES_RESETTED, 0x01)
+
+        assert _read_enh_frame(conn) == (_ENH_REQ_START, src)
+        _write_enh_frame(conn, _ENH_RES_STARTED, src)
+
+        for expected in request[1:]:
+            assert _read_enh_frame(conn) == (_ENH_REQ_SEND, expected)
+            _write_bus_symbol(conn, expected)
+
+        # Inject a single malformed byte (0x85 has bit pattern 10xxxxxx — invalid start)
+        conn.sendall(bytes((0x85,)))
+
+        # Then send valid response
+        _write_bus_symbol(conn, 0x00)  # ACK
+        for value in response_segment:
+            _write_bus_symbol(conn, value)
+        _write_bus_symbol(conn, response_crc)
+
+        assert _read_enh_frame(conn) == (_ENH_REQ_SEND, 0x00)  # ACK
+        _write_bus_symbol(conn, 0x00)
+        assert _read_enh_frame(conn) == (_ENH_REQ_SEND, 0xAA)  # SYN
+        _write_bus_symbol(conn, 0xAA)
+
+    with _run_ens_test_server(_handler) as (host, port):
+        transport = EnhancedTcpTransport(
+            EnhancedTcpConfig(host=host, port=port, timeout_s=2.0, src=src)
+        )
+        result = transport.send_proto(dst, 0x07, 0x04, b"")
+
+    assert result == response
+
+
+def test_ve2_host_error_not_retried() -> None:
+    """VE2: TransportHostError should propagate without retry."""
+    import pytest
+
+    from helianthus_vrc_explorer.transport.base import TransportHostError
+
+    call_count = 0
+
+    def _handler(conn: socket.socket) -> None:
+        nonlocal call_count
+        assert _read_enh_frame(conn) == (_ENH_REQ_INIT, 0x01)
+        _write_enh_frame(conn, _ENH_RES_RESETTED, 0x01)
+
+        assert _read_enh_frame(conn) == (_ENH_REQ_START, 0xF7)
+        # Respond with host error
+        _write_enh_frame(conn, _ENH_RES_ERROR_HOST, 0x01)
+        call_count += 1
+
+    with _run_ens_test_server(_handler) as (host, port):
+        transport = EnhancedTcpTransport(
+            EnhancedTcpConfig(host=host, port=port, timeout_s=1.0, collision_max_retries=3)
+        )
+        with pytest.raises(TransportHostError):
+            transport.send_proto(0x15, 0x07, 0x04, b"")
+
+    # Should have been called exactly once — no retry
+    assert call_count == 1

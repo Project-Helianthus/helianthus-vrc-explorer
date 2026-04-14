@@ -12,7 +12,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO
 
-from .base import TransportError, TransportInterface, TransportNack, TransportTimeout
+from .base import (
+    TransportDisconnected,
+    TransportError,
+    TransportHostError,
+    TransportInterface,
+    TransportNack,
+    TransportTimeout,
+)
 
 _EBUS_ESCAPE = 0xA9
 _EBUS_SYN = 0xAA
@@ -438,6 +445,7 @@ class EnhancedTcpTransport(TransportInterface):
         self._session: _EnhancedTcpSession | None = None
         self._messages = deque[tuple[str, int, int]]()
         self._enh_pending_first: int | None = None
+        self._malformed_count: int = 0
         self._lock = threading.RLock()
 
     def _trace(self, message: str) -> None:
@@ -458,6 +466,7 @@ class EnhancedTcpTransport(TransportInterface):
     def _reset_parser(self) -> None:
         self._messages.clear()
         self._enh_pending_first = None
+        self._malformed_count = 0
 
     def close(self) -> None:
         with self._lock:
@@ -575,7 +584,7 @@ class EnhancedTcpTransport(TransportInterface):
 
             if not chunk:
                 self.close()
-                raise TransportError(
+                raise TransportDisconnected(
                     f"Enhanced adapter disconnected {self._config.host}:{self._config.port}"
                 )
 
@@ -589,19 +598,30 @@ class EnhancedTcpTransport(TransportInterface):
             if value & 0x80 == 0:
                 return ("data", value, 0)
             if value & 0xC0 == 0x80:
-                self.close()
-                raise TransportError(f"Malformed ENH byte pair start 0x{value:02X}")
+                self._malformed_count += 1
+                self._trace(f"Malformed ENH byte pair start 0x{value:02X} (count={self._malformed_count})")
+                if self._malformed_count >= 3:
+                    self._malformed_count = 0
+                    self.close()
+                    raise TransportError(f"Malformed ENH byte pair start 0x{value:02X} (3 consecutive)")
+                return None
             self._enh_pending_first = value
             return None
 
         if value & 0xC0 != 0x80:
             self._enh_pending_first = None
-            self.close()
-            raise TransportError(f"Malformed ENH byte pair end 0x{value:02X}")
+            self._malformed_count += 1
+            self._trace(f"Malformed ENH byte pair end 0x{value:02X} (count={self._malformed_count})")
+            if self._malformed_count >= 3:
+                self._malformed_count = 0
+                self.close()
+                raise TransportError(f"Malformed ENH byte pair end 0x{value:02X} (3 consecutive)")
+            return None
 
         first = self._enh_pending_first
         self._enh_pending_first = None
         assert first is not None
+        self._malformed_count = 0
         command = (first >> 2) & 0x0F
         data = ((first & 0x03) << 6) | (value & 0x3F)
         return ("frame", command, data)
@@ -615,7 +635,7 @@ class EnhancedTcpTransport(TransportInterface):
                 kind, command, data = self._read_message()
             except TransportTimeout:
                 self._trace("INIT_RESP timeout")
-                return
+                raise
             if kind != "frame":
                 continue
             if command == _ENH_RES_RESETTED:
@@ -627,7 +647,7 @@ class EnhancedTcpTransport(TransportInterface):
                 raise TransportError(f"ENH init eBUS error 0x{data:02X}")
             if command == _ENH_RES_ERROR_HOST:
                 self._trace(f"INIT_RESP host_error=0x{data:02X}")
-                raise TransportError(f"ENH init host error 0x{data:02X}")
+                raise TransportHostError(f"ENH init host error 0x{data:02X}")
         self._trace("INIT_RESP deadline expired (bus data flooding)")
 
     def _start_arbitration(self, initiator: int) -> None:
@@ -655,7 +675,7 @@ class EnhancedTcpTransport(TransportInterface):
             if command == _ENH_RES_ERROR_HOST:
                 self._trace(f"START_RESP host_error=0x{data:02X}")
                 self._reset_parser()
-                raise _EnhancedCollision(f"enhanced arbitration host error 0x{data:02X}")
+                raise TransportHostError(f"enhanced arbitration host error 0x{data:02X}")
             if command == _ENH_RES_RESETTED:
                 self._trace(f"START_RESP reset features=0x{data:02X}")
                 self.close()
@@ -680,10 +700,15 @@ class EnhancedTcpTransport(TransportInterface):
                 raise TransportTimeout(f"Adapter reset during bus read (features=0x{data:02X})")
             if command == _ENH_RES_INFO:
                 continue
+            if command == _ENH_RES_FAILED:
+                raise _EnhancedCollision(f"Bus FAILED during read (data=0x{data:02X})")
             if command == _ENH_RES_ERROR_EBUS:
                 raise TransportError(f"enhanced bus read eBUS error 0x{data:02X}")
             if command == _ENH_RES_ERROR_HOST:
-                raise TransportError(f"enhanced bus read host error 0x{data:02X}")
+                raise TransportHostError(f"enhanced bus read host error 0x{data:02X}")
+            # Unknown ENH command — skip silently (VE28: prevents spin on padding).
+            self._trace(f"Unknown ENH command 0x{command:02X} data=0x{data:02X}")
+            continue
         raise TransportTimeout("Bus symbol read deadline expired")
 
     def _send_symbol_with_echo(self, symbol: int) -> None:
@@ -794,6 +819,29 @@ class EnhancedTcpTransport(TransportInterface):
                     f"#{seq} RETRY type=timeout "
                     f"n={timeout_retries}/{self._config.timeout_max_retries}"
                 )
+            except TransportHostError:
+                # Host errors are non-retryable — the request is malformed.
+                raise
+            except TransportDisconnected as exc:
+                # Clean EOF — attempt TCP reconnect.
+                reconnect_retries += 1
+                if reconnect_retries > self._config.reconnect_max_retries:
+                    self.close()
+                    raise TransportError(
+                        f"{exc} (reconnect retries exhausted "
+                        f"({self._config.reconnect_max_retries}))"
+                    ) from exc
+                try:
+                    self._reconnect(seq, reconnect_retries)
+                except (TransportError, TransportTimeout, OSError) as reconn_exc:
+                    self._trace(f"#{seq} RECONNECT failed: {reconn_exc}")
+                    if reconnect_retries >= self._config.reconnect_max_retries:
+                        raise TransportError(
+                            f"{exc} (reconnect failed: {reconn_exc})"
+                        ) from exc
+                    time.sleep(self._config.reconnect_delay_s)
+                    continue
+                continue
             except _EnhancedCollision as exc:
                 # Collision is normal on a shared bus.  Per eBUS spec
                 # section 6.2.2.2 the adapter waits for the winner's
