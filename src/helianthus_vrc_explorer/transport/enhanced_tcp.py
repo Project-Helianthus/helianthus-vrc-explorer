@@ -376,6 +376,19 @@ def _crc_update(crc: int, value: int) -> int:
 
 
 def _crc(data: bytes) -> int:
+    """Compute eBUS CRC-8 over logical frame bytes.
+
+    Per eBUS specification, the CRC is computed over the wire-expanded form
+    of the frame.  Logical bytes 0xA9 (ESCAPE) and 0xAA (SYN) are expanded
+    to their two-byte wire sequences [0xA9, 0x00] and [0xA9, 0x01] before
+    feeding into the CRC polynomial.  This function accepts logical bytes
+    and performs the expansion internally -- callers should NOT pre-expand.
+
+    The enhanced adapter firmware handles wire escape encoding/decoding
+    transparently: ENH SEND carries logical bytes; ENH RECEIVED returns
+    logical bytes.  CRC computation is the only place where escape expansion
+    matters to the client.
+    """
     value = 0
     for item in data:
         if item == _EBUS_ESCAPE:
@@ -672,6 +685,17 @@ class EnhancedTcpTransport(TransportInterface):
         raise TransportTimeout("Bus symbol read deadline expired")
 
     def _send_symbol_with_echo(self, symbol: int) -> None:
+        """Send a logical eBUS byte via ENH SEND and verify the echo.
+
+        The enhanced adapter firmware handles wire escape encoding
+        (0xA9->[0xA9,0x00], 0xAA->[0xA9,0x01]) transparently.  The ENH
+        protocol operates at the logical byte level -- no client-side
+        escape encoding is needed or desired.
+
+        Audit VE1/VE20: Verified correct -- adapter firmware handles wire
+        escape encoding.  Client-side escaping would cause double-encoding
+        corruption on the physical bus.
+        """
         self._send_enh_frame(_ENH_REQ_SEND, symbol)
         echo = self._recv_bus_symbol()
         if echo == _EBUS_SYN and symbol != _EBUS_SYN:
