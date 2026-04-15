@@ -134,13 +134,21 @@ def parse_b555_timer_read_response(payload: bytes) -> B555TimerRead:
     # VE17-R2: Validate time components.
     # Allow 0xFF sentinel ("no timer") and 24:00 ("end of day").
     for label, h, m in (("start", sh, sm), ("end", eh, em)):
-        if h == 0xFF:
-            continue
+        # R6-Codex-Cross-03: Sentinel must be symmetric — both hour AND
+        # minute must be 0xFF for a valid sentinel.  Half-sentinel values
+        # like (0xFF, 30) or (12, 0xFF) produce impossible times.
+        if h == 0xFF and m == 0xFF:
+            continue  # Valid sentinel: "no timer"
+        if h == 0xFF or m == 0xFF:
+            raise ValueError(
+                f"Invalid {label} half-sentinel: hour=0x{h:02X} minute=0x{m:02X} "
+                f"(both must be 0xFF for sentinel)"
+            )
         if h > 24:
             raise ValueError(f"Invalid {label} hour: {h}")
         if h == 24 and m != 0:
             raise ValueError(f"Invalid {label} time: 24:{m:02d} (only 24:00 is valid)")
-        if m != 0xFF and m > 59:
+        if m > 59:
             raise ValueError(f"Invalid {label} minute: {m}")
     return B555TimerRead(
         status=blob[0],

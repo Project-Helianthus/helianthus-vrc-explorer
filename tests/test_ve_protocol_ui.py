@@ -67,6 +67,21 @@ class TestVE17R2TimerValidation:
         with pytest.raises(ValueError, match="24:30"):
             parse_b555_timer_read_response(_timer_payload(0x00, 0, 0, 24, 30))
 
+    def test_half_sentinel_hour_0xff_minute_normal_rejected(self) -> None:
+        """R6-Codex-Cross-03: hour=0xFF + minute=30 is an invalid half-sentinel."""
+        with pytest.raises(ValueError, match="half-sentinel"):
+            parse_b555_timer_read_response(_timer_payload(0x00, 0xFF, 30, 0, 0))
+
+    def test_half_sentinel_hour_normal_minute_0xff_rejected(self) -> None:
+        """R6-Codex-Cross-03: hour=12 + minute=0xFF is an invalid half-sentinel."""
+        with pytest.raises(ValueError, match="half-sentinel"):
+            parse_b555_timer_read_response(_timer_payload(0x00, 12, 0xFF, 0, 0))
+
+    def test_half_sentinel_end_time_rejected(self) -> None:
+        """R6-Codex-Cross-03: end time with half-sentinel rejected too."""
+        with pytest.raises(ValueError, match="half-sentinel"):
+            parse_b555_timer_read_response(_timer_payload(0x00, 6, 0, 0xFF, 15))
+
 
 # ---------------------------------------------------------------------------
 # VE18-R3: _json_for_html must escape single quotes
