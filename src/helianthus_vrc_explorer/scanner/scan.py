@@ -682,9 +682,9 @@ class ConstraintEntry:
 
     tt: int
     kind: str
-    min_value: int | float | str
-    max_value: int | float | str
-    step_value: int | float
+    min_value: int | float | str | None
+    max_value: int | float | str | None
+    step_value: int | float | None
     raw_hex: str
     source: str = "opcode_0x01"
     scope: str = LIVE_PROBE_CONSTRAINT_SCOPE
@@ -701,8 +701,10 @@ def _decode_constraint_date(value: bytes) -> str:
         import datetime as _dt_mod
 
         _dt_mod.date(year, month, day)
-    except ValueError:
-        raise ValueError(f"Invalid date triplet: {value.hex()} ({year:04d}-{month:02d}-{day:02d})")
+    except ValueError as exc:
+        raise ValueError(
+            f"Invalid date triplet: {value.hex()} ({year:04d}-{month:02d}-{day:02d})"
+        ) from exc
     return f"{year:04d}-{month:02d}-{day:02d}"
 
 
@@ -1412,12 +1414,14 @@ def scan_b524(
                     if constraints:
                         constraint_map[group.group] = constraints
             except KeyboardInterrupt:
-                # VE32: Preserve partial constraint results on interrupt.
+                # VE32: Preserve partial constraint results, then re-raise
+                # so the outer handler sets meta.incomplete=true.
                 if observer is not None:
                     observer.log(
                         "Constraint probe interrupted — partial results preserved.",
                         level="warn",
                     )
+                raise
             if observer is not None:
                 observer.phase_finish("constraint_probe")
                 if not constraint_map:

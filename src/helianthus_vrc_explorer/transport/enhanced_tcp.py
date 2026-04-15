@@ -621,11 +621,14 @@ class EnhancedTcpTransport(TransportInterface):
                 return ("data", value, 0)
             if value & 0xC0 == 0x80:
                 self._malformed_count += 1
-                self._trace(f"Malformed ENH byte pair start 0x{value:02X} (count={self._malformed_count})")
-                if self._malformed_count >= 3:
+                cnt = self._malformed_count
+                self._trace(f"Malformed ENH start 0x{value:02X} (n={cnt})")
+                if cnt >= 3:
                     self._malformed_count = 0
                     self.close()
-                    raise TransportError(f"Malformed ENH byte pair start 0x{value:02X} (3 consecutive)")
+                    raise TransportError(
+                        f"Malformed ENH start 0x{value:02X} (3 consecutive)"
+                    )
                 return None
             self._enh_pending_first = value
             return None
@@ -633,11 +636,14 @@ class EnhancedTcpTransport(TransportInterface):
         if value & 0xC0 != 0x80:
             self._enh_pending_first = None
             self._malformed_count += 1
-            self._trace(f"Malformed ENH byte pair end 0x{value:02X} (count={self._malformed_count})")
-            if self._malformed_count >= 3:
+            cnt = self._malformed_count
+            self._trace(f"Malformed ENH end 0x{value:02X} (n={cnt})")
+            if cnt >= 3:
                 self._malformed_count = 0
                 self.close()
-                raise TransportError(f"Malformed ENH byte pair end 0x{value:02X} (3 consecutive)")
+                raise TransportError(
+                    f"Malformed ENH end 0x{value:02X} (3 consecutive)"
+                )
             return None
 
         first = self._enh_pending_first
@@ -676,14 +682,19 @@ class EnhancedTcpTransport(TransportInterface):
     def _start_arbitration(self, initiator: int) -> None:
         self._trace(f"START initiator=0x{initiator:02X}")
         self._send_enh_frame(_ENH_REQ_START, initiator)
-        deadline = time.monotonic() + self._config.timeout_s
-        while time.monotonic() < deadline:
+        now = time.monotonic()
+        deadline = now + self._config.timeout_s
+        # VE11: Absolute cap prevents infinite wait on a flooded bus.
+        # Activity deadline resets on each RECEIVED frame, but the
+        # absolute cap (10× timeout) is never extended.
+        absolute_cap = now + self._config.timeout_s * 10
+        while time.monotonic() < min(deadline, absolute_cap):
             kind, command, data = self._read_message()
             if kind != "frame":
                 continue
             if command == _ENH_RES_RECEIVED:
-                # VE11: Bus traffic extends deadline — received frames are
-                # normal activity and should not consume arbitration budget.
+                # VE11: Bus traffic extends activity deadline — received
+                # frames should not consume arbitration budget.
                 deadline = time.monotonic() + self._config.timeout_s
                 continue
             if command == _ENH_RES_STARTED and data == initiator:
@@ -966,7 +977,9 @@ class EnhancedTcpTransport(TransportInterface):
             if ack == _EBUS_NACK:
                 if nack_attempt == 0:
                     continue  # retry without re-arbitration
-                raise _EnhancedNack("nack received (local retry exhausted)")
+                # Local retry exhausted — raise non-retryable TransportNack
+                # so _send_with_policy does NOT re-arbitrate again.
+                raise TransportNack("nack received (local retry exhausted)")
             if ack == _EBUS_SYN:
                 raise TransportTimeout("syn received while waiting for command ack")
             if ack != _EBUS_ACK:
