@@ -671,11 +671,12 @@ class EnhancedTcpTransport(TransportInterface):
         self._malformed_count = 0
         command = (first >> 2) & 0x0F
         data = ((first & 0x03) << 6) | (value & 0x3F)
-        # D3: Reject undefined ENH command nibbles at parse level
-        # (aligns with Go's stricter ErrInvalidPayload validation).
+        # D3: Log undefined ENH command nibbles at parse level.
+        # Still returned as ("frame", ...) so _read_message yields it to
+        # callers — prevents spin if adapter streams unknown frames, and
+        # lets deadline checks in _recv_bus_symbol/_start_arbitration fire.
         if command not in _ENH_VALID_RESPONSE_COMMANDS:
-            self._trace(f"Rejected undefined ENH command 0x{command:02X}")
-            return None
+            self._trace(f"Unknown ENH command 0x{command:02X} data=0x{data:02X}")
         return ("frame", command, data)
 
     def _init_transport(self, *, features: int) -> None:
