@@ -62,9 +62,9 @@ class RegisterEntry(TypedDict):
     # Optional constraint dictionary annotation sourced from opcode 0x01 (01 GG RR).
     constraint_tt: NotRequired[str]
     constraint_type: NotRequired[str]
-    constraint_min: NotRequired[int | float | str]
-    constraint_max: NotRequired[int | float | str]
-    constraint_step: NotRequired[int | float]
+    constraint_min: NotRequired[int | float | str | None]
+    constraint_max: NotRequired[int | float | str | None]
+    constraint_step: NotRequired[int | float | None]
     constraint_source: NotRequired[str]
     constraint_scope: NotRequired[str]
     constraint_provenance: NotRequired[str]
