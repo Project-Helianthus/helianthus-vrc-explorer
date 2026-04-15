@@ -702,6 +702,7 @@ class EnhancedTcpTransport(TransportInterface):
                 # VE11: Bus traffic extends activity deadline — received
                 # frames should not consume arbitration budget.
                 deadline = time.monotonic() + self._config.timeout_s
+                mismatch_count = 0  # Reset: non-mismatch traffic seen
                 continue
             if command == _ENH_RES_STARTED and data == initiator:
                 self._trace(f"START_RESP started initiator=0x{data:02X}")
