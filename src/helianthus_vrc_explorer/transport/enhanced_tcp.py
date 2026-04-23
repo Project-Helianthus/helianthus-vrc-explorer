@@ -957,6 +957,12 @@ class EnhancedTcpTransport(TransportInterface):
                     self.close()
                     self._open_session()
                     raise TransportTimeout(f"Adapter reset during INFO (features=0x{data:02X})")
+                if command == _ENH_RES_RECEIVED:
+                    # Busy-bus background traffic can still surface as RECEIVED
+                    # while an INFO request is pending. That frame is unrelated
+                    # to the INFO response and must not fail the request.
+                    self._trace(f"INFO ignore RECEIVED data=0x{data:02X}")
+                    continue
                 # Unknown command in INFO path — explicit error, not timeout.
                 self._reset_parser()
                 raise TransportError(

@@ -1419,6 +1419,30 @@ def test_xr2_info_unknown_command_explicit_error() -> None:
             transport.request_info(0x00)
 
 
+def test_xr2_info_ignores_unsolicited_received() -> None:
+    """XR2: unsolicited RECEIVED during INFO wait is busy-bus background traffic.
+
+    The adapter may surface _ENH_RES_RECEIVED while other masters are active.
+    request_info() must ignore that frame and continue waiting for the INFO
+    payload instead of failing the request.
+    """
+
+    def _handler(conn: socket.socket) -> None:
+        assert _read_enh_frame(conn) == (_ENH_REQ_INIT, 0x01)
+        _write_enh_frame(conn, _ENH_RES_RESETTED, 0x01)
+        assert _read_enh_frame(conn) == (_ENH_REQ_INFO, 0x00)
+        _write_enh_frame(conn, _ENH_RES_RECEIVED, 0xAA)
+        _write_enh_frame(conn, _ENH_RES_INFO, 0x01)
+        _write_enh_frame(conn, _ENH_RES_INFO, 0x42)
+
+    with _run_ens_test_server(_handler) as (host, port):
+        transport = EnhancedTcpTransport(EnhancedTcpConfig(host=host, port=port, timeout_s=2.0))
+        with transport.session():
+            result = transport.request_info(0x00)
+
+    assert result == b"\x42"
+
+
 def test_xr2_info_truncated_payload_timeout() -> None:
     """XR2 negative: INFO with length=3 but only 1 data frame times out."""
     import pytest
