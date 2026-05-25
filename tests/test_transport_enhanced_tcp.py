@@ -1314,12 +1314,17 @@ def test_xr2_info_stale_response_drained() -> None:
     discarding the stale frame.  Only the fresh response is returned.
     """
 
+    import time as _time
+
+    stale_sent = threading.Event()
+
     def _handler(conn: socket.socket) -> None:
         assert _read_enh_frame(conn) == (_ENH_REQ_INIT, 0x01)
         # Send RESETTED + stale INFO in one burst — both land in kernel
         # buffer before the client calls request_info().
         _write_enh_frame(conn, _ENH_RES_RESETTED, 0x01)
         _write_enh_frame(conn, _ENH_RES_INFO, 0xBB)  # stale
+        stale_sent.set()
 
         # Wait for the actual INFO request
         cmd, data = _read_enh_frame(conn)
@@ -1332,6 +1337,10 @@ def test_xr2_info_stale_response_drained() -> None:
     with _run_ens_test_server(_handler) as (host, port):
         transport = EnhancedTcpTransport(EnhancedTcpConfig(host=host, port=port, timeout_s=2.0))
         with transport.session():
+            assert stale_sent.wait(2.0), "server did not send stale INFO"
+            # Give loopback delivery a deterministic chance to put the stale
+            # INFO in the client kernel buffer before request_info() drains it.
+            _time.sleep(0.05)
             # _reset_parser() in request_info drains stale 0xBB from
             # kernel buffer before sending the new INFO request.
             result = transport.request_info(0x00)
