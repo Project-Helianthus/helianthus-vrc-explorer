@@ -74,7 +74,10 @@ mapping is confirmed without reproducible support.
 - Keep commits purposeful and describe validation in the pull request.
 - Use the repository issue and pull-request templates. Do not include private
   infrastructure or secrets in their text.
-- Do not merge unless the maintainer explicitly requests it.
+- Resolve every valid P0-P2 finding, rerun validation after fixes, and obtain a
+  fresh exact-HEAD `NO_BLOCKING_FINDINGS` review.
+- Squash merge only after applicable checks and review gates are green. Verify
+  remote `main` and stop at the requested boundary.
 
 ## Validation
 
