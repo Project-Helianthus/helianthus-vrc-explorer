@@ -1242,7 +1242,7 @@ def scan_b524(
 ) -> dict[str, Any]:
     """Scan a VRC regulator using B524 and return a JSON-serializable artifact.
 
-    Implements the Phase A/B/C/D algorithm described in `AGENTS.md`:
+    Implements the four-phase scan algorithm:
     - Phase A: group discovery via directory probes
     - Phase B: group classification via GROUP_CONFIG
     - Phase C: instance discovery for groups whose configured ii_max is > 0
@@ -2219,7 +2219,7 @@ def scan_vrc(
 def default_output_filename(*, dst: int, scan_timestamp: str | None = None) -> str:
     """Return the default artifact file name.
 
-    Format (per `AGENTS.md`): `b524_scan_<DST>_<ISO8601>.json`
+    Format: `b524_scan_<DST>_<ISO8601>.json`
     """
 
     stamp = scan_timestamp

@@ -2,62 +2,20 @@ from __future__ import annotations
 
 import argparse
 import csv
-import io
 from pathlib import Path
 
 EXPECTED_HEADER = ["model_number", "marketing_name", "ebus_model", "notes"]
-START_MARKER = "<!-- models.csv:start -->"
-END_MARKER = "<!-- models.csv:end -->"
 
 
-def _extract_models_csv_block(markdown: str) -> str:
-    start = markdown.find(START_MARKER)
-    if start == -1:
-        raise ValueError(f"Missing start marker: {START_MARKER}")
-    start += len(START_MARKER)
-
-    end = markdown.find(END_MARKER, start)
-    if end == -1:
-        raise ValueError(f"Missing end marker: {END_MARKER}")
-
-    block = markdown[start:end].strip()
-    if not block:
-        raise ValueError("models.csv block is empty")
-
-    lines = block.splitlines()
-    if lines and lines[0].lstrip().startswith("```"):
-        # Allow fenced code blocks for readability:
-        # ```csv
-        # ...
-        # ```
-        fence_end = None
-        for i in range(len(lines) - 1, 0, -1):
-            if lines[i].strip().startswith("```"):
-                fence_end = i
-                break
-        if fence_end is None or fence_end == 0:
-            raise ValueError("Unterminated fenced block in models.csv section")
-        lines = lines[1:fence_end]
-
-    csv_text = "\n".join(lines).strip("\n") + "\n"
-    return csv_text
-
-
-def load_models_rows_from_agents_md(agents_md_path: Path) -> list[dict[str, str]]:
-    markdown = agents_md_path.read_text(encoding="utf-8")
-    csv_text = _extract_models_csv_block(markdown)
-
-    reader = csv.DictReader(io.StringIO(csv_text))
+def load_models_rows_from_csv(models_csv_path: Path) -> list[dict[str, str]]:
+    with models_csv_path.open(newline="", encoding="utf-8") as models_csv:
+        reader = csv.DictReader(models_csv)
+        rows = [{key: (row.get(key) or "").strip() for key in EXPECTED_HEADER} for row in reader]
     if reader.fieldnames != EXPECTED_HEADER:
         raise ValueError(
-            f"Unexpected CSV header in {agents_md_path}. "
+            f"Unexpected CSV header in {models_csv_path}. "
             f"expected={EXPECTED_HEADER} got={reader.fieldnames}"
         )
-
-    rows: list[dict[str, str]] = []
-    for row in reader:
-        normalized = {k: (row.get(k) or "").strip() for k in EXPECTED_HEADER}
-        rows.append(normalized)
 
     seen_model_numbers: set[str] = set()
     for row in rows:
@@ -68,7 +26,10 @@ def load_models_rows_from_agents_md(agents_md_path: Path) -> list[dict[str, str]
             raise ValueError(f"Duplicate model_number: {model_number}")
         seen_model_numbers.add(model_number)
 
-    rows.sort(key=lambda r: int(r["model_number"]))
+    if [row["model_number"] for row in rows] != sorted(
+        (row["model_number"] for row in rows), key=int
+    ):
+        raise ValueError(f"Model rows in {models_csv_path} must be ordered by model_number")
     return rows
 
 
@@ -83,25 +44,27 @@ def write_models_csv(rows: list[dict[str, str]], out_path: Path) -> None:
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     repo_root = Path(__file__).resolve().parents[1]
-    parser = argparse.ArgumentParser(description="Regenerate data/models.csv from AGENTS.md.")
+    parser = argparse.ArgumentParser(
+        description="Regenerate the packaged model CSV from data/models.csv."
+    )
     parser.add_argument(
-        "--agents",
+        "--input",
         type=Path,
-        default=repo_root / "AGENTS.md",
-        help="Path to AGENTS.md containing the models.csv block markers.",
+        default=repo_root / "data" / "models.csv",
+        help="Canonical model CSV input path.",
     )
     parser.add_argument(
         "--output",
         type=Path,
-        default=repo_root / "data" / "models.csv",
-        help="Output path for generated models.csv.",
+        default=repo_root / "src" / "helianthus_vrc_explorer" / "data" / "models.csv",
+        help="Packaged model CSV output path.",
     )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
-    rows = load_models_rows_from_agents_md(args.agents)
+    rows = load_models_rows_from_csv(args.input)
     write_models_csv(rows, args.output)
     print(f"Wrote {len(rows)} rows to {args.output}")
     return 0

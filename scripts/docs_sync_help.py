@@ -66,51 +66,53 @@ def get_help_map() -> dict[str, str]:
     return {section.key: _run_help(*section.argv) for section in _SECTIONS}
 
 
-def render_agents_with_help(agents_md: str, *, help_map: dict[str, str]) -> str:
-    updated = agents_md
+def render_cli_reference_with_help(cli_reference_md: str, *, help_map: dict[str, str]) -> str:
+    updated = cli_reference_md
     for key, text in help_map.items():
         begin = f"<!-- BEGIN CLI HELP:{key} -->"
         end = f"<!-- END CLI HELP:{key} -->"
         pattern = re.compile(re.escape(begin) + r".*?" + re.escape(end), re.DOTALL)
         replacement = f"{begin}\n\n```text\n{text}```\n\n{end}"
         if not pattern.search(updated):
-            raise SystemExit(f"Missing CLI help markers in AGENTS.md: {begin} ... {end}")
+            raise SystemExit(f"Missing CLI help markers in CLI reference: {begin} ... {end}")
         updated = pattern.sub(replacement, updated, count=1)
     return updated
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Sync CLI --help blocks into AGENTS.md")
+    parser = argparse.ArgumentParser(
+        description="Sync CLI --help blocks into docs/cli-reference.md"
+    )
     parser.add_argument(
         "--check",
         action="store_true",
-        help="Fail if AGENTS.md is out of sync (do not write changes).",
+        help="Fail if the CLI reference is out of sync (do not write changes).",
     )
     parser.add_argument(
-        "--agents-path",
+        "--docs-path",
         type=Path,
-        default=_repo_root() / "AGENTS.md",
-        help="Path to AGENTS.md (defaults to repo root).",
+        default=_repo_root() / "docs" / "cli-reference.md",
+        help="Path to the CLI reference (defaults to docs/cli-reference.md).",
     )
     args = parser.parse_args(argv)
 
-    agents_path: Path = args.agents_path
-    original = agents_path.read_text(encoding="utf-8")
+    docs_path: Path = args.docs_path
+    original = docs_path.read_text(encoding="utf-8")
     help_map = get_help_map()
-    rendered = render_agents_with_help(original, help_map=help_map)
+    rendered = render_cli_reference_with_help(original, help_map=help_map)
 
     if rendered == original:
         return 0
     if args.check:
-        sys.stderr.write("AGENTS.md is out of sync with CLI --help output.\n")
+        sys.stderr.write("docs/cli-reference.md is out of sync with CLI --help output.\n")
         # Print a small diff to make CI failures actionable.
         import difflib
 
         diff = difflib.unified_diff(
             original.splitlines(True),
             rendered.splitlines(True),
-            fromfile=str(agents_path),
-            tofile=f"{agents_path} (generated)",
+            fromfile=str(docs_path),
+            tofile=f"{docs_path} (generated)",
         )
         for idx, line in enumerate(diff):
             if idx >= 200:
@@ -118,7 +120,7 @@ def main(argv: list[str] | None = None) -> int:
                 break
             sys.stderr.write(line)
         return 1
-    agents_path.write_text(rendered, encoding="utf-8")
+    docs_path.write_text(rendered, encoding="utf-8")
     return 0
 
 

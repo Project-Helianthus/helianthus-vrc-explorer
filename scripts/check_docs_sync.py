@@ -48,7 +48,7 @@ def _assert_flags_exist(*, flags: list[str], help_text: str) -> None:
 
 
 def main() -> int:
-    # 1) Doc-gate: ensure AGENTS.md embedded --help blocks are in sync.
+    # 1) Doc-gate: ensure the generated CLI reference is in sync.
     if docs_sync_help.main(["--check"]) != 0:
         return 1
 

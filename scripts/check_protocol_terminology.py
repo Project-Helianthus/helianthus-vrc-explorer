@@ -12,7 +12,6 @@ _BANNED_PATTERN = re.compile(
     r"\b(" + "|".join(re.escape(term) for term in _BANNED_TERMS) + r")\b",
     re.IGNORECASE,
 )
-_EXCLUDED_RELATIVE_PATHS = {"AGENTS.md", "AGENTS-local.md"}
 
 
 def _iter_tracked_paths(repo_root: pathlib.Path) -> list[pathlib.Path]:
@@ -40,11 +39,9 @@ def main() -> int:
     violations: list[str] = []
 
     for path in _iter_tracked_paths(repo_root):
-        relative = path.relative_to(repo_root).as_posix()
-        if relative in _EXCLUDED_RELATIVE_PATHS:
-            continue
         if not path.is_file() or _is_binary(path):
             continue
+        relative = path.relative_to(repo_root).as_posix()
         text = path.read_text(encoding="utf-8", errors="ignore")
         for line_no, line in enumerate(text.splitlines(), start=1):
             match = _BANNED_PATTERN.search(line)

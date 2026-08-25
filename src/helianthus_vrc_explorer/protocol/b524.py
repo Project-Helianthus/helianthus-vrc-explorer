@@ -114,7 +114,7 @@ def parse_b524_id(id_hex: str) -> B524IdSelector:
     - 0x00: directory probe selector (3 bytes, not expected in CSV)
     - 0x01: constraint selector (3 bytes: opcode, group, register)
 
-    Examples (from `AGENTS.md`):
+    Examples:
     - ``b524,020003001600`` -> opcode=0x02, optype=0x00, group=0x03, instance=0x00, register=0x0016
     - ``b524,060009010700`` -> opcode=0x06, optype=0x00, group=0x09, instance=0x01, register=0x0007
     - ``b524,0300000100``   -> opcode=0x03, selector=(0x00,0x00,0x01), weekday=0x00
