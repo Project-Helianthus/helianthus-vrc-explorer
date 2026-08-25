@@ -42,8 +42,8 @@ python -m helianthus_vrc_explorer scan \
 `scan` auto-discovers the destination (`--dst auto`) by default. Use `--dst 0x..` to force an address.
 
 Namespace contract for implementers:
-- Stable B524 namespace invariants (identity, discovery authority, constraint scope, artifact keys, fixture compatibility): [`docs/b524-namespace-invariants.md`](docs/b524-namespace-invariants.md)
-- This README remains user-facing; invariant-level semantics are documented in the file above once implementation behavior is stable.
+- Stable B524 namespace invariants (identity, discovery authority, constraint scope, artifact keys, fixture compatibility): [public B524 namespace invariants](https://github.com/Project-Helianthus/helianthus-docs-ebus/blob/main/architecture/b524-namespace-invariants.md)
+- This README remains user-facing; invariant-level semantics are documented in the public eBUS documentation once implementation behavior is stable.
 
 Key scan UX flags:
 - `--planner-ui auto|textual|classic`
@@ -62,7 +62,7 @@ Transport note:
 - On shared live `ebusd-tcp` setups, the first B524 directory probe (`GG=0x00`) can transiently return a status-only `00`. The scanner treats this as transient noise and continues discovery instead of declaring B524 unsupported immediately.
 - On `ebusd-tcp`, `ERR: timeout`, `ERR: arbitration lost`, `ERR: SYN received`, and `ERR: wrong symbol received` now trigger a fixed 5-second quiet backoff before retry so the bus can settle.
 - On `ebusd-tcp`, `ERR: no signal` now triggers a fixed 15-second quiet backoff before retry so the eBUS side can recover instead of being polled aggressively.
-- Classic GG directory-probe results are retained as advisory metadata for semantic identity and namespace topology. They are useful evidence for reverse-engineering and debugging, but they do not define those semantics once a group is a scan candidate (see `docs/b524-namespace-invariants.md`). Discovery no longer filters on `descriptor_type == 0.0`; all non-NaN groups returned by the directory probe are scan candidates.
+- Classic GG directory-probe results are retained as advisory metadata for semantic identity and namespace topology. They are useful evidence for reverse-engineering and debugging, but they do not define those semantics once a group is a scan candidate (see the [public B524 namespace invariants](https://github.com/Project-Helianthus/helianthus-docs-ebus/blob/main/architecture/b524-namespace-invariants.md)). Discovery no longer filters on `descriptor_type == 0.0`; all non-NaN groups returned by the directory probe are scan candidates.
 - Instance availability is namespace-specific. Dual-namespace radio groups (`0x09`, `0x0A`) are discovered independently per opcode namespace instead of sharing remote results across local and remote.
 - Artifacts retain the availability contract plus raw per-slot probe evidence under `availability_contract` and `availability_probes`, including the opcode `0x06` generic header block (`RR=0x0001..0x0004`) used for remote namespace occupancy.
 - Empty ACK / 0-byte B524 register replies are preserved as `response_state="empty_reply"` (rendered as “empty reply / dormant”), not as transport errors.

@@ -36,20 +36,20 @@ def test_models_csv_parses_and_has_entries() -> None:
     assert model_numbers == sorted(model_numbers, key=int)
 
 
-def test_generate_models_csv_matches_repo_file(tmp_path: Path) -> None:
+def test_generate_models_csv_reads_canonical_data_file(tmp_path: Path) -> None:
     module = _load_generator_module()
-    agents_md = _repo_root() / "AGENTS.md"
+    canonical_csv = _repo_root() / "data" / "models.csv"
     out_path = tmp_path / "models.csv"
 
-    rows = module.load_models_rows_from_agents_md(agents_md)
+    rows = module.load_models_rows_from_csv(canonical_csv)
     module.write_models_csv(rows, out_path)
 
-    expected = (_repo_root() / "data" / "models.csv").read_text(encoding="utf-8")
+    expected = canonical_csv.read_text(encoding="utf-8")
     actual = out_path.read_text(encoding="utf-8")
     assert actual == expected
 
 
-def test_packaged_models_csv_stays_in_sync_with_repo_copy() -> None:
+def test_packaged_models_csv_stays_in_sync_with_canonical_copy() -> None:
     repo_csv = _repo_root() / "data" / "models.csv"
     packaged_csv = _repo_root() / "src" / "helianthus_vrc_explorer" / "data" / "models.csv"
     assert packaged_csv.read_text(encoding="utf-8") == repo_csv.read_text(encoding="utf-8")

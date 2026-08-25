@@ -817,7 +817,7 @@ def is_instance_present(
 ) -> bool:
     """Presence heuristic for instanced groups.
 
-    Source of truth: `AGENTS.md` (keep in sync).
+    Availability policy is implemented by `probe_instance_availability`.
     """
     return probe_instance_availability(
         transport,

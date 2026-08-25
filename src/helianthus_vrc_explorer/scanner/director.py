@@ -39,7 +39,6 @@ class GroupConfig(TypedDict):
 
 
 # Known groups (hardcoded reference, validated against CSV).
-# Source of truth: `AGENTS.md` (keep in sync).
 GROUP_CONFIG: Final[dict[int, GroupConfig]] = {
     0x00: {
         "desc": 3.0,
