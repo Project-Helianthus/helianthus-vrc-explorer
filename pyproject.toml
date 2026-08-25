@@ -9,7 +9,9 @@ dependencies = [
   "httpx>=0.24",
   "rich>=13",
   "textual>=0.82",
-  "typer>=0.9",
+  # CLI help is embedded in docs/cli-reference.md; pin Typer so the generated
+  # layout is reproducible in standalone installs and CI.
+  "typer==0.27.1",
 ]
 
 [project.optional-dependencies]
