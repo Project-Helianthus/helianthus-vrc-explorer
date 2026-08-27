@@ -359,7 +359,16 @@ def scan_b524(
     planner_preset: PlannerPreset = "recommended",
     probe_constraints: bool = False,
 ) -> dict[str, Any]:
-    """Scan a VRC regulator using B524 and return a JSON-serializable artifact."""
+    """Scan a VRC regulator using B524 and return a JSON-serializable artifact.
+
+    Implements the four-phase scan algorithm:
+    - Phase A: group discovery via directory probes
+    - Phase B: group classification via GROUP_CONFIG
+    - Phase C: instance discovery for groups whose configured ii_max is > 0
+    - Phase D: register scan RR=0..rr_max for each present instance
+
+    Partial scans are supported: Ctrl+C yields `meta.incomplete=true`.
+    """
     from .b524_orchestration import run_b524_scan
 
     return run_b524_scan(
