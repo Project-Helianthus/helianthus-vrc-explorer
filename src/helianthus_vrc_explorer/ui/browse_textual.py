@@ -27,7 +27,7 @@ try:
     from textual.screen import ModalScreen
     from textual.widgets import DataTable, Footer, Header, Input, Label, Static, Tab, Tabs, Tree
 except ModuleNotFoundError as exc:
-    if exc.name != "textual":
+    if exc.name is None or (exc.name != "textual" and not exc.name.startswith("textual.")):
         raise
     _TEXTUAL_IMPORT_ERROR: ModuleNotFoundError | None = exc
 else:
