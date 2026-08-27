@@ -1,0 +1,1263 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from typing import Any
+
+from ..artifact_schema import migrate_artifact_schema
+from ..scanner.director import GROUP_CONFIG, group_name_for_opcode, group_namespace_profiles
+from ..scanner.identity import operation_label
+from .browse_models import BrowseTab, RegisterAddress, RegisterRow, TreeNodeRef
+from .register_semantics import entry_display_value_text, visible_rr_keys
+
+_B524_SECTION_ORDER: tuple[str, ...] = (
+    "group_directory",
+    "register_constraints",
+    "controller_registers",
+    "timer_programs",
+    "device_slots",
+    "register_tables",
+)
+_B524_SECTION_LABELS: dict[str, str] = {
+    "group_directory": "Group Directory",
+    "register_constraints": "Register Constraints",
+    "controller_registers": "Controller Registers",
+    "timer_programs": "Timer Programs",
+    "device_slots": "Device Slots",
+    "register_tables": "Register Tables",
+}
+
+
+def _hex_u8(value: int) -> str:
+    return f"0x{value:02x}"
+
+
+def _safe_int_hex(value: str) -> int:
+    try:
+        return int(value, 0)
+    except ValueError:
+        return 0
+
+
+def _fmt_value(entry: dict[str, Any]) -> str:
+    return entry_display_value_text(entry)
+
+
+def _parse_timestamp(meta: dict[str, Any]) -> datetime | None:
+    ts = meta.get("scan_timestamp")
+    if not isinstance(ts, str):
+        return None
+    try:
+        return datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+    except ValueError:
+        return None
+
+
+def _tab_from_entry(entry: dict[str, Any]) -> BrowseTab:
+    namespace_key = _entry_namespace_key(entry)
+    if namespace_key is not None and namespace_key != "0x02":
+        return "state"
+
+    register_class = str(entry.get("register_class") or "").strip().lower()
+    if register_class == "config":
+        return "config"
+    if register_class in {"config_limits", "limits"}:
+        return "config_limits"
+    if register_class == "state":
+        return "state"
+
+    flags_access = entry.get("flags_access")
+    if flags_access == "config_user":
+        return "config"
+    if flags_access == "config_installer":
+        return "config_limits"
+    return "state"
+
+
+def _fmt_group_label(group_key: str, group_name: str) -> str:
+    return f"{group_name} ({group_key})"
+
+
+def _fmt_register_label(register_key: str, entry: dict[str, Any]) -> str:
+    display_name = str(entry.get("myvaillant_name") or "").strip()
+    if not display_name:
+        display_name = str(entry.get("ebusd_name") or "").strip()
+    try:
+        rr = int(register_key, 0)
+        compact_rr = f"0x{rr:x}"
+    except ValueError:
+        compact_rr = register_key
+    if not display_name or display_name in {register_key, compact_rr}:
+        return compact_rr
+    return f"{display_name} ({compact_rr})"
+
+
+def _group_display_name(group_key: str, fallback_name: str, namespace_key: str | None) -> str:
+    if namespace_key is None:
+        return fallback_name
+    try:
+        return group_name_for_opcode(_safe_int_hex(group_key), _safe_int_hex(namespace_key))
+    except Exception:
+        return fallback_name
+
+
+def _instance_display_base(*, group_key: str, group_name: str, namespace_key: str | None) -> str:
+    if namespace_key == "0x06":
+        return "Remote Slot"
+    if namespace_key is not None and namespace_key != "0x02":
+        return f"Namespace {namespace_key} Slot"
+    mapping: dict[int, str] = {
+        0x02: "Heating Circuit",
+        0x03: "Zone",
+        0x05: "Cylinder",
+    }
+    gg = _safe_int_hex(group_key)
+    if gg in mapping:
+        return mapping[gg]
+    # Best-effort singularization for unknown groups.
+    text = group_name.strip()
+    if text.endswith("s") and len(text) > 1:
+        text = text[:-1]
+    return text or "Instance"
+
+
+def _instance_label(
+    *,
+    group_key: str,
+    group_name: str,
+    namespace_key: str | None,
+    instance_key: str,
+    instance_obj: dict[str, Any],
+) -> str:
+    # Prefer a user-visible name if present (e.g. Zones: RR=0x0016 name).
+    registers = instance_obj.get("registers")
+    if isinstance(registers, dict):
+        for wanted in ("name", "name_prefix", "name_suffix"):
+            for entry in registers.values():
+                if not isinstance(entry, dict):
+                    continue
+                if str(entry.get("myvaillant_name") or "").strip() != wanted:
+                    continue
+                value = entry.get("value")
+                if isinstance(value, str) and value.strip():
+                    return f"{value.strip()} ({instance_key})"
+
+    base = _instance_display_base(
+        group_key=group_key,
+        group_name=group_name,
+        namespace_key=namespace_key,
+    )
+    # Human-friendly numbering: show 1-based index, but always keep the instance ID too.
+    ii = _safe_int_hex(instance_key)
+    return f"{base} {ii + 1} ({instance_key})"
+
+
+def _row_sort_key(row: RegisterRow) -> tuple[int, int, int, int, int, int]:
+    proto_weight_map = {"b524": 0, "b555": 1, "b516": 2, "b509": 3}
+    proto_weight = proto_weight_map.get(row.protocol, 99)
+    if row.protocol == "b524":
+        section_weight = {key: idx for idx, key in enumerate(_B524_SECTION_ORDER)}.get(
+            row.section_key or "",
+            99,
+        )
+        return (
+            proto_weight,
+            section_weight,
+            _safe_int_hex(row.group_key or "0"),
+            _safe_int_hex(row.namespace_key or "0"),
+            _safe_int_hex(row.instance_key or "0"),
+            _safe_int_hex(row.register_key),
+        )
+    if row.protocol == "b555":
+        return (
+            proto_weight,
+            0,
+            _safe_int_hex(row.group_key or "0"),
+            0,
+            0,
+            _safe_int_hex(row.register_key.split(":", 1)[-1] if ":" in row.register_key else "0"),
+        )
+    if row.protocol == "b516":
+        period_weight_map = {
+            "system": 0,
+            "year_current": 1,
+            "year_previous": 2,
+        }
+        source_weight_map = {"gas": 0, "electricity": 1}
+        usage_weight_map = {"heating": 0, "hot_water": 1}
+        return (
+            proto_weight,
+            0,
+            period_weight_map.get(row.group_key or "", 99),
+            source_weight_map.get(row.namespace_key or "", 99),
+            usage_weight_map.get(row.namespace_label or "", 99),
+            0,
+        )
+    return (proto_weight, 0, 0, 0, 0, _safe_int_hex(row.register_key))
+
+
+def _b524_section_key_for_opcode(namespace_key: str | None) -> str:
+    opcode = _safe_int_hex(namespace_key or "0")
+    if opcode == 0x00:
+        return "group_directory"
+    if opcode == 0x01:
+        return "register_constraints"
+    if opcode == 0x02:
+        return "controller_registers"
+    if opcode in {0x03, 0x04}:
+        return "timer_programs"
+    if opcode == 0x06:
+        return "device_slots"
+    if opcode == 0x0B:
+        return "register_tables"
+    return "controller_registers"
+
+
+def _b524_section_label(section_key: str) -> str:
+    return _B524_SECTION_LABELS.get(section_key, section_key.replace("_", " ").title())
+
+
+def _b524_operation_label_for_namespace(namespace_key: str | None) -> str:
+    if namespace_key is None:
+        return "ReadControllerRegister"
+    opcode = _safe_int_hex(namespace_key)
+    return operation_label(opcode=opcode, optype=0x00)
+
+
+def _namespace_display_label(namespace_key: str | None, namespace_label: str | None) -> str | None:
+    if namespace_key is None:
+        return None
+    canonical_label = _namespace_label_for_key(namespace_key)
+    if canonical_label in {"local", "remote"}:
+        return None
+    label = namespace_label.strip() if isinstance(namespace_label, str) else ""
+    if label and label.lower() != namespace_key.lower():
+        if label.startswith("0x"):
+            return namespace_key
+        return f"{label[:1].upper()}{label[1:]} ({namespace_key})"
+    return namespace_key
+
+
+def _expected_instance_keys(
+    *,
+    group_key: str,
+    namespace_key: str | None,
+    instances: dict[str, Any],
+) -> list[str]:
+    keys = {key for key in instances if isinstance(key, str)}
+    if namespace_key is None:
+        return sorted(keys, key=_safe_int_hex)
+
+    profiles = group_namespace_profiles(_safe_int_hex(group_key))
+    profile = profiles.get(_safe_int_hex(namespace_key))
+    if profile is not None and profile.ii_max > 0:
+        for ii in range(profile.ii_max + 1):
+            keys.add(_hex_u8(ii))
+    return sorted(keys, key=_safe_int_hex)
+
+
+def _b524_operation_rows_present(
+    *,
+    artifact: dict[str, Any],
+    group_keys: list[str],
+    section_key: str,
+) -> bool:
+    meta = artifact.get("meta")
+    meta_obj = meta if isinstance(meta, dict) else {}
+    operations = artifact.get("b524_operations")
+    operations_obj = operations if isinstance(operations, dict) else {}
+
+    if section_key == "group_directory":
+        rows = operations_obj.get("group_directory")
+        return isinstance(rows, list) and bool(rows)
+    if section_key == "register_constraints":
+        constraint_dict = meta_obj.get("constraint_dictionary")
+        if isinstance(constraint_dict, dict) and bool(constraint_dict):
+            return True
+        rows = operations_obj.get("register_constraints")
+        return isinstance(rows, list) and bool(rows)
+    rows = operations_obj.get(section_key)
+    return isinstance(rows, list) and bool(rows)
+
+
+def _normalize_opcode_hex(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    raw = value.strip()
+    if not raw:
+        return None
+    try:
+        opcode = int(raw, 0)
+    except ValueError:
+        return None
+    if opcode < 0x00 or opcode > 0xFF:
+        return None
+    return _hex_u8(opcode)
+
+
+def _namespace_key_from_label(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    raw = value.strip().lower()
+    if raw == "local":
+        return "0x02"
+    if raw == "remote":
+        return "0x06"
+    return _normalize_opcode_hex(value)
+
+
+def _entry_namespace_key(
+    entry: dict[str, Any], *, fallback_namespace_key: str | None = None
+) -> str | None:
+    namespace_key = _normalize_opcode_hex(entry.get("read_opcode"))
+    if namespace_key is not None:
+        return namespace_key
+    namespace_key = _namespace_key_from_label(entry.get("read_opcode_label"))
+    if namespace_key is not None:
+        return namespace_key
+    return fallback_namespace_key
+
+
+def _namespace_label_for_key(namespace_key: str | None) -> str | None:
+    if namespace_key is None:
+        return None
+    opcode = _safe_int_hex(namespace_key)
+    if opcode == 0x02:
+        return "local"
+    if opcode == 0x06:
+        return "remote"
+    return namespace_key
+
+
+def _single_namespace_key(group_key: str, group_obj: dict[str, Any]) -> str | None:
+    discovery_advisory = group_obj.get("discovery_advisory")
+    if isinstance(discovery_advisory, dict):
+        proven = discovery_advisory.get("proven_register_opcodes")
+        if isinstance(proven, list):
+            for opcode in proven:
+                normalized = _normalize_opcode_hex(opcode)
+                if normalized is not None:
+                    return normalized
+
+    instances = group_obj.get("instances")
+    if isinstance(instances, dict):
+        for instance_key in sorted(
+            (k for k in instances if isinstance(k, str)),
+            key=_safe_int_hex,
+        ):
+            instance_obj = instances.get(instance_key)
+            if not isinstance(instance_obj, dict):
+                continue
+            registers = instance_obj.get("registers")
+            if not isinstance(registers, dict):
+                continue
+            for register_key in sorted(
+                (k for k in registers if isinstance(k, str)),
+                key=_safe_int_hex,
+            ):
+                entry = registers.get(register_key)
+                if not isinstance(entry, dict):
+                    continue
+                normalized = _normalize_opcode_hex(entry.get("read_opcode"))
+                if normalized is not None:
+                    return normalized
+
+    gg = _safe_int_hex(group_key)
+    config = GROUP_CONFIG.get(gg)
+    if config is not None:
+        opcodes = config.get("opcodes")
+        if isinstance(opcodes, list):
+            for opcode in opcodes:
+                if isinstance(opcode, int):
+                    return _hex_u8(opcode)
+    return None
+
+
+def _build_b524_instance_node_id(
+    *,
+    section_key: str,
+    group_key: str,
+    namespace_key: str | None,
+    instance_key: str,
+) -> str:
+    parts = ["b524", "inst", section_key, group_key]
+    if namespace_key is not None:
+        parts.append(namespace_key)
+    parts.append(instance_key)
+    return ":".join(parts)
+
+
+def _build_b524_register_node_id(
+    *,
+    section_key: str,
+    group_key: str,
+    namespace_key: str | None,
+    instance_key: str,
+    register_key: str,
+) -> str:
+    parts = ["b524", "reg", section_key, group_key]
+    if namespace_key is not None:
+        parts.append(namespace_key)
+    parts.extend([instance_key, register_key])
+    return ":".join(parts)
+
+
+def _build_b524_row_id(
+    *, group_key: str, namespace_key: str | None, instance_key: str, register_key: str
+) -> str:
+    parts = [group_key]
+    if namespace_key is not None:
+        parts.append(namespace_key)
+    parts.extend([instance_key, register_key])
+    return ":".join(parts)
+
+
+def _group_namespace_views(
+    *,
+    group_key: str,
+    group_obj: dict[str, Any],
+) -> list[tuple[str | None, str | None, dict[str, Any]]]:
+    """Build namespace views by splitting instances by read_opcode.
+
+    In the operations-first schema, groups always have flat instances.
+    When instances contain entries with different read_opcode values, split
+    them into separate namespace views for rendering.
+    """
+    instances = group_obj.get("instances")
+    if not isinstance(instances, dict):
+        return [(None, None, {})]
+
+    split_instances: dict[str, dict[str, Any]] = {}
+    for instance_key in sorted(
+        (k for k in instances if isinstance(k, str)),
+        key=_safe_int_hex,
+    ):
+        instance_obj = instances.get(instance_key)
+        if not isinstance(instance_obj, dict):
+            continue
+        registers = instance_obj.get("registers")
+        if not isinstance(registers, dict):
+            continue
+        for register_key in sorted(
+            (k for k in registers if isinstance(k, str)),
+            key=_safe_int_hex,
+        ):
+            entry = registers.get(register_key)
+            if not isinstance(entry, dict):
+                continue
+            entry_namespace_key = _entry_namespace_key(entry)
+            if entry_namespace_key is None:
+                continue
+            namespace_instances = split_instances.setdefault(entry_namespace_key, {})
+            namespace_instance = namespace_instances.get(instance_key)
+            if not isinstance(namespace_instance, dict):
+                namespace_instance = {
+                    "present": instance_obj.get("present"),
+                    "registers": {},
+                }
+                namespace_instances[instance_key] = namespace_instance
+            namespace_registers = namespace_instance.get("registers")
+            if not isinstance(namespace_registers, dict):
+                namespace_registers = {}
+                namespace_instance["registers"] = namespace_registers
+            namespace_registers[register_key] = entry
+
+    if len(split_instances) <= 1:
+        return [(None, None, instances)]
+
+    views: list[tuple[str | None, str | None, dict[str, Any]]] = []
+    for namespace_key in sorted(split_instances, key=_safe_int_hex):
+        views.append(
+            (
+                namespace_key,
+                _namespace_label_for_key(namespace_key) or namespace_key,
+                split_instances[namespace_key],
+            )
+        )
+    return views
+
+
+def _parse_range_key(range_key: str) -> tuple[int, int] | None:
+    raw = range_key.strip()
+    if ".." not in raw:
+        return None
+    start_s, end_s = raw.split("..", 1)
+    try:
+        start = int(start_s.strip(), 0)
+        end = int(end_s.strip(), 0)
+    except ValueError:
+        return None
+    if start > end:
+        start, end = end, start
+    return (start, end)
+
+
+def _format_b555_value(entry: dict[str, Any]) -> str:
+    error = entry.get("error")
+    if isinstance(error, str) and error:
+        return error
+    status_label = str(entry.get("status_label") or "").strip()
+    if status_label and status_label != "available":
+        return status_label
+    op = str(entry.get("op") or "").strip().lower()
+    if op == "0xa3":
+        parts: list[str] = []
+        if isinstance(entry.get("max_slots"), int):
+            parts.append(f"max_slots={entry['max_slots']}")
+        if isinstance(entry.get("temp_slots"), int):
+            parts.append(f"temp_slots={entry['temp_slots']}")
+        if isinstance(entry.get("time_resolution_min"), int):
+            parts.append(f"resolution={entry['time_resolution_min']}m")
+        return ", ".join(parts) or "config"
+    if op == "0xa4":
+        days = entry.get("days")
+        if isinstance(days, dict):
+            return ", ".join(f"{day[:3]}={value}" for day, value in days.items())
+        return "slots/weekday"
+    start_text = entry.get("start_text")
+    end_text = entry.get("end_text")
+    temp = entry.get("temperature_c")
+    if isinstance(start_text, str) and isinstance(end_text, str):
+        if isinstance(temp, (int, float)) and not isinstance(temp, bool):
+            return f"{start_text}-{end_text} @ {float(temp):g}C"
+        return f"{start_text}-{end_text}"
+    return "entry"
+
+
+def _format_b516_value(entry: dict[str, Any]) -> str:
+    error = entry.get("error")
+    if isinstance(error, str) and error:
+        return error
+    value_kwh = entry.get("value_kwh")
+    value_wh = entry.get("value_wh")
+    if isinstance(value_kwh, (int, float)) and not isinstance(value_kwh, bool):
+        value_txt = f"{float(value_kwh):g} kWh"
+        if isinstance(value_wh, (int, float)) and not isinstance(value_wh, bool):
+            value_txt += f" ({float(value_wh):g} Wh)"
+        return value_txt
+    if isinstance(value_wh, (int, float)) and not isinstance(value_wh, bool):
+        return f"{float(value_wh):g} Wh"
+    return "entry"
+
+
+@dataclass(slots=True)
+class _HydratedBrowseStore:
+    device_label: str
+    rows: list[RegisterRow]
+    tree_nodes: list[TreeNodeRef]
+    _row_by_id: dict[str, RegisterRow]
+
+    @classmethod
+    def from_artifact(cls, artifact: dict[str, Any]) -> _HydratedBrowseStore:
+        artifact, _migration = migrate_artifact_schema(artifact)
+
+        meta = artifact.get("meta")
+        if not isinstance(meta, dict):
+            meta = {}
+        dst = meta.get("destination_address")
+        dst_txt = dst if isinstance(dst, str) else "0x??"
+        device_label = f"Device {dst_txt}"
+
+        last_update_dt = _parse_timestamp(meta)
+        last_update_text = (
+            last_update_dt.strftime("%Y-%m-%d %H:%M:%SZ") if last_update_dt else "n/a"
+        )
+        age_text = "n/a"
+        if last_update_dt is not None:
+            age_s = max(0.0, (datetime.now(UTC) - last_update_dt).total_seconds())
+            age_text = f"{age_s:.1f}s"
+
+        rows: list[RegisterRow] = []
+        tree_nodes: list[TreeNodeRef] = [
+            TreeNodeRef(node_id="root", label=device_label, level="root")
+        ]
+        row_by_id: dict[str, RegisterRow] = {}
+        # Build namespace views directly from operations-first structure.
+        # Each operation provides its own group objects; iterate them to produce
+        # (group_key, op_key, op_label, group_obj) tuples that avoid data loss
+        # from register-key collisions during merge.
+        _op_group_views: list[tuple[str, str, str, dict[str, Any]]] = []
+        _seen_group_keys: set[str] = set()
+        _operations = artifact.get("operations")
+        if isinstance(_operations, dict):
+            for _op_key in sorted(
+                (k for k in _operations if isinstance(k, str)), key=_safe_int_hex
+            ):
+                _op_obj = _operations.get(_op_key)
+                if not isinstance(_op_obj, dict):
+                    continue
+                _op_groups = _op_obj.get("groups")
+                if not isinstance(_op_groups, dict):
+                    continue
+                _op_label = _namespace_label_for_key(_op_key) or _op_key
+                for _gk in sorted((k for k in _op_groups if isinstance(k, str)), key=_safe_int_hex):
+                    _go = _op_groups.get(_gk)
+                    if isinstance(_gk, str) and isinstance(_go, dict):
+                        _op_group_views.append((_gk, _op_key, _op_label, _go))
+                        _seen_group_keys.add(_gk)
+
+        group_keys = sorted(_seen_group_keys, key=_safe_int_hex)
+        b524_operations = artifact.get("b524_operations")
+        has_b524_operations = isinstance(b524_operations, dict) and bool(b524_operations)
+        has_constraint_dictionary = isinstance(meta.get("constraint_dictionary"), dict)
+        if group_keys or has_b524_operations or has_constraint_dictionary:
+            tree_nodes.append(
+                TreeNodeRef(
+                    node_id="proto:b524",
+                    label="B524",
+                    level="protocol",
+                    protocol="b524",
+                )
+            )
+            for section_key in _B524_SECTION_ORDER:
+                tree_nodes.append(
+                    TreeNodeRef(
+                        node_id=f"b524:section:{section_key}",
+                        label=_b524_section_label(section_key),
+                        level="section",
+                        protocol="b524",
+                        section_key=section_key,
+                    )
+                )
+
+        seen_group_nodes: set[str] = set()
+        seen_namespace_nodes: set[str] = set()
+        seen_instance_nodes: set[str] = set()
+
+        for group_key, op_key, op_label, group_obj in _op_group_views:
+            group_name = str(group_obj.get("name") or "Unknown")
+            gg = _safe_int_hex(group_key)
+            # Split instances by read_opcode to separate namespace views.
+            # A single operation group may contain entries with different
+            # read_opcodes (e.g. after migration from v2.2 flat groups).
+            namespace_views = _group_namespace_views(group_key=group_key, group_obj=group_obj)
+            # When the split produces a single (None, None, ...) view, use
+            # the operation key as the namespace context.
+            if len(namespace_views) == 1 and namespace_views[0][0] is None:
+                namespace_views = [(op_key, op_label, namespace_views[0][2])]
+            if not namespace_views:
+                continue
+            all_instance_keys = sorted(
+                {
+                    instance_key
+                    for (_namespace_key, _namespace_label, instances) in namespace_views
+                    for instance_key in instances
+                    if isinstance(instance_key, str)
+                },
+                key=_safe_int_hex,
+            )
+            config = GROUP_CONFIG.get(gg)
+            is_instanced = (config is not None and int(config["ii_max"]) > 0) or any(
+                instance_key != "0x00" for instance_key in all_instance_keys
+            )
+
+            for namespace_key, namespace_label, instances in namespace_views:
+                effective_namespace_key = namespace_key or op_key
+                effective_namespace_label = namespace_label or op_label
+                section_key = _b524_section_key_for_opcode(effective_namespace_key)
+                if section_key not in {"controller_registers", "device_slots"}:
+                    continue
+                section_group_name = _group_display_name(
+                    group_key,
+                    group_name,
+                    effective_namespace_key,
+                )
+
+                group_node_id = f"b524:group:{section_key}:{group_key}"
+                if group_node_id not in seen_group_nodes:
+                    seen_group_nodes.add(group_node_id)
+                    tree_nodes.append(
+                        TreeNodeRef(
+                            node_id=group_node_id,
+                            label=_fmt_group_label(group_key, section_group_name),
+                            level="group",
+                            protocol="b524",
+                            section_key=section_key,
+                            group_key=group_key,
+                        )
+                    )
+
+                namespace_display = _namespace_display_label(
+                    effective_namespace_key, effective_namespace_label
+                )
+                if namespace_key is not None and namespace_display is not None:
+                    namespace_node_id = f"b524:ns:{section_key}:{group_key}:{namespace_key}"
+                    if namespace_node_id not in seen_namespace_nodes:
+                        seen_namespace_nodes.add(namespace_node_id)
+                        tree_nodes.append(
+                            TreeNodeRef(
+                                node_id=namespace_node_id,
+                                label=namespace_display,
+                                level="namespace",
+                                protocol="b524",
+                                section_key=section_key,
+                                group_key=group_key,
+                                namespace_key=namespace_key,
+                                namespace_label=namespace_label,
+                            )
+                        )
+
+                instance_keys = _expected_instance_keys(
+                    group_key=group_key,
+                    namespace_key=effective_namespace_key,
+                    instances=instances,
+                )
+                visible_registers = set(visible_rr_keys(instances))
+                for instance_key in instance_keys:
+                    instance_obj = instances.get(instance_key)
+                    if not isinstance(instance_obj, dict):
+                        instance_obj = {"present": False, "registers": {}}
+                    if is_instanced:
+                        node_id = _build_b524_instance_node_id(
+                            section_key=section_key,
+                            group_key=group_key,
+                            namespace_key=effective_namespace_key,
+                            instance_key=instance_key,
+                        )
+                        if node_id not in seen_instance_nodes:
+                            seen_instance_nodes.add(node_id)
+                            tree_nodes.append(
+                                TreeNodeRef(
+                                    node_id=node_id,
+                                    label=_instance_label(
+                                        group_key=group_key,
+                                        group_name=section_group_name,
+                                        namespace_key=effective_namespace_key,
+                                        instance_key=instance_key,
+                                        instance_obj=instance_obj,
+                                    ),
+                                    level="instance",
+                                    protocol="b524",
+                                    section_key=section_key,
+                                    group_key=group_key,
+                                    namespace_key=effective_namespace_key,
+                                    namespace_label=effective_namespace_label,
+                                    instance_key=instance_key,
+                                )
+                            )
+
+                    registers = instance_obj.get("registers")
+                    if not isinstance(registers, dict):
+                        continue
+                    for register_key in sorted(
+                        (k for k in registers if isinstance(k, str)),
+                        key=_safe_int_hex,
+                    ):
+                        if register_key not in visible_registers:
+                            continue
+                        entry = registers.get(register_key)
+                        if not isinstance(entry, dict):
+                            continue
+
+                        myvaillant_name = str(entry.get("myvaillant_name") or "").strip()
+                        ebusd_name = str(entry.get("ebusd_name") or "").strip()
+                        name = myvaillant_name or register_key
+                        tab = _tab_from_entry(entry)
+                        entry_namespace_key = effective_namespace_key
+                        read_opcode = _normalize_opcode_hex(entry.get("read_opcode"))
+                        if read_opcode is not None:
+                            entry_namespace_key = read_opcode
+                        entry_section_key = _b524_section_key_for_opcode(entry_namespace_key)
+                        if entry_section_key not in {"controller_registers", "device_slots"}:
+                            continue
+                        if entry_namespace_key is not None:
+                            entry_namespace_label = _namespace_label_for_key(entry_namespace_key)
+                        else:
+                            entry_namespace_label = None
+                        entry_group_name = _group_display_name(
+                            group_key,
+                            group_name,
+                            entry_namespace_key,
+                        )
+                        address = RegisterAddress(
+                            protocol="b524",
+                            group_key=group_key,
+                            namespace_key=entry_namespace_key,
+                            namespace_label=entry_namespace_label,
+                            instance_key=instance_key,
+                            register_key=register_key,
+                            read_opcode=entry.get("read_opcode")
+                            if isinstance(entry.get("read_opcode"), str)
+                            else None,
+                        )
+                        value_text = _fmt_value(entry)
+                        raw_hex = str(entry.get("raw_hex") or "")
+                        entry_namespace_display = _namespace_display_label(
+                            entry_namespace_key, entry_namespace_label
+                        )
+                        operation_name = _b524_operation_label_for_namespace(entry_namespace_key)
+                        path_parts = [
+                            "B524",
+                            _b524_section_label(entry_section_key),
+                            operation_name,
+                            entry_group_name,
+                        ]
+                        if entry_namespace_display is not None:
+                            path_parts.append(entry_namespace_display)
+                        path_parts.extend([instance_key, name])
+                        path = "/".join(path_parts)
+                        row_id = _build_b524_row_id(
+                            group_key=group_key,
+                            namespace_key=entry_namespace_key,
+                            instance_key=instance_key,
+                            register_key=register_key,
+                        )
+                        access_flags = str(entry.get("flags_access") or "—")
+                        row = RegisterRow(
+                            row_id=row_id,
+                            protocol="b524",
+                            group_key=group_key,
+                            namespace_key=entry_namespace_key,
+                            namespace_label=entry_namespace_label,
+                            section_key=entry_section_key,
+                            group_name=entry_group_name,
+                            instance_key=instance_key,
+                            register_key=register_key,
+                            name=name,
+                            myvaillant_name=myvaillant_name,
+                            ebusd_name=ebusd_name,
+                            path=path,
+                            tab=tab,
+                            address=address,
+                            value_text=value_text,
+                            raw_hex=raw_hex,
+                            unit="n/a",
+                            access_flags=access_flags,
+                            last_update_text=last_update_text,
+                            age_text=age_text,
+                            change_indicator="-",
+                            search_blob=" ".join(
+                                [
+                                    path.lower(),
+                                    myvaillant_name.lower(),
+                                    ebusd_name.lower(),
+                                    address.label.lower(),
+                                    (entry_namespace_label or "").lower(),
+                                    value_text.lower(),
+                                    raw_hex.lower(),
+                                    access_flags.lower(),
+                                    entry_section_key.lower(),
+                                    operation_name.lower(),
+                                    tab.lower(),
+                                ]
+                            ),
+                        )
+                        rows.append(row)
+                        row_by_id[row_id] = row
+
+        b524_sections_present = {
+            row.section_key
+            for row in rows
+            if row.protocol == "b524" and isinstance(row.section_key, str)
+        }
+        for section_key in _B524_SECTION_ORDER:
+            if _b524_operation_rows_present(
+                artifact=artifact,
+                group_keys=group_keys,
+                section_key=section_key,
+            ):
+                b524_sections_present.add(section_key)
+        if b524_sections_present:
+            tree_nodes = [
+                node
+                for node in tree_nodes
+                if node.protocol != "b524"
+                or node.section_key is None
+                or node.section_key in b524_sections_present
+            ]
+        else:
+            tree_nodes = [node for node in tree_nodes if node.protocol != "b524"]
+
+        b509_dump = artifact.get("b509_dump")
+        if isinstance(b509_dump, dict):
+            proto_node = TreeNodeRef(
+                node_id="proto:b509",
+                label="B509",
+                level="protocol",
+                protocol="b509",
+            )
+            tree_nodes.append(proto_node)
+
+            # Tree: B509 -> ranges (leaf nodes, no per-register expansion).
+            meta_obj = b509_dump.get("meta")
+            ranges = meta_obj.get("ranges") if isinstance(meta_obj, dict) else None
+            if isinstance(ranges, list):
+                for range_key in ranges:
+                    if not isinstance(range_key, str) or not range_key.strip():
+                        continue
+                    tree_nodes.append(
+                        TreeNodeRef(
+                            node_id=f"b509:range:{range_key.strip()}",
+                            label=range_key.strip(),
+                            level="range",
+                            protocol="b509",
+                            range_key=range_key.strip(),
+                        )
+                    )
+
+            # Rows: include all dumped B509 registers (default in State tab).
+            devices = b509_dump.get("devices")
+            dst_key = dst_txt.lower()
+            if isinstance(devices, dict):
+                device_obj = devices.get(dst_key) or devices.get(dst_txt)
+                if isinstance(device_obj, dict):
+                    registers_obj = device_obj.get("registers")
+                    if isinstance(registers_obj, dict):
+                        for addr_key in sorted(
+                            (k for k in registers_obj if isinstance(k, str)),
+                            key=_safe_int_hex,
+                        ):
+                            entry = registers_obj.get(addr_key)
+                            if not isinstance(entry, dict):
+                                continue
+                            ebusd_name = str(entry.get("ebusd_name") or "").strip()
+                            myvaillant_name = str(entry.get("myvaillant_name") or "").strip()
+                            name = ebusd_name or addr_key
+                            op = entry.get("op") if isinstance(entry.get("op"), str) else None
+                            address = RegisterAddress(
+                                protocol="b509",
+                                group_key=None,
+                                namespace_key=None,
+                                namespace_label=None,
+                                instance_key=None,
+                                register_key=addr_key,
+                                read_opcode=op,
+                            )
+                            value_text = _fmt_value(entry)
+                            raw_hex = str(entry.get("raw_hex") or "")
+                            path = f"B509/{addr_key}/{name}"
+                            row_id = f"b509:{addr_key}"
+                            row = RegisterRow(
+                                row_id=row_id,
+                                protocol="b509",
+                                group_key=None,
+                                namespace_key=None,
+                                namespace_label=None,
+                                section_key=None,
+                                group_name="B509",
+                                instance_key=None,
+                                register_key=addr_key,
+                                name=name,
+                                myvaillant_name=myvaillant_name,
+                                ebusd_name=ebusd_name,
+                                path=path,
+                                tab="state",
+                                address=address,
+                                value_text=value_text,
+                                raw_hex=raw_hex,
+                                unit="n/a",
+                                access_flags="—",
+                                last_update_text=last_update_text,
+                                age_text=age_text,
+                                change_indicator="-",
+                                search_blob=" ".join(
+                                    [
+                                        path.lower(),
+                                        myvaillant_name.lower(),
+                                        ebusd_name.lower(),
+                                        address.label.lower(),
+                                        value_text.lower(),
+                                        raw_hex.lower(),
+                                        "state",
+                                    ]
+                                ),
+                            )
+                            rows.append(row)
+                            row_by_id[row_id] = row
+
+        b555_dump = artifact.get("b555_dump")
+        if isinstance(b555_dump, dict):
+            tree_nodes.append(
+                TreeNodeRef(
+                    node_id="proto:b555",
+                    label="B555",
+                    level="protocol",
+                    protocol="b555",
+                )
+            )
+            programs = b555_dump.get("programs")
+            if isinstance(programs, dict):
+                for program_key in sorted(
+                    (key for key in programs if isinstance(key, str)),
+                    key=str,
+                ):
+                    program_obj = programs.get(program_key)
+                    if not isinstance(program_obj, dict):
+                        continue
+                    label = str(program_obj.get("label") or program_key)
+                    tree_nodes.append(
+                        TreeNodeRef(
+                            node_id=f"b555:program:{program_key}",
+                            label=label,
+                            level="group",
+                            protocol="b555",
+                            group_key=program_key,
+                        )
+                    )
+
+                    selector_obj = program_obj.get("selector")
+                    selector_text = ""
+                    if isinstance(selector_obj, dict):
+                        zone = selector_obj.get("zone")
+                        hc = selector_obj.get("hc")
+                        if isinstance(zone, str) and isinstance(hc, str):
+                            selector_text = f"zone={zone} hc={hc}"
+
+                    for entry_key, tab in (("config", "config"), ("slots_per_weekday", "config")):
+                        entry = program_obj.get(entry_key)
+                        if not isinstance(entry, dict):
+                            continue
+                        register_key = "0xa3" if entry_key == "config" else "0xa4"
+                        name = f"{label} {entry_key.replace('_', ' ')}"
+                        value_text = _format_b555_value(entry)
+                        raw_hex = str(entry.get("reply_hex") or "")
+                        access_flags = str(entry.get("status_label") or "—")
+                        path = f"B555/{label}/{entry_key}"
+                        row_id = f"b555:{program_key}:{entry_key}"
+                        address = RegisterAddress(
+                            protocol="b555",
+                            group_key=program_key,
+                            namespace_key=None,
+                            namespace_label=None,
+                            instance_key=None,
+                            register_key=register_key,
+                            read_opcode=register_key,
+                        )
+                        search_blob = " ".join(
+                            [
+                                path.lower(),
+                                name.lower(),
+                                selector_text.lower(),
+                                value_text.lower(),
+                                raw_hex.lower(),
+                                access_flags.lower(),
+                            ]
+                        )
+                        row = RegisterRow(
+                            row_id=row_id,
+                            protocol="b555",
+                            group_key=program_key,
+                            namespace_key=None,
+                            namespace_label=None,
+                            section_key=None,
+                            group_name=label,
+                            instance_key=None,
+                            register_key=register_key,
+                            name=name,
+                            myvaillant_name="",
+                            ebusd_name="",
+                            path=path,
+                            tab=tab,
+                            address=address,
+                            value_text=value_text,
+                            raw_hex=raw_hex,
+                            unit="n/a",
+                            access_flags=access_flags,
+                            last_update_text=last_update_text,
+                            age_text=age_text,
+                            change_indicator="-",
+                            search_blob=search_blob,
+                        )
+                        rows.append(row)
+                        row_by_id[row_id] = row
+
+                    weekdays = program_obj.get("weekdays")
+                    if not isinstance(weekdays, dict):
+                        continue
+                    for day_name in sorted(
+                        (key for key in weekdays if isinstance(key, str)),
+                        key=str,
+                    ):
+                        day_obj = weekdays.get(day_name)
+                        if not isinstance(day_obj, dict):
+                            continue
+                        slots = day_obj.get("slots")
+                        if not isinstance(slots, dict):
+                            continue
+                        for slot_key in sorted(
+                            (key for key in slots if isinstance(key, str)),
+                            key=_safe_int_hex,
+                        ):
+                            entry = slots.get(slot_key)
+                            if not isinstance(entry, dict):
+                                continue
+                            register_key = f"{day_name}:{slot_key}"
+                            name = f"{label} {day_name} slot {slot_key}"
+                            value_text = _format_b555_value(entry)
+                            raw_hex = str(entry.get("reply_hex") or "")
+                            access_flags = str(entry.get("status_label") or "—")
+                            path = f"B555/{label}/{day_name}/{slot_key}"
+                            row_id = f"b555:{program_key}:{day_name}:{slot_key}"
+                            address = RegisterAddress(
+                                protocol="b555",
+                                group_key=program_key,
+                                namespace_key=None,
+                                namespace_label=None,
+                                instance_key=None,
+                                register_key=register_key,
+                                read_opcode=str(entry.get("op") or "0xa5"),
+                            )
+                            search_blob = " ".join(
+                                [
+                                    path.lower(),
+                                    name.lower(),
+                                    selector_text.lower(),
+                                    value_text.lower(),
+                                    raw_hex.lower(),
+                                    access_flags.lower(),
+                                ]
+                            )
+                            row = RegisterRow(
+                                row_id=row_id,
+                                protocol="b555",
+                                group_key=program_key,
+                                namespace_key=None,
+                                namespace_label=None,
+                                section_key=None,
+                                group_name=label,
+                                instance_key=None,
+                                register_key=register_key,
+                                name=name,
+                                myvaillant_name="",
+                                ebusd_name="",
+                                path=path,
+                                tab="state",
+                                address=address,
+                                value_text=value_text,
+                                raw_hex=raw_hex,
+                                unit="n/a",
+                                access_flags=access_flags,
+                                last_update_text=last_update_text,
+                                age_text=age_text,
+                                change_indicator="-",
+                                search_blob=search_blob,
+                            )
+                            rows.append(row)
+                            row_by_id[row_id] = row
+
+        b516_dump = artifact.get("b516_dump")
+        if isinstance(b516_dump, dict):
+            tree_nodes.append(
+                TreeNodeRef(
+                    node_id="proto:b516",
+                    label="B516",
+                    level="protocol",
+                    protocol="b516",
+                )
+            )
+            entries = b516_dump.get("entries")
+            if isinstance(entries, dict):
+                period_labels = {
+                    "system": "System",
+                    "year_current": "Current Year",
+                    "year_previous": "Previous Year",
+                }
+                seen_periods: set[str] = set()
+                for entry_key in sorted(
+                    (key for key in entries if isinstance(key, str)),
+                    key=str,
+                ):
+                    entry = entries.get(entry_key)
+                    if not isinstance(entry, dict):
+                        continue
+                    period = str(entry.get("period") or "").strip()
+                    source = str(entry.get("source") or "").strip()
+                    usage = str(entry.get("usage") or "").strip()
+                    label = str(entry.get("label") or entry_key).strip() or entry_key
+                    if period and period not in seen_periods:
+                        tree_nodes.append(
+                            TreeNodeRef(
+                                node_id=f"b516:group:{period}",
+                                label=period_labels.get(period, period),
+                                level="group",
+                                protocol="b516",
+                                group_key=period,
+                            )
+                        )
+                        seen_periods.add(period)
+                    request_hex = str(entry.get("request_hex") or "")
+                    reply_hex = str(entry.get("reply_hex") or "")
+                    error = str(entry.get("error") or "")
+                    value_text = _format_b516_value(entry)
+                    path_parts = ["B516"]
+                    if period:
+                        path_parts.append(period_labels.get(period, period))
+                    if source:
+                        path_parts.append(source)
+                    if usage:
+                        path_parts.append(usage)
+                    path = "/".join(path_parts + [label])
+                    address = RegisterAddress(
+                        protocol="b516",
+                        group_key=period or None,
+                        namespace_key=source or None,
+                        namespace_label=usage or None,
+                        instance_key=None,
+                        register_key=entry_key,
+                        read_opcode=None,
+                    )
+                    search_blob = " ".join(
+                        [
+                            path.lower(),
+                            label.lower(),
+                            entry_key.lower(),
+                            period.lower(),
+                            source.lower(),
+                            usage.lower(),
+                            value_text.lower(),
+                            request_hex.lower(),
+                            reply_hex.lower(),
+                            error.lower(),
+                            str(entry.get("echo_period") or "").lower(),
+                            str(entry.get("echo_source") or "").lower(),
+                            str(entry.get("echo_usage") or "").lower(),
+                            str(entry.get("echo_window") or "").lower(),
+                            str(entry.get("echo_qualifier") or "").lower(),
+                            "state",
+                        ]
+                    )
+                    row_id = f"b516:{entry_key}"
+                    row = RegisterRow(
+                        row_id=row_id,
+                        protocol="b516",
+                        group_key=period or None,
+                        namespace_key=source or None,
+                        namespace_label=usage or None,
+                        section_key=None,
+                        group_name="B516",
+                        instance_key=None,
+                        register_key=entry_key,
+                        name=label,
+                        myvaillant_name="",
+                        ebusd_name="",
+                        path=path,
+                        tab="state",
+                        address=address,
+                        value_text=value_text,
+                        raw_hex=reply_hex,
+                        unit="kWh",
+                        access_flags="read-only",
+                        last_update_text=last_update_text,
+                        age_text=age_text,
+                        change_indicator="-",
+                        search_blob=search_blob,
+                    )
+                    rows.append(row)
+                    row_by_id[row_id] = row
+
+        rows.sort(key=_row_sort_key)
+        return cls(
+            device_label=device_label,
+            rows=rows,
+            tree_nodes=tree_nodes,
+            _row_by_id=row_by_id,
+        )
+
+
+def hydrate_browse_store(
+    artifact: dict[str, Any],
+) -> tuple[str, list[RegisterRow], list[TreeNodeRef]]:
+    """Hydrate the artifact through the preserved BrowseStore construction path."""
+
+    hydrated = _HydratedBrowseStore.from_artifact(artifact)
+    return hydrated.device_label, hydrated.rows, hydrated.tree_nodes
