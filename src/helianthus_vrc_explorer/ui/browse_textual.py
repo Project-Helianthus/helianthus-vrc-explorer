@@ -194,6 +194,21 @@ def _tab_from_id(tab_id: str) -> BrowseTab:
     return "state"
 
 
+def _validate_browse_artifact(artifact: dict[str, object]) -> dict[str, object]:
+    """Keep the programmatic artifact seam explicit without changing validation."""
+
+    return artifact
+
+
+def _raise_if_textual_unavailable() -> None:
+    if _TEXTUAL_IMPORT_ERROR is not None:
+        raise _TEXTUAL_IMPORT_ERROR
+
+
+def _hydrate_browse_store(artifact: dict[str, object]) -> BrowseStore:
+    return BrowseStore.from_artifact(artifact)
+
+
 if _TEXTUAL_IMPORT_ERROR is None:
 
     class _FocusableStatic(Static):
@@ -364,9 +379,15 @@ if _TEXTUAL_IMPORT_ERROR is None:
         }
         """
 
-        def __init__(self, artifact: dict[str, object], *, allow_write: bool) -> None:
+        def __init__(
+            self,
+            artifact: dict[str, object],
+            *,
+            allow_write: bool,
+            store: BrowseStore | None = None,
+        ) -> None:
             super().__init__()
-            self._store = BrowseStore.from_artifact(artifact)
+            self._store = store if store is not None else _hydrate_browse_store(artifact)
             self._node_by_id = {node.node_id: node for node in self._store.tree_nodes}
             self._tree_node_by_ref: dict[str, Any] = {}
             self._focus_order = ["tree", "tabs", "table", "watch"]
@@ -1185,11 +1206,25 @@ if _TEXTUAL_IMPORT_ERROR is None:
                 self.pop_screen()
 
 
+def _compose_browse_app(
+    artifact: dict[str, object],
+    *,
+    allow_write: bool,
+    store: BrowseStore,
+) -> Any:
+    return _BrowseApp(artifact, allow_write=allow_write, store=store)
+
+
+def _run_browse_app(app: Any) -> None:
+    app.run()
+
+
 def run_browse_from_artifact(
     artifact: dict[str, object],
     *,
     allow_write: bool,
 ) -> None:
-    if _TEXTUAL_IMPORT_ERROR is not None:
-        raise _TEXTUAL_IMPORT_ERROR
-    _BrowseApp(artifact, allow_write=allow_write).run()
+    artifact = _validate_browse_artifact(artifact)
+    _raise_if_textual_unavailable()
+    store = _hydrate_browse_store(artifact)
+    _run_browse_app(_compose_browse_app(artifact, allow_write=allow_write, store=store))

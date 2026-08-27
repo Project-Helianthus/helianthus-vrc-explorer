@@ -3,11 +3,14 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import pytest
+
 import helianthus_vrc_explorer.ui.browse_textual as browse_textual
 from helianthus_vrc_explorer.ui.browse_textual import (
     compute_change_indicator,
     format_watch_interval,
     parse_watch_interval,
+    run_browse_from_artifact,
 )
 
 
@@ -69,3 +72,40 @@ def test_textual_browse_classes_are_module_scoped() -> None:
         "_BrowseApp",
     }:
         assert name not in collector.names
+
+
+def test_run_browse_from_artifact_preserves_artifact_and_allow_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeApp:
+        def __init__(self, artifact: dict[str, object], *, allow_write: bool, store) -> None:  # noqa: ANN001
+            captured["artifact"] = artifact
+            captured["allow_write"] = allow_write
+            captured["store"] = store
+
+        def run(self) -> None:
+            captured["ran"] = True
+
+    artifact = {"meta": {"destination_address": "0x15"}, "groups": {}}
+    monkeypatch.setattr(browse_textual, "_TEXTUAL_IMPORT_ERROR", None)
+    monkeypatch.setattr(browse_textual, "_BrowseApp", _FakeApp)
+
+    assert run_browse_from_artifact(artifact, allow_write=True) is None
+    assert captured["artifact"] is artifact
+    assert captured["allow_write"] is True
+    assert captured["ran"] is True
+
+
+def test_run_browse_from_artifact_preserves_lazy_textual_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    error = ModuleNotFoundError("No module named 'textual'")
+    error.name = "textual"
+    monkeypatch.setattr(browse_textual, "_TEXTUAL_IMPORT_ERROR", error)
+
+    with pytest.raises(ModuleNotFoundError) as raised:
+        run_browse_from_artifact({}, allow_write=False)
+
+    assert raised.value is error
