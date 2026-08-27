@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-import helianthus_vrc_explorer.ui.browse_textual as browse_textual
+import ast
+from pathlib import Path
 
+import helianthus_vrc_explorer.ui.browse_textual as browse_textual
 from helianthus_vrc_explorer.ui.browse_textual import (
     compute_change_indicator,
     format_watch_interval,
@@ -33,12 +35,37 @@ def test_compute_change_indicator_numeric_and_text() -> None:
 
 
 def test_textual_browse_classes_are_module_scoped() -> None:
-    for name in (
+    source_path = Path(browse_textual.__file__ or "")
+    tree = ast.parse(source_path.read_text(encoding="utf-8"))
+
+    class FunctionNestedClassCollector(ast.NodeVisitor):
+        def __init__(self) -> None:
+            self.function_depth = 0
+            self.names: set[str] = set()
+
+        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+            self.function_depth += 1
+            self.generic_visit(node)
+            self.function_depth -= 1
+
+        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+            self.function_depth += 1
+            self.generic_visit(node)
+            self.function_depth -= 1
+
+        def visit_ClassDef(self, node: ast.ClassDef) -> None:
+            if self.function_depth:
+                self.names.add(node.name)
+            self.generic_visit(node)
+
+    collector = FunctionNestedClassCollector()
+    collector.visit(tree)
+
+    for name in {
         "_FocusableStatic",
         "_InputDialog",
         "_HelpDialog",
         "_ConfirmDialog",
         "_BrowseApp",
-    ):
-        cls = getattr(browse_textual, name)
-        assert cls.__qualname__ == name
+    }:
+        assert name not in collector.names
