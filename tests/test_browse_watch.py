@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import helianthus_vrc_explorer.ui.browse_textual as browse_textual
+
 from helianthus_vrc_explorer.ui.browse_textual import (
     compute_change_indicator,
     format_watch_interval,
@@ -28,3 +30,15 @@ def test_compute_change_indicator_numeric_and_text() -> None:
     assert compute_change_indicator("12", "10") == "▼"
     assert compute_change_indicator("10", "10") == "-"
     assert compute_change_indicator("foo", "bar") == "Δ"
+
+
+def test_textual_browse_classes_are_module_scoped() -> None:
+    for name in (
+        "_FocusableStatic",
+        "_InputDialog",
+        "_HelpDialog",
+        "_ConfirmDialog",
+        "_BrowseApp",
+    ):
+        cls = getattr(browse_textual, name)
+        assert cls.__qualname__ == name
