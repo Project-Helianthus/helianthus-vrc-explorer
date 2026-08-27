@@ -9,9 +9,29 @@ from rich.console import Group
 from rich.table import Table
 from rich.text import Text
 
+from ..protocol.parser import (
+    ValueEncodeError,
+    ValueParseError,
+    encode_typed_value,
+    parse_typed_value,
+)
 from .browse_models import BrowseTab, RegisterRow, TreeNodeRef
 from .browse_store import BrowseStore
 from .emphasis import rich_star_bold_text
+
+try:
+    from textual.app import App, ComposeResult
+    from textual.binding import Binding
+    from textual.containers import Horizontal, Vertical
+    from textual.events import Key
+    from textual.screen import ModalScreen
+    from textual.widgets import DataTable, Footer, Header, Input, Label, Static, Tab, Tabs, Tree
+except ModuleNotFoundError as exc:
+    if exc.name is None or (exc.name != "textual" and not exc.name.startswith("textual.")):
+        raise
+    _TEXTUAL_IMPORT_ERROR: ModuleNotFoundError | None = exc
+else:
+    _TEXTUAL_IMPORT_ERROR = None
 
 _ALLOWED_WATCH_INTERVALS: tuple[float, ...] = (0.25, 0.5, 1.0, 2.0, 5.0)
 _WRITE_MARK = "✎"
@@ -174,24 +194,7 @@ def _tab_from_id(tab_id: str) -> BrowseTab:
     return "state"
 
 
-def run_browse_from_artifact(
-    artifact: dict[str, object],
-    *,
-    allow_write: bool,
-) -> None:
-    from textual.app import App, ComposeResult
-    from textual.binding import Binding
-    from textual.containers import Horizontal, Vertical
-    from textual.events import Key
-    from textual.screen import ModalScreen
-    from textual.widgets import DataTable, Footer, Header, Input, Label, Static, Tab, Tabs, Tree
-
-    from ..protocol.parser import (
-        ValueEncodeError,
-        ValueParseError,
-        encode_typed_value,
-        parse_typed_value,
-    )
+if _TEXTUAL_IMPORT_ERROR is None:
 
     class _FocusableStatic(Static):
         can_focus = True
@@ -361,7 +364,7 @@ def run_browse_from_artifact(
         }
         """
 
-        def __init__(self) -> None:
+        def __init__(self, artifact: dict[str, object], *, allow_write: bool) -> None:
             super().__init__()
             self._store = BrowseStore.from_artifact(artifact)
             self._node_by_id = {node.node_id: node for node in self._store.tree_nodes}
@@ -1181,4 +1184,12 @@ def run_browse_from_artifact(
             if len(self.screen_stack) > 1:
                 self.pop_screen()
 
-    _BrowseApp().run()
+
+def run_browse_from_artifact(
+    artifact: dict[str, object],
+    *,
+    allow_write: bool,
+) -> None:
+    if _TEXTUAL_IMPORT_ERROR is not None:
+        raise _TEXTUAL_IMPORT_ERROR
+    _BrowseApp(artifact, allow_write=allow_write).run()
