@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from copy import deepcopy
+
 from helianthus_vrc_explorer.ui.browse_store import BrowseStore
 
 
@@ -118,6 +120,7 @@ def test_browse_store_builds_rows_and_left_tree_uses_only_myvaillant_name() -> N
     assert by_register["0x0001"].ebusd_name == "regulator_param_1"
     assert by_register["0x0002"].myvaillant_name == "limit_value"
     assert by_register["0x0002"].ebusd_name == ""
+
     assert by_register["0x0001"].access_flags == "config_user"
     assert by_register["0x0001"].row_id == "0x00:0x02:0x00:0x0001"
     assert by_register["0x0002"].row_id == "0x00:0x06:0x00:0x0002"
@@ -144,6 +147,20 @@ def test_browse_store_builds_rows_and_left_tree_uses_only_myvaillant_name() -> N
     assert "b524:section:timer_programs" not in by_node_id
     assert "b524:section:register_tables" not in by_node_id
     assert not any(node.level == "register" for node in store.tree_nodes)
+
+
+def test_browse_store_hydration_keeps_artifact_and_query_results_independent() -> None:
+    """Characterize facade copy semantics across hydration, index, and query phases."""
+
+    artifact = _sample_artifact()
+    original = deepcopy(artifact)
+    store = BrowseStore.from_artifact(artifact)
+
+    selected = store.rows_for_selection(None, tab="state")
+
+    assert artifact == original
+    assert selected == [row for row in store.rows if row.tab == "state"]
+    assert selected is not store.rows
 
 
 def test_browse_store_filters_rows_for_tree_selection() -> None:
