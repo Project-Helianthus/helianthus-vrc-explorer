@@ -80,3 +80,15 @@ Each register entry contains:
   where `value_bytes = bytes.fromhex(raw_hex)`. If missing, `TransportTimeout` is raised.
 - Operations-first fixtures are read directly by opcode key. Legacy fixtures are auto-migrated
   to operations-first during load.
+
+## Synthetic offline acceptance evidence
+
+`offline_acceptance_evidence.json` is deliberately synthetic. It combines only sanitized values and
+entry shapes already present in this repository's fixtures and tests; it is not a device capture and
+does not establish a protocol or hardware fact.
+
+It contains separate `0x02` and `0x06` operation paths, retained active raw payloads, explicit
+`empty_reply` and `nack` response states, and incomplete metadata with the existing
+`user_interrupt` reason. Run `python scripts/check_offline_acceptance_evidence.py` to verify those
+paths and fields. The checker rejects field removal, operation collapse, response-state changes, and
+loss of incomplete metadata.

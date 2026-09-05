@@ -14,6 +14,7 @@ python3.12 -m venv .venv
 .venv/bin/python scripts/check_protocol_terminology.py
 .venv/bin/python scripts/check_b524_namespace_guardrails.py
 .venv/bin/python scripts/check_docs_sync.py
+.venv/bin/python scripts/check_offline_acceptance_evidence.py
 .venv/bin/ruff format --check .
 .venv/bin/mypy src
 .venv/bin/pytest
@@ -78,34 +79,41 @@ zero, and `scan.stdout` contains exactly one line: the absolute JSON artifact pa
 scan summary belong on stderr. The JSON and matching HTML report must exist, and the artifact must
 retain its schema version and opcode-keyed operation.
 
-Replay the checked-in browse fixtures through the same installed CLI. In a non-TTY environment,
-`browse` prints its summary to stderr and exits zero after reporting that the fullscreen UI needs a
-TTY; this is the scriptable behavior to check.
+The deterministic evidence checker verifies the synthetic fixture at the JSON level after schema
+migration. It requires separate operation/group/instance/register paths, retained known-good raw
+payloads, explicit `empty_reply` and `nack` response/error fields, and the `meta.incomplete` reason.
+It rejects field removal or a `0x02`/`0x06` collapse. The fixture is explicitly synthetic and offline;
+it is not a capture or hardware proof.
+
+Replay that checked-in fixture through the same installed CLI as additional scriptability evidence.
+In a non-TTY environment, `browse` prints its summary to stderr and exits zero after reporting that
+the fullscreen UI needs a TTY.
 
 ```bash
-"$RUNNER" -m helianthus_vrc_explorer browse --file fixtures/dual_namespace_scan.json \
-  > "$OUTPUT_DIR/dual.stdout" 2> "$OUTPUT_DIR/dual.stderr"
+"$RUNNER" -m helianthus_vrc_explorer browse --file fixtures/offline_acceptance_evidence.json \
+  > "$OUTPUT_DIR/evidence.stdout" 2> "$OUTPUT_DIR/evidence.stderr"
 "$RUNNER" -m helianthus_vrc_explorer browse --file fixtures/demo_browse.json \
   > "$OUTPUT_DIR/demo.stdout" 2> "$OUTPUT_DIR/demo.stderr"
 
-test ! -s "$OUTPUT_DIR/dual.stdout"
+test ! -s "$OUTPUT_DIR/evidence.stdout"
 test ! -s "$OUTPUT_DIR/demo.stdout"
-rg -F 'Local Devices (0x02)' "$OUTPUT_DIR/dual.stderr"
-rg -F 'Remote Devices (0x06)' "$OUTPUT_DIR/dual.stderr"
-rg -F 'Browse UI requires a TTY terminal.' "$OUTPUT_DIR/dual.stderr"
+rg -F 'Local Devices (0x02)' "$OUTPUT_DIR/evidence.stderr"
+rg -F 'Remote Devices (0x06)' "$OUTPUT_DIR/evidence.stderr"
+rg -F 'Browse UI requires a TTY terminal.' "$OUTPUT_DIR/evidence.stderr"
 rg -F 'Local Devices (0x02)' "$OUTPUT_DIR/demo.stderr"
 ```
 
-Pass when both commands exit zero. `dual_namespace_scan.json` must retain distinct `0x02` and `0x06`
-operation sections, including their separate `GG=0x09` rows. The output must not combine operation
-identity or promote unknown entries into confirmed semantics. `demo_browse.json` must remain readable
-as a local-operation artifact.
+Pass when both commands exit zero. The JSON-level checker is the required evidence for the separate
+`0x02` and `0x06` paths, raw payloads, response states, errors, and incomplete metadata; the browse
+summary is additional evidence that the installed non-TTY CLI remains scriptable. `demo_browse.json`
+must remain readable as a local-operation artifact.
 
 ## Failure and hardware boundary
 
 Any nonzero exit, missing JSON or HTML output, more than one stdout line from the dry run, changed
-generated model CSV, absent packaged resource, or missing local/remote operation labels is a failure.
-Investigate it with a focused regression test before changing behavior.
+generated model CSV, absent packaged resource, failed JSON-level evidence check, or missing
+local/remote operation labels is a failure. Investigate it with a focused regression test before
+changing behavior.
 
 This acceptance card does not validate live discovery, transport timing, controller behavior, or
 device writes. Those require an explicit operator-approved hardware procedure; do not use these

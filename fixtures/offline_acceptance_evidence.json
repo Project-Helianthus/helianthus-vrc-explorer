@@ -1,0 +1,74 @@
+{
+  "schema_version": "2.3",
+  "meta": {
+    "fixture_kind": "synthetic_offline_evidence",
+    "fixture_note": "Synthetic offline acceptance evidence assembled from sanitized repository fixture values and test-state shapes; not a device capture or hardware proof.",
+    "incomplete": true,
+    "incomplete_reason": "user_interrupt"
+  },
+  "operations": {
+    "0x02": {
+      "groups": {
+        "0x09": {
+          "descriptor_observed": 1.0,
+          "instances": {
+            "0x00": {
+              "present": true,
+              "registers": {
+                "0x0004": {
+                  "raw_hex": "031702",
+                  "read_opcode": "0x02",
+                  "response_state": "active",
+                  "error": null
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "0x06": {
+      "groups": {
+        "0x09": {
+          "descriptor_observed": 1.0,
+          "instances": {
+            "0x00": {
+              "present": true,
+              "registers": {
+                "0x0004": {
+                  "raw_hex": "021703",
+                  "read_opcode": "0x06",
+                  "response_state": "active",
+                  "error": null
+                }
+              }
+            }
+          }
+        },
+        "0x0C": {
+          "descriptor_observed": 1.0,
+          "instances": {
+            "0x00": {
+              "present": true,
+              "registers": {
+                "0x0004": {
+                  "raw_hex": null,
+                  "reply_hex": "",
+                  "read_opcode": "0x06",
+                  "response_state": "empty_reply",
+                  "error": null
+                },
+                "0x0007": {
+                  "raw_hex": null,
+                  "read_opcode": "0x06",
+                  "response_state": "nack",
+                  "error": "nack"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
