@@ -5,20 +5,28 @@ sanitized fixtures and does not contact an eBUS adapter, a controller, or anothe
 “Offline” here means no device or protocol I/O. Creating the environment may use the configured
 package index unless its dependencies have been staged in a local wheelhouse.
 
-Use Python 3.12 or newer. Run the command blocks below in Bash. From the repository root, prepare
-the development environment and run the same checks as CI. Leave `WHEELHOUSE` unset to use pip's
-configured public package index. To use a prepared local wheelhouse, export `WHEELHOUSE` before
-running every block; both development and external wheel installs then use the same
-`--no-index --find-links` dependency source. The wheelhouse must contain the runtime, development,
-and build dependencies needed by the selected block.
+Use Python 3.12 or newer. Run the command blocks below in Bash. `PYTHON_BIN` defaults to
+`python3`, so a supported later interpreter can be selected with `PYTHON_BIN=/path/to/python3.14`.
+From the repository root, prepare the development environment and run the same checks as CI. Leave
+`WHEELHOUSE` unset to use pip's configured public package index. To use a prepared local
+wheelhouse, export `WHEELHOUSE` before running every block; both development and external wheel
+installs then use the same `--no-index --find-links` dependency source. The wheelhouse must contain
+the runtime, development, and build dependencies needed by the selected block.
 
 ```bash
 set -euo pipefail
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+"$PYTHON_BIN" - <<'PY'
+import sys
+
+if sys.version_info < (3, 12):
+    raise SystemExit(f"Python 3.12+ is required, got {sys.version.split()[0]}")
+PY
 PIP_DEPENDENCY_ARGS=()
 if [[ -n "${WHEELHOUSE:-}" ]]; then
   PIP_DEPENDENCY_ARGS=(--no-index --find-links "$WHEELHOUSE")
 fi
-python3.12 -m venv .venv
+"$PYTHON_BIN" -m venv .venv
 .venv/bin/python -m pip install "${PIP_DEPENDENCY_ARGS[@]}" --upgrade pip
 .venv/bin/python -m pip install "${PIP_DEPENDENCY_ARGS[@]}" -e ".[dev]" build "setuptools>=68" wheel
 .venv/bin/ruff check .
@@ -43,6 +51,13 @@ cannot resolve from this checkout:
 
 ```bash
 set -euo pipefail
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+"$PYTHON_BIN" - <<'PY'
+import sys
+
+if sys.version_info < (3, 12):
+    raise SystemExit(f"Python 3.12+ is required, got {sys.version.split()[0]}")
+PY
 PIP_DEPENDENCY_ARGS=()
 if [[ -n "${WHEELHOUSE:-}" ]]; then
   PIP_DEPENDENCY_ARGS=(--no-index --find-links "$WHEELHOUSE")
@@ -52,7 +67,7 @@ git diff --exit-code -- data/models.csv src/helianthus_vrc_explorer/data/models.
 .venv/bin/python -m build --no-isolation
 
 VRC_ACCEPTANCE_DIR="$(mktemp -d)"
-python3.12 -m venv "$VRC_ACCEPTANCE_DIR/venv"
+"$PYTHON_BIN" -m venv "$VRC_ACCEPTANCE_DIR/venv"
 "$VRC_ACCEPTANCE_DIR/venv/bin/python" -m pip install "${PIP_DEPENDENCY_ARGS[@]}" --upgrade pip
 "$VRC_ACCEPTANCE_DIR/venv/bin/python" -m pip install "${PIP_DEPENDENCY_ARGS[@]}" dist/*.whl
 PACKAGE_MODELS="$("$VRC_ACCEPTANCE_DIR/venv/bin/python" -c 'from importlib import resources; print(resources.files("helianthus_vrc_explorer.data").joinpath("models.csv"))')"
@@ -112,10 +127,12 @@ retain its schema version and opcode-keyed operation.
 
 The deterministic evidence checker first verifies the original synthetic JSON fixture. It requires its
 root schema version, separate operation/group/instance/register paths, retained known-good raw
-payloads, explicitly present `empty_reply` and `nack` response/error fields, and the
-`meta.incomplete` reason. Only after those checks does it migrate a deep copy to confirm
-compatibility without a register-count change. It rejects field removal or a `0x02`/`0x06` collapse.
-The fixture is explicitly synthetic and offline; it is not a capture or hardware proof.
+payloads, explicitly present `empty_reply` and `nack` response/error fields, incomplete reason,
+and the synthetic unknown-group `0x06/0x69/0x00/0x0000` identity with
+`meta.issue_suggestion.unknown_groups` provenance. Only after those checks does it migrate a deep
+copy to confirm compatibility without a register-count change. It rejects field removal or a
+`0x02`/`0x06` collapse. The fixture is explicitly synthetic and offline; it is not a capture or
+hardware proof.
 
 Replay that checked-in fixture through the same installed CLI as additional scriptability evidence.
 In a non-TTY environment, `browse` prints its summary to stderr and exits zero after reporting that
@@ -132,14 +149,17 @@ test ! -s "$OUTPUT_DIR/evidence.stdout"
 test ! -s "$OUTPUT_DIR/demo.stdout"
 rg -F 'Local Devices (0x02)' "$OUTPUT_DIR/evidence.stderr"
 rg -F 'Remote Devices (0x06)' "$OUTPUT_DIR/evidence.stderr"
+rg -F 'Unknown 0x69' "$OUTPUT_DIR/evidence.stderr"
+rg -F 'groups: 0x69' "$OUTPUT_DIR/evidence.stderr"
 rg -F 'Browse UI requires a TTY terminal.' "$OUTPUT_DIR/evidence.stderr"
 rg -F 'Local Devices (0x02)' "$OUTPUT_DIR/demo.stderr"
 ```
 
 Pass when both commands exit zero. The JSON-level checker is the required evidence for the separate
-`0x02` and `0x06` paths, raw payloads, response states, errors, and incomplete metadata; the browse
-summary is additional evidence that the installed non-TTY CLI remains scriptable. `demo_browse.json`
-must remain readable as a local-operation artifact.
+`0x02` and `0x06` paths, raw payloads, response states, errors, incomplete metadata, and unknown
+group provenance; the browse summary is additional evidence that the installed non-TTY CLI retains
+the unknown-group label and remains scriptable. `demo_browse.json` must remain readable as a
+local-operation artifact.
 
 ## Failure and hardware boundary
 

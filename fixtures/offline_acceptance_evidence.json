@@ -4,7 +4,13 @@
     "fixture_kind": "synthetic_offline_evidence",
     "fixture_note": "Synthetic offline acceptance evidence assembled from sanitized repository fixture values and test-state shapes; not a device capture or hardware proof.",
     "incomplete": true,
-    "incomplete_reason": "user_interrupt"
+    "incomplete_reason": "user_interrupt",
+    "issue_suggestion": {
+      "suggest_issue": true,
+      "unknown_groups": [
+        "0x69"
+      ]
+    }
   },
   "operations": {
     "0x02": {
@@ -63,6 +69,23 @@
                   "read_opcode": "0x06",
                   "response_state": "nack",
                   "error": "nack"
+                }
+              }
+            }
+          }
+        },
+        "0x69": {
+          "name": "Unknown 0x69",
+          "descriptor_observed": 1.0,
+          "instances": {
+            "0x00": {
+              "present": true,
+              "registers": {
+                "0x0000": {
+                  "raw_hex": "00",
+                  "read_opcode": "0x06",
+                  "response_state": "active",
+                  "error": null
                 }
               }
             }

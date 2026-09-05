@@ -44,14 +44,20 @@ _REQUIRED_ENTRIES: dict[tuple[str, str, str, str], dict[str, object]] = {
         "response_state": "nack",
         "error": "nack",
     },
+    ("0x06", "0x69", "0x00", "0x0000"): {
+        "raw_hex": "00",
+        "read_opcode": "0x06",
+        "response_state": "active",
+        "error": None,
+    },
 }
 
 
-def _get_entry(
+def _get_group(
     artifact: dict[str, Any],
-    path: tuple[str, str, str, str],
+    operation: str,
+    group: str,
 ) -> dict[str, Any] | None:
-    operation, group, instance, register = path
     operations = artifact.get("operations")
     if not isinstance(operations, dict):
         return None
@@ -62,7 +68,16 @@ def _get_entry(
     if not isinstance(groups, dict):
         return None
     group_obj = groups.get(group)
-    if not isinstance(group_obj, dict):
+    return group_obj if isinstance(group_obj, dict) else None
+
+
+def _get_entry(
+    artifact: dict[str, Any],
+    path: tuple[str, str, str, str],
+) -> dict[str, Any] | None:
+    operation, group, instance, register = path
+    group_obj = _get_group(artifact, operation, group)
+    if group_obj is None:
         return None
     instances = group_obj.get("instances")
     if not isinstance(instances, dict):
@@ -91,6 +106,17 @@ def validate_offline_acceptance_evidence(artifact: dict[str, Any]) -> list[str]:
         errors.append("meta.incomplete must remain true")
     if meta.get("incomplete_reason") != "user_interrupt":
         errors.append("meta.incomplete_reason must remain user_interrupt")
+    issue_suggestion = meta.get("issue_suggestion")
+    if not isinstance(issue_suggestion, dict):
+        errors.append("meta.issue_suggestion must retain unknown-group provenance")
+    else:
+        if issue_suggestion.get("suggest_issue") is not True:
+            errors.append("meta.issue_suggestion.suggest_issue must remain true")
+        if issue_suggestion.get("unknown_groups") != ["0x69"]:
+            errors.append("meta.issue_suggestion.unknown_groups must remain ['0x69']")
+    unknown_group = _get_group(artifact, "0x06", "0x69")
+    if unknown_group is not None and unknown_group.get("name") != "Unknown 0x69":
+        errors.append("0x06/0x69: name must remain 'Unknown 0x69'")
 
     for path, expected_fields in _REQUIRED_ENTRIES.items():
         entry = _get_entry(artifact, path)

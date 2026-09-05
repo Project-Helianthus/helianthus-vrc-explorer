@@ -77,7 +77,7 @@ def test_offline_acceptance_evidence_checker_cli_accepts_canonical_fixture() -> 
 
     assert result.returncode == 0
     assert result.stderr == ""
-    assert result.stdout == "offline acceptance evidence passed: 4 entries, schema 2.3\n"
+    assert result.stdout == "offline acceptance evidence passed: 5 entries, schema 2.3\n"
 
 
 def _delete_path_field(
@@ -154,7 +154,26 @@ def _delete_path_field(
             "0x06",
             "missing required entry: 0x06/0x09/0x00/0x0004\n"
             "- missing required entry: 0x06/0x0C/0x00/0x0004\n"
-            "- missing required entry: 0x06/0x0C/0x00/0x0007",
+            "- missing required entry: 0x06/0x0C/0x00/0x0007\n"
+            "- missing required entry: 0x06/0x69/0x00/0x0000",
+        ),
+        (
+            "unknown-group",
+            ("operations", "0x06", "groups"),
+            "0x69",
+            "missing required entry: 0x06/0x69/0x00/0x0000",
+        ),
+        (
+            "unknown-group-label",
+            ("operations", "0x06", "groups", "0x69"),
+            "name",
+            "0x06/0x69: name must remain 'Unknown 0x69'",
+        ),
+        (
+            "unknown-provenance",
+            ("meta", "issue_suggestion"),
+            "unknown_groups",
+            "meta.issue_suggestion.unknown_groups must remain ['0x69']",
         ),
     ],
 )

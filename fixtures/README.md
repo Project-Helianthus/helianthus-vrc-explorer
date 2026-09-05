@@ -89,7 +89,9 @@ does not establish a protocol or hardware fact.
 
 It contains separate `0x02` and `0x06` operation paths, retained active raw payloads, explicit
 `empty_reply` and `nack` response states, and incomplete metadata with the existing
-`user_interrupt` reason. Run `python scripts/check_offline_acceptance_evidence.py` to verify those
-paths and fields in the original fixture before it migrates a deep copy for compatibility and
-register-count preservation. The checker rejects field removal, operation collapse, response-state
-changes, and loss of incomplete metadata.
+`user_interrupt` reason. It also carries the sanitized unknown group `0x69` under operation
+`0x06`, with an explicit `issue_suggestion.unknown_groups` provenance entry. Run
+`python scripts/check_offline_acceptance_evidence.py` to verify those paths and fields in the
+original fixture before it migrates a deep copy for compatibility and register-count preservation.
+The checker rejects field removal, operation collapse, response-state changes, loss of incomplete
+metadata, and loss of unknown-group identity or provenance.
