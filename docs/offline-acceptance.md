@@ -5,14 +5,22 @@ sanitized fixtures and does not contact an eBUS adapter, a controller, or anothe
 “Offline” here means no device or protocol I/O. Creating the environment may use the configured
 package index unless its dependencies have been staged in a local wheelhouse.
 
-Use Python 3.12 or newer. From the repository root, prepare the development environment and run the
-same checks as CI:
+Use Python 3.12 or newer. Run the command blocks below in Bash. From the repository root, prepare
+the development environment and run the same checks as CI. Leave `WHEELHOUSE` unset to use pip's
+configured public package index. To use a prepared local wheelhouse, export `WHEELHOUSE` before
+running every block; both development and external wheel installs then use the same
+`--no-index --find-links` dependency source. The wheelhouse must contain the runtime, development,
+and build dependencies needed by the selected block.
 
 ```bash
 set -euo pipefail
+PIP_DEPENDENCY_ARGS=()
+if [[ -n "${WHEELHOUSE:-}" ]]; then
+  PIP_DEPENDENCY_ARGS=(--no-index --find-links "$WHEELHOUSE")
+fi
 python3.12 -m venv .venv
-.venv/bin/python -m pip install --upgrade pip
-.venv/bin/python -m pip install -e ".[dev]" build "setuptools>=68" wheel
+.venv/bin/python -m pip install "${PIP_DEPENDENCY_ARGS[@]}" --upgrade pip
+.venv/bin/python -m pip install "${PIP_DEPENDENCY_ARGS[@]}" -e ".[dev]" build "setuptools>=68" wheel
 .venv/bin/ruff check .
 .venv/bin/python scripts/check_protocol_terminology.py
 .venv/bin/python scripts/check_b524_namespace_guardrails.py
@@ -22,10 +30,6 @@ python3.12 -m venv .venv
 .venv/bin/mypy src
 .venv/bin/pytest
 ```
-
-For a disconnected machine, stage the required wheels beforehand and replace the install command with
-`.venv/bin/python -m pip install --no-index --find-links "$WHEELHOUSE" -e ".[dev]" build "setuptools>=68" wheel`.
-Set `WHEELHOUSE` to that local directory; do not use this card to reach a device endpoint.
 
 All commands must exit zero. `pytest` must collect and pass the full suite. The B524 guardrail and
 schema tests cover operation-aware identity, legacy migration, response states, raw payload retention,
@@ -39,13 +43,18 @@ cannot resolve from this checkout:
 
 ```bash
 set -euo pipefail
+PIP_DEPENDENCY_ARGS=()
+if [[ -n "${WHEELHOUSE:-}" ]]; then
+  PIP_DEPENDENCY_ARGS=(--no-index --find-links "$WHEELHOUSE")
+fi
 .venv/bin/python scripts/generate_models_csv.py
 git diff --exit-code -- data/models.csv src/helianthus_vrc_explorer/data/models.csv
 .venv/bin/python -m build --no-isolation
 
 VRC_ACCEPTANCE_DIR="$(mktemp -d)"
 python3.12 -m venv "$VRC_ACCEPTANCE_DIR/venv"
-"$VRC_ACCEPTANCE_DIR/venv/bin/python" -m pip install dist/*.whl
+"$VRC_ACCEPTANCE_DIR/venv/bin/python" -m pip install "${PIP_DEPENDENCY_ARGS[@]}" --upgrade pip
+"$VRC_ACCEPTANCE_DIR/venv/bin/python" -m pip install "${PIP_DEPENDENCY_ARGS[@]}" dist/*.whl
 PACKAGE_MODELS="$("$VRC_ACCEPTANCE_DIR/venv/bin/python" -c 'from importlib import resources; print(resources.files("helianthus_vrc_explorer.data").joinpath("models.csv"))')"
 cmp -s data/models.csv "$PACKAGE_MODELS"
 unzip -l dist/*.whl | rg 'helianthus_vrc_explorer/data/models\.csv'
