@@ -72,11 +72,16 @@ mkdir -p "$OUTPUT_DIR"
 
 (
   cd "$VRC_ACCEPTANCE_DIR"
-  "$RUNNER" -m helianthus_vrc_explorer --version
+  "$RUNNER" -m helianthus_vrc_explorer --version \
+    > "$OUTPUT_DIR/version.stdout" 2> "$OUTPUT_DIR/version.stderr"
   "$RUNNER" -m helianthus_vrc_explorer scan --dry-run --dst 0x15 --output-dir "$OUTPUT_DIR" \
     > "$OUTPUT_DIR/scan.stdout" 2> "$OUTPUT_DIR/scan.stderr"
 )
 
+test "$(wc -l < "$OUTPUT_DIR/version.stdout")" -eq 1
+test ! -s "$OUTPUT_DIR/version.stderr"
+EXPECTED_VERSION="$("$RUNNER" -c 'from helianthus_vrc_explorer import __version__; print(f"helianthus-vrc-explorer {__version__}")')"
+test "$(< "$OUTPUT_DIR/version.stdout")" = "$EXPECTED_VERSION"
 test "$(wc -l < "$OUTPUT_DIR/scan.stdout")" -eq 1
 ARTIFACT="$(< "$OUTPUT_DIR/scan.stdout")"
 test -s "$ARTIFACT"
