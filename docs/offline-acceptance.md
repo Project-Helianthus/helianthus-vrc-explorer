@@ -110,11 +110,12 @@ zero, and `scan.stdout` contains exactly one line: the absolute JSON artifact pa
 scan summary belong on stderr. The JSON and matching HTML report must exist, and the artifact must
 retain its schema version and opcode-keyed operation.
 
-The deterministic evidence checker verifies the synthetic fixture at the JSON level after schema
-migration. It requires separate operation/group/instance/register paths, retained known-good raw
-payloads, explicit `empty_reply` and `nack` response/error fields, and the `meta.incomplete` reason.
-It rejects field removal or a `0x02`/`0x06` collapse. The fixture is explicitly synthetic and offline;
-it is not a capture or hardware proof.
+The deterministic evidence checker first verifies the original synthetic JSON fixture. It requires its
+root schema version, separate operation/group/instance/register paths, retained known-good raw
+payloads, explicitly present `empty_reply` and `nack` response/error fields, and the
+`meta.incomplete` reason. Only after those checks does it migrate a deep copy to confirm
+compatibility without a register-count change. It rejects field removal or a `0x02`/`0x06` collapse.
+The fixture is explicitly synthetic and offline; it is not a capture or hardware proof.
 
 Replay that checked-in fixture through the same installed CLI as additional scriptability evidence.
 In a non-TTY environment, `browse` prints its summary to stderr and exits zero after reporting that

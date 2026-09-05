@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import sys
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -77,8 +78,10 @@ def _get_entry(
 
 
 def validate_offline_acceptance_evidence(artifact: dict[str, Any]) -> list[str]:
-    """Return invariant violations for the synthetic offline evidence fixture."""
+    """Return canonical-fixture invariant violations before compatibility migration."""
     errors: list[str] = []
+    if artifact.get("schema_version") != CURRENT_ARTIFACT_SCHEMA_VERSION:
+        errors.append(f"schema_version must be {CURRENT_ARTIFACT_SCHEMA_VERSION}")
     meta = artifact.get("meta")
     if not isinstance(meta, dict):
         return ["meta must be an object"]
@@ -117,14 +120,23 @@ def main(argv: list[str]) -> int:
     path = Path(argv[1]) if len(argv) == 2 else _DEFAULT_FIXTURE
     try:
         artifact = _load_fixture(path)
-        migrated, report = migrate_artifact_schema(artifact)
     except (OSError, ValueError, json.JSONDecodeError, ArtifactSchemaError) as exc:
         print(f"offline acceptance evidence: {exc}", file=sys.stderr)
         return 2
 
-    errors = validate_offline_acceptance_evidence(migrated)
-    if migrated.get("schema_version") != CURRENT_ARTIFACT_SCHEMA_VERSION:
-        errors.append(f"schema_version must be {CURRENT_ARTIFACT_SCHEMA_VERSION}")
+    errors = validate_offline_acceptance_evidence(artifact)
+    if errors:
+        print("offline acceptance evidence failed:", file=sys.stderr)
+        for error in errors:
+            print(f"- {error}", file=sys.stderr)
+        return 1
+
+    try:
+        migrated, report = migrate_artifact_schema(deepcopy(artifact))
+    except ArtifactSchemaError as exc:
+        print(f"offline acceptance evidence: {exc}", file=sys.stderr)
+        return 2
+
     if report.register_count_before != report.register_count_after:
         errors.append(
             "migration changed register count "
