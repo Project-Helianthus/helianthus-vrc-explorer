@@ -1,15 +1,18 @@
 # Offline acceptance card
 
 This card verifies the public, read-first CLI from a clean checkout. It uses only repository-owned
-sanitized fixtures and does not contact an eBUS adapter, a controller, or any network endpoint.
+sanitized fixtures and does not contact an eBUS adapter, a controller, or another device endpoint.
+“Offline” here means no device or protocol I/O. Creating the environment may use the configured
+package index unless its dependencies have been staged in a local wheelhouse.
 
 Use Python 3.12 or newer. From the repository root, prepare the development environment and run the
 same checks as CI:
 
 ```bash
+set -euo pipefail
 python3.12 -m venv .venv
 .venv/bin/python -m pip install --upgrade pip
-.venv/bin/python -m pip install -e ".[dev]" build
+.venv/bin/python -m pip install -e ".[dev]" build "setuptools>=68" wheel
 .venv/bin/ruff check .
 .venv/bin/python scripts/check_protocol_terminology.py
 .venv/bin/python scripts/check_b524_namespace_guardrails.py
@@ -19,6 +22,10 @@ python3.12 -m venv .venv
 .venv/bin/mypy src
 .venv/bin/pytest
 ```
+
+For a disconnected machine, stage the required wheels beforehand and replace the install command with
+`.venv/bin/python -m pip install --no-index --find-links "$WHEELHOUSE" -e ".[dev]" build "setuptools>=68" wheel`.
+Set `WHEELHOUSE` to that local directory; do not use this card to reach a device endpoint.
 
 All commands must exit zero. `pytest` must collect and pass the full suite. The B524 guardrail and
 schema tests cover operation-aware identity, legacy migration, response states, raw payload retention,
@@ -31,17 +38,20 @@ diff. Build both distribution formats, then install the wheel into a separate di
 cannot resolve from this checkout:
 
 ```bash
+set -euo pipefail
 .venv/bin/python scripts/generate_models_csv.py
 git diff --exit-code -- data/models.csv src/helianthus_vrc_explorer/data/models.csv
-.venv/bin/python -m build
+.venv/bin/python -m build --no-isolation
 
 VRC_ACCEPTANCE_DIR="$(mktemp -d)"
 python3.12 -m venv "$VRC_ACCEPTANCE_DIR/venv"
 "$VRC_ACCEPTANCE_DIR/venv/bin/python" -m pip install dist/*.whl
 PACKAGE_MODELS="$("$VRC_ACCEPTANCE_DIR/venv/bin/python" -c 'from importlib import resources; print(resources.files("helianthus_vrc_explorer.data").joinpath("models.csv"))')"
 cmp -s data/models.csv "$PACKAGE_MODELS"
-unzip -l dist/*.whl | rg 'helianthus_vrc_explorer/(data/models\.csv|fixtures/vrc720_full_scan\.json)'
-tar -tzf dist/*.tar.gz | rg 'src/helianthus_vrc_explorer/(data/models\.csv|fixtures/vrc720_full_scan\.json)'
+unzip -l dist/*.whl | rg 'helianthus_vrc_explorer/data/models\.csv'
+unzip -l dist/*.whl | rg 'helianthus_vrc_explorer/fixtures/vrc720_full_scan\.json'
+tar -tzf dist/*.tar.gz | rg 'src/helianthus_vrc_explorer/data/models\.csv'
+tar -tzf dist/*.tar.gz | rg 'src/helianthus_vrc_explorer/fixtures/vrc720_full_scan\.json'
 ```
 
 Pass when every command exits zero. The final comparison proves the installed wheel loads the
@@ -55,6 +65,7 @@ Continue with the separately installed interpreter. The dry run uses the package
 `vrc720_full_scan.json` fixture and makes no device or network request.
 
 ```bash
+set -euo pipefail
 RUNNER="$VRC_ACCEPTANCE_DIR/venv/bin/python"
 OUTPUT_DIR="$VRC_ACCEPTANCE_DIR/output"
 mkdir -p "$OUTPUT_DIR"
@@ -70,8 +81,14 @@ test "$(wc -l < "$OUTPUT_DIR/scan.stdout")" -eq 1
 ARTIFACT="$(< "$OUTPUT_DIR/scan.stdout")"
 test -s "$ARTIFACT"
 test -s "${ARTIFACT%.json}.html"
-rg -F 'schema_version' "$ARTIFACT"
-rg -F '"0x02"' "$ARTIFACT"
+"$RUNNER" - "$ARTIFACT" <<'PY'
+import json
+import sys
+
+artifact = json.loads(open(sys.argv[1], encoding="utf-8").read())
+assert artifact["schema_version"] == "2.3"
+assert isinstance(artifact.get("operations", {}).get("0x02"), dict)
+PY
 ```
 
 Pass when `--version` emits one `helianthus-vrc-explorer <version>` line and exits zero, `scan` exits
@@ -90,6 +107,7 @@ In a non-TTY environment, `browse` prints its summary to stderr and exits zero a
 the fullscreen UI needs a TTY.
 
 ```bash
+set -euo pipefail
 "$RUNNER" -m helianthus_vrc_explorer browse --file fixtures/offline_acceptance_evidence.json \
   > "$OUTPUT_DIR/evidence.stdout" 2> "$OUTPUT_DIR/evidence.stderr"
 "$RUNNER" -m helianthus_vrc_explorer browse --file fixtures/demo_browse.json \
