@@ -41,6 +41,9 @@ python -m helianthus_vrc_explorer scan \
 
 `scan` auto-discovers the destination (`--dst auto`) by default. Use `--dst 0x..` to force an address.
 
+Contributors can verify the installed CLI, packaged data, and sanitized B524 replay inputs without
+hardware by following the [offline acceptance card](docs/offline-acceptance.md).
+
 Namespace contract for implementers:
 - Stable B524 namespace invariants (identity, discovery authority, constraint scope, artifact keys, fixture compatibility): [public B524 namespace invariants](https://github.com/Project-Helianthus/helianthus-docs-ebus/blob/main/architecture/b524-namespace-invariants.md)
 - This README remains user-facing; invariant-level semantics are documented in the public eBUS documentation once implementation behavior is stable.
