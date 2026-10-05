@@ -52,6 +52,9 @@ Key scan UX flags:
 - `--planner-ui auto|textual|classic`
 - `--preset recommended|full|research|custom`
 - `--probe-constraints/--no-probe-constraints` (targeted OP01/OP07 descriptions for observed writable parameters; enabled by default)
+- `--description-budget` (default 256; fair OP01/OP07 sharing with unused capacity borrowed)
+- `--request-budget` (actual B524 sends including retries; research defaults to 10000)
+- `--scan-plan` (version 1 JSON file for exact custom read selectors)
 - `--b509-dump` (B509 is opt-in; `--b509-range` requires this flag)
 - `--no-tips`
 - `--redact` (redact identity fields like serial number from console output)
@@ -87,9 +90,24 @@ Transport note:
 - CI enforces these rules with `python scripts/check_b524_namespace_guardrails.py`.
 
 Coverage and parameter-description note:
-- `recommended` and `full` use count-guided sparse instance probing where OP00 supplied a valid count; both retain a bounded fallback when the count cannot be used. `full` expands the declared profile ranges and can take hours on BASV2.
-- `research` and explicit `custom` plans are the only modes that represent an exhaustive probing choice. `research` enables broader group and register exploration. Legacy aliases remain `aggressive` -> `full`, `exhaustive` -> `research`, and `conservative` -> `recommended`.
-- Normal scans request at most 256 complete descriptions for observed writable parameters (`flags` bit 1): OP01 `DescribeParameter` for OP02 reads and OP07 `DescribeDeviceParameter` for OP06 reads. Each matched artifact record carries its scoped identity, opcode pair, codec, width, min, max, step, and raw reply.
+- `recommended` uses qualified OP00 counts for sparse circuit/zone instance discovery, with a bounded fallback for zero, unavailable, invalid or unmet counts. It scans characterized OP02 groups `00..05,08,09` and OP06 groups `01,02,08,09,0A,0C` consistently through CLI and interactive planners.
+- `full` audits every declared II slot in those characterized profile families independently of counts, using normal RR bounds. It reports count mismatches; configured profile coverage is not universal wire-space completeness.
+- `research` expands groups and RR bounds with multiple bounded discovery selectors. A failed first `II=00/RR=0000` probe does not veto later probes. It is non-exhaustive and defaults to 10000 actual B524 sends; budget exhaustion saves an incomplete artifact with retained observations. Legacy aliases remain `aggressive` -> `full`, `exhaustive` -> `research`, and `conservative` -> `recommended`.
+- Descriptions are acquired after scalar reads. The finite default budget of 256 reserves half for OP01 and half for OP07, borrows unused capacity, and rotates across group/instance queues. Any observed writable format is eligible, including unknown codecs whose description replies remain raw and unqualified. Artifacts report eligible, attempted, matched, unavailable, unqualified and budget-skipped coverage. Each matched record carries its scoped identity, opcode pair, codec, width, min, max, step, and raw reply.
+- OP00 API version/revision and other count classes remain profile context. Ventilation hints can annotate known candidates; they do not establish a same-numbered GG route or prove absence.
+
+Exact custom scans use `--preset custom --scan-plan plan.json`. The file is validated before device I/O, permits only OP02/OP06, and preserves explicit selectors regardless of discovery. Plans exceeding 100000 scalar reads are rejected before queuing.
+
+With planning or budget options, `--dry-run` executes the selected policy against the bundled fixture through DummyTransport. The default `--dry-run` invocation displays that fixture directly. The artifact records `dry_run_mode` as `deterministic_scan` or `fixture_view`.
+
+```json
+{
+  "schema_version": 1,
+  "groups": [
+    {"opcode": "0x02", "group": "0x02", "instances": ["0x00", "0x03"], "registers": ["0x0002", "0x0010..0x0015"]}
+  ]
+}
+```
 - The browse edit confirmation validates every supported value format against that matched description. If no matched description is available, the UI warns that confirmation is unvalidated. Browse edits only alter the local artifact view; they never write to a live device.
 
 Output:

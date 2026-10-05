@@ -10,7 +10,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from importlib import resources
 from pathlib import Path
-from typing import cast
+from tempfile import TemporaryDirectory
+from typing import Any, cast
 
 import typer
 from rich.console import Console
@@ -34,9 +35,11 @@ from .scanner.b509 import parse_b509_range
 from .scanner.director import GROUP_CONFIG, classify_groups, discover_groups
 from .scanner.register import is_instance_present
 from .scanner.scan import PlannerUiMode, default_output_filename, scan_vrc
+from .scanner.scan_policy import parse_scan_plan
 from .schema.ebusd_csv import EbusdCsvSchema
 from .schema.myvaillant_map import MyvaillantRegisterMap
 from .transport.base import TransportCommandNotEnabled, TransportError, TransportTimeout
+from .transport.dummy import DummyTransport
 from .transport.ebusd_tcp import EbusdTcpConfig, EbusdTcpTransport
 from .transport.enhanced_tcp import EnhancedTcpConfig, EnhancedTcpTransport
 from .ui.browse_textual import run_browse_from_artifact
@@ -682,8 +685,8 @@ def scan(
         "--preset",
         help=(
             "Planner preset: recommended, full, research, or custom. "
-            "`full` expands all groups to full instance slots; "
-            "`research` enables all groups with expanded RR ranges. "
+            "`full` audits declared profile slots independently of OP00 counts; "
+            "`research` performs bounded, non-exhaustive exploration. "
             "Legacy aliases: aggressive->full, exhaustive->research, conservative->recommended."
         ),
     ),
@@ -702,8 +705,34 @@ def scan(
         "--probe-constraints/--no-probe-constraints",
         help=(
             "Acquire complete OP01/OP07 descriptions for observed writable parameters. "
-            "Enabled by default, bounded to 256 additional requests; descriptions validate "
+            "Enabled by default with a fair configurable request budget; descriptions validate "
             "later offline edits. Missing descriptions remain explicit warnings."
+        ),
+    ),
+    scan_plan_path: Path | None = typer.Option(  # noqa: B008
+        None,
+        "--scan-plan",
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        help="Version 1 JSON plan file for custom OP02/OP06, GG, II and RR16 selectors.",
+    ),
+    description_budget: int = typer.Option(  # noqa: B008
+        256,
+        "--description-budget",
+        min=0,
+        help=(
+            "Maximum description requests, shared fairly between OP01 and OP07 "
+            "(unused shares borrowed)."
+        ),
+    ),
+    request_budget: int | None = typer.Option(  # noqa: B008
+        None,
+        "--request-budget",
+        min=1,
+        help=(
+            "Maximum actual B524 sends including retries; research defaults to 10000. "
+            "Exhaustion saves a partial artifact."
         ),
     ),
 ) -> None:
@@ -749,6 +778,26 @@ def scan(
             err=True,
         )
         raise typer.Exit(2)
+
+    scan_options: dict[str, Any] = {}
+    if scan_plan_path is not None:
+        if preset_value != "custom":
+            typer.echo("--scan-plan requires --preset custom.", err=True)
+            raise typer.Exit(2)
+        try:
+            scan_options["explicit_plan"] = parse_scan_plan(
+                json.loads(scan_plan_path.read_text(encoding="utf-8"))
+            )
+        except (OSError, ValueError) as exc:
+            typer.echo(f"Invalid custom scan plan: {exc}", err=True)
+            raise typer.Exit(2) from exc
+    elif preset_value == "custom" and (planner_ui_value == "disabled" or not console.is_terminal):
+        typer.echo("Custom scanning requires --scan-plan or an interactive planner.", err=True)
+        raise typer.Exit(2)
+    if description_budget != 256:
+        scan_options["description_budget"] = description_budget
+    if request_budget is not None:
+        scan_options["request_budget"] = request_budget
 
     ebusd_schema: EbusdCsvSchema | None = None
     ebusd_schema_source: str | None = None
@@ -802,6 +851,37 @@ def scan(
             identity=None,
         )
         _emit_non_tty_session_preface(preface)
+        if scan_options or preset_value != "recommended" or planner_ui_value != "disabled":
+            with TemporaryDirectory(prefix="vrc-explorer-dry-run-") as fixture_dir:
+                fixture_path = Path(fixture_dir) / "fixture.json"
+                fixture_path.write_text(json.dumps(artifact), encoding="utf-8")
+                with make_scan_observer(
+                    console=console,
+                    title="Offline fixture scan",
+                    subtitle_lines=[],
+                    show_tips=not no_tips,
+                    session_preface=preface,
+                ) as observer:
+                    artifact = scan_vrc(
+                        DummyTransport(fixture_path),
+                        dst=dst_u8,
+                        b509_ranges=[],
+                        b509_dump=b509_dump,
+                        b555_dump=b555_dump,
+                        b516_dump=b516_dump,
+                        ebusd_schema=ebusd_schema,
+                        myvaillant_map=myvaillant_map,
+                        observer=observer,
+                        console=console,
+                        planner_ui=cast(PlannerUiMode, planner_ui_value),
+                        planner_preset=cast(PlannerPreset, preset_value),
+                        probe_constraints=probe_constraints,
+                        **scan_options,
+                    )
+                artifact["meta"]["dry_run"] = True
+            artifact["meta"]["dry_run_mode"] = "deterministic_scan"
+        else:
+            artifact["meta"]["dry_run_mode"] = "fixture_view"
     else:
         source_addr_u8 = (
             _parse_u8_address(source_address) if transport_proto == "enhanced" else None
@@ -884,6 +964,7 @@ def scan(
                             planner_ui=cast(PlannerUiMode, planner_ui_value),
                             planner_preset=cast(PlannerPreset, preset_value),
                             probe_constraints=probe_constraints,
+                            **scan_options,
                         )
                 break
             except TransportCommandNotEnabled as exc:

@@ -1,0 +1,232 @@
+{
+  "source": "synthetic_contract_vectors",
+  "accepted": [
+    {
+      "name": "mixed_selectors",
+      "input": {
+        "schema_version": 1,
+        "groups": [
+          {
+            "opcode": "0x02",
+            "group": "0x02",
+            "instances": [
+              3,
+              0,
+              3
+            ],
+            "registers": [
+              "0x0002..0x0004",
+              3
+            ]
+          }
+        ]
+      },
+      "expected_requests": 6,
+      "normalized": {
+        "opcode": 2,
+        "group": 2,
+        "instances": [
+          0,
+          3
+        ],
+        "registers": [
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "equivalent_reversed_and_duplicate_rows",
+      "input": {
+        "schema_version": "1",
+        "groups": [
+          {
+            "opcode": 2,
+            "group": 2,
+            "instances": [
+              0,
+              3
+            ],
+            "registers": [
+              2,
+              3,
+              4
+            ]
+          },
+          {
+            "opcode": "02",
+            "group": "02",
+            "instances": [
+              "3",
+              0
+            ],
+            "registers": [
+              "0x0004-0x0002",
+              3
+            ]
+          }
+        ]
+      },
+      "expected_requests": 6,
+      "normalized": {
+        "opcode": 2,
+        "group": 2,
+        "instances": [
+          0,
+          3
+        ],
+        "registers": [
+          2,
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "name": "exact_request_limit",
+      "input": {
+        "schema_version": 1,
+        "groups": [
+          {
+            "opcode": 2,
+            "group": 0,
+            "instances": [
+              "0..1"
+            ],
+            "registers": [
+              "0..49999"
+            ]
+          }
+        ]
+      },
+      "expected_requests": 100000
+    }
+  ],
+  "rejected": [
+    {
+      "name": "request_limit_exceeded",
+      "input": {
+        "schema_version": 1,
+        "groups": [
+          {
+            "opcode": 2,
+            "group": 0,
+            "instances": [
+              "0..1"
+            ],
+            "registers": [
+              "0..50000"
+            ]
+          }
+        ]
+      },
+      "error": "100000"
+    },
+    {
+      "name": "write_operation",
+      "input": {
+        "schema_version": 1,
+        "groups": [
+          {
+            "opcode": 8,
+            "group": 0,
+            "instances": [
+              0
+            ],
+            "registers": [
+              1
+            ]
+          }
+        ]
+      },
+      "error": "opcode"
+    },
+    {
+      "name": "boolean_instance",
+      "input": {
+        "schema_version": 1,
+        "groups": [
+          {
+            "opcode": 2,
+            "group": 0,
+            "instances": [
+              true
+            ],
+            "registers": [
+              1
+            ]
+          }
+        ]
+      },
+      "error": "instances"
+    },
+    {
+      "name": "conflicting_rows",
+      "input": {
+        "schema_version": 1,
+        "groups": [
+          {
+            "opcode": 2,
+            "group": 0,
+            "instances": [
+              0
+            ],
+            "registers": [
+              1
+            ]
+          },
+          {
+            "opcode": 2,
+            "group": 0,
+            "instances": [
+              0
+            ],
+            "registers": [
+              2
+            ]
+          }
+        ]
+      },
+      "error": "conflicting"
+    },
+    {
+      "name": "comma_in_element",
+      "input": {
+        "schema_version": 1,
+        "groups": [
+          {
+            "opcode": 2,
+            "group": 0,
+            "instances": [
+              0
+            ],
+            "registers": [
+              "1,2"
+            ]
+          }
+        ]
+      },
+      "error": "one integer"
+    },
+    {
+      "name": "register_out_of_bounds",
+      "input": {
+        "schema_version": 1,
+        "groups": [
+          {
+            "opcode": 2,
+            "group": 0,
+            "instances": [
+              0
+            ],
+            "registers": [
+              65536
+            ]
+          }
+        ]
+      },
+      "error": "out of range"
+    }
+  ]
+}

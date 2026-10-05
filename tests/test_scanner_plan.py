@@ -81,6 +81,36 @@ def test_build_work_queue_skips_done_tasks() -> None:
     ]
 
 
+def test_explicit_register_selectors_drive_queue_estimate_and_metadata() -> None:
+    group_plan = GroupScanPlan(
+        group=0x02,
+        opcode=0x02,
+        rr_max=0x0100,
+        instances=(0x00, 0x03),
+        registers=(0x0002, 0x0010, 0x0100),
+    )
+    plan = {make_plan_key(0x02, 0x02): group_plan}
+
+    assert estimate_register_requests(plan) == 6
+    assert build_work_queue(plan, done=set()) == [
+        RegisterTask(group=0x02, opcode=0x02, instance=ii, register=rr)
+        for ii in (0x00, 0x03)
+        for rr in (0x0002, 0x0010, 0x0100)
+    ]
+    assert group_plan.to_meta()["registers"] == ["0x0002", "0x0010", "0x0100"]
+
+
+def test_group_scan_plan_rejects_invalid_explicit_selectors() -> None:
+    with pytest.raises(ValueError, match="register"):
+        GroupScanPlan(
+            group=0x02,
+            opcode=0x02,
+            rr_max=0,
+            instances=(0,),
+            registers=(0x10000,),
+        )
+
+
 def test_format_seconds_normalizes_boundaries() -> None:
     assert _format_seconds(480.0) == "8m"
     assert _format_seconds(481.0) == "8m 1s"
@@ -166,6 +196,62 @@ def test_plan_dual_namespace_presets_keep_namespace_specific_ii_max() -> None:
     assert full[make_plan_key(0x08, 0x06)].instances == tuple(range(0x0A + 1))
 
 
+def test_full_uses_all_declared_slots_even_when_expected_count_is_positive() -> None:
+    group = PlannerGroup(
+        group=0x02,
+        opcode=0x02,
+        name="Heating Circuits",
+        descriptor=1.0,
+        known=True,
+        ii_max=0x0A,
+        rr_max=0x0025,
+        rr_max_full=0x0025,
+        present_instances=(0x03, 0x07),
+        expected_count=2,
+    )
+
+    assert build_plan_from_preset([group], preset="recommended")[group.key].instances == (
+        0x03,
+        0x07,
+    )
+    assert build_plan_from_preset([group], preset="full")[group.key].instances == tuple(range(0x0B))
+
+
+def test_presets_apply_profile_pair_policy_and_research_rr_floor() -> None:
+    groups = [
+        PlannerGroup(
+            group=group,
+            opcode=opcode,
+            name="Candidate",
+            descriptor=1.0,
+            known=group != 0x69,
+            ii_max=None,
+            rr_max=rr_max,
+            rr_max_full=rr_max_full,
+            present_instances=(0,),
+        )
+        for group, opcode, rr_max, rr_max_full in (
+            (0x01, 0x02, 0x0013, 0x0013),
+            (0x01, 0x06, 0x0015, 0x0015),
+            (0x07, 0x02, 0x0120, 0x00FF),
+            (0x69, 0x06, 0x0030, 0x0030),
+            (0x00, 0x06, 0x0040, 0x0040),
+        )
+    ]
+
+    expected_profile = {make_plan_key(0x01, 0x02), make_plan_key(0x01, 0x06)}
+    assert set(build_plan_from_preset(groups, preset="recommended")) == expected_profile
+    assert set(build_plan_from_preset(groups, preset="full")) == expected_profile
+
+    research = build_plan_from_preset(groups, preset="research")
+    assert set(research) == expected_profile | {
+        make_plan_key(0x07, 0x02),
+        make_plan_key(0x69, 0x06),
+    }
+    assert research[make_plan_key(0x07, 0x02)].rr_max == 0x0120
+    assert research[make_plan_key(0x69, 0x06)].rr_max == 0x00FF
+
+
 def test_plan_key_is_opcode_first_namespace_identity() -> None:
     key = make_plan_key(0x09, 0x06)
 
@@ -173,7 +259,7 @@ def test_plan_key_is_opcode_first_namespace_identity() -> None:
     assert format_plan_key(key) == "0x09/0x06"
 
 
-def test_recommended_preset_skips_non_core_namespaces_without_verified_presence_contract() -> None:
+def test_profile_policy_overrides_stale_per_row_recommended_flags() -> None:
     groups = [
         PlannerGroup(
             group=0x01,
@@ -202,7 +288,8 @@ def test_recommended_preset_skips_non_core_namespaces_without_verified_presence_
         ),
     ]
 
-    assert build_plan_from_preset(groups, preset="recommended") == {}
+    recommended = build_plan_from_preset(groups, preset="recommended")
+    assert sorted(recommended) == [make_plan_key(0x01, 0x02), make_plan_key(0x01, 0x06)]
 
     full = build_plan_from_preset(groups, preset="full")
     assert sorted(full) == [make_plan_key(0x01, 0x02), make_plan_key(0x01, 0x06)]

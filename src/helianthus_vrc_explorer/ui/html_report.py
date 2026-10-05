@@ -718,6 +718,7 @@ __ARTIFACT_JSON__
       }
 
       const B524_SECTIONS = [
+        { key: "scan_coverage", label: "Scan coverage and descriptions" },
         { key: "system_information", label: "OP=00h ReadSystemInformation" },
         { key: "controller_registers", label: "OP=02h GetParameter" },
         { key: "timer_programs", label: "OP=03h ReadTimer" },
@@ -1441,6 +1442,9 @@ __ARTIFACT_JSON__
       }
 
       function b524SectionHasContent(sectionKey, operations, metaObj) {
+        if (sectionKey === "scan_coverage") {
+          return !!(metaObj && (metaObj.scan_coverage || metaObj.parameter_description_coverage));
+        }
         if (sectionKey === "controller_registers" || sectionKey === "device_slots") {
           return b524GroupKeysForSection(sectionKey).length > 0;
         }
@@ -1469,6 +1473,46 @@ __ARTIFACT_JSON__
         title.className = "section-title";
         title.textContent = sectionLabel(sectionKey);
         container.appendChild(title);
+
+        if (sectionKey === "scan_coverage") {
+          const scan = metaObj && metaObj.scan_coverage || {};
+          const descriptions = metaObj && metaObj.parameter_description_coverage || {};
+          const rows = [
+            ["Preset", scan.preset], ["Configured scope", scan.scope],
+            ["Request budget", scan.request_budget], ["Actual requests", scan.actual_requests],
+            ["Scan completed", scan.completed], ["Unknown groups", Array.isArray(scan.unknown_groups) ? scan.unknown_groups.join(", ") : "unknown"],
+            ["Description request budget", descriptions.request_budget], ["Effective description budget", descriptions.effective_request_budget],
+            ["Description candidates", descriptions.eligible], ["Descriptions scheduled", descriptions.scheduled], ["Descriptions attempted", descriptions.attempted],
+            ["Descriptions matched", descriptions.matched], ["Descriptions unavailable", descriptions.unavailable],
+            ["Descriptions unqualified", descriptions.unqualified], ["Descriptions skipped by budget", descriptions.budget_skipped],
+            ["Descriptions not attempted", descriptions.not_attempted],
+          ];
+          const families = descriptions.by_read_operation || {};
+          for (const opcode of Object.keys(families).sort()) {
+            const stats = families[opcode];
+            if (!stats || typeof stats !== "object") continue;
+            for (const name of ["eligible", "scheduled", "attempted", "matched", "unavailable", "unqualified", "budget_skipped", "not_attempted"]) {
+              rows.push([`${opcode} ${name}`, stats[name]]);
+            }
+          }
+          const table = document.createElement("table");
+          table.innerHTML = "<thead><tr><th>Coverage</th><th>Observation</th></tr></thead>";
+          const tbody = document.createElement("tbody");
+          for (const [label, value] of rows) {
+            const tr = document.createElement("tr");
+            for (const cellValue of [label, value]) {
+              const td = document.createElement("td");
+              td.textContent = typeof cellValue === "undefined" || cellValue === null ? "unknown" : String(cellValue);
+              tr.appendChild(td);
+            }
+            tbody.appendChild(tr);
+          }
+          table.appendChild(tbody);
+          container.appendChild(table);
+          mountTarget.innerHTML = "";
+          mountTarget.appendChild(container);
+          return;
+        }
 
         if (sectionKey === "system_information") {
           const rows = metaObj && typeof metaObj === "object" && Array.isArray(metaObj.system_information)

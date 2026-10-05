@@ -146,13 +146,55 @@ class GroupScanPlan:
     opcode: RegisterOpcode
     rr_max: int
     instances: tuple[int, ...]
+    registers: tuple[int, ...] | None = None
+
+    def __post_init__(self) -> None:
+        _validate_selector("group", self.group, max_value=0xFF)
+        _validate_selector("opcode", self.opcode, max_value=0xFF)
+        if self.opcode not in {0x02, 0x06}:
+            raise ValueError("opcode must be 0x02 or 0x06")
+        _validate_selector("rr_max", self.rr_max, max_value=0xFFFF)
+        _validate_selector_tuple("instances", self.instances, max_value=0xFF, allow_empty=True)
+        if self.registers is not None:
+            _validate_selector_tuple(
+                "registers", self.registers, max_value=0xFFFF, allow_empty=False
+            )
+            if max(self.registers) > self.rr_max:
+                raise ValueError("explicit registers exceed rr_max")
 
     def to_meta(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "opcode": _hex_u8(self.opcode),
             "rr_max": _hex_u16(self.rr_max),
             "instances": [_hex_u8(ii) for ii in self.instances],
         }
+        if self.registers is not None:
+            payload["registers"] = [_hex_u16(rr) for rr in self.registers]
+        return payload
+
+
+def _validate_selector(name: str, value: object, *, max_value: int) -> None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{name} must be an integer")
+    if not (0 <= value <= max_value):
+        raise ValueError(f"{name} out of range: {value} (allowed 0-{max_value})")
+
+
+def _validate_selector_tuple(
+    name: str,
+    values: object,
+    *,
+    max_value: int,
+    allow_empty: bool,
+) -> None:
+    if not isinstance(values, tuple):
+        raise ValueError(f"{name} must be a tuple")
+    if not values and not allow_empty:
+        raise ValueError(f"{name} must not be empty")
+    for value in values:
+        _validate_selector(name.removesuffix("s"), value, max_value=max_value)
+    if len(set(values)) != len(values):
+        raise ValueError(f"{name} must not contain duplicates")
 
 
 @dataclass(frozen=True, slots=True, order=True)
@@ -177,8 +219,13 @@ def build_work_queue(
             raise ValueError(
                 f"Plan key mismatch: key={key!r} entry={(group_plan.group, group_plan.opcode)!r}"
             )
+        registers: Sequence[int]
+        if group_plan.registers is None:
+            registers = range(0x0000, group_plan.rr_max + 1)
+        else:
+            registers = group_plan.registers
         for ii in group_plan.instances:
-            for rr in range(0x0000, group_plan.rr_max + 1):
+            for rr in registers:
                 task = RegisterTask(
                     group=group_plan.group,
                     opcode=group_plan.opcode,
@@ -194,7 +241,10 @@ def build_work_queue(
 def estimate_register_requests(plan: dict[PlanKey, GroupScanPlan]) -> int:
     total = 0
     for group_plan in plan.values():
-        total += len(group_plan.instances) * (group_plan.rr_max + 1)
+        register_count = (
+            group_plan.rr_max + 1 if group_plan.registers is None else len(group_plan.registers)
+        )
+        total += len(group_plan.instances) * register_count
     return total
 
 

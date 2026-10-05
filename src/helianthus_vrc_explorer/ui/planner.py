@@ -19,7 +19,11 @@ from ..scanner.plan import (
     format_plan_key,
     make_plan_key,
     parse_int_set,
-    parse_int_token,
+)
+from ..scanner.scan_policy import (
+    profile_opcodes,
+    research_rr_max,
+    validate_scalar_request_limit,
 )
 
 
@@ -183,22 +187,10 @@ def _build_default_plan(
     )
 
 
-_RECOMMENDED_ALWAYS_ON: frozenset[int] = frozenset({0x00, 0x01, 0x04, 0x05})
-
-
 def _instances_for_preset(group: PlannerGroup, preset: PlannerPreset) -> tuple[int, ...]:
     if group.ii_max is None:
         return (0x00,)
-    if preset in {"recommended", "full"} and group.expected_count is not None:
-        return group.present_instances
     if preset == "recommended":
-        # always_on groups in OP=0x02 get full instance range;
-        # present_gated groups get only discovered instances.
-        if group.opcode == 0x02 and group.group in _RECOMMENDED_ALWAYS_ON:
-            full_range = tuple(range(0x00, group.ii_max + 1))
-            if 0xFF in group.present_instances:
-                return full_range + (0xFF,)
-            return full_range
         return group.present_instances
     # full and research: scan all instance slots
     full_range = tuple(range(0x00, group.ii_max + 1))
@@ -214,18 +206,9 @@ def build_plan_from_preset(
 ) -> dict[PlanKey, GroupScanPlan]:
     selected: dict[PlanKey, GroupScanPlan] = {}
     for group in sorted(groups, key=planner_group_sort_key):
-        if preset == "recommended":
-            if not group.recommended:
-                continue
-            selected[group.key] = GroupScanPlan(
-                group=group.group,
-                opcode=group.opcode,
-                rr_max=group.rr_max,
-                instances=_instances_for_preset(group, preset),
-            )
-        elif preset == "full":
-            # Full: ALL groups (incl. unknown), full instances, normal RR.
-            # Discovery pass — "what exists on the bus?"
+        if group.opcode not in profile_opcodes(group.group, preset):
+            continue
+        if preset in {"recommended", "full"}:
             selected[group.key] = GroupScanPlan(
                 group=group.group,
                 opcode=group.opcode,
@@ -233,12 +216,14 @@ def build_plan_from_preset(
                 instances=_instances_for_preset(group, preset),
             )
         elif preset == "research":
-            # Research: ALL groups (incl. unknown), full instances, expanded RR.
-            # Deep-dive — "every register on every group."
             selected[group.key] = GroupScanPlan(
                 group=group.group,
                 opcode=group.opcode,
-                rr_max=group.rr_max_full,
+                rr_max=research_rr_max(
+                    group=group.group,
+                    opcode=group.opcode,
+                    normal_rr_max=max(group.rr_max, group.rr_max_full),
+                ),
                 instances=_instances_for_preset(group, preset),
             )
     return selected
@@ -491,13 +476,14 @@ def prompt_scan_plan(
 
     if preset == "full":
         console.print(
-            "[bold yellow]Warning:[/bold yellow] full preset scans all groups (including "
-            "unknown) with full instance slots. Discovery pass — may take tens of minutes.",
+            "[bold yellow]Warning:[/bold yellow] full preset scans all profile-supported "
+            "pairs with full declared instance slots. Discovery pass — may take tens of minutes.",
         )
     if preset == "research":
         console.print(
-            "[bold yellow]Warning:[/bold yellow] research preset scans all groups with "
-            "expanded RR ranges. Deep-dive — expect very long reverse-engineering runs.",
+            "[bold yellow]Warning:[/bold yellow] research preset scans broad read-namespace "
+            "candidates with expanded RR ranges. Deep-dive — expect very long "
+            "reverse-engineering runs.",
         )
 
     if preset == "custom":
@@ -525,20 +511,26 @@ def prompt_scan_plan(
             )
         }
 
-        if _ask_yes_no(console, "Override RR_max values?", default=False):
+        if _ask_yes_no(console, "Override register selections?", default=False):
+            from .planner_textual import _parse_register_scope
+
             for key in sorted(selected_plan.keys()):
                 current = selected_plan[key]
                 planner_group = eligible[key]
-                group_id, _opcode = key
                 while True:
+                    current_scope = (
+                        format_int_set(current.registers)
+                        if current.registers is not None
+                        else _hex_u16(current.rr_max)
+                    )
                     raw_rr_max = Prompt.ask(
-                        f"{planner_group.prompt_label} RR_max",
-                        default=_hex_u16(current.rr_max),
+                        f"{planner_group.prompt_label} RR scope (ceiling, list, or range)",
+                        default=current_scope,
                         show_default=True,
                         console=console,
                     ).strip()
                     try:
-                        rr_max = parse_int_token(raw_rr_max)
+                        rr_max, registers = _parse_register_scope(raw_rr_max)
                     except ValueError as exc:
                         console.print(f"[red]Invalid RR_max:[/red] {exc}")
                         continue
@@ -546,10 +538,11 @@ def prompt_scan_plan(
                         console.print("[red]RR_max out of range (0x0000..0xFFFF).[/red]")
                         continue
                     selected_plan[key] = GroupScanPlan(
-                        group=group_id,
+                        group=current.group,
                         opcode=current.opcode,
                         rr_max=rr_max,
                         instances=current.instances,
+                        registers=registers,
                     )
                     break
 
@@ -557,11 +550,10 @@ def prompt_scan_plan(
             for key in sorted(selected_plan.keys()):
                 planner_group = eligible[key]
                 current = selected_plan[key]
-                group_id, _opcode = key
                 if planner_group.ii_max is None:
                     continue
                 selected_plan[key] = GroupScanPlan(
-                    group=group_id,
+                    group=current.group,
                     opcode=current.opcode,
                     rr_max=current.rr_max,
                     instances=_ask_instances(
@@ -569,10 +561,17 @@ def prompt_scan_plan(
                         group=planner_group,
                         current_instances=current.instances,
                     ),
+                    registers=current.registers,
                 )
 
     _print_plan_breakdown(console, selected_plan)
     _print_estimate(console, plan=selected_plan, request_rate_rps=request_rate_rps)
+
+    try:
+        validate_scalar_request_limit(selected_plan)
+    except ValueError as exc:
+        console.print(f"[red]Invalid scan plan:[/red] {exc}")
+        raise
 
     if not _ask_yes_no(console, "Proceed with register scan?", default=True):
         raise KeyboardInterrupt

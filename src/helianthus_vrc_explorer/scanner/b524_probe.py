@@ -7,7 +7,11 @@ import struct
 from dataclasses import asdict, dataclass
 from typing import Any, cast
 
-from ..protocol.b524 import RegisterOpcode, build_constraint_probe_payload
+from ..protocol.b524 import (
+    RegisterOpcode,
+    build_constraint_probe_payload,
+    build_register_read_payload,
+)
 from ..protocol.b524_metadata import decode_parameter_description
 from ..schema.b524_constraints import (
     LIVE_PROBE_CONSTRAINT_SCOPE,
@@ -44,6 +48,45 @@ _UNKNOWN_GROUP_OPCODE_CANDIDATES: tuple[RegisterOpcode, ...] = (
     _LOCAL_REGISTER_OPCODE,
     _REMOTE_REGISTER_OPCODE,
 )
+_UNKNOWN_GROUP_RESEARCH_SELECTORS: tuple[tuple[int, int], ...] = (
+    (0x00, 0x0000),
+    (0x00, 0x0001),
+    (0x01, 0x0000),
+    (0x01, 0x0001),
+)
+_QUALIFIED_DESCRIPTION_CODECS = frozenset(
+    {"UCH", "BOOL", "I8", "UIN", "I16", "U32", "I32", "EXP", "HDA:3"}
+)
+
+
+def _unknown_probe_evidence(
+    entry: RegisterEntry,
+    *,
+    opcode: RegisterOpcode,
+    group: int,
+    instance: int,
+    register: int,
+) -> dict[str, Any]:
+    responsive = _entry_is_opcode_responsive(entry)
+    return {
+        "selector": {
+            "instance": _hex_u8(instance),
+            "register": _hex_u16(register),
+        },
+        "request_hex": build_register_read_payload(
+            opcode,
+            group=group,
+            instance=instance,
+            register=register,
+        ).hex(),
+        "responsive": responsive,
+        "classification": "responsive" if responsive else "unknown",
+        "response_state": entry.get("response_state"),
+        "error": entry.get("error"),
+        "flags_access": entry.get("flags_access"),
+        "reply_hex": entry.get("reply_hex"),
+        "raw_hex": entry.get("raw_hex"),
+    }
 
 
 def _probe_unknown_group_opcodes(
@@ -52,7 +95,61 @@ def _probe_unknown_group_opcodes(
     dst: int,
     group: int,
     observer: ScanObserver | None,
+    research: bool = False,
 ) -> tuple[tuple[RegisterOpcode, ...], dict[str, Any]]:
+    if research:
+        research_evidence: dict[str, Any] = {}
+        research_responsive: list[RegisterOpcode] = []
+        for opcode in _UNKNOWN_GROUP_OPCODE_CANDIDATES:
+            probes: list[dict[str, Any]] = []
+            for instance, register in _UNKNOWN_GROUP_RESEARCH_SELECTORS:
+                if observer is not None:
+                    observer.status(
+                        f"Research opcode GG=0x{group:02X} OP={_hex_u8(opcode)} "
+                        f"II={_hex_u8(instance)} RR={_hex_u16(register)}"
+                    )
+                entry = read_register(
+                    transport,
+                    dst,
+                    opcode,
+                    group=group,
+                    instance=instance,
+                    register=register,
+                )
+                probes.append(
+                    _unknown_probe_evidence(
+                        entry,
+                        opcode=opcode,
+                        group=group,
+                        instance=instance,
+                        register=register,
+                    )
+                )
+            is_responsive = any(probe["responsive"] for probe in probes)
+            if is_responsive:
+                research_responsive.append(opcode)
+            research_evidence[_hex_u8(opcode)] = {
+                "responsive": is_responsive,
+                # Negative sentinel probes cannot establish group absence.
+                "classification": "responsive" if is_responsive else "unknown",
+                "probes": probes,
+            }
+
+        selected = tuple(sorted(set(research_responsive)))
+        return cast(tuple[RegisterOpcode, ...], selected), {
+            "kind": "bounded_research_opcode_responsiveness",
+            "selectors": [
+                {
+                    "instance": _hex_u8(instance),
+                    "register": _hex_u16(register),
+                }
+                for instance, register in _UNKNOWN_GROUP_RESEARCH_SELECTORS
+            ],
+            "candidates": research_evidence,
+            "responsive_opcodes": [_hex_u8(opcode) for opcode in selected],
+            "negative_result_meaning": "unknown_not_absent",
+        }
+
     evidence: dict[str, Any] = {}
     responsive: list[RegisterOpcode] = []
 
@@ -103,7 +200,42 @@ def _probe_unknown_present_instances(
     opcode: RegisterOpcode,
     observer: ScanObserver | None,
     expand_fallback: bool,
+    research: bool = False,
 ) -> tuple[int, ...]:
+    if research:
+        research_present_instances: list[int] = []
+        for ii in _UNKNOWN_GROUP_EXPANDED_INSTANCES:
+            readable = False
+            for register in (0x0000, 0x0001):
+                if observer is not None:
+                    observer.status(
+                        f"Research presence GG=0x{group:02X} OP={_hex_u8(opcode)} "
+                        f"II=0x{ii:02X} RR={_hex_u16(register)}"
+                    )
+                entry = read_register(
+                    transport,
+                    dst,
+                    opcode,
+                    group=group,
+                    instance=ii,
+                    register=register,
+                )
+                # A full echoed reply is positive evidence. Timeouts, empty
+                # replies, NACKs and status-only replies remain unknown and the
+                # secondary anchor is still attempted.
+                readable = (
+                    _entry_is_readable(entry)
+                    and entry.get("response_state") == "active"
+                    and entry.get("raw_hex") is not None
+                )
+                if readable:
+                    break
+            if readable:
+                research_present_instances.append(ii)
+            if observer is not None:
+                observer.phase_advance("instance_discovery", advance=1)
+        return tuple(research_present_instances)
+
     present_instances: list[int] = []
     probed: set[int] = set()
     should_expand = False
@@ -414,26 +546,62 @@ def probe_parameter_description(
     group: int,
     instance: int,
     register: int,
-    type_spec: str,
+    type_spec: str | None,
 ) -> dict[str, Any]:
+    if opcode not in {2, 6}:
+        raise ValueError("Description read opcode must be 0x02 or 0x06")
     description_opcode = 1 if opcode == 2 else 7
     request = build_constraint_probe_payload(
         group, register, instance=instance, opcode=description_opcode
     )
-    metadata: dict[str, Any] = {
-        "qualification": "unavailable",
+    selector = {
         "description_opcode": _hex_u8(description_opcode),
         "read_opcode": _hex_u8(opcode),
         "group": _hex_u8(group),
         "instance": _hex_u8(instance),
         "register": _hex_u16(register),
+    }
+    metadata: dict[str, Any] = {
+        "qualification": "unavailable",
+        **selector,
         "destination_address": _hex_u8(dst),
         "profile": "controller_b524",
         "request_hex": request.hex(),
+        "selector": selector,
     }
     try:
         response = transport.send(dst, request)
         metadata["reply_hex"] = response.hex()
+        if len(response) < 3:
+            raise ValueError("Description response too short for GG/RR16 echo")
+        reply_group = response[0]
+        reply_register = int.from_bytes(response[1:3], "little")
+        echo_matches = reply_group == group and reply_register == register
+        metadata["reply_echo"] = {
+            "group": _hex_u8(reply_group),
+            "register": _hex_u16(reply_register),
+            "matches_selector": echo_matches,
+            "instance": "not_echoed_by_protocol",
+        }
+        if not echo_matches:
+            raise ValueError("Description GG/RR16 echo mismatch")
+        normalized_type = type_spec.strip().upper() if type_spec is not None else None
+        if normalized_type not in _QUALIFIED_DESCRIPTION_CODECS:
+            reason = (
+                "parameter codec is unknown"
+                if normalized_type is None
+                else f"parameter codec is unsupported for description decoding: {normalized_type}"
+            )
+            metadata.update(
+                {
+                    "qualification": "unqualified",
+                    "reason": reason,
+                    "source": "complete_description",
+                }
+            )
+            if normalized_type is not None:
+                metadata["type"] = normalized_type
+            return metadata
         metadata.update(
             decode_parameter_description(
                 response,
@@ -441,7 +609,7 @@ def probe_parameter_description(
                 group=group,
                 instance=instance,
                 register=register,
-                type_spec=type_spec,
+                type_spec=normalized_type,
             )
         )
     except TransportCommandNotEnabled:

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from helianthus_vrc_explorer.scanner.plan import GroupScanPlan
 from helianthus_vrc_explorer.ui.planner import PlannerGroup, split_planner_groups_by_namespace
 from helianthus_vrc_explorer.ui.planner_textual import (
     _EditableGroup,
     _estimate_footer,
     _parse_instances_spec,
+    _parse_register_scope,
     _planner_pane_id,
     _table_row_values,
     run_textual_scan_plan,
@@ -26,6 +28,14 @@ def test_parse_instances_spec_accepts_keywords_and_ranges() -> None:
     assert _parse_instances_spec("present", group=group) == (0x00, 0x02, 0x03)
     assert _parse_instances_spec("all", group=group) == tuple(range(0x0A + 1))
     assert _parse_instances_spec("0-2", group=group) == (0x00, 0x01, 0x02)
+
+
+def test_parse_register_scope_distinguishes_ceiling_from_exact_selectors() -> None:
+    assert _parse_register_scope("0x0015") == (0x0015, None)
+    assert _parse_register_scope("0x0002,0x0010..0x0012") == (
+        0x0012,
+        (0x0002, 0x0010, 0x0011, 0x0012),
+    )
 
 
 def test_estimate_footer_reports_requests_and_eta() -> None:
@@ -52,6 +62,31 @@ def test_estimate_footer_reports_requests_and_eta() -> None:
     assert "Plan: 6 requests" in footer
     assert "ETA:" in footer
     assert "1 plan entries selected" in footer
+
+
+def test_estimate_footer_uses_exact_register_selectors() -> None:
+    group = PlannerGroup(
+        group=0x02,
+        opcode=0x02,
+        name="Heating Circuits",
+        descriptor=1.0,
+        known=True,
+        ii_max=0x0A,
+        rr_max=0x0100,
+        rr_max_full=0x0100,
+        present_instances=(0x00,),
+    )
+    states = {
+        group.key: _EditableGroup(
+            group=group,
+            enabled=True,
+            rr_max=0x0100,
+            instances=(0x00, 0x03),
+            registers=(0x0002, 0x0010, 0x0100),
+        )
+    }
+
+    assert "Plan: 6 requests" in _estimate_footer(states, request_rate_rps=None)
 
 
 def test_table_row_values_show_explicit_namespace_column() -> None:
@@ -192,6 +227,45 @@ def test_run_textual_scan_plan_registers_enter_binding_for_rr_max(
     )
 
     assert "enter" in captured["key"]
+
+
+def test_run_textual_scan_plan_preserves_exact_default_registers_on_save(monkeypatch) -> None:
+    from textual.app import App
+
+    group = PlannerGroup(
+        group=0x02,
+        opcode=0x02,
+        name="Heating Circuits",
+        descriptor=1.0,
+        known=True,
+        ii_max=0x0A,
+        rr_max=0x0100,
+        rr_max_full=0x0100,
+        present_instances=(0x00, 0x03),
+    )
+    default = GroupScanPlan(
+        group=0x02,
+        opcode=0x02,
+        rr_max=0x0100,
+        instances=(0x00, 0x03),
+        registers=(0x0002, 0x0010, 0x0100),
+    )
+    captured: dict[str, object] = {}
+
+    def fake_run(self: App[object], *args: object, **kwargs: object) -> object:
+        self.exit = lambda result: captured.__setitem__("plan", result)  # type: ignore[method-assign]
+        self.action_save()
+        return captured["plan"]
+
+    monkeypatch.setattr(App, "run", fake_run)
+
+    result = run_textual_scan_plan(
+        [group],
+        request_rate_rps=None,
+        default_plan={group.key: default},
+    )
+
+    assert result == {group.key: default}
 
 
 def test_run_textual_scan_plan_rr_dialog_registers_enter_submit_binding(

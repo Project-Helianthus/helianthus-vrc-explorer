@@ -223,7 +223,7 @@ def test_missing_zero_or_unmet_count_keeps_bounded_fallback(count: int | None) -
     assert probes[9].present
 
 
-def test_full_preset_uses_discovered_sparse_instances_when_count_is_available() -> None:
+def test_full_preset_audits_slots_while_recommended_uses_sparse_count() -> None:
     from helianthus_vrc_explorer.ui.planner import PlannerGroup, build_plan_from_preset
 
     group = PlannerGroup(
@@ -238,7 +238,8 @@ def test_full_preset_uses_discovered_sparse_instances_when_count_is_available() 
         present_instances=(3, 7),
         expected_count=2,
     )
-    assert build_plan_from_preset([group], preset="full")[(2, 2)].instances == (3, 7)
+    assert build_plan_from_preset([group], preset="recommended")[(2, 2)].instances == (3, 7)
+    assert build_plan_from_preset([group], preset="full")[(2, 2)].instances == tuple(range(11))
     assert build_plan_from_preset([group], preset="research")[(2, 2)].instances == tuple(range(11))
 
 
@@ -329,6 +330,93 @@ def test_device_description_probe_uses_complete_op07_selector() -> None:
     assert result["qualification"] == "matched"
     assert result["description_opcode"] == "0x07"
     assert result["read_opcode"] == "0x06"
+
+
+def test_unknown_codec_retains_matched_echo_and_raw_description_without_decoding() -> None:
+    from helianthus_vrc_explorer.scanner.b524_probe import probe_parameter_description
+    from helianthus_vrc_explorer.transport.base import TransportInterface
+
+    class UnknownCodecBus(TransportInterface):
+        def send(self, dst: int, payload: bytes) -> bytes:  # noqa: ARG002
+            assert payload == bytes.fromhex("0102053412")
+            return bytes.fromhex("023412010203040506")
+
+    result = probe_parameter_description(
+        UnknownCodecBus(),
+        dst=0x15,
+        opcode=2,
+        group=2,
+        instance=5,
+        register=0x1234,
+        type_spec=None,
+    )
+
+    assert result["qualification"] == "unqualified"
+    assert result["reason"] == "parameter codec is unknown"
+    assert result["reply_hex"] == "023412010203040506"
+    assert result["selector"] == {
+        "description_opcode": "0x01",
+        "read_opcode": "0x02",
+        "group": "0x02",
+        "instance": "0x05",
+        "register": "0x1234",
+    }
+    assert result["reply_echo"] == {
+        "group": "0x02",
+        "register": "0x1234",
+        "matches_selector": True,
+        "instance": "not_echoed_by_protocol",
+    }
+    assert "width" not in result
+    assert "type" not in result
+
+
+def test_unknown_codec_with_mismatched_echo_is_unavailable() -> None:
+    from helianthus_vrc_explorer.scanner.b524_probe import probe_parameter_description
+    from helianthus_vrc_explorer.transport.base import TransportInterface
+
+    class WrongEchoBus(TransportInterface):
+        def send(self, dst: int, payload: bytes) -> bytes:  # noqa: ARG002
+            return bytes.fromhex("033412010203")
+
+    result = probe_parameter_description(
+        WrongEchoBus(),
+        dst=0x15,
+        opcode=2,
+        group=2,
+        instance=5,
+        register=0x1234,
+        type_spec=None,
+    )
+
+    assert result["qualification"] == "unavailable"
+    assert result["reply_echo"]["matches_selector"] is False
+    assert "echo mismatch" in result["reason"].lower()
+
+
+def test_unsupported_scalar_codec_retains_echo_as_unqualified_raw_evidence() -> None:
+    from helianthus_vrc_explorer.scanner.b524_probe import probe_parameter_description
+    from helianthus_vrc_explorer.transport.base import TransportInterface
+
+    class HexCodecBus(TransportInterface):
+        def send(self, dst: int, payload: bytes) -> bytes:  # noqa: ARG002
+            return bytes.fromhex("023412010203040506")
+
+    result = probe_parameter_description(
+        HexCodecBus(),
+        dst=0x15,
+        opcode=2,
+        group=2,
+        instance=5,
+        register=0x1234,
+        type_spec="HEX:2",
+    )
+
+    assert result["qualification"] == "unqualified"
+    assert result["type"] == "HEX:2"
+    assert "unsupported" in result["reason"]
+    assert result["reply_echo"]["matches_selector"] is True
+    assert "width" not in result
 
 
 @pytest.mark.parametrize("read_opcode,description_opcode", [(2, 1), (6, 7)])

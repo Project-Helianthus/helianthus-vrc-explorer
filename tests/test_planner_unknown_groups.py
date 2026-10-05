@@ -57,7 +57,41 @@ def test_prompt_scan_plan_disables_unknown_groups_by_default(monkeypatch) -> Non
     assert sorted(plan.keys()) == [make_plan_key(0x02, 0x02)]
 
 
-def test_prompt_scan_plan_accepts_legacy_aggressive_alias_as_full(monkeypatch) -> None:
+def test_prompt_scan_plan_preserves_exact_default_registers_without_changes(monkeypatch) -> None:
+    import helianthus_vrc_explorer.ui.planner as planner
+
+    answers = iter(["n", "y"])
+    monkeypatch.setattr(planner.Prompt, "ask", lambda *_args, **_kwargs: next(answers))
+    group = PlannerGroup(
+        group=0x02,
+        opcode=0x02,
+        name="Heating Circuits",
+        descriptor=1.0,
+        known=True,
+        ii_max=0x0A,
+        rr_max=0x0100,
+        rr_max_full=0x0100,
+        present_instances=(0x00, 0x03),
+    )
+    default = GroupScanPlan(
+        group=0x02,
+        opcode=0x02,
+        rr_max=0x0100,
+        instances=(0x00, 0x03),
+        registers=(0x0002, 0x0010, 0x0100),
+    )
+
+    plan = prompt_scan_plan(
+        Console(force_terminal=True),
+        [group],
+        request_rate_rps=None,
+        default_plan={group.key: default},
+    )
+
+    assert plan == {group.key: default}
+
+
+def test_prompt_scan_plan_full_alias_still_applies_profile_pair_policy(monkeypatch) -> None:
     import helianthus_vrc_explorer.ui.planner as planner
 
     answers = iter(
@@ -89,10 +123,7 @@ def test_prompt_scan_plan_accepts_legacy_aggressive_alias_as_full(monkeypatch) -
     ]
 
     plan = prompt_scan_plan(console, groups, request_rate_rps=None, default_plan=None)
-    # After preset simplification, "full" (alias: aggressive) includes ALL groups
-    key = make_plan_key(0x69, 0x02)
-    assert sorted(plan.keys()) == [key]
-    assert plan[key].instances == tuple(range(0x0A + 1))
+    assert plan == {}
 
 
 def test_build_plan_from_preset_recommended_skips_unknown_groups() -> None:

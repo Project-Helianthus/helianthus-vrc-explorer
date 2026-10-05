@@ -842,7 +842,7 @@ def test_scan_b524_group_bounds_come_from_profile_defaults(tmp_path: Path) -> No
     )
 
     plan = artifact["meta"]["scan_plan"]["groups"]["0x02"]
-    assert plan["rr_max"] == "0x0025"
+    assert plan["operations"]["0x02"]["rr_max"] == "0x0025"
     bounds = artifact["meta"]["group_metadata_bounds"]["0x02"]
     assert bounds["source"] == "profile"
 
@@ -959,7 +959,7 @@ def test_scan_instanced_group_zero_descriptor(tmp_path: Path) -> None:
     assert group["descriptor_observed"] is None
     assert group["discovery_advisory"]["kind"] == "profile_register_candidate"
     assert group["discovery_advisory"]["semantic_authority"] is False
-    assert group["discovery_advisory"]["proven_register_opcodes"] == ["0x02"]
+    assert group["discovery_advisory"]["proven_register_opcodes"] == ["0x02", "0x06"]
     assert group["instances"]["0x00"]["present"] is True
     assert group["instances"].get("0x01", {}).get("present") is not True
 
@@ -1594,7 +1594,7 @@ def test_scan_b524_recommended_plan_keeps_namespace_rr_max(tmp_path: Path) -> No
     assert plan["multi_op"] is True
     assert plan["operations"]["0x02"]["rr_max"] == "0x000f"
     assert plan["operations"]["0x06"]["rr_max"] == "0x0035"
-    assert artifact["meta"]["scan_plan"]["estimated_register_requests"] == 636
+    assert artifact["meta"]["scan_plan"]["estimated_register_requests"] == 602
 
 
 def test_scan_b524_instance_discovery_runs_local_namespace_before_remote(
@@ -1826,7 +1826,7 @@ def test_scan_unknown_group_expands_to_instance_ff_after_readable_probe(tmp_path
         for (opcode, gg, ii, rr) in transport.register_reads
         if gg == 0x69 and opcode == 0x02
     }
-    assert local_reads == {(0x02, 0x00, 0x0000)}
+    assert local_reads == {(0x02, ii, rr) for ii in (0, 1) for rr in (0, 1)}
     assert (0x06, 0x69, 0xFF, 0x0000) in transport.register_reads
 
 
@@ -1924,7 +1924,7 @@ def test_scan_b524_textual_planner_receives_remote_heating_source_rows(
     assert artifact["meta"]["scan_plan"]["estimated_register_requests"] == 0
 
 
-def test_scan_b524_textual_planner_includes_remote_exploratory_rows_for_groups_02_to_05(
+def test_scan_b524_textual_planner_excludes_uncharacterized_remote_rows(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -1957,21 +1957,18 @@ def test_scan_b524_textual_planner_includes_remote_exploratory_rows_for_groups_0
 
     by_key = {(group.group, group.opcode): group for group in planner_groups}
     assert by_key[(0x02, 0x06)].name == "Secondary Heating Source"
-    assert by_key[(0x03, 0x06)].name == "Unknown"
-    assert by_key[(0x04, 0x06)].name == "Unknown"
-    assert by_key[(0x05, 0x06)].name == "Unknown"
+    assert (0x03, 0x06) not in by_key
+    assert (0x04, 0x06) not in by_key
+    assert (0x05, 0x06) not in by_key
     assert by_key[(0x04, 0x02)].ii_max == 0x01
     assert by_key[(0x02, 0x06)].ii_max == 0x07
-    assert by_key[(0x03, 0x06)].ii_max == 0x0A
-    assert by_key[(0x04, 0x06)].ii_max == 0x0A
-    assert by_key[(0x05, 0x06)].ii_max == 0x0A
 
     default_plan = captured["default_plan"]
     assert isinstance(default_plan, dict)
     assert make_plan_key(0x02, 0x06) in default_plan
-    assert make_plan_key(0x03, 0x06) in default_plan
-    assert make_plan_key(0x04, 0x06) in default_plan
-    assert make_plan_key(0x05, 0x06) in default_plan
+    assert make_plan_key(0x03, 0x06) not in default_plan
+    assert make_plan_key(0x04, 0x06) not in default_plan
+    assert make_plan_key(0x05, 0x06) not in default_plan
     assert artifact["meta"]["scan_plan"]["estimated_register_requests"] == 0
 
 
@@ -2040,23 +2037,23 @@ def test_scan_b524_textual_full_preset_keeps_exploratory_rows_visible_but_unsele
     planner_groups = captured["groups"]
     assert isinstance(planner_groups, list)
     by_key = {(group.group, group.opcode): group for group in planner_groups}
-    # Keep broad visibility in UI.
+    # UI and CLI expose the same characterized profile pairs.
     assert (0x02, 0x06) in by_key
-    assert (0x03, 0x06) in by_key
-    assert (0x04, 0x06) in by_key
-    assert (0x05, 0x06) in by_key
+    assert (0x03, 0x06) not in by_key
+    assert (0x04, 0x06) not in by_key
+    assert (0x05, 0x06) not in by_key
 
     default_plan = captured["default_plan"]
     assert isinstance(default_plan, dict)
-    # After preset simplification, full includes ALL groups and namespaces.
+    # Full audits the characterized profile families.
     assert make_plan_key(0x02, 0x02) in default_plan
     assert make_plan_key(0x03, 0x02) in default_plan
     assert make_plan_key(0x04, 0x02) in default_plan
     assert make_plan_key(0x05, 0x02) in default_plan
     assert make_plan_key(0x02, 0x06) in default_plan
-    assert make_plan_key(0x03, 0x06) in default_plan
-    assert make_plan_key(0x04, 0x06) in default_plan
-    assert make_plan_key(0x05, 0x06) in default_plan
+    assert make_plan_key(0x03, 0x06) not in default_plan
+    assert make_plan_key(0x04, 0x06) not in default_plan
+    assert make_plan_key(0x05, 0x06) not in default_plan
 
 
 def test_scan_b524_textual_full_preset_keeps_remote_only_group_selected_on_remote_opcode(
@@ -2090,15 +2087,15 @@ def test_scan_b524_textual_full_preset_keeps_remote_only_group_selected_on_remot
     planner_groups = captured["groups"]
     assert isinstance(planner_groups, list)
     keys = {(group.group, group.opcode) for group in planner_groups}
-    # Keep broad visibility in UI.
-    assert (0x0C, 0x02) in keys
+    # UI and CLI expose the same characterized profile pairs.
+    assert (0x0C, 0x02) not in keys
     assert (0x0C, 0x06) in keys
 
     default_plan = captured["default_plan"]
     assert isinstance(default_plan, dict)
-    # After preset simplification, full includes ALL namespaces.
+    # Full retains the characterized remote family only.
     assert make_plan_key(0x0C, 0x06) in default_plan
-    assert make_plan_key(0x0C, 0x02) in default_plan
+    assert make_plan_key(0x0C, 0x02) not in default_plan
 
 
 def test_scan_b524_textual_planner_does_not_reuse_remote_presence_for_local_speculative_rows(
@@ -2132,7 +2129,7 @@ def test_scan_b524_textual_planner_does_not_reuse_remote_presence_for_local_spec
     assert isinstance(planner_groups, list)
     by_key = {(group.group, group.opcode): group for group in planner_groups}
     assert by_key[(0x0C, 0x06)].present_instances == (0x00,)
-    assert by_key[(0x0C, 0x02)].present_instances == ()
+    assert (0x0C, 0x02) not in by_key
 
 
 def test_scan_b524_textual_planner_models_group_08_as_instanced_on_local_and_remote(
@@ -2294,8 +2291,8 @@ def test_scan_b524_textual_planner_uses_remote_presence_for_op06_rows(
 
     assert by_key[(0x01, 0x06)].present_instances == (0x01,)
     assert by_key[(0x02, 0x06)].present_instances == (0x00, 0x01)
-    assert by_key[(0x03, 0x06)].present_instances == (0x02,)
-    assert by_key[(0x05, 0x06)].present_instances == (0x01,)
+    assert (0x03, 0x06) not in by_key
+    assert (0x05, 0x06) not in by_key
     assert by_key[(0x0A, 0x06)].present_instances == (0x03,)
     assert by_key[(0x0C, 0x06)].present_instances == (0x04,)
 
@@ -2303,7 +2300,7 @@ def test_scan_b524_textual_planner_uses_remote_presence_for_op06_rows(
     assert by_key[(0x02, 0x02)].present_instances == (0x00, 0x01, 0x02)
     assert by_key[(0x03, 0x02)].present_instances == (0x00, 0x01)
     assert by_key[(0x05, 0x02)].present_instances == (0x00,)
-    assert by_key[(0x0A, 0x02)].present_instances == tuple(range(0x0B))
+    assert (0x0A, 0x02) not in by_key
 
 
 def test_scan_b524_textual_planner_does_not_leak_remote_presence_into_local_mirror_rows(
@@ -2338,7 +2335,7 @@ def test_scan_b524_textual_planner_does_not_leak_remote_presence_into_local_mirr
     assert isinstance(planner_groups, list)
     by_key = {(group.group, group.opcode): group for group in planner_groups}
     assert by_key[(0x0C, 0x06)].present_instances == (0x00,)
-    assert by_key[(0x0C, 0x02)].present_instances == ()
+    assert (0x0C, 0x02) not in by_key
 
 
 def test_scan_b524_textual_failure_raises_in_forced_textual_mode(
