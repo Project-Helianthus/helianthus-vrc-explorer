@@ -278,17 +278,49 @@ class DummyTransport(TransportInterface):
         opcodes: tuple[int, ...],
         register_value: dict[str, Any],
     ) -> None:
-        """Load an offline normalized description from register metadata."""
-        metadata = register_value.get("metadata")
-        if not isinstance(metadata, dict):
-            return
-        raw_description = metadata.get("parameter_description")
+        """Load a qualified normalized description from a fixture register."""
+        raw_description = register_value.get("parameter_description")
+        if not isinstance(raw_description, dict):
+            # Older hand-authored fixtures nested the same normalized object.
+            metadata = register_value.get("metadata")
+            raw_description = (
+                metadata.get("parameter_description") if isinstance(metadata, dict) else None
+            )
         if not isinstance(raw_description, dict):
             return
 
-        type_spec = raw_description.get("type", register_value.get("type"))
-        if not isinstance(type_spec, str):
-            raise ValueError("Parameter description metadata requires a scalar type")
+        if raw_description.get("qualification") != "matched":
+            raise ValueError("Parameter description must be qualified as matched")
+        read_opcode = self._parse_opcode_value(
+            raw_description.get("read_opcode"), "parameter description read"
+        )
+        description_opcode = self._parse_opcode_value(
+            raw_description.get("description_opcode"), "parameter description"
+        )
+        if (
+            read_opcode not in {0x02, 0x06}
+            or description_opcode
+            != {
+                0x02: 0x01,
+                0x06: 0x07,
+            }[read_opcode]
+        ):
+            raise ValueError("Parameter description has an invalid opcode mapping")
+        if read_opcode not in opcodes:
+            raise ValueError("Parameter description read opcode does not match fixture register")
+        self._validate_description_identity(
+            raw_description,
+            group=group,
+            instance=instance,
+            register=register,
+        )
+
+        type_spec = raw_description.get("type")
+        entry_type = register_value.get("type")
+        if not isinstance(type_spec, str) or not isinstance(entry_type, str):
+            raise ValueError("Parameter description and fixture register require scalar types")
+        if type_spec.strip().upper() != entry_type.strip().upper():
+            raise ValueError("Parameter description codec does not match fixture register")
         try:
             minimum = encode_typed_value(type_spec, raw_description["min"])
             maximum = encode_typed_value(type_spec, raw_description["max"])
@@ -299,17 +331,36 @@ class DummyTransport(TransportInterface):
             ) from exc
         if not (len(minimum) == len(maximum) == len(step)):
             raise ValueError("Parameter description metadata has unequal value widths")
+        if raw_description.get("width") != len(minimum):
+            raise ValueError("Parameter description width does not match its scalar codec")
 
-        for opcode in opcodes:
-            if opcode not in {0x02, 0x06}:
-                continue
-            self._parameter_descriptions[(opcode, group, instance, register)] = (
-                bytes((group,))
-                + register.to_bytes(2, byteorder="little")
-                + minimum
-                + maximum
-                + step
-            )
+        self._parameter_descriptions[(read_opcode, group, instance, register)] = (
+            bytes((group,)) + register.to_bytes(2, byteorder="little") + minimum + maximum + step
+        )
+
+    @staticmethod
+    def _parse_opcode_value(value: object, field: str) -> int:
+        if not isinstance(value, str):
+            raise ValueError(f"{field} opcode must be a hex string")
+        return DummyTransport._parse_opcode(value, field)
+
+    def _validate_description_identity(
+        self,
+        description: dict[str, Any],
+        *,
+        group: int,
+        instance: int,
+        register: int,
+    ) -> None:
+        expected = (
+            ("group", group, self._parse_hex_key_u8),
+            ("instance", instance, self._parse_hex_key_u8),
+            ("register", register, self._parse_hex_key_u16),
+        )
+        for field, expected_value, parser in expected:
+            raw_value = description.get(field)
+            if not isinstance(raw_value, str) or parser(raw_value, field) != expected_value:
+                raise ValueError(f"Parameter description {field} does not match fixture register")
 
     def _load_fixture(self) -> None:
         raw = self._fixture_path.read_text(encoding="utf-8")

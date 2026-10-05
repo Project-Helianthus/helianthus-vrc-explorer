@@ -69,7 +69,9 @@ def test_dummy_transport_missing_system_information_returns_nan(tmp_path: Path) 
     assert struct.unpack("<f", response)[0] != struct.unpack("<f", response)[0]
 
 
-def test_dummy_transport_parameter_description_uses_register_metadata(tmp_path: Path) -> None:
+def test_dummy_transport_parameter_description_supports_qualified_nested_fixture(
+    tmp_path: Path,
+) -> None:
     fixture = {
         "meta": {},
         "operations": {
@@ -84,6 +86,14 @@ def test_dummy_transport_parameter_description_uses_register_metadata(tmp_path: 
                                         "type": "UIN",
                                         "metadata": {
                                             "parameter_description": {
+                                                "qualification": "matched",
+                                                "description_opcode": "0x01",
+                                                "read_opcode": "0x02",
+                                                "group": "0x02",
+                                                "instance": "0x00",
+                                                "register": "0x000f",
+                                                "type": "UIN",
+                                                "width": 2,
                                                 "min": 0,
                                                 "max": 20,
                                                 "step": 2,
@@ -106,6 +116,85 @@ def test_dummy_transport_parameter_description_uses_register_metadata(tmp_path: 
     assert transport.send(0x15, build_constraint_probe_payload(0x02, 0x000F)) == bytes.fromhex(
         "020f00000014000200"
     )
+
+
+def test_dummy_transport_parameter_description_supports_direct_scan_replay_entries(
+    tmp_path: Path,
+) -> None:
+    fixture = {
+        "meta": {},
+        "operations": {
+            "0x02": {
+                "groups": {
+                    "0x02": {
+                        "instances": {
+                            "0x00": {
+                                "registers": {
+                                    "0x000f": {
+                                        "raw_hex": "0500",
+                                        "type": "UIN",
+                                        "parameter_description": {
+                                            "qualification": "matched",
+                                            "description_opcode": "0x01",
+                                            "read_opcode": "0x02",
+                                            "group": "0x02",
+                                            "instance": "0x00",
+                                            "register": "0x000f",
+                                            "type": "UIN",
+                                            "width": 2,
+                                            "min": 0,
+                                            "max": 20,
+                                            "step": 2,
+                                        },
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "0x06": {
+                "groups": {
+                    "0x09": {
+                        "instances": {
+                            "0x01": {
+                                "registers": {
+                                    "0x0004": {
+                                        "raw_hex": "02",
+                                        "type": "UCH",
+                                        "parameter_description": {
+                                            "qualification": "matched",
+                                            "description_opcode": "0x07",
+                                            "read_opcode": "0x06",
+                                            "group": "0x09",
+                                            "instance": "0x01",
+                                            "register": "0x0004",
+                                            "type": "UCH",
+                                            "width": 1,
+                                            "min": 0,
+                                            "max": 10,
+                                            "step": 1,
+                                        },
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+        },
+    }
+    fixture_path = tmp_path / "direct_parameter_description.json"
+    fixture_path.write_text(json.dumps(fixture), encoding="utf-8")
+
+    transport = DummyTransport(fixture_path)
+
+    assert transport.send(0x15, build_constraint_probe_payload(0x02, 0x000F)) == bytes.fromhex(
+        "020f00000014000200"
+    )
+    assert transport.send(
+        0x15, build_constraint_probe_payload(0x09, 0x0004, instance=0x01, opcode=0x07)
+    ) == bytes.fromhex("090400000a01")
 
 
 def test_dummy_transport_register_read_returns_header_plus_value(tmp_path: Path) -> None:
