@@ -494,7 +494,10 @@ def test_current_artifact_round_trip_preserves_writable_and_unavailable_metadata
     assert DummyTransport(path).send(0x15, build_constraint_probe_payload(0, 1)) == reply
 
 
-def test_partial_system_information_keeps_valid_fixture_registers(tmp_path: Path) -> None:
+@pytest.mark.parametrize("circuit_raw_hex", [None, "00", "0102"])
+def test_partial_system_information_keeps_valid_fixture_registers(
+    tmp_path: Path, circuit_raw_hex: str | None
+) -> None:
     from helianthus_vrc_explorer.scanner.scan import scan_b524
 
     path = _write_min_fixture(tmp_path)
@@ -505,7 +508,7 @@ def test_partial_system_information_keeps_valid_fixture_registers(tmp_path: Path
             "name": "circuit_count",
             "value": None,
             "state": "unavailable",
-            "raw_hex": None,
+            "raw_hex": circuit_raw_hex,
         },
         {
             "identifier": "0x0001",
@@ -529,19 +532,32 @@ def test_partial_system_information_keeps_valid_fixture_registers(tmp_path: Path
     }
     path.write_text(json.dumps(fixture))
     transport = DummyTransport(path)
-    with pytest.raises(TransportTimeout):
-        transport.send(0x15, build_directory_probe_payload(0))
+    if circuit_raw_hex is None:
+        with pytest.raises(TransportTimeout):
+            transport.send(0x15, build_directory_probe_payload(0))
+    else:
+        assert transport.send(0x15, build_directory_probe_payload(0)).hex() == circuit_raw_hex
     assert transport.send(0x15, build_directory_probe_payload(1)) == bytes.fromhex("00000040")
     assert transport.send(0x15, build_directory_probe_payload(2)) == b"\x00"
     artifact = scan_b524(transport, dst=0x15)
-    assert artifact["meta"]["system_information"][0]["raw_hex"] is None
+    assert artifact["meta"]["system_information"][0]["raw_hex"] == circuit_raw_hex
+    assert artifact["meta"]["system_information"][0]["value"] is None
+    assert artifact["meta"]["system_information"][0]["state"] == "unavailable"
     assert artifact["meta"]["system_information"][1]["value"] == 2.0
     assert artifact["meta"]["system_information"][2]["value"] is None
+    assert artifact["meta"]["system_information"][2]["raw_hex"] == "00"
+    circuit_counts = artifact["meta"]["instance_counts"]["0x02:0x02"]
+    assert circuit_counts["expected"] is None
+    assert circuit_counts["probed_instances"] == 11
     regs = artifact["operations"]["0x02"]["groups"]["0x02"]["instances"]["0x00"]["registers"]
     assert regs["0x000f"]["value"] == 0x1234
     path.write_text(json.dumps(artifact))
-    assert (
-        DummyTransport(path)
-        .send(0x15, build_register_read_payload(2, 2, 0, 0xF))
-        .endswith(b"\x34\x12")
+    replay_transport = DummyTransport(path)
+    if circuit_raw_hex is not None:
+        assert (
+            replay_transport.send(0x15, build_directory_probe_payload(0)).hex() == circuit_raw_hex
+        )
+    assert replay_transport.send(0x15, build_directory_probe_payload(2)) == b"\x00"
+    assert replay_transport.send(0x15, build_register_read_payload(2, 2, 0, 0xF)).endswith(
+        b"\x34\x12"
     )

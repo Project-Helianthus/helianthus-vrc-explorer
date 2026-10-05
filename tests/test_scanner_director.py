@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from pathlib import Path
 
 import pytest
@@ -189,7 +190,10 @@ def test_discover_groups_does_not_terminate_on_transient_transport_failures(tmp_
 
     discovered = discover_groups(transport, dst=0x15)
 
-    assert [group.group for group in discovered] == [i for i in range(18) if i not in {4, 5, 6}]
+    assert [group.group for group in discovered] == [i for i in range(18) if i not in {4, 5}]
+    unavailable = next(group for group in discovered if group.group == 6)
+    assert math.isnan(unavailable.descriptor)
+    assert unavailable.raw_hex == "00"
     # Failures at 0x04/0x05/0x06 must not terminate discovery early.
     assert transport.probed_groups[:4] == [0x00, 0x01, 0x02, 0x03]
     assert transport.probed_groups.count(0x04) == 3
@@ -205,9 +209,34 @@ def test_discover_groups_treats_status_only_gg00_as_transient(tmp_path: Path) ->
 
     discovered = discover_groups(transport, dst=0x15)
 
-    assert [group.group for group in discovered] == list(range(1, 18))
+    assert [group.group for group in discovered] == list(range(18))
+    assert math.isnan(discovered[0].descriptor)
+    assert discovered[0].raw_hex == "00"
     assert transport.probed_groups.count(0x00) == 3
     assert transport.probed_groups[-1] == 0x11
+
+
+@pytest.mark.parametrize("failure", [TransportTimeout, TransportError])
+def test_system_information_retains_short_response_before_retry_failure(
+    tmp_path: Path, failure: type[TransportError]
+) -> None:
+    inner = DummyTransport(_write_directory_fixture(tmp_path))
+
+    class ShortThenFailTransport(TransportInterface):
+        attempts = 0
+
+        def send(self, dst: int, payload: bytes) -> bytes:
+            if payload[:3] == b"\x00\x00\x00":
+                self.attempts += 1
+                if self.attempts == 1:
+                    return b"\x01\x02"
+                raise failure("retry failure")
+            return inner.send(dst, payload)
+
+    discovered = discover_groups(ShortThenFailTransport(), dst=0x15)
+    assert [group.group for group in discovered] == list(range(18))
+    assert math.isnan(discovered[0].descriptor)
+    assert discovered[0].raw_hex == "0102"
 
 
 def test_discover_groups_retries_known_group_after_single_timeout(tmp_path: Path) -> None:

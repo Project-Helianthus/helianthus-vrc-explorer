@@ -322,11 +322,13 @@ def discover_groups(
         payload = build_directory_probe_payload(gg)
         attempts = _directory_probe_retry_budget(gg)
         descriptor: float | None = None
+        last_response: bytes | None = None
         skip_group = False
         for attempt in range(1, attempts + 1):
             retrying = attempt < attempts
             try:
                 resp = transport.send(dst, payload)
+                last_response = resp
             except TransportTimeout:
                 if retrying:
                     logger.warning(
@@ -420,8 +422,12 @@ def discover_groups(
             break
 
         if skip_group or descriptor is None:
-            # Transport failures are not evidence of a NaN terminator; skip without advancing the
-            # NaN streak.
+            # Keep observed malformed/status bytes even if a later retry times out.
+            # NaN marks the value unavailable, so this evidence cannot guide instance counts.
+            if last_response is not None:
+                discovered.append(
+                    DiscoveredGroup(group=gg, descriptor=float("nan"), raw_hex=last_response.hex())
+                )
             continue
 
         discovered.append(DiscoveredGroup(group=gg, descriptor=descriptor, raw_hex=resp.hex()))
