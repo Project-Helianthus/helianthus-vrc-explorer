@@ -53,7 +53,7 @@ Key scan UX flags:
 - `--preset recommended|full|research|custom`
 - `--probe-constraints/--no-probe-constraints` (targeted OP01/OP07 descriptions for observed writable parameters; enabled by default)
 - `--description-budget` (default 256; fair OP01/OP07 sharing with unused capacity borrowed)
-- `--request-budget` (actual B524 sends including retries; research defaults to 10000)
+- `--request-budget` (B524 request attempts including transport retries; research defaults to 10000)
 - `--scan-plan` (version 1 JSON file for exact custom read selectors)
 - `--b509-dump` (B509 is opt-in; `--b509-range` requires this flag)
 - `--no-tips`
@@ -90,6 +90,8 @@ Transport note:
 - CI enforces these rules with `python scripts/check_b524_namespace_guardrails.py`.
 
 Coverage and parameter-description note:
+
+- Send accounting includes each ebusd command attempt and Enhanced request attempt, including internal retransmissions. Connection/arbitration failure may consume an attempt; these counters do not prove physical bus delivery. Description coverage counts candidates separately from `request_attempts` and `retries`.
 - `recommended` uses qualified OP00 counts for sparse circuit/zone instance discovery, with a bounded fallback for zero, unavailable, invalid or unmet counts. It scans characterized OP02 groups `00..05,08,09` and OP06 groups `01,02,08,09,0A,0C` consistently through CLI and interactive planners.
 - `full` audits every declared II slot in those characterized profile families independently of counts, using normal RR bounds. It reports count mismatches; configured profile coverage is not universal wire-space completeness.
 - `research` expands groups and RR bounds with multiple bounded discovery selectors. A failed first `II=00/RR=0000` probe does not veto later probes. It is non-exhaustive and defaults to 10000 actual B524 sends; budget exhaustion saves an incomplete artifact with retained observations. Legacy aliases remain `aggressive` -> `full`, `exhaustive` -> `research`, and `conservative` -> `recommended`.

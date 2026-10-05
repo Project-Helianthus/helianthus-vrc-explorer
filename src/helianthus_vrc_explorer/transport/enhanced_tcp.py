@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import IO
 
 from .base import (
+    AttemptHook,
     TransportDisconnected,
     TransportError,
     TransportHostError,
@@ -972,7 +973,31 @@ class EnhancedTcpTransport(TransportInterface):
             raise TransportTimeout(f"INFO request 0x{info_id:02X} deadline expired")
 
     def send(self, dst: int, payload: bytes) -> bytes:
-        return self.send_proto(dst, 0xB5, 0x24, payload)
+        return self._send_b524(dst, payload, attempt_hook=None)
+
+    def send_with_attempt_hook(
+        self,
+        dst: int,
+        payload: bytes,
+        attempt_hook: AttemptHook,
+    ) -> bytes:
+        return self._send_b524(dst, payload, attempt_hook=attempt_hook)
+
+    def _send_b524(
+        self,
+        dst: int,
+        payload: bytes,
+        *,
+        attempt_hook: AttemptHook | None,
+    ) -> bytes:
+        return self._send_proto(
+            dst,
+            0xB5,
+            0x24,
+            payload,
+            expect_response=True,
+            attempt_hook=attempt_hook,
+        )
 
     def send_proto(
         self,
@@ -982,6 +1007,25 @@ class EnhancedTcpTransport(TransportInterface):
         payload: bytes,
         *,
         expect_response: bool = True,
+    ) -> bytes:
+        return self._send_proto(
+            dst,
+            primary,
+            secondary,
+            payload,
+            expect_response=expect_response,
+            attempt_hook=None,
+        )
+
+    def _send_proto(
+        self,
+        dst: int,
+        primary: int,
+        secondary: int,
+        payload: bytes,
+        *,
+        expect_response: bool,
+        attempt_hook: AttemptHook | None,
     ) -> bytes:
         _validate_u8("dst", dst)
         if dst in (0x00, _EBUS_ESCAPE, _EBUS_SYN):
@@ -1009,6 +1053,7 @@ class EnhancedTcpTransport(TransportInterface):
                     secondary=secondary,
                     payload=payload_bytes,
                     expect_response=expect_response,
+                    attempt_hook=attempt_hook,
                 ),
             )
 
@@ -1146,7 +1191,10 @@ class EnhancedTcpTransport(TransportInterface):
         secondary: int,
         payload: bytes,
         expect_response: bool,
+        attempt_hook: AttemptHook | None = None,
     ) -> bytes:
+        if attempt_hook is not None:
+            attempt_hook()
         self._start_arbitration(self._config.src)
 
         telegram = bytearray((self._config.src, dst, primary, secondary, len(payload)))
@@ -1163,6 +1211,8 @@ class EnhancedTcpTransport(TransportInterface):
         max_nack_attempts = 1 + self._config.nack_max_retries
         for nack_attempt in range(max_nack_attempts):
             if nack_attempt > 0:
+                if attempt_hook is not None:
+                    attempt_hook()
                 self._trace(f"#{seq} LOCAL_NACK_RETRY attempt={nack_attempt}")
 
             for symbol in telegram[1:]:

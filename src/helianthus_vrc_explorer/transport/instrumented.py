@@ -4,7 +4,7 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Any
 
-from .base import TransportError, TransportInterface
+from .base import AttemptHook, TransportError, TransportInterface
 
 
 class ScanRequestBudgetExceeded(RuntimeError):
@@ -21,7 +21,7 @@ class TransportCounters:
 
 
 class CountingTransport(TransportInterface):
-    """Transport wrapper that counts `send()` calls.
+    """Transport wrapper that counts request attempts, including internal retries.
 
     Useful for request/second estimates and scan planning.
     """
@@ -39,23 +39,48 @@ class CountingTransport(TransportInterface):
         self.recent_requests: deque[dict[str, Any]] = deque(maxlen=64)
 
     def send(self, dst: int, payload: bytes) -> bytes:
-        if self.request_budget is not None and self.counters.send_calls >= self.request_budget:
-            raise ScanRequestBudgetExceeded("B524 request budget exhausted")
-        self.counters.send_calls += 1
-        evidence: dict[str, Any] = {
-            "attempt": self.counters.send_calls,
-            "destination_address": f"0x{dst:02x}",
-            "request_hex": payload.hex(),
-            "reply_hex": None,
-        }
-        try:
-            response = self._inner.send(dst, payload)
-        except TransportError as exc:
-            evidence["error_type"] = type(exc).__name__
+        return self._send_counted(dst, payload, outer_attempt_hook=None)
+
+    def send_with_attempt_hook(
+        self,
+        dst: int,
+        payload: bytes,
+        attempt_hook: AttemptHook,
+    ) -> bytes:
+        return self._send_counted(dst, payload, outer_attempt_hook=attempt_hook)
+
+    def _send_counted(
+        self,
+        dst: int,
+        payload: bytes,
+        *,
+        outer_attempt_hook: AttemptHook | None,
+    ) -> bytes:
+        attempt_evidence: list[dict[str, Any]] = []
+
+        def _before_attempt() -> None:
+            if self.request_budget is not None and self.counters.send_calls >= self.request_budget:
+                raise ScanRequestBudgetExceeded("B524 request budget exhausted")
+            if outer_attempt_hook is not None:
+                outer_attempt_hook()
+            self.counters.send_calls += 1
+            evidence: dict[str, Any] = {
+                "attempt": self.counters.send_calls,
+                "destination_address": f"0x{dst:02x}",
+                "request_hex": payload.hex(),
+                "reply_hex": None,
+            }
+            attempt_evidence.append(evidence)
             self.recent_requests.append(evidence)
+
+        try:
+            response = self._inner.send_with_attempt_hook(dst, payload, _before_attempt)
+        except TransportError as exc:
+            if attempt_evidence:
+                attempt_evidence[-1]["error_type"] = type(exc).__name__
             raise
-        evidence["reply_hex"] = response.hex()
-        self.recent_requests.append(evidence)
+        if attempt_evidence:
+            attempt_evidence[-1]["reply_hex"] = response.hex()
         return response
 
     def trace_label(self, label: str) -> None:

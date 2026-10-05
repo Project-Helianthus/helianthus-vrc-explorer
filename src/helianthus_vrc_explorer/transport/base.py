@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from typing import Any
+
+AttemptHook = Callable[[], None]
 
 
 class TransportError(Exception):
@@ -53,6 +56,22 @@ class TransportInterface(ABC):
             dst: Destination address (0x00..0xFF).
             payload: Raw B524 payload bytes (without ebus framing).
         """
+
+    def send_with_attempt_hook(
+        self,
+        dst: int,
+        payload: bytes,
+        attempt_hook: AttemptHook,
+    ) -> bytes:
+        """Send while notifying a caller immediately before each request attempt.
+
+        Transports with internal retries override this method and invoke the hook
+        for every B524 request attempt.  The default preserves compatibility for
+        transports whose ``send`` implementation performs one attempt.
+        """
+
+        attempt_hook()
+        return self.send(dst, payload)
 
 
 def emit_trace_label(transport: TransportInterface, label: str) -> None:

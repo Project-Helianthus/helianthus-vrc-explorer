@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Final
 
 from .base import (
+    AttemptHook,
     TransportCommandNotEnabled,
     TransportError,
     TransportInterface,
@@ -334,11 +335,34 @@ class EbusdTcpTransport(TransportInterface):
         return session
 
     def send(self, dst: int, payload: bytes) -> bytes:
+        return self._send_b524(dst, payload, attempt_hook=None)
+
+    def send_with_attempt_hook(
+        self,
+        dst: int,
+        payload: bytes,
+        attempt_hook: AttemptHook,
+    ) -> bytes:
+        return self._send_b524(dst, payload, attempt_hook=attempt_hook)
+
+    def _send_b524(
+        self,
+        dst: int,
+        payload: bytes,
+        *,
+        attempt_hook: AttemptHook | None,
+    ) -> bytes:
         self._trace_seq += 1
         seq = self._trace_seq
+
+        def _send_attempt() -> bytes:
+            if attempt_hook is not None:
+                attempt_hook()
+            return self._send_once(seq, dst, payload)
+
         return self._send_with_policy(
             seq,
-            lambda: self._send_once(seq, dst, payload),
+            _send_attempt,
         )
 
     def _send_with_policy(

@@ -524,6 +524,7 @@ def run_b524_scan(
                     opcode=opcode,
                     observer=observer,
                     expand_fallback=research_mode,
+                    research=research_mode,
                 )
                 _mark_present_instances(instances_obj, instances=present_instances)
                 unknown_namespace_probe_counts.setdefault(group.group, []).append(
@@ -1123,7 +1124,9 @@ def run_b524_scan(
             coverage=description_coverage,
         )
     artifact["meta"]["parameter_description_coverage"] = description_coverage
-    artifact["meta"]["parameter_description_requests"] = description_coverage.get("attempted", 0)
+    artifact["meta"]["parameter_description_requests"] = description_coverage.get(
+        "request_attempts", 0
+    )
     artifact["meta"]["scan_coverage"]["actual_requests"] = counting_transport.counters.send_calls
     artifact["meta"]["scan_coverage"]["completed"] = not artifact["meta"]["incomplete"]
     artifact["meta"]["scan_duration_seconds"] = round(time.perf_counter() - start_perf, 4)

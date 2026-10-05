@@ -14,7 +14,7 @@ from helianthus_vrc_explorer.protocol.b524 import build_register_read_payload
 from helianthus_vrc_explorer.scanner.observer import ScanObserver
 from helianthus_vrc_explorer.scanner.plan import GroupScanPlan, make_plan_key
 from helianthus_vrc_explorer.scanner.scan import scan_b524
-from helianthus_vrc_explorer.transport.base import TransportInterface
+from helianthus_vrc_explorer.transport.base import TransportInterface, TransportTimeout
 from helianthus_vrc_explorer.transport.dummy import DummyTransport
 
 
@@ -90,6 +90,40 @@ def test_custom_plan_preserves_exact_unobserved_selectors(tmp_path: Path) -> Non
     scalar = [payload for payload in transport.payloads if payload[0] in {2, 6}]
     assert scalar == [build_register_read_payload(6, 0x69, 3, rr) for rr in (1, 0x102)]
     assert artifact["meta"]["scan_plan"]["estimated_register_requests"] == 2
+
+
+def test_research_orchestration_discovers_later_instances_through_secondary_anchor() -> None:
+    class SecondaryAnchorTransport(TransportInterface):
+        def __init__(self) -> None:
+            self.payloads: list[bytes] = []
+
+        def send(self, dst: int, payload: bytes) -> bytes:
+            self.payloads.append(payload)
+            if payload[0] == 0:
+                return struct.pack("<f", float("nan"))
+            if (
+                payload[0] == 2
+                and payload[2] == 0x69
+                and payload[3] in {1, 3}
+                and int.from_bytes(payload[4:6], "little") == 1
+            ):
+                return bytes.fromhex("0169010001")
+            raise TransportTimeout("synthetic unknown selector")
+
+    transport = SecondaryAnchorTransport()
+    artifact = scan_b524(
+        transport,
+        dst=0x15,
+        planner_preset="research",
+        probe_constraints=False,
+        request_budget=100_000,
+    )
+    instances = artifact["operations"]["0x02"]["groups"]["0x69"]["instances"]
+    assert instances["0x03"]["present"] is True
+    assert instances["0x03"]["registers"]["0x0001"]["value"] == 1
+    assert build_register_read_payload(2, 0x69, 3, 0) in transport.payloads
+    assert build_register_read_payload(2, 0x69, 3, 1) in transport.payloads
+    assert artifact["meta"]["scan_coverage"]["completed"] is True
 
 
 @pytest.mark.parametrize("preset", ["recommended", "full", "research", "custom"])

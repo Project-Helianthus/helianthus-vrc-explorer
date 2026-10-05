@@ -1486,12 +1486,13 @@ __ARTIFACT_JSON__
             ["Descriptions matched", descriptions.matched], ["Descriptions unavailable", descriptions.unavailable],
             ["Descriptions unqualified", descriptions.unqualified], ["Descriptions skipped by budget", descriptions.budget_skipped],
             ["Descriptions not attempted", descriptions.not_attempted],
+            ["Description request attempts", descriptions.request_attempts], ["Description retries", descriptions.retries],
           ];
           const families = descriptions.by_read_operation || {};
           for (const opcode of Object.keys(families).sort()) {
             const stats = families[opcode];
             if (!stats || typeof stats !== "object") continue;
-            for (const name of ["eligible", "scheduled", "attempted", "matched", "unavailable", "unqualified", "budget_skipped", "not_attempted"]) {
+            for (const name of ["eligible", "scheduled", "attempted", "matched", "unavailable", "unqualified", "budget_skipped", "not_attempted", "request_attempts", "retries"]) {
               rows.push([`${opcode} ${name}`, stats[name]]);
             }
           }
