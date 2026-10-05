@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from helianthus_vrc_explorer.protocol.b524 import (
+    build_constraint_probe_payload,
     build_directory_probe_payload,
     build_register_read_payload,
 )
@@ -35,16 +36,165 @@ def _write_min_fixture(tmp_path: Path) -> Path:
     return fixture_path
 
 
-def test_dummy_transport_directory_probe_known_group(tmp_path: Path) -> None:
+def test_dummy_transport_legacy_fixture_op00_returns_unusable_nan(tmp_path: Path) -> None:
     transport = DummyTransport(_write_min_fixture(tmp_path))
     response = transport.send(0x15, build_directory_probe_payload(0x02))
-    assert response == struct.pack("<f", 1.0)
+    assert struct.unpack("<f", response)[0] != struct.unpack("<f", response)[0]
 
 
-def test_dummy_transport_directory_probe_unknown_group_returns_zero(tmp_path: Path) -> None:
+def test_dummy_transport_system_information_returns_fixture_raw_float(tmp_path: Path) -> None:
+    fixture = {
+        "meta": {
+            "system_information": [
+                {
+                    "identifier": "0x0000",
+                    "name": "circuit_count",
+                    "value": 2.0,
+                    "raw_hex": "00000040",
+                }
+            ]
+        },
+        "operations": {},
+    }
+    fixture_path = tmp_path / "system_information.json"
+    fixture_path.write_text(json.dumps(fixture), encoding="utf-8")
+
+    transport = DummyTransport(fixture_path)
+    assert transport.send(0x15, build_directory_probe_payload(0x0000)) == bytes.fromhex("00000040")
+
+
+def test_dummy_transport_missing_system_information_returns_nan(tmp_path: Path) -> None:
     transport = DummyTransport(_write_min_fixture(tmp_path))
     response = transport.send(0x15, build_directory_probe_payload(0x03))
-    assert response == struct.pack("<f", 0.0)
+    assert struct.unpack("<f", response)[0] != struct.unpack("<f", response)[0]
+
+
+def test_dummy_transport_parameter_description_supports_qualified_nested_fixture(
+    tmp_path: Path,
+) -> None:
+    fixture = {
+        "meta": {},
+        "operations": {
+            "0x02": {
+                "groups": {
+                    "0x02": {
+                        "instances": {
+                            "0x00": {
+                                "registers": {
+                                    "0x000f": {
+                                        "raw_hex": "0500",
+                                        "type": "UIN",
+                                        "metadata": {
+                                            "parameter_description": {
+                                                "qualification": "matched",
+                                                "description_opcode": "0x01",
+                                                "read_opcode": "0x02",
+                                                "group": "0x02",
+                                                "instance": "0x00",
+                                                "register": "0x000f",
+                                                "type": "UIN",
+                                                "width": 2,
+                                                "min": 0,
+                                                "max": 20,
+                                                "step": 2,
+                                            }
+                                        },
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+    }
+    fixture_path = tmp_path / "parameter_description.json"
+    fixture_path.write_text(json.dumps(fixture), encoding="utf-8")
+
+    transport = DummyTransport(fixture_path)
+
+    assert transport.send(0x15, build_constraint_probe_payload(0x02, 0x000F)) == bytes.fromhex(
+        "020f00000014000200"
+    )
+
+
+def test_dummy_transport_parameter_description_supports_direct_scan_replay_entries(
+    tmp_path: Path,
+) -> None:
+    fixture = {
+        "meta": {},
+        "operations": {
+            "0x02": {
+                "groups": {
+                    "0x02": {
+                        "instances": {
+                            "0x00": {
+                                "registers": {
+                                    "0x000f": {
+                                        "raw_hex": "0500",
+                                        "type": "UIN",
+                                        "parameter_description": {
+                                            "qualification": "matched",
+                                            "description_opcode": "0x01",
+                                            "read_opcode": "0x02",
+                                            "group": "0x02",
+                                            "instance": "0x00",
+                                            "register": "0x000f",
+                                            "type": "UIN",
+                                            "width": 2,
+                                            "min": 0,
+                                            "max": 20,
+                                            "step": 2,
+                                        },
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "0x06": {
+                "groups": {
+                    "0x09": {
+                        "instances": {
+                            "0x01": {
+                                "registers": {
+                                    "0x0004": {
+                                        "raw_hex": "02",
+                                        "type": "UCH",
+                                        "parameter_description": {
+                                            "qualification": "matched",
+                                            "description_opcode": "0x07",
+                                            "read_opcode": "0x06",
+                                            "group": "0x09",
+                                            "instance": "0x01",
+                                            "register": "0x0004",
+                                            "type": "UCH",
+                                            "width": 1,
+                                            "min": 0,
+                                            "max": 10,
+                                            "step": 1,
+                                        },
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+        },
+    }
+    fixture_path = tmp_path / "direct_parameter_description.json"
+    fixture_path.write_text(json.dumps(fixture), encoding="utf-8")
+
+    transport = DummyTransport(fixture_path)
+
+    assert transport.send(0x15, build_constraint_probe_payload(0x02, 0x000F)) == bytes.fromhex(
+        "020f00000014000200"
+    )
+    assert transport.send(
+        0x15, build_constraint_probe_payload(0x09, 0x0004, instance=0x01, opcode=0x07)
+    ) == bytes.fromhex("090400000a01")
 
 
 def test_dummy_transport_register_read_returns_header_plus_value(tmp_path: Path) -> None:
@@ -61,14 +211,14 @@ def test_dummy_transport_missing_register_raises_timeout(tmp_path: Path) -> None
         transport.send(0x15, payload)
 
 
-def test_dummy_transport_artifact_v2_directory_probe_uses_descriptor_observed(
+def test_dummy_transport_legacy_artifact_does_not_promote_descriptor_to_system_info(
     dual_namespace_scan_path: Path,
 ) -> None:
     transport = DummyTransport(dual_namespace_scan_path)
 
     response = transport.send(0x15, build_directory_probe_payload(0x09))
 
-    assert response == struct.pack("<f", 1.0)
+    assert struct.unpack("<f", response)[0] != struct.unpack("<f", response)[0]
 
 
 def test_dummy_transport_artifact_v2_separates_local_and_remote_registers(
@@ -239,3 +389,175 @@ def test_dummy_transport_unknown_group_flat_fixture_requires_explicit_namespace(
     # The register should be loadable under opcode 0x02
     response = transport.send(0x15, bytes((0x02, 0x00, 0x69, 0x00, 0x00, 0x00)))
     assert response[4:] == bytes.fromhex("00")
+
+
+@pytest.mark.parametrize("opcode,read_opcode", [(1, 2), (7, 6)])
+@pytest.mark.parametrize("nested", [False, True])
+def test_date_description_replays_day_step_separately_from_dates(
+    tmp_path: Path, opcode: int, read_opcode: int, nested: bool
+) -> None:
+    from helianthus_vrc_explorer.protocol.b524_metadata import decode_parameter_description
+
+    reply = bytes.fromhex("03050001011a05011a020000")
+    desc = decode_parameter_description(
+        reply, opcode=opcode, group=3, instance=1, register=5, type_spec="HDA:3"
+    )
+    entry = {"type": "HDA:3", "raw_hex": "03011a", "flags": 3}
+    entry["metadata" if nested else "parameter_description"] = (
+        {"parameter_description": desc} if nested else desc
+    )
+    fixture = {
+        "schema_version": "2.3",
+        "meta": {},
+        "operations": {
+            f"0x{read_opcode:02x}": {
+                "groups": {"0x03": {"instances": {"0x01": {"registers": {"0x0005": entry}}}}}
+            }
+        },
+    }
+    path = tmp_path / "date.json"
+    path.write_text(json.dumps(fixture))
+    transport = DummyTransport(path)
+    assert (
+        transport.send(0x15, build_constraint_probe_payload(3, 5, instance=1, opcode=opcode))
+        == reply
+    )
+
+
+def test_current_artifact_round_trip_preserves_writable_and_unavailable_metadata(
+    tmp_path: Path,
+) -> None:
+    from helianthus_vrc_explorer.protocol.b524_metadata import decode_parameter_description
+    from helianthus_vrc_explorer.scanner.scan import scan_b524
+
+    reply = bytes.fromhex("000100") + struct.pack("<fff", 0, 20, 0.5)
+    desc = decode_parameter_description(
+        reply, opcode=1, group=0, instance=0, register=1, type_spec="EXP"
+    )
+    entry = {
+        "read_opcode": "0x02",
+        "flags": 3,
+        "type": "EXP",
+        "raw_hex": struct.pack("<f", 4.5).hex(),
+        "reply_hex": (bytes.fromhex("03000100") + struct.pack("<f", 4.5)).hex(),
+        "parameter_description": desc,
+    }
+    unavailable = {
+        "read_opcode": "0x02",
+        "flags": 3,
+        "type": "UIN",
+        "raw_hex": "0200",
+        "reply_hex": "030002000200",
+        "parameter_description": {"qualification": "unavailable", "reason": "unsupported"},
+    }
+    short = {
+        "read_opcode": "0x02",
+        "flags": 0,
+        "raw_hex": None,
+        "type": None,
+        "reply_hex": "00",
+        "response_state": "active",
+    }
+    fixture = {
+        "schema_version": "2.3",
+        "meta": {},
+        "operations": {
+            "0x02": {
+                "groups": {
+                    "0x00": {
+                        "instances": {
+                            "0x00": {
+                                "registers": {
+                                    "0x0001": entry,
+                                    "0x0002": unavailable,
+                                    "0x0003": short,
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+    }
+    path = tmp_path / "roundtrip.json"
+    path.write_text(json.dumps(fixture))
+    transport = DummyTransport(path)
+    assert transport.send(0x15, build_register_read_payload(2, 0, 0, 1)).hex() == entry["reply_hex"]
+    assert transport.send(0x15, build_register_read_payload(2, 0, 0, 3)) == b"\x00"
+    artifact = scan_b524(transport, dst=0x15)
+    regs = artifact["operations"]["0x02"]["groups"]["0x00"]["instances"]["0x00"]["registers"]
+    assert regs["0x0001"]["parameter_description"]["qualification"] == "matched"
+    assert regs["0x0001"]["flags"] == 3
+    assert regs["0x0002"]["parameter_description"]["qualification"] == "unavailable"
+    # A second generated artifact, including absent/status/timeout entries, also loads.
+    path.write_text(json.dumps(artifact))
+    assert DummyTransport(path).send(0x15, build_constraint_probe_payload(0, 1)) == reply
+
+
+@pytest.mark.parametrize("circuit_raw_hex", [None, "00", "0102"])
+def test_partial_system_information_keeps_valid_fixture_registers(
+    tmp_path: Path, circuit_raw_hex: str | None
+) -> None:
+    from helianthus_vrc_explorer.scanner.scan import scan_b524
+
+    path = _write_min_fixture(tmp_path)
+    fixture = json.loads(path.read_text())
+    fixture["meta"]["system_information"] = [
+        {
+            "identifier": "0x0000",
+            "name": "circuit_count",
+            "value": None,
+            "state": "unavailable",
+            "raw_hex": circuit_raw_hex,
+        },
+        {
+            "identifier": "0x0001",
+            "name": "zone_count",
+            "value": 2.0,
+            "state": "available",
+            "raw_hex": "0400000040",
+        },
+        {
+            "identifier": "0x0002",
+            "name": "solar_circuit_count",
+            "value": None,
+            "state": "unavailable",
+            "raw_hex": "00",
+        },
+    ]
+    fixture["groups"]["0x02"]["instances"]["0x00"]["registers"]["0x0002"] = {
+        "type": "UIN",
+        "raw_hex": "0100",
+        "flags": 1,
+    }
+    path.write_text(json.dumps(fixture))
+    transport = DummyTransport(path)
+    if circuit_raw_hex is None:
+        with pytest.raises(TransportTimeout):
+            transport.send(0x15, build_directory_probe_payload(0))
+    else:
+        assert transport.send(0x15, build_directory_probe_payload(0)).hex() == circuit_raw_hex
+    assert transport.send(0x15, build_directory_probe_payload(1)) == bytes.fromhex("00000040")
+    assert transport.send(0x15, build_directory_probe_payload(2)) == b"\x00"
+    artifact = scan_b524(transport, dst=0x15)
+    assert artifact["meta"]["system_information"][0]["raw_hex"] == circuit_raw_hex
+    assert artifact["meta"]["system_information"][0]["value"] is None
+    assert artifact["meta"]["system_information"][0]["state"] == "unavailable"
+    assert artifact["meta"]["system_information"][1]["value"] == 2.0
+    assert artifact["meta"]["system_information"][2]["value"] is None
+    assert artifact["meta"]["system_information"][2]["raw_hex"] == "00"
+    circuit_counts = artifact["meta"]["instance_counts"]["0x02:0x02"]
+    assert circuit_counts["expected"] is None
+    assert circuit_counts["probed_instances"] == 11
+    regs = artifact["operations"]["0x02"]["groups"]["0x02"]["instances"]["0x00"]["registers"]
+    assert regs["0x000f"]["value"] == 0x1234
+    path.write_text(json.dumps(artifact))
+    replay_transport = DummyTransport(path)
+    if circuit_raw_hex is not None:
+        assert (
+            replay_transport.send(0x15, build_directory_probe_payload(0)).hex() == circuit_raw_hex
+        )
+    assert replay_transport.send(0x15, build_directory_probe_payload(2)) == b"\x00"
+    assert replay_transport.send(0x15, build_register_read_payload(2, 2, 0, 0xF)).endswith(
+        b"\x34\x12"
+    )

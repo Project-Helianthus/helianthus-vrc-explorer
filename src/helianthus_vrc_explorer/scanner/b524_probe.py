@@ -8,6 +8,7 @@ from dataclasses import asdict, dataclass
 from typing import Any, cast
 
 from ..protocol.b524 import RegisterOpcode, build_constraint_probe_payload
+from ..protocol.b524_metadata import decode_parameter_description
 from ..schema.b524_constraints import (
     LIVE_PROBE_CONSTRAINT_SCOPE,
     StaticConstraintCatalog,
@@ -158,8 +159,10 @@ def _probe_present_instances(
     ii_max: int,
     observer: ScanObserver | None,
     probe_instance_availability_fn: Any = probe_instance_availability,
+    expected_count: int | None = None,
 ) -> dict[int, InstanceAvailabilityProbe]:
     probes: dict[int, InstanceAvailabilityProbe] = {}
+    present_count = 0
     for ii in range(0x00, ii_max + 1):
         if observer is not None:
             observer.status(f"Probe presence GG=0x{group:02X} OP={_hex_u8(opcode)} II=0x{ii:02X}")
@@ -171,6 +174,11 @@ def _probe_present_instances(
             opcode=opcode,
         )
         probes[ii] = probe
+        present_count += int(probe.present)
+        if expected_count is not None and expected_count > 0 and present_count >= expected_count:
+            if observer is not None:
+                observer.phase_advance("instance_discovery", advance=1)
+            break
         if observer is not None:
             observer.phase_advance("instance_discovery", advance=1)
     return probes
@@ -223,6 +231,8 @@ def _parse_constraint_entry(
     register: int,
     response: bytes,
 ) -> ConstraintEntry:
+    # Archived legacy heuristic only. The first byte is response framing length;
+    # archived guesses are never qualified or used for edit validation.
     if len(response) < 4:
         raise ValueError(f"Short constraint response: expected >=4 bytes, got {len(response)}")
 
@@ -299,44 +309,14 @@ def _probe_group_constraints(
     observer: ScanObserver | None,
     progress_phase: str | None = None,
 ) -> dict[int, ConstraintEntry]:
-    """Probe `01 GG RR` entries for one group and return decoded constraints."""
+    """Retained compatibility shim: legacy probing cannot qualify metadata.
 
-    constraints: dict[int, ConstraintEntry] = {}
-
-    probe_rr_max = min(rr_max, 0xFF)
-    rr_candidates = list(range(0x00, probe_rr_max + 1))
-    # Observed shared constraint IDs may live above the per-group RR scan window.
-    if probe_rr_max < 0x80:
-        rr_candidates.append(0x80)
-
-    for rr in rr_candidates:
-        try:
-            if observer is not None:
-                observer.status(f"Probe constraints GG=0x{group:02X} RR=0x{rr:02X}")
-            payload = build_constraint_probe_payload(group=group, register=rr)
-            try:
-                response = transport.send(dst, payload)
-            except TransportError as exc:
-                if isinstance(exc, TransportCommandNotEnabled):
-                    raise
-                continue
-            except Exception:
-                continue
-            try:
-                parsed = _parse_constraint_entry(group=group, register=rr, response=response)
-            except Exception:
-                continue
-            constraints[rr] = parsed
-        finally:
-            if observer is not None and progress_phase is not None:
-                observer.phase_advance(progress_phase, advance=1)
-
-    if observer is not None and constraints:
-        observer.log(
-            f"GG=0x{group:02X} constraint_dictionary entries: {len(constraints)}",
-            level="info",
-        )
-    return constraints
+    Use probe_parameter_description after reading the complete parameter identity
+    and its codec. This shim deliberately sends no requests.
+    """
+    if observer is not None:
+        observer.log("Legacy short-selector constraint probing is disabled", level="warn")
+    return {}
 
 
 def _metadata_map_to_dict(metadata_map: dict[int, GroupMetadata]) -> dict[str, Any]:
@@ -406,6 +386,7 @@ def _apply_constraint_metadata(
     entry: RegisterEntry,
     constraint: ConstraintEntry | StaticConstraintEntry,
 ) -> None:
+    entry["constraint_qualification"] = "legacy_unqualified"
     entry["constraint_tt"] = _hex_u8(constraint.tt)
     entry["constraint_type"] = constraint.kind
     entry["constraint_min"] = constraint.min_value
@@ -420,32 +401,51 @@ def _constraint_mismatch_reason(
     entry: RegisterEntry,
     constraint: ConstraintEntry | StaticConstraintEntry,
 ) -> str | None:
-    if constraint.source != "static_catalog":
-        return None
-    if entry.get("response_state") != "active":
-        return None
-    if entry.get("error") is not None or entry.get("flags_access") == "absent":
-        return None
-    value = entry.get("value")
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    if isinstance(value, float) and math.isnan(value):
-        return None
-
-    min_value = constraint.min_value
-    max_value = constraint.max_value
-    if (
-        isinstance(min_value, bool)
-        or isinstance(max_value, bool)
-        or not isinstance(min_value, (int, float))
-        or not isinstance(max_value, (int, float))
-    ):
-        return None
-
-    epsilon = 1e-6 if any(isinstance(obj, float) for obj in (value, min_value, max_value)) else 0.0
-    if float(value) < float(min_value) - epsilon or float(value) > float(max_value) + epsilon:
-        return (
-            f"value {value!r} outside seeded range "
-            f"[{constraint.min_value!r}, {constraint.max_value!r}]"
-        )
+    # Archived short-selector guesses cannot contradict a current read. Only a
+    # complete matched description can validate an edit.
     return None
+
+
+def probe_parameter_description(
+    transport: TransportInterface,
+    *,
+    dst: int,
+    opcode: int,
+    group: int,
+    instance: int,
+    register: int,
+    type_spec: str,
+) -> dict[str, Any]:
+    description_opcode = 1 if opcode == 2 else 7
+    request = build_constraint_probe_payload(
+        group, register, instance=instance, opcode=description_opcode
+    )
+    metadata: dict[str, Any] = {
+        "qualification": "unavailable",
+        "description_opcode": _hex_u8(description_opcode),
+        "read_opcode": _hex_u8(opcode),
+        "group": _hex_u8(group),
+        "instance": _hex_u8(instance),
+        "register": _hex_u16(register),
+        "destination_address": _hex_u8(dst),
+        "profile": "controller_b524",
+        "request_hex": request.hex(),
+    }
+    try:
+        response = transport.send(dst, request)
+        metadata["reply_hex"] = response.hex()
+        metadata.update(
+            decode_parameter_description(
+                response,
+                opcode=description_opcode,
+                group=group,
+                instance=instance,
+                register=register,
+                type_spec=type_spec,
+            )
+        )
+    except TransportCommandNotEnabled:
+        raise
+    except (TransportError, ValueError) as exc:
+        metadata["reason"] = str(exc)
+    return metadata

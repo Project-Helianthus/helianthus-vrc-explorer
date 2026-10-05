@@ -11,6 +11,7 @@ from .browse_models import BrowseTab, RegisterAddress, RegisterRow, TreeNodeRef
 from .register_semantics import entry_display_value_text, visible_rr_keys
 
 _B524_SECTION_ORDER: tuple[str, ...] = (
+    "system_information",
     "group_directory",
     "register_constraints",
     "controller_registers",
@@ -19,8 +20,9 @@ _B524_SECTION_ORDER: tuple[str, ...] = (
     "register_tables",
 )
 _B524_SECTION_LABELS: dict[str, str] = {
-    "group_directory": "Group Directory",
-    "register_constraints": "Register Constraints",
+    "system_information": "OP00 ReadSystemInformation",
+    "group_directory": "Legacy unqualified group-directory artifacts",
+    "register_constraints": "Legacy unqualified constraint artifacts",
     "controller_registers": "Controller Registers",
     "timer_programs": "Timer Programs",
     "device_slots": "Device Slots",
@@ -267,6 +269,9 @@ def _b524_operation_rows_present(
     operations = artifact.get("b524_operations")
     operations_obj = operations if isinstance(operations, dict) else {}
 
+    if section_key == "system_information":
+        rows = meta_obj.get("system_information")
+        return isinstance(rows, list) and bool(rows)
     if section_key == "group_directory":
         rows = operations_obj.get("group_directory")
         return isinstance(rows, list) and bool(rows)
@@ -600,7 +605,11 @@ class _HydratedBrowseStore:
         b524_operations = artifact.get("b524_operations")
         has_b524_operations = isinstance(b524_operations, dict) and bool(b524_operations)
         has_constraint_dictionary = isinstance(meta.get("constraint_dictionary"), dict)
-        if group_keys or has_b524_operations or has_constraint_dictionary:
+        raw_system_information = meta.get("system_information")
+        has_system_information = isinstance(raw_system_information, list) and bool(
+            raw_system_information
+        )
+        if group_keys or has_b524_operations or has_constraint_dictionary or has_system_information:
             tree_nodes.append(
                 TreeNodeRef(
                     node_id="proto:b524",
@@ -619,6 +628,66 @@ class _HydratedBrowseStore:
                         section_key=section_key,
                     )
                 )
+
+        if isinstance(raw_system_information, list):
+            for entry in raw_system_information:
+                if not isinstance(entry, dict):
+                    continue
+                identifier = entry.get("identifier")
+                if not isinstance(identifier, str) or not identifier:
+                    continue
+                name = str(entry.get("name") or identifier)
+                value = entry.get("value")
+                value_text = str(value) if isinstance(value, (int, float)) else "unavailable"
+                raw_hex = str(entry.get("raw_hex") or "")
+                state = str(entry.get("state") or "unknown")
+                address = RegisterAddress(
+                    protocol="b524",
+                    group_key=None,
+                    namespace_key="0x00",
+                    namespace_label=None,
+                    instance_key=None,
+                    register_key=identifier,
+                    read_opcode="0x00",
+                )
+                path = f"B524/OP00 ReadSystemInformation/{identifier}/{name}"
+                row = RegisterRow(
+                    row_id=f"b524:system_information:{identifier}",
+                    protocol="b524",
+                    group_key=None,
+                    namespace_key="0x00",
+                    namespace_label=None,
+                    section_key="system_information",
+                    group_name="ReadSystemInformation",
+                    instance_key=None,
+                    register_key=identifier,
+                    name=name,
+                    myvaillant_name="",
+                    ebusd_name="",
+                    path=path,
+                    tab="state",
+                    address=address,
+                    value_text=value_text,
+                    raw_hex=raw_hex,
+                    unit="n/a",
+                    access_flags="read-only",
+                    last_update_text=last_update_text,
+                    age_text=age_text,
+                    change_indicator="-",
+                    search_blob=" ".join(
+                        [
+                            path.lower(),
+                            identifier.lower(),
+                            name.lower(),
+                            value_text.lower(),
+                            raw_hex.lower(),
+                            state.lower(),
+                            "read-only",
+                        ]
+                    ),
+                )
+                rows.append(row)
+                row_by_id[row.row_id] = row
 
         seen_group_nodes: set[str] = set()
         seen_namespace_nodes: set[str] = set()
@@ -803,6 +872,12 @@ class _HydratedBrowseStore:
                             register_key=register_key,
                         )
                         access_flags = str(entry.get("flags_access") or "—")
+                        description_obj = entry.get("parameter_description")
+                        parameter_description = (
+                            dict(description_obj) if isinstance(description_obj, dict) else None
+                        )
+                        candidate_name = str(entry.get("candidate_name") or "").strip()
+                        candidate_evidence = str(entry.get("candidate_evidence") or "").strip()
                         row = RegisterRow(
                             row_id=row_id,
                             protocol="b524",
@@ -826,6 +901,9 @@ class _HydratedBrowseStore:
                             last_update_text=last_update_text,
                             age_text=age_text,
                             change_indicator="-",
+                            parameter_description=parameter_description,
+                            candidate_name=candidate_name,
+                            candidate_evidence=candidate_evidence,
                             search_blob=" ".join(
                                 [
                                     path.lower(),
@@ -839,6 +917,9 @@ class _HydratedBrowseStore:
                                     entry_section_key.lower(),
                                     operation_name.lower(),
                                     tab.lower(),
+                                    candidate_name.lower(),
+                                    candidate_evidence.lower(),
+                                    str(parameter_description or "").lower(),
                                 ]
                             ),
                         )

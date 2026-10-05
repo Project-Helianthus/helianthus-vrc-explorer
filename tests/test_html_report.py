@@ -39,9 +39,92 @@ def test_html_report_supports_b509_tab_and_dual_naming() -> None:
     assert "Hide timeouts" in html
     assert "hideAbsent" in html
     assert "ebusd: " in html
-    assert "Group Directory" in html
-    assert "Controller Registers" in html
-    assert "Device Slots" in html
+    assert "Legacy unqualified group-directory artifacts" in html
+    assert "OP=02h GetParameter" in html
+    assert "OP=06h GetDeviceParameter" in html
+
+
+def test_html_report_renders_modern_system_information_and_embedded_descriptions() -> None:
+    artifact = {
+        "schema_version": "2.3",
+        "meta": {
+            "destination_address": "0x15",
+            "scan_timestamp": "2026-10-05T00:00:00Z",
+            "system_information": [
+                {
+                    "identifier": "0x0000",
+                    "name": "circuit_count",
+                    "value": 2.0,
+                    "raw_hex": "00000040",
+                    "state": "available",
+                },
+                {
+                    "identifier": "0x0001",
+                    "name": "zone_count",
+                    "value": None,
+                    "raw_hex": "7fc00000",
+                    "state": "unavailable",
+                },
+            ],
+        },
+        "operations": {
+            "0x02": {
+                "groups": {
+                    "0x09": {
+                        "name": "System",
+                        "instances": {
+                            "0x00": {
+                                "registers": {
+                                    "0x0002": {
+                                        "value": 1,
+                                        "raw_hex": "01",
+                                        "flags": 2,
+                                        "response_state": "active",
+                                        "read_opcode": "0x02",
+                                        "parameter_description": {
+                                            "qualification": "matched",
+                                            "description_opcode": "0x01",
+                                            "read_opcode": "0x02",
+                                            "group": "0x09",
+                                            "instance": "0x00",
+                                            "register": "0x0002",
+                                            "type": "UCH",
+                                            "width": 1,
+                                            "min": 0,
+                                            "max": 4,
+                                            "step": 1,
+                                            "reply_hex": "090200000401",
+                                        },
+                                    },
+                                    "0x0004": {
+                                        "value": 0,
+                                        "raw_hex": "00",
+                                        "flags": 0,
+                                        "response_state": "active",
+                                        "read_opcode": "0x02",
+                                        "candidate_name": "status_special_function_ventilation",
+                                        "candidate_evidence": (
+                                            "profile_scoped_reconstruction_recovair_count_nonzero"
+                                        ),
+                                    },
+                                }
+                            }
+                        },
+                    }
+                }
+            }
+        },
+    }
+
+    html = render_html_report(artifact, title="test")
+
+    assert "OP=00h ReadSystemInformation" in html
+    assert "circuit_count" in html
+    assert "raw_hex" in html
+    assert "OP01 DescribeParameter" in html
+    assert "description_opcode" in html
+    assert "Candidate annotation:" in html
+    assert "candidate_name=" in html
 
 
 def test_html_report_supports_b555_tab() -> None:

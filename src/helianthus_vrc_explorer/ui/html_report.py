@@ -718,12 +718,13 @@ __ARTIFACT_JSON__
       }
 
       const B524_SECTIONS = [
-        { key: "group_directory", label: "OP=00h Group Directory" },
-        { key: "register_constraints", label: "OP=01h Register Constraints" },
-        { key: "controller_registers", label: "OP=02h Controller Registers" },
-        { key: "timer_programs", label: "OP=03h Timer Programs" },
-        { key: "device_slots", label: "OP=06h Device Slots" },
-        { key: "register_tables", label: "OP=0Bh Register Tables" },
+        { key: "system_information", label: "OP=00h ReadSystemInformation" },
+        { key: "controller_registers", label: "OP=02h GetParameter" },
+        { key: "timer_programs", label: "OP=03h ReadTimer" },
+        { key: "device_slots", label: "OP=06h GetDeviceParameter" },
+        { key: "register_tables", label: "OP=0Bh GetEventSetPoint" },
+        { key: "group_directory", label: "Legacy unqualified group-directory artifacts" },
+        { key: "register_constraints", label: "Legacy unqualified constraint artifacts" },
       ];
 
       const state = {
@@ -815,13 +816,13 @@ __ARTIFACT_JSON__
       }
 
       function operationLabelForOpcode(namespaceKey) {
-        if (namespaceKey === "0x00") return "QueryGroupDirectory";
-        if (namespaceKey === "0x01") return "QueryRegisterConstraints";
-        if (namespaceKey === "0x02") return "ReadControllerRegister";
-        if (namespaceKey === "0x03") return "ReadTimerProgram";
-        if (namespaceKey === "0x04") return "WriteTimerProgram";
-        if (namespaceKey === "0x06") return "ReadDeviceSlotRegister";
-        if (namespaceKey === "0x0b") return "ReadRegisterTable";
+        if (namespaceKey === "0x00") return "ReadSystemInformation";
+        if (namespaceKey === "0x01") return "DescribeParameter";
+        if (namespaceKey === "0x02") return "GetParameter";
+        if (namespaceKey === "0x03") return "ReadTimer";
+        if (namespaceKey === "0x04") return "WriteTimer";
+        if (namespaceKey === "0x06") return "GetDeviceParameter";
+        if (namespaceKey === "0x0b") return "GetEventSetPoint";
         return namespaceKey || "UnknownOperation";
       }
 
@@ -1443,6 +1444,9 @@ __ARTIFACT_JSON__
         if (sectionKey === "controller_registers" || sectionKey === "device_slots") {
           return b524GroupKeysForSection(sectionKey).length > 0;
         }
+        if (sectionKey === "system_information") {
+          return !!(metaObj && typeof metaObj === "object" && Array.isArray(metaObj.system_information) && metaObj.system_information.length);
+        }
         if (sectionKey === "group_directory") {
           return !!(operations && typeof operations === "object" && Array.isArray(operations.group_directory) && operations.group_directory.length);
         }
@@ -1465,6 +1469,45 @@ __ARTIFACT_JSON__
         title.className = "section-title";
         title.textContent = sectionLabel(sectionKey);
         container.appendChild(title);
+
+        if (sectionKey === "system_information") {
+          const rows = metaObj && typeof metaObj === "object" && Array.isArray(metaObj.system_information)
+            ? metaObj.system_information
+            : [];
+          if (!rows.length) {
+            container.innerHTML += "<div class='subtitle'>No ReadSystemInformation entries in artifact.</div>";
+            mountTarget.innerHTML = "";
+            mountTarget.appendChild(container);
+            return;
+          }
+          const wrap = document.createElement("div");
+          wrap.className = "table-wrap";
+          const table = document.createElement("table");
+          table.innerHTML = "<thead><tr><th>Identifier</th><th>Name</th><th>Value</th><th>Raw reply</th><th>State</th></tr></thead>";
+          const tbody = document.createElement("tbody");
+          for (const row of rows) {
+            if (!row || typeof row !== "object") continue;
+            const tr = document.createElement("tr");
+            for (const value of [
+              typeof row.identifier === "string" ? row.identifier : "n/a",
+              typeof row.name === "string" ? row.name : "unknown",
+              typeof row.value === "number" ? formatValue(row.value) : "—",
+              typeof row.raw_hex === "string" && row.raw_hex ? row.raw_hex : "—",
+              typeof row.state === "string" ? row.state : "unknown",
+            ]) {
+              const td = document.createElement("td");
+              td.textContent = value;
+              tr.appendChild(td);
+            }
+            tbody.appendChild(tr);
+          }
+          table.appendChild(tbody);
+          wrap.appendChild(table);
+          container.appendChild(wrap);
+          mountTarget.innerHTML = "";
+          mountTarget.appendChild(container);
+          return;
+        }
 
         if (sectionKey === "group_directory") {
           const rows = [];
@@ -1492,7 +1535,7 @@ __ARTIFACT_JSON__
             }
           }
           if (!rows.length) {
-            container.innerHTML += "<div class='subtitle'>No Group Directory entries in artifact.</div>";
+            container.innerHTML += "<div class='subtitle'>No legacy group-directory entries in artifact.</div>";
             mountTarget.innerHTML = "";
             mountTarget.appendChild(container);
             return;
@@ -1562,7 +1605,7 @@ __ARTIFACT_JSON__
             }
           }
           if (!rows.length) {
-            container.innerHTML += "<div class='subtitle'>No Register Constraints rows in artifact.</div>";
+            container.innerHTML += "<div class='subtitle'>No legacy constraint rows in artifact.</div>";
             mountTarget.innerHTML = "";
             mountTarget.appendChild(container);
             return;
@@ -1819,6 +1862,45 @@ __ARTIFACT_JSON__
                 td.appendChild(rawEl);
               }
 
+              if (typeof entry.candidate_name === "string" && entry.candidate_name) {
+                const candidateEl = document.createElement("div");
+                candidateEl.className = "cell-raw";
+                const evidence = typeof entry.candidate_evidence === "string"
+                  ? ` (${entry.candidate_evidence})`
+                  : "";
+                candidateEl.textContent = `Candidate annotation: ${entry.candidate_name}${evidence}`;
+                td.appendChild(candidateEl);
+              }
+
+              const description = entry.parameter_description;
+              if (description && typeof description === "object") {
+                const descriptionEl = document.createElement("div");
+                descriptionEl.className = "cell-raw";
+                if (description.qualification === "matched") {
+                  const descriptionLabel = description.description_opcode === "0x07"
+                    ? "OP07 DescribeDeviceParameter"
+                    : "OP01 DescribeParameter";
+                  const fields = [
+                    description.description_opcode,
+                    description.read_opcode,
+                    description.group,
+                    description.instance,
+                    description.register,
+                    description.type,
+                    `width=${formatValue(description.width)}`,
+                    `min=${formatValue(description.min)}`,
+                    `max=${formatValue(description.max)}`,
+                    `step=${formatValue(description.step)}`,
+                    description.reply_hex,
+                  ].filter((part) => typeof part === "string" || typeof part === "number");
+                  descriptionEl.textContent = `Matched ${descriptionLabel}: ${fields.join(" · ")}`;
+                } else {
+                  const reason = typeof description.reason === "string" ? `: ${description.reason}` : "";
+                  descriptionEl.textContent = `Parameter description unavailable${reason}; offline edit confirmation remains unvalidated.`;
+                }
+                td.appendChild(descriptionEl);
+              }
+
               if (typeof entry.flags_access === "string" && entry.flags_access && statusKind === "ok") {
                 const flagsEl = document.createElement("div");
                 flagsEl.className = "cell-flags";
@@ -1859,6 +1941,8 @@ __ARTIFACT_JSON__
               if (entry.constraint_tt) tipParts.push(`constraint_tt=${entry.constraint_tt}`);
               if (entry.constraint_scope) tipParts.push(`constraint_scope=${entry.constraint_scope}`);
               if (entry.constraint_provenance) tipParts.push(`constraint_provenance=${entry.constraint_provenance}`);
+              if (entry.candidate_name) tipParts.push(`candidate_name=${entry.candidate_name}`);
+              if (description && typeof description === "object") tipParts.push(`parameter_description_qualification=${description.qualification || "unknown"}`);
               if (tipParts.length) td.title = tipParts.join("\\n");
 
               tr.appendChild(td);

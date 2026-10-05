@@ -51,7 +51,7 @@ Namespace contract for implementers:
 Key scan UX flags:
 - `--planner-ui auto|textual|classic`
 - `--preset recommended|full|research|custom`
-- `--probe-constraints` (optional live opcode `0x01` GG/RR rescan; off by default and research-only)
+- `--probe-constraints/--no-probe-constraints` (targeted OP01/OP07 descriptions for observed writable parameters; enabled by default)
 - `--b509-dump` (B509 is opt-in; `--b509-range` requires this flag)
 - `--no-tips`
 - `--redact` (redact identity fields like serial number from console output)
@@ -62,10 +62,11 @@ Key scan UX flags:
 If startup fails on default transport (`tcp://127.0.0.1:8888`) in an interactive TTY, scan opens a retry dialog so you can adjust protocol/host/port and retry or cancel.
 
 Transport note:
-- On shared live `ebusd-tcp` setups, the first B524 directory probe (`GG=0x00`) can transiently return a status-only `00`. The scanner treats this as transient noise and continues discovery instead of declaring B524 unsupported immediately.
+- Default discovery reads the bounded OP00 `ReadSystemInformation` identifiers `0x0000..0x0011`. These are system-information identifiers, not group numbers. The artifact preserves `identifier`, snake-case `name`, finite `value` or `null`, and `raw_hex` for each response.
+- OP00 `0x0000` (`circuit_count`) guides OP02/GG02 instance coverage; OP00 `0x0001` (`zone_count`) guides OP02/GG03. A valid expected count permits sparse II probing until that many successful instances are found. Missing, invalid, or inconsistent counts retain the bounded profile fallback rather than claiming completeness.
 - On `ebusd-tcp`, `ERR: timeout`, `ERR: arbitration lost`, `ERR: SYN received`, and `ERR: wrong symbol received` now trigger a fixed 5-second quiet backoff before retry so the bus can settle.
 - On `ebusd-tcp`, `ERR: no signal` now triggers a fixed 15-second quiet backoff before retry so the eBUS side can recover instead of being polled aggressively.
-- Classic GG directory-probe results are retained as advisory metadata for semantic identity and namespace topology. They are useful evidence for reverse-engineering and debugging, but they do not define those semantics once a group is a scan candidate (see the [public B524 namespace invariants](https://github.com/Project-Helianthus/helianthus-docs-ebus/blob/main/architecture/b524-namespace-invariants.md)). Discovery no longer filters on `descriptor_type == 0.0`; all non-NaN groups returned by the directory probe are scan candidates.
+- Legacy group-directory artifacts and old TT constraint interpretations remain viewable but are explicitly unqualified. They do not define group semantics, value codecs, or a complete parameter-description contract.
 - Instance availability is namespace-specific. Dual-namespace radio groups (`0x09`, `0x0A`) are discovered independently per opcode namespace instead of sharing remote results across local and remote.
 - Artifacts retain the availability contract plus raw per-slot probe evidence under `availability_contract` and `availability_probes`, including the opcode `0x06` generic header block (`RR=0x0001..0x0004`) used for remote namespace occupancy.
 - Empty ACK / 0-byte B524 register replies are preserved as `response_state="empty_reply"` (rendered as “empty reply / dormant”), not as transport errors.
@@ -85,13 +86,11 @@ Transport note:
 - Artifact schema contract is versioned (`schema_version: "2.3"` current, operations-first layout). Readers keep backward compatibility by migrating unversioned, `2.0`, `2.1`, and `2.2` artifacts in-memory.
 - CI enforces these rules with `python scripts/check_b524_namespace_guardrails.py`.
 
-Constraint note:
-- Normal scans use a bundled static BASV2 constraint catalog and flag values that fall outside it.
-- `--probe-constraints` is a separate live rescan path for opcode `0x01`; it can add hundreds of extra requests and should only be used when you need to confirm a mismatch or do research work.
-- Constraint scope decision: `opcode_0x02_default`. The bundled static catalog is seeded from opcode `0x01` probe evidence, but it is only applied to opcode `0x02` by default. Remote opcode `0x06` requires explicit scope or live confirmation via `--probe-constraints`.
-- Artifacts record this decision in `meta.constraint_scope` and per-entry fields (`constraint_scope`, `constraint_provenance`) so report/UI consumers do not guess scope semantics.
-- `--preset full` is intentionally expensive: it expands all instance slots and full RR ranges and can take hours on BASV2.
-- `--preset research` enables all groups (including those not found by directory probing) with expanded RR ranges; intended for reverse-engineering sessions. Legacy aliases: `aggressive`->`full`, `exhaustive`->`research`, `conservative`->`recommended`.
+Coverage and parameter-description note:
+- `recommended` and `full` use count-guided sparse instance probing where OP00 supplied a valid count; both retain a bounded fallback when the count cannot be used. `full` expands the declared profile ranges and can take hours on BASV2.
+- `research` and explicit `custom` plans are the only modes that represent an exhaustive probing choice. `research` enables broader group and register exploration. Legacy aliases remain `aggressive` -> `full`, `exhaustive` -> `research`, and `conservative` -> `recommended`.
+- Normal scans request at most 256 complete descriptions for observed writable parameters (`flags` bit 1): OP01 `DescribeParameter` for OP02 reads and OP07 `DescribeDeviceParameter` for OP06 reads. Each matched artifact record carries its scoped identity, opcode pair, codec, width, min, max, step, and raw reply.
+- The browse edit confirmation validates every supported value format against that matched description. If no matched description is available, the UI warns that confirmation is unvalidated. Browse edits only alter the local artifact view; they never write to a live device.
 
 Output:
 - JSON artifact: `b524_scan_0x??_<timestamp>.json`
@@ -107,6 +106,7 @@ Replay limitations (v1):
 - Only current `EnhancedTcpTransport` ENH/ENS trace format is supported.
 - Reconstruction is deterministic and only for fields derivable from captured request/response bytes.
 - Metadata requiring live probing (for example runtime identity enrichment) is not replayed.
+- A replay artifact represents the first B524 destination in the trace. Exchanges for other destinations are excluded and counted in its limitations.
 
 Browse a saved artifact in fullscreen Textual UI:
 ```bash
@@ -134,25 +134,25 @@ device writes are planned.
 ## Features
 - Session preface with regulator identity and transport endpoint.
 - Phased scanner progress: Group Discovery, Instance Discovery, Register Scan.
-- Bundled static BASV2 constraint catalog with mismatch warnings in scan artifacts and summaries.
-- Optional live `0x01` constraint probing (`Constraint Probe`) when explicitly enabled.
+- Bounded OP00 system-information discovery with raw response evidence and count-guided instance coverage.
+- Targeted OP01/OP07 parameter descriptions for observed writable values, including offline range and step validation.
 - Interactive planner (`textual` or classic) with presets and per-group overrides.
 - Register decoding with raw payload retention and TT/metadata annotations in JSON.
 - Auto-generated HTML report alongside JSON scan output.
 - Fullscreen register browser with B524 operation-first sections:
-  - Group Directory
-  - Register Constraints
-  - Controller Registers
-  - Timer Programs
-  - Device Slots
-  - Register Tables
+  - OP00 ReadSystemInformation
+  - OP02 GetParameter
+  - OP03 ReadTimer
+  - OP06 GetDeviceParameter
+  - OP0B GetEventSetPoint
+  - Legacy unqualified group-directory and constraint views, when present
 - Tabbed register views: `Config`, `Config-Limits`, `State`.
 - Watch/pin/rate controls and safe write workflow (`--allow-write` + confirmation).
 
 ## Data Enrichment Sources (Optional)
 This tool can enrich raw scan output with human-readable names:
 - **myVaillant map** (`--myvaillant-map-path`): a small curated CSV mapping `(GG,II,RR)` to myVaillant-style leaf names.
-  - Default: bundled in this repo as `data/myvaillant_register_map.csv` (also packaged under `src/helianthus_vrc_explorer/data/`).
+  - Default: packaged at `src/helianthus_vrc_explorer/data/myvaillant_register_map.csv`.
   - Opcode-aware namespace policy: `0x06` mappings must be explicit; generic opcode-less fallback rows are local `0x02` defaults only.
 - **eBUSd CSV schema** (`--ebusd-csv-path`): adds register names from an eBUSd configuration CSV (e.g. `15.720.csv`).
   - Source: typically taken from an `ebusd-configuration` checkout (not bundled here).

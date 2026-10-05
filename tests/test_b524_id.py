@@ -102,11 +102,13 @@ def test_parse_b524_id_timer_examples() -> None:
 def test_parse_b524_id_constraint_example() -> None:
     assert parse_b524_id("010000") == B524ConstraintSelector(
         opcode=0x01,
+        legacy_incomplete=True,
         group=0x00,
         register=0x00,
     )
     assert parse_b524_id("b524,010a01") == B524ConstraintSelector(
         opcode=0x01,
+        legacy_incomplete=True,
         group=0x0A,
         register=0x01,
     )

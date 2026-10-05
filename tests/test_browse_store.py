@@ -124,11 +124,9 @@ def test_browse_store_builds_rows_and_left_tree_uses_only_myvaillant_name() -> N
     assert by_register["0x0001"].access_flags == "config_user"
     assert by_register["0x0001"].row_id == "0x00:0x02:0x00:0x0001"
     assert by_register["0x0002"].row_id == "0x00:0x06:0x00:0x0002"
-    expected_local_path = (
-        "B524/Controller Registers/ReadControllerRegister/Regulator Parameters/0x00/0x0001"
-    )
+    expected_local_path = "B524/Controller Registers/GetParameter/Regulator Parameters/0x00/0x0001"
     expected_remote_path = (
-        "B524/Device Slots/ReadDeviceSlotRegister/Regulator Parameters/0x00/limit_value"
+        "B524/Device Slots/GetDeviceParameter/Regulator Parameters/0x00/limit_value"
     )
     assert by_register["0x0001"].path == expected_local_path
     assert by_register["0x0002"].path == expected_remote_path
@@ -161,6 +159,129 @@ def test_browse_store_hydration_keeps_artifact_and_query_results_independent() -
     assert artifact == original
     assert selected == [row for row in store.rows if row.tab == "state"]
     assert selected is not store.rows
+
+
+def test_browse_store_exposes_copied_modern_system_information() -> None:
+    artifact = _sample_artifact()
+    artifact["meta"]["system_information"] = [
+        {
+            "identifier": "0x0000",
+            "name": "circuit_count",
+            "value": 2.0,
+            "raw_hex": "00000040",
+        }
+    ]
+
+    store = BrowseStore.from_artifact(artifact)
+
+    assert store.system_information == (
+        {
+            "identifier": "0x0000",
+            "name": "circuit_count",
+            "value": 2.0,
+            "raw_hex": "00000040",
+        },
+    )
+    assert store.system_information[0] is not artifact["meta"]["system_information"][0]
+
+
+def test_browse_store_hydrates_read_only_system_information_and_scoped_descriptions() -> None:
+    artifact = {
+        "schema_version": "2.3",
+        "meta": {
+            "destination_address": "0x15",
+            "scan_timestamp": "2026-10-05T00:00:00Z",
+            "system_information": [
+                {
+                    "identifier": "0x0000",
+                    "name": "circuit_count",
+                    "value": 2.0,
+                    "raw_hex": "00000040",
+                }
+            ],
+        },
+        "operations": {
+            "0x02": {
+                "groups": {
+                    "0x02": {
+                        "name": "Heating Circuits",
+                        "instances": {
+                            "0x00": {
+                                "registers": {
+                                    "0x0001": {
+                                        "value": 1,
+                                        "raw_hex": "01",
+                                        "read_opcode": "0x02",
+                                        "parameter_description": {
+                                            "qualification": "matched",
+                                            "description_opcode": "0x01",
+                                            "read_opcode": "0x02",
+                                            "group": "0x02",
+                                            "instance": "0x00",
+                                            "register": "0x0001",
+                                        },
+                                    }
+                                }
+                            }
+                        },
+                    }
+                }
+            },
+            "0x06": {
+                "groups": {
+                    "0x01": {
+                        "name": "Heat Sources",
+                        "instances": {
+                            "0x00": {
+                                "registers": {
+                                    "0x0012": {
+                                        "value": 1,
+                                        "raw_hex": "01",
+                                        "read_opcode": "0x06",
+                                        "candidate_name": "ventilation_candidate",
+                                        "parameter_description": {
+                                            "qualification": "matched",
+                                            "description_opcode": "0x07",
+                                            "read_opcode": "0x06",
+                                            "group": "0x01",
+                                            "instance": "0x00",
+                                            "register": "0x0012",
+                                        },
+                                    }
+                                }
+                            }
+                        },
+                    }
+                }
+            },
+        },
+        "b524_operations": {"group_directory": [{"group": "0x02"}]},
+    }
+
+    store = BrowseStore.from_artifact(artifact)
+    by_id = {row.row_id: row for row in store.rows}
+    information = by_id["b524:system_information:0x0000"]
+    system = by_id["0x02:0x02:0x00:0x0001"]
+    device = by_id["0x01:0x06:0x00:0x0012"]
+
+    assert information.section_key == "system_information"
+    assert information.access_flags == "read-only"
+    assert information.raw_hex == "00000040"
+    assert system.parameter_description is not None
+    assert system.parameter_description["description_opcode"] == "0x01"
+    assert system.parameter_description["read_opcode"] == system.address.read_opcode
+    assert device.parameter_description is not None
+    assert device.parameter_description["description_opcode"] == "0x07"
+    assert device.parameter_description["read_opcode"] == device.address.read_opcode
+    assert device.candidate_name == "ventilation_candidate"
+    assert device.myvaillant_name == ""
+
+    nodes = {node.node_id: node for node in store.tree_nodes}
+    assert nodes["b524:section:system_information"].label == "OP00 ReadSystemInformation"
+    assert (
+        nodes["b524:section:group_directory"].label
+        == "Legacy unqualified group-directory artifacts"
+    )
 
 
 def test_browse_store_filters_rows_for_tree_selection() -> None:
@@ -363,9 +484,7 @@ def test_browse_store_remote_namespace_instance_label_drops_local_group_assumpti
     by_node_id = {node.node_id: node for node in store.tree_nodes}
     assert by_node_id["b524:inst:device_slots:0x02:0x06:0x00"].label == "Remote Slot 1 (0x00)"
     row = store.rows[0]
-    assert (
-        row.path == "B524/Device Slots/ReadDeviceSlotRegister/Secondary Heating Source/0x00/0x0001"
-    )
+    assert row.path == "B524/Device Slots/GetDeviceParameter/Secondary Heating Source/0x00/0x0001"
 
 
 def test_browse_store_filters_rows_for_namespace_selection() -> None:

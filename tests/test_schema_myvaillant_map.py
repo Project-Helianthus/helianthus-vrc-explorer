@@ -192,6 +192,25 @@ def test_loader_prefers_opcode_specific_rows_and_exposes_type_hint(tmp_path: Pat
     assert local_fallback.opcode is None
 
 
+def test_heat_source_remote_rows_are_opcode_scoped_and_do_not_claim_a_codec() -> None:
+    schema = MyvaillantRegisterMap.from_path(_CSV_PATH)
+
+    for group in (0x01, 0x02):
+        error = schema.lookup(group=group, instance=0x00, register=0x0012, opcode=0x06)
+        status = schema.lookup(group=group, instance=0x00, register=0x0015, opcode=0x06)
+        assert error is not None
+        assert status is not None
+        assert error.leaf == "heatgen_error"
+        assert status.leaf == "heatgen_status"
+        assert error.type_hint is None
+        assert status.type_hint is None
+
+    radio_error = schema.lookup(group=0x09, instance=0x00, register=0x0012, opcode=0x06)
+    assert radio_error is not None
+    assert radio_error.leaf == "active_errors"
+    assert radio_error.type_hint == "UCH"
+
+
 def test_loader_supports_group_wildcard_rows_with_explicit_opcode(tmp_path: Path) -> None:
     csv_path = tmp_path / "wildcard-group.csv"
     csv_path.write_text(
@@ -316,11 +335,11 @@ def test_namespace_owned_required_tuple_rows_are_resolvable() -> None:
     assert remote_presence.leaf == "device_connected"
     assert remote_presence.type_hint == "BOOL"
     assert remote_gg01_rr0012 is not None
-    assert remote_gg01_rr0012.leaf == "active_errors"
-    assert remote_gg01_rr0012.type_hint == "UCH"
+    assert remote_gg01_rr0012.leaf == "heatgen_error"
+    assert remote_gg01_rr0012.type_hint is None
     assert remote_gg01_rr0015 is not None
-    assert remote_gg01_rr0015.leaf == "heat_source_flow_temperature"
-    assert remote_gg01_rr0015.type_hint == "EXP"
+    assert remote_gg01_rr0015.leaf == "heatgen_status"
+    assert remote_gg01_rr0015.type_hint is None
     assert remote_gg00_rr0002 is not None
     assert remote_gg00_rr0002.leaf == "device_class_address"
     assert remote_gg00_rr0002.type_hint == "HEX:1"
@@ -360,8 +379,8 @@ def test_remote_namespace_maps_heat_source_rows_for_op06() -> None:
     assert local is not None
     assert local.leaf == "room_temperature_control_mode"
     assert remote is not None
-    assert remote.leaf == "heat_source_flow_temperature"
-    assert remote.type_hint == "EXP"
+    assert remote.leaf == "heatgen_status"
+    assert remote.type_hint is None
 
 
 def test_register_map_minimum_entry_count_and_no_duplicates() -> None:

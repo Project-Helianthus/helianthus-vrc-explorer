@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import contextlib
 import math
 import re
 import struct
@@ -10,6 +9,7 @@ from pathlib import Path
 from typing import Any, Literal, cast
 
 from .artifact_schema import CURRENT_ARTIFACT_SCHEMA_VERSION
+from .protocol.b524_metadata import SYSTEM_INFORMATION_NAMES, decode_parameter_description
 from .protocol.parser import ValueParseError, parse_typed_value
 from .scanner.director import (
     GROUP_CONFIG,
@@ -264,6 +264,19 @@ def _namespace_profile(group: int, opcode: int) -> NamespaceProfile | None:
     return group_namespace_profiles(group).get(opcode)
 
 
+def _strip_transport_length_prefix(response: bytes) -> bytes:
+    """Return the B524 payload after an optional transport length prefix."""
+    if len(response) >= 2 and response[0] == len(response) - 1:
+        return response[1:]
+    return response
+
+
+def _system_information_name(identifier: int) -> str:
+    if 0 <= identifier < len(SYSTEM_INFORMATION_NAMES):
+        return SYSTEM_INFORMATION_NAMES[identifier]
+    return f"unknown_0x{identifier:04x}"
+
+
 def _ensure_operation_group(
     operations: dict[str, Any],
     *,
@@ -367,76 +380,6 @@ def _decode_register_read_entry(
     return entry
 
 
-def _decode_constraint_date(value: bytes) -> str:
-    """Decode a 3-byte date triplet (DD MM YY) into ISO date string."""
-    if len(value) != 3:
-        raise ValueError(f"Date triplet expects 3 bytes, got {len(value)}")
-    day = value[0]
-    month = value[1]
-    year = 2000 + value[2]
-    if not (1 <= month <= 12 and 1 <= day <= 31):
-        raise ValueError(f"Invalid date triplet: {value.hex()}")
-    return f"{year:04d}-{month:02d}-{day:02d}"
-
-
-def _decode_constraint_response(response: bytes, entry: dict[str, Any]) -> None:
-    """Decode OP=0x01 constraint response using TT-based dispatch.
-
-    Wire layout (matching the live scanner's _parse_constraint_entry):
-        byte 0: TT (type tag)
-        byte 1: GG echo
-        byte 2: RR echo
-        byte 3: reserved
-        byte 4+: body (shape depends on TT)
-
-    TT values:
-        0x06 -> u8_range:  3 body bytes (min_u8, max_u8, step_u8)
-        0x09 -> u16_range: 6 body bytes (min_u16, max_u16, step_u16) LE
-        0x0F -> f32_range: 12 body bytes (min_f32, max_f32, step_f32) LE
-        0x0C -> date_range: 9 body bytes (min_date[3], max_date[3], step_u16, pad)
-    """
-    tt = response[0]
-    entry["tt"] = tt
-    body = response[4:]
-
-    if tt == 0x06:
-        if len(body) < 3:
-            return
-        entry["kind"] = "u8_range"
-        entry["min_value"] = body[0]
-        entry["max_value"] = body[1]
-        entry["step_value"] = body[2]
-    elif tt == 0x09:
-        if len(body) < 6:
-            return
-        entry["kind"] = "u16_range"
-        entry["min_value"] = int.from_bytes(body[0:2], byteorder="little", signed=False)
-        entry["max_value"] = int.from_bytes(body[2:4], byteorder="little", signed=False)
-        entry["step_value"] = int.from_bytes(body[4:6], byteorder="little", signed=False)
-    elif tt == 0x0F:
-        if len(body) < 12:
-            return
-        min_f32 = struct.unpack("<f", body[0:4])[0]
-        max_f32 = struct.unpack("<f", body[4:8])[0]
-        step_f32 = struct.unpack("<f", body[8:12])[0]
-        entry["kind"] = "f32_range"
-        if not math.isnan(min_f32):
-            entry["min_value"] = min_f32
-        if not math.isnan(max_f32):
-            entry["max_value"] = max_f32
-        if not math.isnan(step_f32):
-            entry["step_value"] = step_f32
-    elif tt == 0x0C:
-        if len(body) < 9:
-            return
-        entry["kind"] = "date_range"
-        entry["min_value"] = _decode_constraint_date(body[0:3])
-        entry["max_value"] = _decode_constraint_date(body[3:6])
-        entry["step_value"] = int.from_bytes(body[6:8], byteorder="little", signed=False)
-    # Unknown TT values are silently skipped — the entry retains reply_hex
-    # for manual inspection.
-
-
 def replay_trace_to_artifact(trace_path: Path) -> dict[str, Any]:
     """Replay an ENH/ENS trace into a deterministic scan artifact (schema 2.2).
 
@@ -454,6 +397,8 @@ def replay_trace_to_artifact(trace_path: Path) -> dict[str, Any]:
         raise UnsupportedTraceFormatError("Trace contains no B524 SEND_PROTO exchanges.")
 
     dst = b524_exchanges[0].dst
+    ignored_targets = sum(exchange.dst != dst for exchange in b524_exchanges)
+    b524_exchanges = [exchange for exchange in b524_exchanges if exchange.dst == dst]
     scan_timestamp = meta.first_timestamp.strftime("%Y-%m-%dT%H:%M:%SZ")
     duration = round((meta.last_timestamp - meta.first_timestamp).total_seconds(), 4)
 
@@ -480,16 +425,26 @@ def replay_trace_to_artifact(trace_path: Path) -> dict[str, Any]:
         "operations": {},
     }
     limitations = cast(list[str], artifact["meta"]["replay_trace"]["limitations"])
+    artifact["meta"]["replay_trace"]["ignored_b524_exchanges"] = ignored_targets
+    if ignored_targets:
+        limitations.append(
+            f"Selected first B524 target {_hex_u8(dst)}; ignored {ignored_targets} "
+            "exchanges belonging to other targets"
+        )
     if meta.truncated_hex_frames > 0:
         limitations.append(
             "Some trace hex frames were truncated ('...'); replay used deterministic prefixes only"
         )
 
-    _group_directory_dedup: dict[str, dict[str, Any]] = {}
-    _constraint_dedup: dict[tuple[str, str], dict[str, Any]] = {}
+    system_information: dict[int, dict[str, Any]] = {}
+    description_exchanges: list[_TraceExchange] = []
+    legacy_constraint_dedup: dict[str, dict[str, Any]] = {}
     b524_operations: dict[str, list[dict[str, Any]]] = {
+        # Retain this compatibility shape for old artifact consumers.  New OP00
+        # evidence is system information, never a qualified group directory.
         "group_directory": [],
         "register_constraints": [],
+        "parameter_descriptions": [],
         "timer_programs": [],
         "register_tables": [],
     }
@@ -549,47 +504,42 @@ def replay_trace_to_artifact(trace_path: Path) -> dict[str, Any]:
                 instance_obj["present"] = True
             continue
 
-        if opcode == 0x00 and len(payload) >= 3:
-            descriptor = None
-            if isinstance(response, bytes) and len(response) >= 4:
-                parsed = struct.unpack("<f", response[:4])[0]
-                descriptor = None if math.isnan(parsed) else parsed
-            group_key = _hex_u8(payload[1])
-            gd_entry = {
+        if opcode == 0x00 and len(payload) == 3:
+            identifier = int.from_bytes(payload[1:3], byteorder="little", signed=False)
+            normalized_response = (
+                _strip_transport_length_prefix(response) if isinstance(response, bytes) else None
+            )
+            value: float | None = None
+            if isinstance(normalized_response, bytes) and len(normalized_response) == 4:
+                decoded = struct.unpack("<f", normalized_response)[0]
+                if math.isfinite(decoded):
+                    value = decoded
+            system_information[identifier] = {
+                "identifier": _hex_u16(identifier),
+                "name": _system_information_name(identifier),
+                "value": value,
+                # Keep the trace byte sequence, including any transport prefix.
+                "raw_hex": response.hex() if isinstance(response, bytes) else None,
                 "trace_seq": exchange.seq,
-                "group": group_key,
-                "descriptor": descriptor,
-                "reply_hex": response.hex() if isinstance(response, bytes) else None,
             }
-            existing = _group_directory_dedup.get(group_key)
-            if existing is None or descriptor is not None:
-                _group_directory_dedup[group_key] = gd_entry
             continue
 
-        if opcode == 0x01 and len(payload) >= 3:
-            group_key = _hex_u8(payload[1])
-            reg_sel = _hex_u8(payload[2])
-            constraint_entry: dict[str, Any] = {
-                "trace_seq": exchange.seq,
-                "group": group_key,
-                "register_selector": reg_sel,
-                "reply_hex": response.hex() if isinstance(response, bytes) else None,
-            }
-            if isinstance(response, bytes) and len(response) >= 4:
-                # TT-based dispatch matching the live scanner's
-                # _parse_constraint_entry layout:
-                #   byte 0: TT (type tag)
-                #   byte 1: GG echo
-                #   byte 2: RR echo
-                #   byte 3: reserved
-                #   byte 4+: body (shape depends on TT)
-                with contextlib.suppress(struct.error, IndexError, ValueError):
-                    _decode_constraint_response(response, constraint_entry)
-            dedup_key = (group_key, reg_sel)
-            # Keep the entry with actual parsed data; don't overwrite with empty
-            existing = _constraint_dedup.get(dedup_key)
-            if existing is None or "kind" in constraint_entry or "kind" not in existing:
-                _constraint_dedup[dedup_key] = constraint_entry
+        if opcode in {0x01, 0x07}:
+            if len(payload) == 5:
+                description_exchanges.append(exchange)
+                continue
+            if opcode == 0x01 and len(payload) == 3:
+                # The historic selector is GG/RR8 only.  It cannot be bound to
+                # a full parameter identity, so preserve raw evidence without
+                # inventing a constraint lookup target.
+                entry = {
+                    "trace_seq": exchange.seq,
+                    "request_hex": payload.hex(),
+                    "reply_hex": response.hex() if isinstance(response, bytes) else None,
+                    "qualification": "legacy_incomplete",
+                    "reason": "OP01 selector has no instance or RR16 identity",
+                }
+                legacy_constraint_dedup[payload.hex()] = entry
             continue
 
         if opcode in {0x03, 0x04} and len(payload) >= 5:
@@ -614,13 +564,75 @@ def replay_trace_to_artifact(trace_path: Path) -> dict[str, Any]:
                 }
             )
 
-    b524_operations["group_directory"] = sorted(
-        _group_directory_dedup.values(),
-        key=lambda e: int(e["group"], 16),
-    )
+    artifact["meta"]["system_information"] = [
+        system_information[identifier] for identifier in sorted(system_information)
+    ]
+
+    for exchange in description_exchanges:
+        payload = exchange.payload
+        response = exchange.response
+        description_opcode = int(payload[0])
+        read_opcode = 0x02 if description_opcode == 0x01 else 0x06
+        group, instance = int(payload[1]), int(payload[2])
+        register = int.from_bytes(payload[3:5], byteorder="little", signed=False)
+        observation: dict[str, Any] = {
+            "trace_seq": exchange.seq,
+            "request_hex": payload.hex(),
+            "reply_hex": response.hex() if isinstance(response, bytes) else None,
+            "description_opcode": _hex_u8(description_opcode),
+            "read_opcode": _hex_u8(read_opcode),
+            "group": _hex_u8(group),
+            "instance": _hex_u8(instance),
+            "register": _hex_u16(register),
+            "qualification": "unqualified",
+        }
+        target = (
+            artifact["operations"]
+            .get(_hex_u8(read_opcode), {})
+            .get("groups", {})
+            .get(_hex_u8(group), {})
+            .get("instances", {})
+            .get(_hex_u8(instance), {})
+            .get("registers", {})
+            .get(_hex_u16(register))
+        )
+        if not isinstance(target, dict):
+            observation["reason"] = "matching register observation is unavailable"
+            b524_operations["parameter_descriptions"].append(observation)
+            continue
+        type_spec = target.get("type")
+        if not isinstance(type_spec, str):
+            observation["reason"] = "matching register has no known scalar codec"
+            b524_operations["parameter_descriptions"].append(observation)
+            continue
+        if not isinstance(response, bytes):
+            observation["reason"] = "description response is unavailable"
+            b524_operations["parameter_descriptions"].append(observation)
+            continue
+        normalized_response = _strip_transport_length_prefix(response)
+        try:
+            description = decode_parameter_description(
+                normalized_response,
+                opcode=description_opcode,
+                group=group,
+                instance=instance,
+                register=register,
+                type_spec=type_spec,
+            )
+        except ValueError as exc:
+            observation["reason"] = str(exc)
+            b524_operations["parameter_descriptions"].append(observation)
+            continue
+        description["trace_seq"] = exchange.seq
+        description["trace_reply_hex"] = response.hex()
+        target["parameter_description"] = description
+        observation["qualification"] = "matched"
+        observation["type"] = description["type"]
+        b524_operations["parameter_descriptions"].append(observation)
+
     b524_operations["register_constraints"] = sorted(
-        _constraint_dedup.values(),
-        key=lambda e: (int(e["group"], 16), int(e["register_selector"], 16)),
+        legacy_constraint_dedup.values(),
+        key=lambda e: e["request_hex"],
     )
     artifact["b524_operations"] = b524_operations
 

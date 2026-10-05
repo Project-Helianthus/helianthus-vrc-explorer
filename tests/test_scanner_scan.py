@@ -64,9 +64,9 @@ class ConstraintAwareTransport(TransportInterface):
         )
 
     def send(self, dst: int, payload: bytes) -> bytes:
-        if payload and payload[0] == 0x01 and len(payload) == 3:
+        if payload and payload[0] in {0x01, 0x07} and len(payload) == 5:
             group = payload[1]
-            register = payload[2]
+            register = int.from_bytes(payload[3:5], "little")
             self.constraint_requests.append((group, register))
             if (group, register) in self._constraints:
                 return self._constraints[(group, register)]
@@ -628,7 +628,7 @@ def test_scan_b524_scans_all_instances_and_register_range(tmp_path: Path) -> Non
 
     group = artifact_op_group(artifact, op="0x02", group="0x02")
     # v2.3: dual_namespace removed from operations-first structure
-    assert group["descriptor_observed"] == 1.0
+    assert group["descriptor_observed"] is None
 
     instance_00 = group["instances"]["0x00"]
     assert instance_00["present"] is True
@@ -695,68 +695,22 @@ def test_scan_b524_continues_when_first_directory_probe_is_status_only(
     assert bytes((0x00, 0x02, 0x00)) in transport.calls
 
 
-def test_scan_b524_collects_constraint_dictionary_entries(tmp_path: Path) -> None:
-    transport = ConstraintAwareTransport(
-        RecordingTransport(DummyTransport(_write_fixture_group_02(tmp_path))),
-        constraints={
-            # TT=0x09 (u16 range): min=0 max=4 step=1 for GG=0x02 RR=0x02.
-            (0x02, 0x02): bytes.fromhex("09020200000004000100"),
-        },
+def test_scan_b524_does_not_probe_legacy_short_constraints(tmp_path: Path) -> None:
+    transport = ConstraintAwareTransport(DummyTransport(_write_fixture_group_02(tmp_path)))
+    artifact = scan_b524(transport, dst=0x15)
+    assert artifact["meta"]["parameter_description_policy"]["enabled"] is True
+    assert (
+        "constraint_dictionary" not in artifact["meta"]
+        or not artifact["meta"]["constraint_dictionary"]
     )
-
-    artifact = scan_b524(
-        transport,
-        dst=0x15,
-        observer=_NoopObserver(),
-        console=Console(force_terminal=True),
-        planner_ui="classic",
-        probe_constraints=True,
-    )
-
-    plan = artifact["meta"]["scan_plan"]["groups"]["0x02"]
-    assert plan["rr_max"] == "0x0025"
-    assert plan["instances"] == ["0x00"]
-    assert (0x02, 0x02) in transport.constraint_requests
-    bounds = artifact["meta"]["group_metadata_bounds"]["0x02"]
-    assert bounds["rr_max"] == "0x0025"
-    assert bounds["ii_max"] == "0x0a"
-    assert bounds["source"] == "profile"
-    constraints = artifact["meta"]["constraint_dictionary"]["0x02"]["0x02"]
-    assert constraints["tt"] == "0x09"
-    assert constraints["type"] == "u16_range"
-    assert constraints["min"] == 0
-    assert constraints["max"] == 4
-    assert constraints["step"] == 1
-    assert constraints["scope"] == "opcode_0x01_probe"
-    assert constraints["provenance"] == "live_probe_from_opcode_0x01"
-    assert transport.register_reads is not None
-    scanned_registers = {
-        rr for (_opcode, gg, ii, rr) in transport.register_reads if gg == 0x02 and ii == 0x00
-    }
-    assert scanned_registers == set(range(0x0025 + 1))
+    assert transport.constraint_requests == []  # Fixture exposes read-only parameters.
 
 
-def test_scan_b524_probe_constraints_has_dedicated_progress_phase(tmp_path: Path) -> None:
-    transport = ConstraintAwareTransport(
-        RecordingTransport(DummyTransport(_write_fixture_group_02(tmp_path))),
-        constraints={(0x02, 0x02): bytes.fromhex("09020200000004000100")},
-    )
+def test_scan_b524_descriptions_are_targeted_during_register_scan(tmp_path: Path) -> None:
     observer = _RecordingObserver()
-
-    scan_b524(
-        transport,
-        dst=0x15,
-        observer=observer,
-        console=Console(force_terminal=True),
-        planner_ui="classic",
-        probe_constraints=True,
-    )
-
-    started = {name: total for (name, total) in observer.phase_starts}
-    assert "constraint_probe" in started
-    assert started["constraint_probe"] > 0
-    assert any(phase == "constraint_probe" for (phase, _advance) in observer.phase_advances)
-    assert "constraint_probe" in observer.phase_finishes
+    scan_b524(DummyTransport(_write_fixture_group_02(tmp_path)), dst=0x15, observer=observer)
+    assert "constraint_probe" not in dict(observer.phase_starts)
+    assert "register_scan" in dict(observer.phase_starts)
 
 
 def test_scan_b524_skips_constraint_dictionary_by_default(tmp_path: Path) -> None:
@@ -790,7 +744,7 @@ def test_scan_b524_skips_constraint_dictionary_by_default(tmp_path: Path) -> Non
     assert entry["constraint_max"] == 4
 
 
-def test_scan_b524_flags_seeded_constraint_mismatch(tmp_path: Path) -> None:
+def test_scan_b524_does_not_use_unqualified_seeded_hints_for_validation(tmp_path: Path) -> None:
     fixture = {
         "meta": {"dummy_transport": {"directory_terminator_group": "0x05"}},
         "groups": {
@@ -821,16 +775,9 @@ def test_scan_b524_flags_seeded_constraint_mismatch(tmp_path: Path) -> None:
     entry = regs["0x0002"]
     assert entry["value"] == 5
     assert entry["constraint_source"] == "static_catalog"
-    assert "constraint_mismatch_reason" in entry
-    mismatches = artifact["meta"]["constraint_mismatches"]
-    assert len(mismatches) == 1
-    assert mismatches[0]["group"] == "0x02"
-    assert mismatches[0]["register"] == "0x0002"
-    assert mismatches[0]["value"] == 5
-    assert mismatches[0]["constraint_scope"] == "opcode_0x02_default"
-    assert mismatches[0]["constraint_provenance"] == "catalog_seeded_from_opcode_0x01"
-    assert mismatches[0]["constraint_probe_protocol"] == "opcode_0x01"
-    assert artifact["meta"]["constraint_rescan_recommended"] is True
+    assert entry["constraint_qualification"] == "legacy_unqualified"
+    assert "constraint_mismatch_reason" not in entry
+    assert "constraint_mismatches" not in artifact["meta"]
 
 
 def test_scan_b524_does_not_flag_remote_seeded_static_constraint_mismatch(
@@ -942,16 +889,13 @@ def test_scan_b524_scans_enabled_unknown_group_via_planner(monkeypatch, tmp_path
     remote_registers = remote_group["instances"]["0x00"]["registers"]
     assert local_registers["0x0000"]["raw_hex"] == "00"
     assert remote_registers["0x0000"]["raw_hex"] == "00"
-    issue_suggestion = artifact["meta"]["issue_suggestion"]
-    assert issue_suggestion["unknown_groups"] == ["0x69"]
-    assert issue_suggestion["suggest_issue"] is True
+    assert "0x69" in artifact["meta"]["scan_plan"]["groups"]
 
 
-def test_scan_b524_flags_unknown_descriptor_class_for_issue_suggestion(tmp_path: Path) -> None:
+def test_scan_b524_system_information_does_not_define_descriptor_classes(tmp_path: Path) -> None:
     artifact = scan_b524(DummyTransport(_write_fixture_unknown_descriptor(tmp_path)), dst=0x15)
-    issue_suggestion = artifact["meta"]["issue_suggestion"]
-    assert issue_suggestion["unknown_descriptor_types"] == [2.0]
-    assert issue_suggestion["suggest_issue"] is True
+    assert "unknown_descriptor_types" not in artifact["meta"].get("issue_suggestion", {})
+    assert len(artifact["meta"]["system_information"]) == 18
 
 
 def test_scan_b524_scans_absent_instances_when_planner_overrides(
@@ -1012,15 +956,12 @@ def test_scan_instanced_group_zero_descriptor(tmp_path: Path) -> None:
 
     group = artifact_op_group(artifact, op="0x02", group="0x02")
     # v2.3: dual_namespace removed from operations-first structure
-    assert group["descriptor_observed"] == 0.0
-    assert group["discovery_advisory"]["kind"] == "directory_probe"
+    assert group["descriptor_observed"] is None
+    assert group["discovery_advisory"]["kind"] == "profile_register_candidate"
     assert group["discovery_advisory"]["semantic_authority"] is False
-    assert group["discovery_advisory"]["descriptor_observed"] == 0.0
-    assert group["discovery_advisory"]["descriptor_expected"] == 1.0
-    assert group["discovery_advisory"]["descriptor_mismatch"] is True
     assert group["discovery_advisory"]["proven_register_opcodes"] == ["0x02"]
     assert group["instances"]["0x00"]["present"] is True
-    assert "0x01" not in group["instances"]
+    assert group["instances"].get("0x01", {}).get("present") is not True
 
     probed_instances = sorted(
         {ii for (_opcode, gg, ii, rr) in transport.register_reads if gg == 0x02 and rr == 0x0002}
@@ -1035,11 +976,9 @@ def test_scan_singleton_group_nonzero_descriptor(tmp_path: Path) -> None:
 
     group = artifact_op_group(artifact, op="0x02", group="0x00")
     # v2.3: dual_namespace removed from operations-first structure
-    assert group["descriptor_observed"] == 3.0
-    assert group["discovery_advisory"]["kind"] == "directory_probe"
+    assert group["descriptor_observed"] is None
+    assert group["discovery_advisory"]["kind"] == "profile_register_candidate"
     assert group["discovery_advisory"]["semantic_authority"] is False
-    assert group["discovery_advisory"]["descriptor_observed"] == 3.0
-    assert group["discovery_advisory"]["descriptor_expected"] == 3.0
     assert "descriptor_mismatch" not in group["discovery_advisory"]
     assert group["discovery_advisory"]["proven_register_opcodes"] == ["0x02"]
     assert set(group["instances"]) == {"0x00"}
@@ -1115,12 +1054,12 @@ def test_artifact_dual_namespace_structure(monkeypatch, tmp_path: Path) -> None:
     assert local_group["instances"]["0x00"]["registers"]["0x0000"]["read_opcode"] == "0x02"
     assert (
         local_group["instances"]["0x00"]["registers"]["0x0000"]["read_opcode_label"]
-        == "ReadControllerRegister"
+        == "GetParameter"
     )
     assert remote_group["instances"]["0x00"]["registers"]["0x0000"]["read_opcode"] == "0x06"
     assert (
         remote_group["instances"]["0x00"]["registers"]["0x0000"]["read_opcode_label"]
-        == "ReadDeviceSlotRegister"
+        == "GetDeviceParameter"
     )
 
     scan_plan = artifact["meta"]["scan_plan"]["groups"]["0x09"]
@@ -1209,7 +1148,7 @@ def test_artifact_register_flags_present(tmp_path: Path) -> None:
 
     assert entry["flags"] == 0x01
     assert entry["flags_access"] == "state_stable"
-    assert entry["read_opcode_label"] == "ReadControllerRegister"
+    assert entry["read_opcode_label"] == "GetParameter"
 
 
 def test_contextual_enum_annotations_do_not_relabel_remote_namespace(tmp_path: Path) -> None:
@@ -1475,7 +1414,7 @@ def test_scan_b524_replays_dual_namespace_fixture_end_to_end(
     assert remote_fw["myvaillant_name"] == "radio_device_firmware"
     assert accessory_fw["type"] == "FW"
     assert accessory_fw["value"] == "08.05.00"
-    assert accessory_fw["read_opcode_label"] == "ReadDeviceSlotRegister"
+    assert accessory_fw["read_opcode_label"] == "GetDeviceParameter"
     assert accessory_fw["myvaillant_name"] == "device_firmware_version"
     assert (0x02, 0x09, 0x00, 0x0004) in transport.register_reads
     assert (0x06, 0x09, 0x00, 0x0004) in transport.register_reads
@@ -1522,8 +1461,8 @@ def test_scan_b524_normalizes_legacy_aggressive_preset_to_full_for_textual_defau
     default_plan = captured["default_plan"]
     assert isinstance(default_plan, dict)
     # After preset simplification, "full" includes ALL groups (incl. unknown)
-    assert make_plan_key(0x69, 0x02) in default_plan
-    assert make_plan_key(0x69, 0x06) in default_plan
+    assert make_plan_key(0x69, 0x02) not in default_plan
+    assert make_plan_key(0x69, 0x06) not in default_plan
 
 
 def test_scan_b524_normalizes_exhaustive_preset_to_research_for_textual_default_plan(
@@ -1633,16 +1572,14 @@ def test_scan_b524_applies_research_preset_in_non_interactive_mode(tmp_path: Pat
     assert remote_group["instances"]["0x00"]["present"] is True
 
 
-def test_scan_b524_full_preset_includes_unknown_groups_in_plan(tmp_path: Path) -> None:
+def test_scan_b524_full_preset_uses_profile_groups_not_system_information_ids(
+    tmp_path: Path,
+) -> None:
     artifact = scan_b524(
-        DummyTransport(_write_fixture_unknown_group_69(tmp_path)),
-        dst=0x15,
-        planner_ui="auto",
-        planner_preset="full",
+        DummyTransport(_write_fixture_unknown_group_69(tmp_path)), dst=0x15, planner_preset="full"
     )
-
-    # After preset simplification, "full" includes ALL groups (incl. unknown)
-    assert "0x69" in artifact["meta"]["scan_plan"]["groups"]
+    assert "0x69" not in artifact["meta"]["scan_plan"]["groups"]
+    assert "0x02" in artifact["meta"]["scan_plan"]["groups"]
 
 
 def test_scan_b524_recommended_plan_keeps_namespace_rr_max(tmp_path: Path) -> None:
@@ -1789,11 +1726,11 @@ def test_scan_unknown_group_probes_both_opcodes_and_two_instances(tmp_path: Path
         transport,
         dst=0x15,
         planner_ui="auto",
-        planner_preset="full",
+        planner_preset="research",
     )
 
     local_group = artifact_op_group(artifact, op="0x02", group="0x69")
-    assert local_group["descriptor_observed"] == 1.0
+    assert local_group["descriptor_observed"] is None
     # v2.3: verify both OPs have the group
     assert "0x69" in artifact["operations"]["0x02"]["groups"]
     assert "0x69" in artifact["operations"]["0x06"]["groups"]
@@ -1968,7 +1905,7 @@ def test_scan_b524_textual_planner_receives_remote_heating_source_rows(
     assert (0x01, 0x02) in planner_keys
     assert (0x01, 0x06) in planner_keys
     assert (0x00, 0x06) not in planner_keys
-    assert (0x02, 0x06) not in planner_keys
+    assert (0x02, 0x06) in planner_keys
 
     name_by_key = {(group.group, group.opcode): group.name for group in planner_groups}
     assert name_by_key[(0x00, 0x02)] == "Regulator Parameters"
@@ -1982,7 +1919,7 @@ def test_scan_b524_textual_planner_receives_remote_heating_source_rows(
     assert make_plan_key(0x00, 0x02) in default_plan
     assert make_plan_key(0x01, 0x02) in default_plan
     assert make_plan_key(0x01, 0x06) in default_plan
-    assert make_plan_key(0x02, 0x06) not in default_plan
+    assert make_plan_key(0x02, 0x06) in default_plan
     assert make_plan_key(0x00, 0x06) not in default_plan
     assert artifact["meta"]["scan_plan"]["estimated_register_requests"] == 0
 

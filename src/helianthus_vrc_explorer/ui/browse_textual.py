@@ -9,6 +9,7 @@ from rich.console import Group
 from rich.table import Table
 from rich.text import Text
 
+from ..protocol.b524_metadata import validate_parameter_edit
 from ..protocol.parser import (
     ValueEncodeError,
     ValueParseError,
@@ -290,8 +291,8 @@ if _TEXTUAL_IMPORT_ERROR is None:
         BINDINGS = [
             Binding("escape", "cancel", "Cancel"),
             Binding("q", "cancel", "Cancel"),
-            Binding("enter", "confirm", "Write"),
-            Binding("y", "confirm", "Write"),
+            Binding("enter", "confirm", "Apply locally"),
+            Binding("y", "confirm", "Apply locally"),
         ]
         CSS = """
         _ConfirmDialog {
@@ -317,7 +318,9 @@ if _TEXTUAL_IMPORT_ERROR is None:
 
         def compose(self) -> ComposeResult:
             body = "\n".join(self._lines)
-            yield Vertical(Label(self._title), Static(body), Static("Enter/Y=write  Esc/Q=cancel"))
+            yield Vertical(
+                Label(self._title), Static(body), Static("Enter/Y=apply locally  Esc/Q=cancel")
+            )
 
         def action_cancel(self) -> None:
             self.dismiss(False)
@@ -1072,6 +1075,15 @@ if _TEXTUAL_IMPORT_ERROR is None:
                 self._set_status("Artifact entry not found.")
                 return
 
+            entry.setdefault(
+                "observed_before_local_edit",
+                {
+                    "value": entry.get("value"),
+                    "raw_hex": entry.get("raw_hex"),
+                    "reply_hex": entry.get("reply_hex"),
+                },
+            )
+            entry["local_edit"] = True
             entry["type"] = pending.type_spec
             entry["value"] = pending.new_value
             entry["raw_hex"] = pending.new_raw_hex
@@ -1104,13 +1116,13 @@ if _TEXTUAL_IMPORT_ERROR is None:
 
             self._render_watch_dock()
             self._refresh_table()
-            self._set_status(f"Wrote {row.address.label}")
+            self._set_status(f"Edited locally: {row.address.label}")
 
         def _on_confirm_write(self, confirmed: bool | None) -> None:
             pending = self._pending_write
             self._pending_write = None
             if not confirmed or pending is None:
-                self._set_status("Write cancelled")
+                self._set_status("Local edit cancelled")
                 return
             self._apply_write(pending)
 
@@ -1144,6 +1156,31 @@ if _TEXTUAL_IMPORT_ERROR is None:
                 canonical_value = parse_typed_value(type_spec, new_bytes)
             except ValueParseError:
                 canonical_value = new_value_obj
+            description_obj = entry.get("parameter_description")
+            description = description_obj if isinstance(description_obj, dict) else None
+            identity_matches = description is not None and all(
+                description.get(key) == expected
+                for key, expected in (
+                    ("read_opcode", row.address.read_opcode),
+                    ("group", row.group_key),
+                    ("instance", row.instance_key),
+                    ("register", row.register_key),
+                )
+            )
+            validation = validate_parameter_edit(
+                description if identity_matches else None,
+                type_spec=type_spec,
+                value=canonical_value,
+                encoded=new_bytes,
+            )
+            if validation not in {None, "unvalidated"}:
+                self._set_status(f"Edit rejected: {validation}")
+                return
+            validation_label = (
+                "Description validation: passed"
+                if validation is None
+                else "WARNING: no matching parameter description; this edit is unvalidated."
+            )
             new_value_text = _fmt_value_text(canonical_value)
             new_raw_hex = new_bytes.hex()
 
@@ -1162,10 +1199,11 @@ if _TEXTUAL_IMPORT_ERROR is None:
             )
             self.push_screen(
                 _ConfirmDialog(
-                    title="Confirm write",
+                    title="Confirm local edit",
                     summary_lines=[
                         f"Target: {row.address.label}",
                         f"Type:   {type_spec}",
+                        validation_label,
                         "",
                         f"Old: {old_value_text}  raw={old_raw_hex}",
                         f"New: {new_value_text}  raw={new_raw_hex}",
@@ -1182,10 +1220,14 @@ if _TEXTUAL_IMPORT_ERROR is None:
             if row is None:
                 self._set_status("Select a table row to edit.")
                 return
-            if row.tab == "state":
-                self._set_status("State tab is read-only.")
-                return
             entry = self._entry_for_row(row)
+            flags = entry.get("flags") if entry else None
+            writable = entry.get("writable") if entry else None
+            if writable is None and isinstance(flags, int) and flags in {0, 1, 2, 3}:
+                writable = bool(flags & 2)
+            if writable is False or (writable is None and row.tab == "state"):
+                self._set_status("Parameter is read-only.")
+                return
             type_spec_obj = entry.get("type") if entry is not None else None
             type_spec = type_spec_obj if isinstance(type_spec_obj, str) and type_spec_obj else None
             if type_spec is None:
@@ -1194,7 +1236,7 @@ if _TEXTUAL_IMPORT_ERROR is None:
             self._editing_row_id = row.row_id
             self.push_screen(
                 _InputDialog(
-                    title=f"Write {row.address.label} ({type_spec})",
+                    title=f"Edit locally {row.address.label} ({type_spec})",
                     value=row.value_text if row.value_text != "null" else "",
                     hint="Enter new value. Esc=cancel. (Safe mode: confirmation required.)",
                 ),

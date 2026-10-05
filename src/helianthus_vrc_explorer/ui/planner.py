@@ -36,6 +36,7 @@ class PlannerGroup:
     present_instances: tuple[int, ...]
     namespace_label: str | None = None
     recommended: bool = True
+    expected_count: int | None = None
 
     @property
     def key(self) -> PlanKey:
@@ -188,6 +189,8 @@ _RECOMMENDED_ALWAYS_ON: frozenset[int] = frozenset({0x00, 0x01, 0x04, 0x05})
 def _instances_for_preset(group: PlannerGroup, preset: PlannerPreset) -> tuple[int, ...]:
     if group.ii_max is None:
         return (0x00,)
+    if preset in {"recommended", "full"} and group.expected_count is not None:
+        return group.present_instances
     if preset == "recommended":
         # always_on groups in OP=0x02 get full instance range;
         # present_gated groups get only discovered instances.

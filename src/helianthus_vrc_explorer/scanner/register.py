@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Final, Literal, NotRequired, TypedDict, cast
+from typing import Any, Final, Literal, NotRequired, TypedDict, cast
 
 from ..protocol.b524 import RegisterOpcode, build_register_read_payload
 from ..protocol.parser import ValueParseError, parse_typed_value
@@ -42,6 +42,11 @@ class RegisterEntry(TypedDict):
     # For register reads this is typically: <FLAGS> <GG> <RR_LO> <RR_HI> <VALUE_BYTES...>
     reply_hex: str | None
     # FLAGS byte extracted from the reply, if present.
+    writable: NotRequired[bool]
+    visible: NotRequired[bool]
+    parameter_description: NotRequired[dict[str, Any]]
+    candidate_name: NotRequired[str]
+    candidate_evidence: NotRequired[str]
     flags: int | None
     # Protocol-level DT byte interpretation:
     # bit1=config-vs-simple; bit0 meaning depends on opcode namespace.
@@ -60,6 +65,7 @@ class RegisterEntry(TypedDict):
     value: object | None
     error: str | None
     # Optional constraint dictionary annotation sourced from opcode 0x01 (01 GG RR).
+    constraint_qualification: NotRequired[str]
     constraint_tt: NotRequired[str]
     constraint_type: NotRequired[str]
     constraint_min: NotRequired[int | float | str | None]

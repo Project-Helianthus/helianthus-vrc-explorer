@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import struct
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -61,10 +62,10 @@ def test_replay_trace_to_artifact_reconstructs_b524_register_reads(tmp_path: Pat
         "registers"
     ]["0x0001"]
 
-    assert local_entry["read_opcode_label"] == "ReadControllerRegister"
+    assert local_entry["read_opcode_label"] == "GetParameter"
     assert local_entry["response_state"] == "active"
     assert local_entry["value"] == 1
-    assert remote_entry["read_opcode_label"] == "ReadDeviceSlotRegister"
+    assert remote_entry["read_opcode_label"] == "GetDeviceParameter"
     assert remote_entry["response_state"] == "active"
     assert remote_entry["value"] == 1
 
@@ -244,3 +245,147 @@ def test_replay_trace_applies_current_namespace_profiles(tmp_path: Path) -> None
     assert local_ns["ii_max"] == "0x00"
     assert local_ns["rr_max"] == "0x0004"
     assert set(local_ns["instances"]) == {"0x00"}
+
+
+def test_replay_trace_reconstructs_system_information_and_complete_descriptions(
+    tmp_path: Path,
+) -> None:
+    trace_path = _write_trace(
+        tmp_path,
+        "b524_metadata.trace",
+        "\n".join(
+            [
+                "2026-04-06T10:00:00.000000Z INIT features=0x01",
+                "2026-04-06T10:00:00.050000Z START initiator=0xF7",
+                (
+                    "2026-04-06T10:00:00.100000Z #1 SEND_PROTO src=0xF7 dst=0x15 "
+                    "primary=0xB5 secondary=0x24 payload=000000"
+                ),
+                "2026-04-06T10:00:00.120000Z #1 PARSED_PROTO len=4 hex=00004040",
+                (
+                    "2026-04-06T10:00:00.140000Z #2 SEND_PROTO src=0xF7 dst=0x15 "
+                    "primary=0xB5 secondary=0x24 payload=020002000500"
+                ),
+                "2026-04-06T10:00:00.160000Z #2 PARSED_PROTO len=6 hex=010205000a00",
+                # OP01 is GG, II, RR16. Its reply has no dtype tag: it is
+                # GG, RR16, then three UIN-width values.
+                (
+                    "2026-04-06T10:00:00.180000Z #3 SEND_PROTO src=0xF7 dst=0x15 "
+                    "primary=0xB5 secondary=0x24 payload=0102000500"
+                ),
+                "2026-04-06T10:00:00.200000Z #3 PARSED_PROTO len=9 hex=02050000000a000200",
+                (
+                    "2026-04-06T10:00:00.220000Z #4 SEND_PROTO src=0xF7 dst=0x15 "
+                    "primary=0xB5 secondary=0x24 payload=060009010400"
+                ),
+                "2026-04-06T10:00:00.240000Z #4 PARSED_PROTO len=5 hex=0109040002",
+                # OP07 maps only to the matching OP06 identity. The leading
+                # 0x09 is GG, not an old u16 type tag.
+                (
+                    "2026-04-06T10:00:00.260000Z #5 SEND_PROTO src=0xF7 dst=0x15 "
+                    "primary=0xB5 secondary=0x24 payload=0709010400"
+                ),
+                "2026-04-06T10:00:00.280000Z #5 PARSED_PROTO len=6 hex=090400000a01",
+                # The pre-complete OP01 selector cannot identify an II/RR16
+                # target, even if its reply happens to resemble a range.
+                (
+                    "2026-04-06T10:00:00.300000Z #6 SEND_PROTO src=0xF7 dst=0x15 "
+                    "primary=0xB5 secondary=0x24 payload=010207"
+                ),
+                "2026-04-06T10:00:00.320000Z #6 PARSED_PROTO len=7 hex=06020700010203",
+            ]
+        )
+        + "\n",
+    )
+
+    artifact = replay_trace_to_artifact(trace_path)
+
+    assert artifact["meta"]["system_information"] == [
+        {
+            "identifier": "0x0000",
+            "name": "circuit_count",
+            "value": 3.0,
+            "raw_hex": struct.pack("<f", 3.0).hex(),
+            "trace_seq": 1,
+        }
+    ]
+
+    system_entry = artifact["operations"]["0x02"]["groups"]["0x02"]["instances"]["0x00"][
+        "registers"
+    ]["0x0005"]
+    assert system_entry["parameter_description"] == {
+        "qualification": "matched",
+        "description_opcode": "0x01",
+        "read_opcode": "0x02",
+        "group": "0x02",
+        "instance": "0x00",
+        "register": "0x0005",
+        "type": "UIN",
+        "width": 2,
+        "min": 0,
+        "max": 10,
+        "step": 2,
+        "reply_hex": "02050000000a000200",
+        "source": "complete_description",
+        "decoder_revision": "b524-description/v1",
+        "trace_seq": 3,
+        "trace_reply_hex": "02050000000a000200",
+    }
+
+    device_entry = artifact["operations"]["0x06"]["groups"]["0x09"]["instances"]["0x01"][
+        "registers"
+    ]["0x0004"]
+    assert device_entry["parameter_description"]["description_opcode"] == "0x07"
+    assert device_entry["parameter_description"]["read_opcode"] == "0x06"
+    assert device_entry["parameter_description"]["type"] == "UCH"
+    assert device_entry["parameter_description"]["max"] == 10
+
+    legacy = artifact["b524_operations"]["register_constraints"]
+    assert legacy == [
+        {
+            "trace_seq": 6,
+            "request_hex": "010207",
+            "reply_hex": "06020700010203",
+            "qualification": "legacy_incomplete",
+            "reason": "OP01 selector has no instance or RR16 identity",
+        }
+    ]
+
+
+def test_mixed_targets_cannot_cross_attach_descriptions_information_or_registers(
+    tmp_path: Path,
+) -> None:
+    lines = [
+        "2026-04-06T10:00:00.000000Z INIT features=0x01",
+        "2026-04-06T10:00:00.050000Z START initiator=0xF7",
+    ]
+    records = [
+        (0x15, "000000", "0000803f"),  # Selected target: circuit_count=1.
+        (0x15, "020002000500", "030205000a00"),
+        (0x16, "0102000500", "020500000064000100"),  # Same identity, foreign limits.
+        (0x16, "000000", "0000c040"),
+        (0x16, "020002000500", "030205005000"),
+        (0x16, "060009010400", "0309040002"),
+    ]
+    for seq, (dst, payload, reply) in enumerate(records, 1):
+        lines.append(
+            f"2026-04-06T10:00:{seq:02d}.000000Z #{seq} SEND_PROTO src=0xF7 "
+            f"dst=0x{dst:02X} primary=0xB5 secondary=0x24 payload={payload}"
+        )
+        lines.append(
+            f"2026-04-06T10:00:{seq:02d}.050000Z #{seq} PARSED_PROTO "
+            f"len={len(bytes.fromhex(reply))} hex={reply}"
+        )
+    artifact = replay_trace_to_artifact(
+        _write_trace(tmp_path, "mixed.trace", "\n".join(lines) + "\n")
+    )
+    assert artifact["meta"]["destination_address"] == "0x15"
+    assert artifact["meta"]["system_information"][0]["value"] == 1.0
+    assert artifact["meta"]["replay_trace"]["ignored_b524_exchanges"] == 4
+    entry = artifact["operations"]["0x02"]["groups"]["0x02"]["instances"]["0x00"]["registers"][
+        "0x0005"
+    ]
+    assert entry["value"] == 10
+    assert "parameter_description" not in entry
+    assert "0x06" not in artifact["operations"]
+    assert artifact["b524_operations"]["parameter_descriptions"] == []
