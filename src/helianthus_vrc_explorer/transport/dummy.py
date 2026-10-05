@@ -24,6 +24,7 @@ class DummyTransport(TransportInterface):
 
     def __init__(self, fixture_path: Path) -> None:
         self._fixture_path = fixture_path
+        self._system_information_unavailable: set[int] = set()
         self._system_information: dict[int, bytes] = {}
         self._register_replies: dict[tuple[int, int, int, int], bytes] = {}
         self._register_flags: dict[tuple[int, int, int, int], int] = {}
@@ -55,6 +56,10 @@ class DummyTransport(TransportInterface):
         if len(payload) != 3:
             raise TransportError(f"System-information request expects 3 bytes, got {len(payload)}")
         identifier = int.from_bytes(payload[1:3], byteorder="little", signed=False)
+        if identifier in self._system_information_unavailable:
+            raise TransportTimeout(
+                f"Fixture records unavailable system information {identifier:04x}"
+            )
         # Legacy group-directory fixtures carry no reliable OP00 information.
         # A synthetic NaN makes their incompatibility explicit without treating
         # a group descriptor as an instance-count or topology value.
@@ -424,14 +429,19 @@ class DummyTransport(TransportInterface):
                 else:
                     raise ValueError("System-information entry requires a u16 identifier")
                 raw_hex = item.get("raw_hex")
+                if raw_hex is None:
+                    self._system_information_unavailable.add(identifier)
+                    continue
                 if not isinstance(raw_hex, str):
-                    raise ValueError("System-information entry requires raw_hex")
+                    raise ValueError("System-information raw_hex must be a string or null")
                 try:
                     raw_value = bytes.fromhex(raw_hex)
                 except ValueError as exc:
                     raise ValueError("System-information raw_hex must be valid hex") from exc
-                if len(raw_value) != 4:
-                    raise ValueError("System-information raw_hex must encode one float32le")
+                if len(raw_value) == 5 and raw_value[0] == 4:
+                    raw_value = raw_value[1:]  # Archived transport-framed reply.
+                if len(raw_value) != 4 and item.get("value") is not None:
+                    raise ValueError("Available system information must encode one float32le")
                 self._system_information[identifier] = raw_value
 
         # v2.3 operations-first: iterate operations directly to preserve OP context.

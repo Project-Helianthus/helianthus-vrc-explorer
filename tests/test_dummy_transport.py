@@ -492,3 +492,56 @@ def test_current_artifact_round_trip_preserves_writable_and_unavailable_metadata
     # A second generated artifact, including absent/status/timeout entries, also loads.
     path.write_text(json.dumps(artifact))
     assert DummyTransport(path).send(0x15, build_constraint_probe_payload(0, 1)) == reply
+
+
+def test_partial_system_information_keeps_valid_fixture_registers(tmp_path: Path) -> None:
+    from helianthus_vrc_explorer.scanner.scan import scan_b524
+
+    path = _write_min_fixture(tmp_path)
+    fixture = json.loads(path.read_text())
+    fixture["meta"]["system_information"] = [
+        {
+            "identifier": "0x0000",
+            "name": "circuit_count",
+            "value": None,
+            "state": "unavailable",
+            "raw_hex": None,
+        },
+        {
+            "identifier": "0x0001",
+            "name": "zone_count",
+            "value": 2.0,
+            "state": "available",
+            "raw_hex": "0400000040",
+        },
+        {
+            "identifier": "0x0002",
+            "name": "solar_circuit_count",
+            "value": None,
+            "state": "unavailable",
+            "raw_hex": "00",
+        },
+    ]
+    fixture["groups"]["0x02"]["instances"]["0x00"]["registers"]["0x0002"] = {
+        "type": "UIN",
+        "raw_hex": "0100",
+        "flags": 1,
+    }
+    path.write_text(json.dumps(fixture))
+    transport = DummyTransport(path)
+    with pytest.raises(TransportTimeout):
+        transport.send(0x15, build_directory_probe_payload(0))
+    assert transport.send(0x15, build_directory_probe_payload(1)) == bytes.fromhex("00000040")
+    assert transport.send(0x15, build_directory_probe_payload(2)) == b"\x00"
+    artifact = scan_b524(transport, dst=0x15)
+    assert artifact["meta"]["system_information"][0]["raw_hex"] is None
+    assert artifact["meta"]["system_information"][1]["value"] == 2.0
+    assert artifact["meta"]["system_information"][2]["value"] is None
+    regs = artifact["operations"]["0x02"]["groups"]["0x02"]["instances"]["0x00"]["registers"]
+    assert regs["0x000f"]["value"] == 0x1234
+    path.write_text(json.dumps(artifact))
+    assert (
+        DummyTransport(path)
+        .send(0x15, build_register_read_payload(2, 2, 0, 0xF))
+        .endswith(b"\x34\x12")
+    )
