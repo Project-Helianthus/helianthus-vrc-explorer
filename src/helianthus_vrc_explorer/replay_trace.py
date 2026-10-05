@@ -397,6 +397,8 @@ def replay_trace_to_artifact(trace_path: Path) -> dict[str, Any]:
         raise UnsupportedTraceFormatError("Trace contains no B524 SEND_PROTO exchanges.")
 
     dst = b524_exchanges[0].dst
+    ignored_targets = sum(exchange.dst != dst for exchange in b524_exchanges)
+    b524_exchanges = [exchange for exchange in b524_exchanges if exchange.dst == dst]
     scan_timestamp = meta.first_timestamp.strftime("%Y-%m-%dT%H:%M:%SZ")
     duration = round((meta.last_timestamp - meta.first_timestamp).total_seconds(), 4)
 
@@ -423,6 +425,12 @@ def replay_trace_to_artifact(trace_path: Path) -> dict[str, Any]:
         "operations": {},
     }
     limitations = cast(list[str], artifact["meta"]["replay_trace"]["limitations"])
+    artifact["meta"]["replay_trace"]["ignored_b524_exchanges"] = ignored_targets
+    if ignored_targets:
+        limitations.append(
+            f"Selected first B524 target {_hex_u8(dst)}; ignored {ignored_targets} "
+            "exchanges belonging to other targets"
+        )
     if meta.truncated_hex_frames > 0:
         limitations.append(
             "Some trace hex frames were truncated ('...'); replay used deterministic prefixes only"

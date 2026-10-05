@@ -106,6 +106,7 @@ Replay limitations (v1):
 - Only current `EnhancedTcpTransport` ENH/ENS trace format is supported.
 - Reconstruction is deterministic and only for fields derivable from captured request/response bytes.
 - Metadata requiring live probing (for example runtime identity enrichment) is not replayed.
+- A replay artifact represents the first B524 destination in the trace. Exchanges for other destinations are excluded and counted in its limitations.
 
 Browse a saved artifact in fullscreen Textual UI:
 ```bash
