@@ -25,6 +25,8 @@ class DummyTransport(TransportInterface):
     def __init__(self, fixture_path: Path) -> None:
         self._fixture_path = fixture_path
         self._system_information: dict[int, bytes] = {}
+        self._register_replies: dict[tuple[int, int, int, int], bytes] = {}
+        self._register_flags: dict[tuple[int, int, int, int], int] = {}
         self._register_values: dict[tuple[int, int, int, int], bytes] = {}
         self._register_timeouts: set[tuple[int, int, int, int]] = set()
         self._register_nacks: set[tuple[int, int, int, int]] = set()
@@ -94,6 +96,8 @@ class DummyTransport(TransportInterface):
 
         key = (opcode, group, instance, register)
         value = self._register_values.get(key)
+        if key in self._register_replies:
+            return self._register_replies[key]
         if key in self._register_nacks:
             raise TransportNack(
                 "Fixture marks register as nack for "
@@ -113,9 +117,9 @@ class DummyTransport(TransportInterface):
             )
 
         # Empirically, register replies include a 4-byte header:
-        #   <TT> <GG> <RR_LO> <RR_HI>
-        # Use TT=0x01 (live) for fixtures unless they explicitly model no-data via timeouts.
-        header = bytes((0x01, group)) + payload[4:6]
+        #   <FLAGS> <GG> <RR_LO> <RR_HI>
+        # Raw-only legacy fixtures retain their historical default FLAGS=01h.
+        header = bytes((self._register_flags.get(key, 0x01), group)) + payload[4:6]
         return header + value
 
     @staticmethod
@@ -213,6 +217,24 @@ class DummyTransport(TransportInterface):
                     register_value=register_value,
                 )
 
+                # Current artifacts retain the complete normalized payload, including
+                # writable attributes and short status replies. Replay it verbatim.
+                reply_hex = register_value.get("reply_hex")
+                if isinstance(reply_hex, str):
+                    try:
+                        reply = bytes.fromhex(reply_hex)
+                    except ValueError as exc:
+                        raise ValueError(
+                            f"Register {register_key!r} has invalid reply_hex"
+                        ) from exc
+                    for opcode in opcodes:
+                        self._register_replies[(opcode, group, instance, register)] = reply
+                    continue
+                flags = register_value.get("flags")
+                if isinstance(flags, int) and not isinstance(flags, bool) and 0 <= flags <= 255:
+                    for opcode in opcodes:
+                        self._register_flags[(opcode, group, instance, register)] = flags
+
                 raw_hex = register_value.get("raw_hex")
                 if isinstance(raw_hex, str):
                     try:
@@ -290,7 +312,9 @@ class DummyTransport(TransportInterface):
             return
 
         if raw_description.get("qualification") != "matched":
-            raise ValueError("Parameter description must be qualified as matched")
+            # Missing/unsupported/budget-limited metadata is normal in partial scans.
+            # Keep the scalar evidence without inventing a description response.
+            return
         read_opcode = self._parse_opcode_value(
             raw_description.get("read_opcode"), "parameter description read"
         )
@@ -324,7 +348,13 @@ class DummyTransport(TransportInterface):
         try:
             minimum = encode_typed_value(type_spec, raw_description["min"])
             maximum = encode_typed_value(type_spec, raw_description["max"])
-            step = encode_typed_value(type_spec, raw_description["step"])
+            if type_spec.strip().upper() == "HDA:3":
+                days = raw_description["step"]
+                if not isinstance(days, int) or isinstance(days, bool) or not 0 <= days <= 65535:
+                    raise ValueEncodeError("Date description step must be unsigned 16-bit days")
+                step = days.to_bytes(2, "little") + b"\x00"
+            else:
+                step = encode_typed_value(type_spec, raw_description["step"])
         except (KeyError, ValueEncodeError) as exc:
             raise ValueError(
                 "Parameter description metadata requires encodable min/max/step values"
