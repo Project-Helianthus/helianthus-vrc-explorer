@@ -85,12 +85,12 @@ This file is generated from the CLI's `--help` output. Refresh it with
 │ --no-tips                                                    Hide scan header tips in interactive terminal mode.     │
 │ --redact                                                     Redact device identity fields (e.g. serial number) in   │
 │                                                              console output.                                         │
-│ --probe-constraints        --no-probe-constraints            Research-only live B524 opcode 0x01 constraint probe    │
-│                                                              (GG/RR). Disabled by default: it can add hundreds of    │
-│                                                              extra bus requests and some BASV2 setups return         │
-│                                                              noisy/unreliable replies. Normal scans already use the  │
-│                                                              bundled static BASV2 constraint catalog.                │
-│                                                              [default: no-probe-constraints]                         │
+│ --probe-constraints        --no-probe-constraints            Acquire complete OP01/OP07 descriptions for observed    │
+│                                                              writable parameters. Enabled by default, bounded to 256 │
+│                                                              additional requests; descriptions validate later        │
+│                                                              offline edits. Missing descriptions remain explicit     │
+│                                                              warnings.                                               │
+│                                                              [default: probe-constraints]                            │
 │ --help                 -h                                    Show this message and exit.                             │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```

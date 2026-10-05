@@ -7,5 +7,7 @@ Guidelines:
 - Prefer human-editable formats and clear filenames.
 - Do not commit secrets (tokens, credentials, hostnames, private identifiers).
 
-Files:
-- `myvaillant_register_map.csv`: Optional Vaillant-cloud (myVaillant-style) leaf-name annotations for B524 registers.
+The runtime myVaillant register map is packaged at
+`src/helianthus_vrc_explorer/data/myvaillant_register_map.csv`. It carries optional,
+opcode-scoped leaf-name annotations only; it does not establish a value codec or a
+wire-qualified semantic contract.

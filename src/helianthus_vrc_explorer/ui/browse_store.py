@@ -16,6 +16,7 @@ class BrowseStore:
     """Browse artifact facade kept stable for CLI and Textual consumers."""
 
     device_label: str
+    system_information: tuple[dict[str, Any], ...]
     rows: list[RegisterRow]
     tree_nodes: list[TreeNodeRef]
     _row_by_id: dict[str, RegisterRow]
@@ -23,8 +24,16 @@ class BrowseStore:
     @classmethod
     def from_artifact(cls, artifact: dict[str, Any]) -> BrowseStore:
         device_label, rows, tree_nodes = hydrate_browse_store(artifact)
+        meta = artifact.get("meta")
+        raw_system_information = meta.get("system_information") if isinstance(meta, dict) else None
+        system_information = (
+            tuple(dict(entry) for entry in raw_system_information if isinstance(entry, dict))
+            if isinstance(raw_system_information, list)
+            else ()
+        )
         return cls(
             device_label=device_label,
+            system_information=system_information,
             rows=rows,
             tree_nodes=tree_nodes,
             _row_by_id=build_row_index(rows),

@@ -65,6 +65,9 @@ class RegisterRow:
     age_text: str
     change_indicator: str
     search_blob: str
+    parameter_description: dict[str, object] | None = None
+    candidate_name: str = ""
+    candidate_evidence: str = ""
 
 
 TreeNodeLevel = Literal[

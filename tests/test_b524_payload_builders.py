@@ -41,17 +41,17 @@ def test_build_register_read_payload_known_selectors(
     )
 
 
-@pytest.mark.parametrize("group", [-1, 256])
+@pytest.mark.parametrize("group", [-1, 65536])
 def test_build_directory_probe_payload_range_validation(group: int) -> None:
-    with pytest.raises(ValueError, match=r"group must be in range 0\.\.255"):
+    with pytest.raises(ValueError, match=r"identifier must be in range 0\.\.65535"):
         build_directory_probe_payload(group)
 
 
 @pytest.mark.parametrize(
     ("group", "register", "expected_hex"),
     [
-        (0x00, 0x00, "010000"),
-        (0x0A, 0x01, "010a01"),
+        (0x00, 0x00, "0100000000"),
+        (0x0A, 0x01, "010a000100"),
     ],
 )
 def test_build_constraint_probe_payload(

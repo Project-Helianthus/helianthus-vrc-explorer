@@ -270,6 +270,7 @@ def group_name_for_opcode(group: int, opcode: int) -> str:
 class DiscoveredGroup:
     group: int
     descriptor: float
+    raw_hex: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -282,12 +283,12 @@ class ClassifiedGroup:
 
 
 def _parse_directory_descriptor(resp: bytes, group: int) -> float:
-    if len(resp) < 4:
+    if len(resp) != 4:
         # A short response isn't evidence of a terminator (NaN). Treat it as a transient
         # failure and let discovery continue.
         raise ValueError(
-            "Short directory probe response: "
-            f"expected >=4 bytes, got {len(resp)} bytes for GG=0x{group:02X}"
+            "Short system information response: "
+            f"expected 4 bytes, got {len(resp)} bytes for ID=0x{group:02X}"
         )
     return cast(float, struct.unpack("<f", resp[:4])[0])
 
@@ -304,20 +305,19 @@ def discover_groups(
     *,
     observer: ScanObserver | None = None,
 ) -> list[DiscoveredGroup]:
-    """Phase A: Probe GG=0x00..0xFF via directory probe (opcode 0x00).
+    """Read bounded system information identifiers 0000..0011.
 
-    Terminator logic: stop on the first NaN descriptor.
-    Directory descriptors are not semantic authority for group identity, namespace topology,
-    or scan-plan inclusion. The only authoritative structural signal here is the NaN terminator.
+    NaN and unavailable identifiers do not terminate later information probes.
+    The historical function name is retained for caller compatibility.
     """
 
     discovered: list[DiscoveredGroup] = []
     probes = 0
 
-    for gg in range(0x00, 0x100):
+    for gg in range(0x00, 0x12):
         probes += 1
         if observer is not None:
-            observer.status(f"Directory probe GG=0x{gg:02X}")
+            observer.status(f"System information ID=0x{gg:02X}")
             observer.phase_advance("group_discovery", advance=1)
         payload = build_directory_probe_payload(gg)
         attempts = _directory_probe_retry_budget(gg)
@@ -330,21 +330,21 @@ def discover_groups(
             except TransportTimeout:
                 if retrying:
                     logger.warning(
-                        "Directory probe timeout for GG=0x%02X (attempt %d/%d); retrying",
+                        "System information timeout for ID=0x%02X (attempt %d/%d); retrying",
                         gg,
                         attempt,
                         attempts,
                     )
                     if observer is not None:
                         observer.log(
-                            f"Directory probe timeout for GG=0x{gg:02X} "
+                            f"System information timeout for ID=0x{gg:02X} "
                             f"(attempt {attempt}/{attempts}); retrying",
                             level="warn",
                         )
                     continue
-                logger.warning("Directory probe timeout for GG=0x%02X", gg)
+                logger.warning("System information timeout for ID=0x%02X", gg)
                 if observer is not None:
-                    observer.log(f"Directory probe timeout for GG=0x{gg:02X}", level="warn")
+                    observer.log(f"System information timeout for ID=0x{gg:02X}", level="warn")
                 skip_group = True
                 break
             except TransportError as exc:
@@ -352,7 +352,7 @@ def discover_groups(
                     raise
                 if retrying:
                     logger.warning(
-                        "Directory probe transport error for GG=0x%02X: %s (attempt %d/%d); "
+                        "System information transport error for ID=0x%02X: %s (attempt %d/%d); "
                         "retrying",
                         gg,
                         exc,
@@ -361,15 +361,15 @@ def discover_groups(
                     )
                     if observer is not None:
                         observer.log(
-                            f"Directory probe transport error for GG=0x{gg:02X}: {exc} "
+                            f"System information transport error for ID=0x{gg:02X}: {exc} "
                             f"(attempt {attempt}/{attempts}); retrying",
                             level="warn",
                         )
                     continue
-                logger.warning("Directory probe transport error for GG=0x%02X: %s", gg, exc)
+                logger.warning("System information transport error for ID=0x%02X: %s", gg, exc)
                 if observer is not None:
                     observer.log(
-                        f"Directory probe transport error for GG=0x{gg:02X}: {exc}",
+                        f"System information transport error for ID=0x{gg:02X}: {exc}",
                         level="warn",
                     )
                 skip_group = True
@@ -378,20 +378,20 @@ def discover_groups(
             if gg == 0x00 and resp == b"\x00":
                 if retrying:
                     logger.warning(
-                        "Directory probe GG=0x00 returned status-only 0x00 "
+                        "System information ID=0x00 returned status-only 0x00 "
                         "(attempt %d/%d); retrying",
                         attempt,
                         attempts,
                     )
                     if observer is not None:
                         observer.log(
-                            "Directory probe GG=0x00 returned status-only 0x00 "
+                            "System information ID=0x00 returned status-only 0x00 "
                             f"(attempt {attempt}/{attempts}); retrying",
                             level="warn",
                         )
                     continue
                 message = (
-                    "Directory probe GG=0x00 returned status-only 0x00; "
+                    "System information ID=0x00 returned status-only 0x00; "
                     "treating as transient and continuing"
                 )
                 logger.warning("%s", message)
@@ -424,15 +424,9 @@ def discover_groups(
             # NaN streak.
             continue
 
-        if math.isnan(descriptor):
-            logger.info("Directory terminator at GG=0x%02X (NaN)", gg)
-            if observer is not None:
-                observer.log(f"Directory terminator at GG=0x{gg:02X} (NaN)", level="info")
-            break
-
-        discovered.append(DiscoveredGroup(group=gg, descriptor=descriptor))
+        discovered.append(DiscoveredGroup(group=gg, descriptor=descriptor, raw_hex=resp.hex()))
         if observer is not None:
-            observer.log(f"Discovered group GG=0x{gg:02X} desc={descriptor}", level="info")
+            observer.log(f"System information ID=0x{gg:02X} value={descriptor}", level="info")
 
     if observer is not None:
         observer.phase_set_total("group_discovery", total=probes)
@@ -466,7 +460,7 @@ def classify_groups(
             )
             continue
 
-        expected = config.get("desc")
+        expected = config.get("desc") if math.isfinite(group.descriptor) else None
         mismatch = expected is not None and expected != group.descriptor
         if mismatch:
             logger.info(

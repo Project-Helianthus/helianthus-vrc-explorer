@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from helianthus_vrc_explorer.protocol.b524 import (
+    build_constraint_probe_payload,
     build_directory_probe_payload,
     build_register_read_payload,
 )
@@ -35,16 +36,76 @@ def _write_min_fixture(tmp_path: Path) -> Path:
     return fixture_path
 
 
-def test_dummy_transport_directory_probe_known_group(tmp_path: Path) -> None:
+def test_dummy_transport_legacy_fixture_op00_returns_unusable_nan(tmp_path: Path) -> None:
     transport = DummyTransport(_write_min_fixture(tmp_path))
     response = transport.send(0x15, build_directory_probe_payload(0x02))
-    assert response == struct.pack("<f", 1.0)
+    assert struct.unpack("<f", response)[0] != struct.unpack("<f", response)[0]
 
 
-def test_dummy_transport_directory_probe_unknown_group_returns_zero(tmp_path: Path) -> None:
+def test_dummy_transport_system_information_returns_fixture_raw_float(tmp_path: Path) -> None:
+    fixture = {
+        "meta": {
+            "system_information": [
+                {
+                    "identifier": "0x0000",
+                    "name": "circuit_count",
+                    "value": 2.0,
+                    "raw_hex": "00000040",
+                }
+            ]
+        },
+        "operations": {},
+    }
+    fixture_path = tmp_path / "system_information.json"
+    fixture_path.write_text(json.dumps(fixture), encoding="utf-8")
+
+    transport = DummyTransport(fixture_path)
+    assert transport.send(0x15, build_directory_probe_payload(0x0000)) == bytes.fromhex("00000040")
+
+
+def test_dummy_transport_missing_system_information_returns_nan(tmp_path: Path) -> None:
     transport = DummyTransport(_write_min_fixture(tmp_path))
     response = transport.send(0x15, build_directory_probe_payload(0x03))
-    assert response == struct.pack("<f", 0.0)
+    assert struct.unpack("<f", response)[0] != struct.unpack("<f", response)[0]
+
+
+def test_dummy_transport_parameter_description_uses_register_metadata(tmp_path: Path) -> None:
+    fixture = {
+        "meta": {},
+        "operations": {
+            "0x02": {
+                "groups": {
+                    "0x02": {
+                        "instances": {
+                            "0x00": {
+                                "registers": {
+                                    "0x000f": {
+                                        "raw_hex": "0500",
+                                        "type": "UIN",
+                                        "metadata": {
+                                            "parameter_description": {
+                                                "min": 0,
+                                                "max": 20,
+                                                "step": 2,
+                                            }
+                                        },
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+    }
+    fixture_path = tmp_path / "parameter_description.json"
+    fixture_path.write_text(json.dumps(fixture), encoding="utf-8")
+
+    transport = DummyTransport(fixture_path)
+
+    assert transport.send(0x15, build_constraint_probe_payload(0x02, 0x000F)) == bytes.fromhex(
+        "020f00000014000200"
+    )
 
 
 def test_dummy_transport_register_read_returns_header_plus_value(tmp_path: Path) -> None:
@@ -61,14 +122,14 @@ def test_dummy_transport_missing_register_raises_timeout(tmp_path: Path) -> None
         transport.send(0x15, payload)
 
 
-def test_dummy_transport_artifact_v2_directory_probe_uses_descriptor_observed(
+def test_dummy_transport_legacy_artifact_does_not_promote_descriptor_to_system_info(
     dual_namespace_scan_path: Path,
 ) -> None:
     transport = DummyTransport(dual_namespace_scan_path)
 
     response = transport.send(0x15, build_directory_probe_payload(0x09))
 
-    assert response == struct.pack("<f", 1.0)
+    assert struct.unpack("<f", response)[0] != struct.unpack("<f", response)[0]
 
 
 def test_dummy_transport_artifact_v2_separates_local_and_remote_registers(

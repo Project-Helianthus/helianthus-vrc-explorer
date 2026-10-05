@@ -698,13 +698,12 @@ def scan(
         help="Redact device identity fields (e.g. serial number) in console output.",
     ),
     probe_constraints: bool = typer.Option(  # noqa: B008
-        False,
+        True,
         "--probe-constraints/--no-probe-constraints",
         help=(
-            "Research-only live B524 opcode 0x01 constraint probe (GG/RR). "
-            "Disabled by default: it can add hundreds of extra bus requests and some BASV2 "
-            "setups return noisy/unreliable replies. Normal scans already use the bundled "
-            "static BASV2 constraint catalog."
+            "Acquire complete OP01/OP07 descriptions for observed writable parameters. "
+            "Enabled by default, bounded to 256 additional requests; descriptions validate "
+            "later offline edits. Missing descriptions remain explicit warnings."
         ),
     ),
 ) -> None:

@@ -27,12 +27,12 @@ class B524UnknownOpcodeError(B524IdParseError):
 type RegisterOpcode = Literal[0x02, 0x06]
 type TimerOpcode = Literal[0x03, 0x04]
 type DirectoryOpcode = Literal[0x00]
-type ConstraintOpcode = Literal[0x01]
+type ConstraintOpcode = Literal[0x01, 0x07]
 
 
 @dataclass(frozen=True, slots=True)
 class B524DirectorySelector:
-    """B524 directory probe selector (`00 <GG> 00`).
+    """B524 ReadSystemInformation selector (`00 ID_LO ID_HI`).
 
     This opcode family is not expected to appear in ebusd's CSV id column, but the
     parsing logic supports it for completeness.
@@ -41,14 +41,20 @@ class B524DirectorySelector:
     opcode: DirectoryOpcode
     group: int
 
+    @property
+    def identifier(self) -> int:
+        return self.group
+
 
 @dataclass(frozen=True, slots=True)
 class B524ConstraintSelector:
-    """B524 constraint selector (`01 <GG> <RR>`)."""
+    """Complete parameter description selector (`01/07 GG II RR_LO RR_HI`)."""
 
     opcode: ConstraintOpcode
     group: int
     register: int
+    instance: int = 0
+    legacy_incomplete: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,7 +106,6 @@ type B524IdSelector = (
 _REGISTER_SELECTOR_LEN: Final[int] = 6
 _TIMER_SELECTOR_LEN: Final[int] = 5
 _DIRECTORY_SELECTOR_LEN: Final[int] = 3
-_CONSTRAINT_SELECTOR_LEN: Final[int] = 3
 
 
 def parse_b524_id(id_hex: str) -> B524IdSelector:
@@ -111,8 +116,8 @@ def parse_b524_id(id_hex: str) -> B524IdSelector:
 
     - 0x02 / 0x06: register selectors (6 bytes)
     - 0x03 / 0x04: timer selectors (5 bytes)
-    - 0x00: directory probe selector (3 bytes, not expected in CSV)
-    - 0x01: constraint selector (3 bytes: opcode, group, register)
+    - 0x00: system information identifier (3 bytes)
+    - 0x01 / 0x07: complete description selector (5 bytes); legacy short 0x01 is unqualified
 
     Examples:
     - ``b524,020003001600`` -> opcode=0x02, optype=0x00, group=0x03, instance=0x00, register=0x0016
@@ -154,11 +159,7 @@ def parse_b524_id(id_hex: str) -> B524IdSelector:
                 raise B524IdLengthError(
                     f"Opcode 0x00 expects {_DIRECTORY_SELECTOR_LEN} bytes, got {len(payload)}"
                 )
-            if payload[2] != 0x00:
-                raise B524IdParseError(
-                    f"Opcode 0x00 expects final byte 0x00, got 0x{payload[2]:02X}"
-                )
-            return B524DirectorySelector(opcode=0x00, group=payload[1])
+            return B524DirectorySelector(opcode=0x00, group=int.from_bytes(payload[1:3], "little"))
 
         case 0x02 | 0x06:
             if len(payload) != _REGISTER_SELECTOR_LEN:
@@ -198,16 +199,20 @@ def parse_b524_id(id_hex: str) -> B524IdSelector:
                 weekday=weekday,
             )
 
-        case 0x01:
-            if len(payload) != _CONSTRAINT_SELECTOR_LEN:
+        case 0x01 | 0x07:
+            if opcode == 1 and len(payload) == 3:
+                return B524ConstraintSelector(
+                    opcode=1, group=payload[1], register=payload[2], legacy_incomplete=True
+                )
+            if len(payload) != 5:
                 raise B524IdLengthError(
-                    f"Opcode 0x{opcode:02X} expects {_CONSTRAINT_SELECTOR_LEN} bytes, "
-                    f"got {len(payload)}"
+                    f"Opcode 0x{opcode:02X} expects 5 bytes, got {len(payload)}"
                 )
             return B524ConstraintSelector(
-                opcode=0x01,
+                opcode=opcode,
                 group=payload[1],
-                register=payload[2],
+                instance=payload[2],
+                register=int.from_bytes(payload[3:5], "little"),
             )
 
         case _:
@@ -229,37 +234,25 @@ def _validate_u16(field_name: str, value: int) -> None:
 
 
 def build_directory_probe_payload(group: int) -> bytes:
-    """Build a raw B524 directory probe payload.
+    """Compatibility name: build ReadSystemInformation for a u16 identifier."""
+    _validate_u16("identifier", group)
+    return bytes((0x00, group & 0xFF, group >> 8))
 
-    Payload structure:
 
-        <opcode> <GG> 0x00
-
-    Where:
-    - opcode: 0x00
-    - GG: group
-    """
-
+def build_constraint_probe_payload(
+    group: int,
+    register: int,
+    *,
+    instance: int = 0,
+    opcode: int = 0x01,
+) -> bytes:
+    """Build a complete DescribeParameter/DescribeDeviceParameter selector."""
+    if opcode not in {0x01, 0x07}:
+        raise ValueError("Description opcode must be 0x01 or 0x07")
     _validate_u8("group", group)
-    return bytes((0x00, group, 0x00))
-
-
-def build_constraint_probe_payload(group: int, register: int) -> bytes:
-    """Build a raw B524 constraint dictionary probe payload.
-
-    Payload structure:
-
-        <opcode> <GG> <RR>
-
-    Where:
-    - opcode: 0x01
-    - GG: group
-    - RR: register id (u8)
-    """
-
-    _validate_u8("group", group)
-    _validate_u8("register", register)
-    return bytes((0x01, group, register))
+    _validate_u8("instance", instance)
+    _validate_u16("register", register)
+    return bytes((opcode, group, instance, register & 0xFF, register >> 8))
 
 
 def build_register_read_payload(
