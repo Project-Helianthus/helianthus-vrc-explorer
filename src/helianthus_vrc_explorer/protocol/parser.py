@@ -189,6 +189,14 @@ def parse_fw(data: bytes) -> str:
     return f"{major:02d}.{minor:02d}.{patch:02d}"
 
 
+def parse_fwu(data: bytes) -> str:
+    """Decode a profile-qualified firmware triplet of numeric u8 components."""
+    _expect_len("FWU", data, 3)
+    if data == b"\xff\xff\xff":
+        raise ValueParseError("FWU unavailable firmware triplet")
+    return ".".join(f"{component:02d}" for component in data)
+
+
 def encode_exp(value: float) -> bytes:
     """Encode an `EXP` value (float32le)."""
 
@@ -353,6 +361,22 @@ def encode_fw(value: str) -> bytes:
     )
 
 
+def encode_fwu(value: str) -> bytes:
+    """Encode numeric firmware components for offline artifact editing only."""
+    if not isinstance(value, str):
+        raise ValueEncodeError("FWU expects a numeric firmware string")
+    parts = value.split(".")
+    if len(parts) != 3 or any(not part.isascii() or not part.isdigit() for part in parts):
+        raise ValueEncodeError("FWU expects three numeric components")
+    components = [int(part) for part in parts]
+    if any(not 0 <= component <= 255 for component in components):
+        raise ValueEncodeError("FWU components must be 0..255")
+    data = bytes(components)
+    if data == b"\xff\xff\xff":
+        raise ValueEncodeError("FWU unavailable firmware triplet")
+    return data
+
+
 def encode_typed_value(type_spec: str, value: object) -> bytes:
     """Encode a typed value into bytes compatible with ebusd schema type specs."""
 
@@ -391,6 +415,8 @@ def encode_typed_value(type_spec: str, value: object) -> bytes:
             return encode_hti_time(value)  # type: ignore[arg-type]
         case "FW":
             return encode_fw(value)  # type: ignore[arg-type]
+        case "FWU":
+            return encode_fwu(value)  # type: ignore[arg-type]
         case _:
             raise ValueEncodeError(f"Unknown type spec: {type_spec!r}")
 
@@ -406,8 +432,9 @@ def parse_typed_value(type_spec: str, data: bytes) -> object:
     - `UCH`: u8
     - `STR:*`: cstring (latin1, trailing NULs stripped)
     - `HDA:3`: u24le date encoded as raw DD MM YY bytes (`YYYY-MM-DD`)
-    - `HTI`: u24le time encoded as HH:MM:SS (BCD per byte, `HH:MM:SS`)
+    - `HTI`: three numeric HH, MM, SS bytes, displayed as `HH:MM:SS`
     - `FW`: 3-byte firmware version encoded as BCD bytes (`MM.mm.pp`)
+    - `FWU`: profile-qualified numeric u8 firmware triplet, not SemVer
 
     Args:
         type_spec: Type spec string (e.g. `"EXP"`, `"STR:*"`).
@@ -455,5 +482,7 @@ def parse_typed_value(type_spec: str, data: bytes) -> object:
             return parse_hti_time(data)
         case "FW":
             return parse_fw(data)
+        case "FWU":
+            return parse_fwu(data)
         case _:
             raise ValueParseError(f"Unknown type spec: {type_spec!r}")

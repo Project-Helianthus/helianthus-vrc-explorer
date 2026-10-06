@@ -305,13 +305,13 @@ def test_group_config_completeness() -> None:
     assert GROUP_CONFIG[0x00]["ii_max_by_opcode"] == {0x02: 0x00}
     assert GROUP_CONFIG[0x01]["namespace_opcodes"] == [0x02, 0x06]
     assert GROUP_CONFIG[0x01]["rr_max_by_opcode"] == {0x02: 0x0013, 0x06: 0x0015}
-    assert GROUP_CONFIG[0x01]["ii_max_by_opcode"] == {0x02: 0x00, 0x06: 0x07}
+    assert GROUP_CONFIG[0x01]["ii_max_by_opcode"] == {0x02: 0x00, 0x06: 0x08}
     assert GROUP_CONFIG[0x02]["name_by_opcode"] == {
         0x02: "Heating Circuits",
         0x06: "Secondary Heating Source",
     }
     assert GROUP_CONFIG[0x02]["namespace_opcodes"] == [0x02, 0x06]
-    assert GROUP_CONFIG[0x02]["ii_max_by_opcode"] == {0x02: 0x0A, 0x06: 0x07}
+    assert GROUP_CONFIG[0x02]["ii_max_by_opcode"] == {0x02: 0x0A, 0x06: 0x08}
     assert GROUP_CONFIG[0x02]["rr_max_by_opcode"] == {0x02: 0x0025, 0x06: 0x0015}
     assert GROUP_CONFIG[0x03]["namespace_opcodes"] == [0x02, 0x06]
     assert GROUP_CONFIG[0x03]["ii_max_by_opcode"] == {0x02: 0x0A, 0x06: 0x0A}
@@ -352,12 +352,12 @@ def test_group_namespace_profiles_support_opcode_first_identity() -> None:
     assert sorted(hw) == [0x02, 0x06]
     assert hw[0x02].rr_max == 0x0013
     assert hw[0x06].name == "Primary Heating Source"
-    assert hw[0x06].ii_max == 0x07
+    assert hw[0x06].ii_max == 0x08
     assert hw[0x06].rr_max == 0x0015
 
     assert sorted(hc) == [0x02, 0x06]
     assert hc[0x02].ii_max == 0x0A
-    assert hc[0x06].ii_max == 0x07
+    assert hc[0x06].ii_max == 0x08
     assert hc[0x06].name == "Secondary Heating Source"
     assert zones[0x06].name == "Unknown"
     assert zones[0x06].ii_max == 0x0A

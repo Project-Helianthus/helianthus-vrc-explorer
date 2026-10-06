@@ -74,7 +74,12 @@ from .description_acquisition import acquire_descriptions, finish_description_co
 from .description_scheduler import DescriptionCandidate
 from .director import GROUP_CONFIG, DiscoveredGroup, classify_groups
 from .plan import GroupScanPlan, PlanKey, RegisterTask, build_work_queue, estimate_register_requests
-from .register import namespace_availability_contract, read_register
+from .register import (
+    CONNECTED_DEVICE_GROUPS,
+    InstanceAvailabilityProbe,
+    namespace_availability_contract,
+    read_register,
+)
 from .scan import (
     _UNKNOWN_GROUP_DEFAULT_II_MAX,
     _UNKNOWN_GROUP_DEFAULT_RR_MAX,
@@ -120,7 +125,7 @@ def run_b524_scan(
     planner_preset: PlannerPreset = "recommended",
     probe_constraints: bool = True,
     explicit_plan: dict[PlanKey, GroupScanPlan] | None = None,
-    description_budget: int = 256,
+    description_budget: int | None = None,
     request_budget: int | None = None,
     discover_groups_fn: Any,
     prompt_scan_plan_fn: Any,
@@ -140,6 +145,8 @@ def run_b524_scan(
 
     planner_preset = _normalize_planner_preset(planner_preset)
     research_mode = planner_preset == "research"
+    if description_budget is None:
+        description_budget = 100_000 if planner_preset in {"full", "research"} else 256
     if explicit_plan is not None and planner_preset != "custom":
         raise ValueError("An explicit scan plan requires the custom preset")
     if (
@@ -148,7 +155,7 @@ def run_b524_scan(
         or description_budget < 0
     ):
         raise ValueError("description_budget must be a nonnegative integer")
-    if research_mode and request_budget is None:
+    if planner_preset in {"full", "research"} and request_budget is None:
         request_budget = 10_000
     configured_groups = (
         sorted({item.group for item in explicit_plan.values()})
@@ -564,6 +571,21 @@ def run_b524_scan(
                 transport,
                 f"Identifying instances in group 0x{group.group:02X} ({opcode_label(opcode)})",
             )
+
+            def retain_probe(
+                ii: int,
+                probe: InstanceAvailabilityProbe,
+                *,
+                probe_group: int = group.group,
+                probe_opcode: int = opcode,
+                probe_instances: dict[str, Any] = instances_obj,
+            ) -> None:
+                _record_availability_probes(
+                    artifact, group=probe_group, opcode=probe_opcode, probes={ii: probe}
+                )
+                if probe.present:
+                    _mark_present_instances(probe_instances, instances=(ii,))
+
             probes = _probe_present_instances(
                 transport,
                 dst=dst,
@@ -572,6 +594,8 @@ def run_b524_scan(
                 ii_max=namespace_ii_max,
                 observer=observer,
                 probe_instance_availability_fn=probe_instance_availability_fn,
+                stop_at_first_absence=planner_preset == "recommended" and opcode == 6,
+                on_probe=retain_probe,
                 expected_count=(
                     expected_instance_count(
                         information_values.get(
@@ -589,6 +613,32 @@ def run_b524_scan(
                 opcode=opcode,
                 probes=probes,
             )
+            if opcode == 6 and group.group in CONNECTED_DEVICE_GROUPS:
+                unknown_slots = [
+                    ii for ii, probe in probes.items() if probe.connection_state == "unknown"
+                ]
+                stopped = any(
+                    probe.connection_state == "not_connected" for probe in probes.values()
+                )
+                bounded = planner_preset != "recommended"
+                complete = not unknown_slots and (bounded or stopped)
+                artifact["meta"].setdefault("device_discovery", {})[_hex_u8(group.group)] = {
+                    "read_opcode": "0x06",
+                    "presence_register": "0x0001",
+                    "first_instance": "0x01",
+                    "last_instance_bound": _hex_u8(namespace_ii_max),
+                    "policy": "bounded_audit" if bounded else "first_confirmed_absence",
+                    "absence_semantics": "not_connected_not_physical_absence",
+                    "probed_instances": [_hex_u8(ii) for ii in probes],
+                    "unknown_instances": [_hex_u8(ii) for ii in unknown_slots],
+                    "complete": complete,
+                    "exhaustive_physical_inventory": False,
+                }
+                if not complete:
+                    artifact["meta"]["scan_coverage"]["device_discovery_complete"] = False
+                    artifact["meta"]["scan_coverage"]["qualification_incomplete"] = True
+                else:
+                    artifact["meta"]["scan_coverage"].setdefault("device_discovery_complete", True)
             present_instances = tuple(ii for ii, probe in probes.items() if probe.present)
             count_id = COUNT_GROUP_IDS.get((int(opcode), group.group))
             if count_id is not None:
@@ -600,8 +650,22 @@ def run_b524_scan(
                 ] = {
                     "identifier": _hex_u16(count_id),
                     "expected": expected,
-                    "observed": len(present_instances),
-                    "mismatch": expected is not None and expected != len(present_instances),
+                    "observed": len(
+                        [
+                            ii
+                            for ii in present_instances
+                            if not (opcode == 2 and group.group == 2 and ii == 0x0A)
+                        ]
+                    ),
+                    "mismatch": expected is not None
+                    and expected
+                    != len(
+                        [
+                            ii
+                            for ii in present_instances
+                            if not (opcode == 2 and group.group == 2 and ii == 0x0A)
+                        ]
+                    ),
                     "probed_instances": len(probes),
                 }
             _mark_present_instances(instances_obj, instances=present_instances)
@@ -1015,6 +1079,9 @@ def run_b524_scan(
                 ):
                     entry["writable"] = bool(flags_value & 2)
                     entry["visible"] = bool(flags_value & 1)
+                    entry["attribute_qualification"] = "profile_scoped_inference"
+                    entry["access_role"] = "unknown"
+                    entry["persistence"] = "unknown"
                 if probe_constraints and entry.get("response_state") == "active":
                     flags = entry.get("flags")
                     type_spec = entry.get("type")
@@ -1075,6 +1142,12 @@ def run_b524_scan(
                 instance_key = _hex_u8(task.instance)
                 instance_obj = instances_obj.setdefault(instance_key, {"present": False})
                 if isinstance(instance_obj, dict):
+                    if task.opcode == 2 and task.group == 2 and task.instance == 0x0A:
+                        instance_obj.update(
+                            designation="virtual_dhw",
+                            protocol_role="unknown",
+                            role_qualification="unqualified",
+                        )
                     registers = instance_obj.setdefault("registers", {})
                     registers[_hex_u16(task.register)] = entry
 

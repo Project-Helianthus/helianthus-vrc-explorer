@@ -133,6 +133,10 @@ def finish_description_coverage(
             "not_attempted",
             "request_attempts",
             "retries",
+            "received",
+            "interpreted",
+            "planned",
+            "omitted",
         )
     }
     families: dict[str, dict[str, int]] = {}
@@ -167,6 +171,8 @@ def finish_description_coverage(
                 stats[
                     qualification if qualification in {"matched", "unqualified"} else "unavailable"
                 ] += 1
+                if isinstance(description.get("reply_hex"), str):
+                    stats["received"] += 1
             else:
                 stats["not_attempted"] += 1
                 if not (
@@ -177,6 +183,9 @@ def finish_description_coverage(
                         "reason": "scan incomplete before description acquisition",
                         "request_attempted": False,
                     }
+        stats["planned"] = stats["scheduled"]
+        stats["interpreted"] = stats["matched"]
+        stats["omitted"] = stats["eligible"] - stats["attempted"]
         families[f"0x{opcode:02x}"] = stats
         for key in totals:
             totals[key] += stats[key]

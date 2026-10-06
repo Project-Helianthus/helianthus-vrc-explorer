@@ -7,6 +7,7 @@ from typing import Any
 from ..artifact_schema import migrate_artifact_schema
 from ..scanner.director import GROUP_CONFIG, group_name_for_opcode, group_namespace_profiles
 from ..scanner.identity import operation_label
+from ..schema.parameter_descriptions import attach_bundled_descriptions
 from .browse_models import BrowseTab, RegisterAddress, RegisterRow, TreeNodeRef
 from .register_semantics import entry_display_value_text, visible_rr_keys
 
@@ -69,7 +70,7 @@ def _tab_from_entry(entry: dict[str, Any]) -> BrowseTab:
         return "state"
 
     flags_access = entry.get("flags_access")
-    if flags_access == "config_user":
+    if flags_access in {"writable_not_visible", "writable_visible", "config_user"}:
         return "config"
     if flags_access == "config_installer":
         return "config_limits"
@@ -151,6 +152,8 @@ def _instance_label(
     )
     # Human-friendly numbering: show 1-based index, but always keep the instance ID too.
     ii = _safe_int_hex(instance_key)
+    if namespace_key == "0x02" and _safe_int_hex(group_key) == 2 and ii == 0x0A:
+        return f"Virtual DHW Slot ({instance_key})"
     return f"{base} {ii + 1} ({instance_key})"
 
 
@@ -555,6 +558,7 @@ class _HydratedBrowseStore:
     @classmethod
     def from_artifact(cls, artifact: dict[str, Any]) -> _HydratedBrowseStore:
         artifact, _migration = migrate_artifact_schema(artifact)
+        attach_bundled_descriptions(artifact)
 
         meta = artifact.get("meta")
         if not isinstance(meta, dict):
@@ -876,6 +880,7 @@ class _HydratedBrowseStore:
                         parameter_description = (
                             dict(description_obj) if isinstance(description_obj, dict) else None
                         )
+                        bundled_obj = entry.get("bundled_parameter_description")
                         candidate_name = str(entry.get("candidate_name") or "").strip()
                         candidate_evidence = str(entry.get("candidate_evidence") or "").strip()
                         row = RegisterRow(
@@ -902,6 +907,9 @@ class _HydratedBrowseStore:
                             age_text=age_text,
                             change_indicator="-",
                             parameter_description=parameter_description,
+                            bundled_parameter_description=(
+                                dict(bundled_obj) if isinstance(bundled_obj, dict) else None
+                            ),
                             candidate_name=candidate_name,
                             candidate_evidence=candidate_evidence,
                             search_blob=" ".join(

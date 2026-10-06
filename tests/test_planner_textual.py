@@ -59,7 +59,7 @@ def test_estimate_footer_reports_requests_and_eta() -> None:
         )
     }
     footer = _estimate_footer(states, request_rate_rps=2.0)
-    assert "Plan: 6 requests" in footer
+    assert "Plan: 9 requests" in footer
     assert "ETA:" in footer
     assert "1 plan entries selected" in footer
 
@@ -86,7 +86,7 @@ def test_estimate_footer_uses_exact_register_selectors() -> None:
         )
     }
 
-    assert "Plan: 6 requests" in _estimate_footer(states, request_rate_rps=None)
+    assert "Plan: 9 requests" in _estimate_footer(states, request_rate_rps=None)
 
 
 def test_table_row_values_show_explicit_namespace_column() -> None:

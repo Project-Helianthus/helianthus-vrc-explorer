@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -88,6 +89,23 @@ class _TransientFirstProbeTransport(TransportInterface):
         return self._inner.send(dst, payload)
 
 
+def _write_profile_fixture(path: Path, fixture: dict) -> None:
+    # Keep legacy II00 rows available for explicit replay, and provide the
+    # profile's II01 device row for default connected-device discovery.
+    for gg, group in fixture.get("groups", {}).items():
+        if int(gg, 0) not in {1, 2, 9, 10, 12, 14, 15}:
+            continue
+        instances = group.get("namespaces", {}).get("0x06", {}).get("instances", {})
+        if "0x00" in instances and "0x01" not in instances:
+            row = deepcopy(instances["0x00"])
+            registers = row.setdefault("registers", {})
+            registers.setdefault("0x0001", {"raw_hex": "01", "type": "BOOL", "flags": 1})
+            if registers["0x0001"].get("raw_hex") == "02":
+                registers["0x0001"] = {"raw_hex": "01", "type": "BOOL", "flags": 1}
+            instances["0x01"] = row
+    path.write_text(json.dumps(fixture), encoding="utf-8")
+
+
 def _write_fixture_group_02(
     tmp_path: Path,
     *,
@@ -115,7 +133,7 @@ def _write_fixture_group_02(
         },
     }
     path = tmp_path / "fixture.json"
-    path.write_text(json.dumps(fixture), encoding="utf-8")
+    _write_profile_fixture(path, fixture)
     return path
 
 
@@ -136,7 +154,7 @@ def _write_fixture_group_00(tmp_path: Path) -> Path:
         },
     }
     path = tmp_path / "fixture_group_00.json"
-    path.write_text(json.dumps(fixture), encoding="utf-8")
+    _write_profile_fixture(path, fixture)
     return path
 
 
@@ -180,7 +198,7 @@ def _write_fixture_groups_00_and_01(tmp_path: Path) -> Path:
         },
     }
     path = tmp_path / "fixture_groups_00_and_01.json"
-    path.write_text(json.dumps(fixture), encoding="utf-8")
+    _write_profile_fixture(path, fixture)
     return path
 
 
@@ -251,7 +269,7 @@ def _write_fixture_groups_00_to_05(tmp_path: Path) -> Path:
         },
     }
     path = tmp_path / "fixture_groups_00_to_05.json"
-    path.write_text(json.dumps(fixture), encoding="utf-8")
+    _write_profile_fixture(path, fixture)
     return path
 
 
@@ -276,7 +294,7 @@ def _write_fixture_group_0c_remote(tmp_path: Path) -> Path:
         },
     }
     path = tmp_path / "fixture_group_0c_remote.json"
-    path.write_text(json.dumps(fixture), encoding="utf-8")
+    _write_profile_fixture(path, fixture)
     return path
 
 
@@ -310,7 +328,7 @@ def _write_fixture_group_01_namespaces(tmp_path: Path) -> Path:
         },
     }
     path = tmp_path / "fixture_group_01_namespaces.json"
-    path.write_text(json.dumps(fixture), encoding="utf-8")
+    _write_profile_fixture(path, fixture)
     return path
 
 
@@ -345,7 +363,7 @@ def _write_fixture_unknown_group_69(tmp_path: Path) -> Path:
         },
     }
     path = tmp_path / "fixture_unknown.json"
-    path.write_text(json.dumps(fixture), encoding="utf-8")
+    _write_profile_fixture(path, fixture)
     return path
 
 
@@ -375,7 +393,7 @@ def _write_fixture_unknown_group_69_with_ff(tmp_path: Path) -> Path:
         },
     }
     path = tmp_path / "fixture_unknown_ff.json"
-    path.write_text(json.dumps(fixture), encoding="utf-8")
+    _write_profile_fixture(path, fixture)
     return path
 
 
@@ -396,7 +414,7 @@ def _write_fixture_unknown_descriptor(tmp_path: Path) -> Path:
         },
     }
     path = tmp_path / "fixture_unknown_descriptor.json"
-    path.write_text(json.dumps(fixture), encoding="utf-8")
+    _write_profile_fixture(path, fixture)
     return path
 
 
@@ -432,7 +450,7 @@ def _write_fixture_group_09(tmp_path: Path) -> Path:
         },
     }
     path = tmp_path / "fixture_group_09.json"
-    path.write_text(json.dumps(fixture), encoding="utf-8")
+    _write_profile_fixture(path, fixture)
     return path
 
 
@@ -467,7 +485,7 @@ def _write_fixture_group_09_presence_divergence(tmp_path: Path) -> Path:
         },
     }
     path = tmp_path / "fixture_group_09_presence_divergence.json"
-    path.write_text(json.dumps(fixture), encoding="utf-8")
+    _write_profile_fixture(path, fixture)
     return path
 
 
@@ -518,7 +536,7 @@ def _write_fixture_group_02_dual_namespace(tmp_path: Path) -> Path:
         },
     }
     path = tmp_path / "fixture_group_02_dual_namespace.json"
-    path.write_text(json.dumps(fixture), encoding="utf-8")
+    _write_profile_fixture(path, fixture)
     return path
 
 
@@ -547,7 +565,7 @@ def _write_fixture_group_02_namespace_presence_divergence(tmp_path: Path) -> Pat
         },
     }
     path = tmp_path / "fixture_group_02_namespace_presence_divergence.json"
-    path.write_text(json.dumps(fixture), encoding="utf-8")
+    _write_profile_fixture(path, fixture)
     return path
 
 
@@ -569,7 +587,7 @@ def _write_fixture_group_08(tmp_path: Path) -> Path:
         },
     }
     path = tmp_path / "fixture_group_08.json"
-    path.write_text(json.dumps(fixture), encoding="utf-8")
+    _write_profile_fixture(path, fixture)
     return path
 
 
@@ -761,7 +779,7 @@ def test_scan_b524_does_not_use_unqualified_seeded_hints_for_validation(tmp_path
         },
     }
     fixture_path = tmp_path / "constraint_mismatch.json"
-    fixture_path.write_text(json.dumps(fixture), encoding="utf-8")
+    _write_profile_fixture(fixture_path, fixture)
 
     artifact = scan_b524(
         DummyTransport(fixture_path),
@@ -813,7 +831,7 @@ def test_scan_b524_does_not_flag_remote_seeded_static_constraint_mismatch(
         },
     }
     fixture_path = tmp_path / "remote_constraint_scope.json"
-    fixture_path.write_text(json.dumps(fixture), encoding="utf-8")
+    _write_profile_fixture(fixture_path, fixture)
 
     artifact = scan_b524(
         DummyTransport(fixture_path),
@@ -823,7 +841,7 @@ def test_scan_b524_does_not_flag_remote_seeded_static_constraint_mismatch(
         planner_ui="classic",
     )
 
-    remote_entry = artifact_op_group(artifact, op="0x06", group="0x09")["instances"]["0x00"][
+    remote_entry = artifact_op_group(artifact, op="0x06", group="0x09")["instances"]["0x01"][
         "registers"
     ]["0x0002"]
     assert remote_entry["value"] == 21
@@ -1050,7 +1068,7 @@ def test_artifact_dual_namespace_structure(monkeypatch, tmp_path: Path) -> None:
     assert local_group["availability_contract"]["probe_register"] == "0x0001"
     assert remote_group["availability_contract"]["probe_register"] == "0x0001"
     assert local_group["availability_probes"]["0x00"]["raw_hex"] == "34"
-    assert remote_group["availability_probes"]["0x00"]["raw_hex"] == "01"
+    assert remote_group["availability_probes"]["0x01"]["raw_hex"] == "01"
     assert local_group["instances"]["0x00"]["registers"]["0x0000"]["read_opcode"] == "0x02"
     assert (
         local_group["instances"]["0x00"]["registers"]["0x0000"]["read_opcode_label"]
@@ -1119,15 +1137,15 @@ def test_dual_namespace_presence_is_independent_and_retains_raw_probe_evidence(
     assert remote_ns["availability_contract"]["namespace_relationship"] == "independent"
     assert local_ns["availability_probes"]["0x00"]["present"] is True
     assert local_ns["availability_probes"]["0x00"]["raw_hex"] == "34"
-    assert remote_ns["availability_probes"]["0x00"]["present"] is False
-    assert remote_ns["availability_probes"]["0x00"]["reply_hex"] == "0109010000"
-    assert remote_ns["availability_probes"]["0x00"]["type"] == "BOOL"
+    assert remote_ns["availability_probes"]["0x01"]["present"] is False
+    assert remote_ns["availability_probes"]["0x01"]["reply_hex"] == "0109010000"
+    assert remote_ns["availability_probes"]["0x01"]["type"] == "BOOL"
     assert set(local_ns["instances"]) == {"0x00"}
     assert remote_ns["instances"] == {}
     remote_reads = {
         rr for (opcode, gg, _ii, rr) in transport.register_reads if opcode == 0x06 and gg == 0x09
     }
-    assert remote_reads == {0x0001, 0x0002, 0x0003, 0x0004}
+    assert remote_reads == {0x0001}
 
 
 def test_artifact_single_namespace_unchanged(tmp_path: Path) -> None:
@@ -1147,7 +1165,7 @@ def test_artifact_register_flags_present(tmp_path: Path) -> None:
     entry = regs["0x0002"]
 
     assert entry["flags"] == 0x01
-    assert entry["flags_access"] == "state_stable"
+    assert entry["flags_access"] == "read_only_visible"
     assert entry["read_opcode_label"] == "GetParameter"
 
 
@@ -1255,7 +1273,7 @@ def test_type_hint_propagation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
         },
     }
     fixture_path = tmp_path / "fixture_fw.json"
-    fixture_path.write_text(json.dumps(fixture), encoding="utf-8")
+    _write_profile_fixture(fixture_path, fixture)
 
     map_path = tmp_path / "myvaillant_map.csv"
     map_path.write_text(
@@ -1295,8 +1313,8 @@ def test_type_hint_propagation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
         "0x0004"
     ]
     assert entry["myvaillant_name"] == "radio_device_firmware"
-    assert entry["type"] == "FW"
-    assert entry["value"] == "02.17.03"
+    assert entry["type"] == "FWU"
+    assert entry["value"] == "02.23.03"
 
 
 def test_scan_b524_replays_dual_namespace_fixture_end_to_end(
@@ -1406,13 +1424,13 @@ def test_scan_b524_replays_dual_namespace_fixture_end_to_end(
 
     assert local_fw["type"] == "FW"
     assert local_fw["value"] == "03.17.02"
-    assert local_fw["flags_access"] == "state_stable"
+    assert local_fw["flags_access"] == "read_only_visible"
     assert local_fw["myvaillant_name"] == "radio_device_firmware_local"
-    assert remote_fw["type"] == "FW"
-    assert remote_fw["value"] == "02.17.03"
-    assert remote_fw["flags_access"] == "valid"
+    assert remote_fw["type"] == "FWU"
+    assert remote_fw["value"] == "02.23.03"
+    assert remote_fw["flags_access"] == "read_only_visible"
     assert remote_fw["myvaillant_name"] == "radio_device_firmware"
-    assert accessory_fw["type"] == "FW"
+    assert accessory_fw["type"] == "FWU"
     assert accessory_fw["value"] == "08.05.00"
     assert accessory_fw["read_opcode_label"] == "GetDeviceParameter"
     assert accessory_fw["myvaillant_name"] == "device_firmware_version"
@@ -1594,7 +1612,7 @@ def test_scan_b524_recommended_plan_keeps_namespace_rr_max(tmp_path: Path) -> No
     assert plan["multi_op"] is True
     assert plan["operations"]["0x02"]["rr_max"] == "0x000f"
     assert plan["operations"]["0x06"]["rr_max"] == "0x0035"
-    assert artifact["meta"]["scan_plan"]["estimated_register_requests"] == 602
+    assert artifact["meta"]["scan_plan"]["estimated_register_requests"] == 640
 
 
 def test_scan_b524_instance_discovery_runs_local_namespace_before_remote(
@@ -1626,7 +1644,7 @@ def test_scan_b524_instance_discovery_runs_local_namespace_before_remote(
         },
     }
     fixture_path = tmp_path / "fixture_group_09_0a_order.json"
-    fixture_path.write_text(json.dumps(fixture), encoding="utf-8")
+    _write_profile_fixture(fixture_path, fixture)
 
     transport = RecordingTransport(DummyTransport(fixture_path))
 
@@ -1912,7 +1930,7 @@ def test_scan_b524_textual_planner_receives_remote_heating_source_rows(
     assert name_by_key[(0x01, 0x02)] == "Hot Water Circuit"
     assert name_by_key[(0x01, 0x06)] == "Primary Heating Source"
     by_key = {(group.group, group.opcode): group for group in planner_groups}
-    assert by_key[(0x01, 0x06)].ii_max == 0x07
+    assert by_key[(0x01, 0x06)].ii_max == 0x08
 
     default_plan = captured["default_plan"]
     assert isinstance(default_plan, dict)
@@ -1961,7 +1979,7 @@ def test_scan_b524_textual_planner_excludes_uncharacterized_remote_rows(
     assert (0x04, 0x06) not in by_key
     assert (0x05, 0x06) not in by_key
     assert by_key[(0x04, 0x02)].ii_max == 0x01
-    assert by_key[(0x02, 0x06)].ii_max == 0x07
+    assert by_key[(0x02, 0x06)].ii_max == 0x08
 
     default_plan = captured["default_plan"]
     assert isinstance(default_plan, dict)
@@ -2003,7 +2021,7 @@ def test_scan_b524_textual_planner_uses_remote_presence_for_remote_namespace_row
     assert isinstance(planner_groups, list)
     by_key = {(group.group, group.opcode): group for group in planner_groups}
     assert by_key[(0x02, 0x02)].present_instances == (0x00, 0x01, 0x02)
-    assert by_key[(0x02, 0x06)].present_instances == (0x00, 0x02)
+    assert by_key[(0x02, 0x06)].present_instances == (0x01, 0x02)
 
 
 def test_scan_b524_textual_full_preset_keeps_exploratory_rows_visible_but_unselected(
@@ -2128,7 +2146,7 @@ def test_scan_b524_textual_planner_does_not_reuse_remote_presence_for_local_spec
     planner_groups = captured["groups"]
     assert isinstance(planner_groups, list)
     by_key = {(group.group, group.opcode): group for group in planner_groups}
-    assert by_key[(0x0C, 0x06)].present_instances == (0x00,)
+    assert by_key[(0x0C, 0x06)].present_instances == (0x01,)
     assert (0x0C, 0x02) not in by_key
 
 
@@ -2290,7 +2308,7 @@ def test_scan_b524_textual_planner_uses_remote_presence_for_op06_rows(
     by_key = {(group.group, group.opcode): group for group in planner_groups}
 
     assert by_key[(0x01, 0x06)].present_instances == (0x01,)
-    assert by_key[(0x02, 0x06)].present_instances == (0x00, 0x01)
+    assert by_key[(0x02, 0x06)].present_instances == (0x01,)
     assert (0x03, 0x06) not in by_key
     assert (0x05, 0x06) not in by_key
     assert by_key[(0x0A, 0x06)].present_instances == (0x03,)
@@ -2334,7 +2352,7 @@ def test_scan_b524_textual_planner_does_not_leak_remote_presence_into_local_mirr
     planner_groups = captured["groups"]
     assert isinstance(planner_groups, list)
     by_key = {(group.group, group.opcode): group for group in planner_groups}
-    assert by_key[(0x0C, 0x06)].present_instances == (0x00,)
+    assert by_key[(0x0C, 0x06)].present_instances == (0x01,)
     assert (0x0C, 0x02) not in by_key
 
 

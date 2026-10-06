@@ -133,7 +133,7 @@ def test_signed_description_limits(type_spec: str, spans: bytes) -> None:
     assert desc["max"] == 5
 
 
-def test_date_description_checks_calendar_range_and_day_step() -> None:
+def test_date_description_checks_range_without_inventing_day_step() -> None:
     from helianthus_vrc_explorer.protocol.parser import encode_typed_value
 
     desc = decode_parameter_description(
@@ -151,13 +151,15 @@ def test_date_description_checks_calendar_range_and_day_step() -> None:
             value="2026-01-03",
             encoded=encode_typed_value("HDA:3", "2026-01-03"),
         )
-        is None
+        == "unvalidated"
     )
-    assert "step" in validate_parameter_edit(
+    assert desc["step"] is None
+    assert desc["step_raw_hex"] == "020000"
+    assert "range" in validate_parameter_edit(
         desc,
         type_spec="HDA:3",
-        value="2026-01-02",
-        encoded=encode_typed_value("HDA:3", "2026-01-02"),
+        value="2026-01-06",
+        encoded=encode_typed_value("HDA:3", "2026-01-06"),
     )
 
 
@@ -238,7 +240,7 @@ def test_full_preset_audits_slots_while_recommended_uses_sparse_count() -> None:
         present_instances=(3, 7),
         expected_count=2,
     )
-    assert build_plan_from_preset([group], preset="recommended")[(2, 2)].instances == (3, 7)
+    assert build_plan_from_preset([group], preset="recommended")[(2, 2)].instances == (3, 7, 10)
     assert build_plan_from_preset([group], preset="full")[(2, 2)].instances == tuple(range(11))
     assert build_plan_from_preset([group], preset="research")[(2, 2)].instances == tuple(range(11))
 
@@ -278,7 +280,8 @@ def test_default_scan_keeps_system_information_separate_and_targets_writable_des
     group = artifact["operations"]["0x02"]["groups"]["0x02"]
     assert group["descriptor_observed"] is None
     assert artifact["meta"]["scan_plan"]["groups"]["0x02"]["operations"]["0x02"]["instances"] == [
-        "0x03"
+        "0x03",
+        "0x0a",
     ]
     entry = group["instances"]["0x03"]["registers"]["0x0002"]
     assert entry["parameter_description"]["qualification"] == "matched"

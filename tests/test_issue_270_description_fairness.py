@@ -82,6 +82,10 @@ def test_actual_attempt_budget_preserves_every_remote_reserved_first_attempt() -
         "not_attempted": 36,
         "request_attempts": 166,
         "retries": 36,
+        "received": 130,
+        "interpreted": 130,
+        "planned": 166,
+        "omitted": 94,
     }
     assert remote["eligible"] == remote["scheduled"] == remote["attempted"] == 32
     assert remote["matched"] == remote["request_attempts"] == 32

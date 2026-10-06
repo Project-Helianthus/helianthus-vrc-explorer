@@ -124,6 +124,8 @@ def test_research_orchestration_discovers_later_instances_through_secondary_anch
     assert build_register_read_payload(2, 0x69, 3, 0) in transport.payloads
     assert build_register_read_payload(2, 0x69, 3, 1) in transport.payloads
     assert artifact["meta"]["scan_coverage"]["completed"] is True
+    assert artifact["meta"]["scan_coverage"]["device_discovery_complete"] is False
+    assert artifact["meta"]["scan_coverage"]["qualification_incomplete"] is True
 
 
 @pytest.mark.parametrize("preset", ["recommended", "full", "research", "custom"])

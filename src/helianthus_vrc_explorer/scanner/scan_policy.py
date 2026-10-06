@@ -21,7 +21,7 @@ MAX_EXPLICIT_SCALAR_REQUESTS: Final[int] = 100_000
 
 _PROFILE_GROUPS_BY_OPCODE: Final[dict[RegisterOpcode, frozenset[int]]] = {
     0x02: frozenset({0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x08, 0x09}),
-    0x06: frozenset({0x01, 0x02, 0x08, 0x09, 0x0A, 0x0C}),
+    0x06: frozenset({0x01, 0x02, 0x08, 0x09, 0x0A, 0x0C, 0x0E, 0x0F}),
 }
 _READ_OPCODES: Final[tuple[RegisterOpcode, ...]] = (0x02, 0x06)
 
@@ -119,7 +119,7 @@ def parse_scan_plan(data: object) -> dict[PlanKey, GroupScanPlan]:
             )
         if previous is None:
             plan[key] = group_plan
-            total_requests += len(instances) * len(registers)
+            total_requests += len(group_plan.instances) * len(registers)
             _require_request_limit(total_requests)
     return plan
 

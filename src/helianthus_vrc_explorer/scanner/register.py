@@ -44,12 +44,14 @@ class RegisterEntry(TypedDict):
     # FLAGS byte extracted from the reply, if present.
     writable: NotRequired[bool]
     visible: NotRequired[bool]
+    attribute_qualification: NotRequired[str]
+    access_role: NotRequired[str]
+    persistence: NotRequired[str]
     parameter_description: NotRequired[dict[str, Any]]
     candidate_name: NotRequired[str]
     candidate_evidence: NotRequired[str]
     flags: int | None
-    # Protocol-level DT byte interpretation:
-    # bit1=config-vs-simple; bit0 meaning depends on opcode namespace.
+    # Profile-scoped attribute hints; never role or persistence semantics.
     reply_kind: str | None
     # Access semantics derived from FLAGS and payload shape.
     flags_access: str | None
@@ -96,6 +98,12 @@ class InstanceAvailabilityProbe:
     present: bool
     contract: NamespaceAvailabilityContract
     evidence: RegisterEntry | None
+    connection_state: Literal["connected", "not_connected", "unknown"] | None = None
+
+
+# Connected-device predicates in the characterized controller profile. GG08
+# has an unknown status byte, rather than this Boolean connection contract.
+CONNECTED_DEVICE_GROUPS: Final[frozenset[int]] = frozenset({1, 2, 9, 10, 12, 14, 15})
 
 
 def opcodes_for_group(group: int) -> list[RegisterOpcode]:
@@ -190,18 +198,28 @@ def namespace_availability_contract(
             description="Solar circuit availability requires a decodable float payload.",
         )
 
-    if opcode == 0x06:
+    if opcode == 0x06 and group in CONNECTED_DEVICE_GROUPS:
         return NamespaceAvailabilityContract(
             source="heuristic_probe",
             namespace_relationship=relationship,
             probe_register=0x0001,
             probe_type_hint="BOOL",
-            positive_when="any generic header register RR=0x0001..0x0004 decodes and is not absent",
+            positive_when="profile-qualified device_connected Boolean is true",
             description=(
-                "Remote namespace presence is derived from the generic header block "
-                "RR=0x0001..0x0004; RR=0x0001 (device_connected) is the universal "
-                "presence indicator for all device-slot groups."
+                "Connected-device coverage uses RR=0x0001 in the characterized "
+                "controller profile. False means not connected, not physical absence. "
+                "Other readable headers may retain inventory and do not override it."
             ),
+        )
+
+    if opcode == 0x06:
+        return NamespaceAvailabilityContract(
+            source="heuristic_probe",
+            namespace_relationship=relationship,
+            probe_register=1,
+            probe_type_hint="UCH",
+            positive_when="readable header provides inventory evidence only",
+            description="No attached-device predicate is qualified for this namespace.",
         )
 
     if group in {0x09, 0x0A} and opcode == 0x02:
@@ -252,18 +270,10 @@ def namespace_availability_contract(
 
 
 def _interpret_flags(flags: int, *, response_len: int, opcode: int = 0x02) -> str:
-    """Interpret the leading FLAGS byte of a B524 register reply.
+    """Expose profile-scoped visibility/writability hints from the raw byte.
 
-    The flags byte uses 2 effective bits (bits 2-7 are always zero) with
-    the same {0,1,2,3} structure on both opcodes but different semantics:
-
-    OP=0x02 (controller registers):
-        bit1 = writable, bit0 = stable vs volatile
-        0 = volatile_ro, 1 = stable_ro, 2 = technical_rw, 3 = user_rw
-
-    OP=0x06 (device-slot registers):
-        bit1 = config (instance-independent), bit0 = valid data (vs sentinel)
-        0 = volatile_sentinel, 1 = volatile_valid, 2 = config_sentinel, 3 = config_valid
+    Neither access role nor persistence nor value freshness is encoded by these
+    labels. Reserved bits and the diagnostic/native-envelope join stay unknown.
     """
 
     if response_len == 1:
@@ -271,30 +281,12 @@ def _interpret_flags(flags: int, *, response_len: int, opcode: int = 0x02) -> st
             return "absent"
         return "unknown_status"
 
-    if opcode == 0x06:
-        match flags:
-            case 0x00:
-                return "invalid"
-            case 0x01:
-                return "valid"
-            case 0x02:
-                return "config_sentinel"
-            case 0x03:
-                return "config_valid"
-            case _:
-                return "unknown"
-
-    match flags:
-        case 0x00:
-            return "state_volatile"
-        case 0x01:
-            return "state_stable"
-        case 0x02:
-            return "config_installer"
-        case 0x03:
-            return "config_user"
-        case _:
-            return "unknown"
+    return {
+        0: "read_only_not_visible",
+        1: "read_only_visible",
+        2: "writable_not_visible",
+        3: "writable_visible",
+    }.get(flags, "unknown")
 
 
 def _reply_kind(
@@ -311,14 +303,7 @@ def _reply_kind(
         return None
     if flags not in {0x00, 0x01, 0x02, 0x03}:
         return None
-    class_kind = "config" if flags & 0x02 else "simple"
-    if opcode == 0x06:
-        # Remote namespace: bit0 indicates validity vs sentinel/invalid payload.
-        value_kind = "valid" if flags & 0x01 else "invalid"
-        return f"{class_kind}_{value_kind}"
-    # Local namespace: bit0 indicates stable vs volatile.
-    value_kind = "stable" if flags & 0x01 else "volatile"
-    return f"{class_kind}_{value_kind}"
+    return _interpret_flags(flags, response_len=response_len, opcode=opcode)
 
 
 def _looks_like_nul_terminated_latin1(value_bytes: bytes) -> bool:
@@ -605,6 +590,15 @@ def read_register(
         }
 
     raw_hex = value_bytes.hex()
+    if (
+        opcode == 6
+        and group in CONNECTED_DEVICE_GROUPS
+        and register == 4
+        and type_hint in (None, "FW")
+    ):
+        # Characterized OP06 headers use numeric bytes, including 0x0c/0x0f.
+        # Do not reinterpret unrelated/local legacy FW codecs as numeric.
+        type_hint = "FWU"
     if type_hint is not None:
         try:
             value = parse_typed_value(type_hint, value_bytes)
@@ -707,6 +701,20 @@ def probe_instance_availability(
     present = False
     response_state = entry.get("response_state")
 
+    if opcode == 0x06 and group in CONNECTED_DEVICE_GROUPS:
+        state: Literal["connected", "not_connected", "unknown"] = "unknown"
+        if entry.get("error") is None and response_state == "active":
+            if entry.get("value") is True:
+                state = "connected"
+            elif entry.get("value") is False:
+                state = "not_connected"
+        return InstanceAvailabilityProbe(
+            present=state == "connected",
+            contract=contract,
+            evidence=entry,
+            connection_state=state,
+        )
+
     if response_state in {"nack", "timeout"}:
         return InstanceAvailabilityProbe(present=False, contract=contract, evidence=entry)
 
@@ -756,12 +764,11 @@ def probe_instance_availability(
 
     if opcode == 0x06:
         header_evidence = entry
-        entry_reply_kind = entry.get("reply_kind")
         present = (
             entry["error"] is None
             and entry.get("flags_access") != "absent"
-            and isinstance(entry_reply_kind, str)
-            and entry_reply_kind.endswith("_valid")
+            and entry.get("response_state") == "active"
+            and entry.get("raw_hex") is not None
             and entry["value"] is True
         )
         # VE13 analysis: The audit recommended skipping RR=0x0002-0x0004
@@ -782,12 +789,11 @@ def probe_instance_availability(
                     register=register_id,
                     type_hint=type_hint,
                 )
-                header_reply_kind = header_entry.get("reply_kind")
                 if (
                     header_entry["error"] is None
                     and header_entry.get("flags_access") != "absent"
-                    and isinstance(header_reply_kind, str)
-                    and header_reply_kind.endswith("_valid")
+                    and header_entry.get("response_state") == "active"
+                    and header_entry.get("raw_hex") is not None
                 ):
                     present = True
                     header_evidence = header_entry

@@ -326,10 +326,10 @@ def test_flags_interpretation_single_byte() -> None:
 
 
 def test_flags_interpretation_multi_byte() -> None:
-    assert _interpret_flags(0x00, response_len=7) == "state_volatile"
-    assert _interpret_flags(0x01, response_len=7) == "state_stable"
-    assert _interpret_flags(0x02, response_len=7) == "config_installer"
-    assert _interpret_flags(0x03, response_len=7) == "config_user"
+    assert _interpret_flags(0x00, response_len=7) == "read_only_not_visible"
+    assert _interpret_flags(0x01, response_len=7) == "read_only_visible"
+    assert _interpret_flags(0x02, response_len=7) == "writable_not_visible"
+    assert _interpret_flags(0x03, response_len=7) == "writable_visible"
 
 
 def test_opcodes_for_group_dual_namespace() -> None:
@@ -375,7 +375,7 @@ def test_read_register_infers_numeric_time_with_invalid_date_month() -> None:
 
     assert entry["reply_hex"] == "030035000e3803"
     assert entry["flags"] == 0x03
-    assert entry["flags_access"] == "config_user"
+    assert entry["flags_access"] == "writable_visible"
     assert entry["raw_hex"] == "0e3803"
     assert entry["type"] == "HTI"
     assert entry["value"] == "14:56:03"
@@ -416,22 +416,22 @@ def test_reply_kind_uses_opcode_specific_semantics_for_bit0() -> None:
         type_hint="BOOL",
     )
 
-    assert local["reply_kind"] == "simple_stable"
-    assert remote["reply_kind"] == "simple_valid"
+    assert local["reply_kind"] == "read_only_visible"
+    assert remote["reply_kind"] == "read_only_visible"
 
 
 def test_is_instance_present_group_0c_requires_valid_register_response() -> None:
     transport = _AlwaysDecodeErrorTransport()
 
     assert is_instance_present(transport, dst=0x15, group=0x0C, instance=0x00) is False
-    assert transport.calls == 4
+    assert transport.calls == 1
 
 
 def test_is_instance_present_group_0c_transport_errors_do_not_count_as_present() -> None:
     transport = _AlwaysTransportErrorTransport()
 
     assert is_instance_present(transport, dst=0x15, group=0x0C, instance=0x00) is False
-    assert transport.calls == 4
+    assert transport.calls == 1
 
 
 def test_is_instance_present_group_0c_true_on_first_valid_register_response() -> None:
@@ -442,11 +442,11 @@ def test_is_instance_present_group_0c_true_on_first_valid_register_response() ->
     assert transport.calls == 1
 
 
-def test_is_instance_present_group_0c_accepts_secondary_header_evidence() -> None:
+def test_is_instance_present_group_0c_keeps_disconnected_inventory_separate() -> None:
     transport = _BoolFalseTransport()
 
-    assert is_instance_present(transport, dst=0x15, group=0x0C, instance=0x00) is True
-    assert transport.calls == 2
+    assert is_instance_present(transport, dst=0x15, group=0x0C, instance=0x00) is False
+    assert transport.calls == 1
 
 
 def test_instance_present_cylinder_found(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -461,7 +461,7 @@ def test_instance_present_cylinder_found(monkeypatch: pytest.MonkeyPatch) -> Non
             "type": "EXP",
             "value": 50.0,
             "error": None,
-            "flags_access": "state_stable",
+            "flags_access": "read_only_visible",
         }
 
     monkeypatch.setattr(register, "read_register", _fake_read_register)
@@ -499,8 +499,9 @@ def test_instance_present_buffer(monkeypatch: pytest.MonkeyPatch) -> None:
             "type": "BOOL",
             "value": True,
             "error": None,
-            "flags_access": "state_stable",
-            "reply_kind": "simple_valid",
+            "flags_access": "read_only_visible",
+            "reply_kind": "read_only_visible",
+            "response_state": "active",
         }
 
     monkeypatch.setattr(register, "read_register", _fake_read_register)
@@ -547,7 +548,7 @@ def test_is_instance_present_group_09_remote_requires_all_header_registers_absen
         )
         is False
     )
-    assert calls == [0x0001, 0x0002, 0x0003, 0x0004]
+    assert calls == [0x0001]
 
 
 def test_is_instance_present_group_09_remote_accepts_device_connected_true(
@@ -561,8 +562,9 @@ def test_is_instance_present_group_09_remote_accepts_device_connected_true(
             "type": "BOOL",
             "value": True,
             "error": None,
-            "flags_access": "state_stable",
-            "reply_kind": "simple_valid",
+            "flags_access": "read_only_visible",
+            "reply_kind": "read_only_visible",
+            "response_state": "active",
         }
 
     monkeypatch.setattr(register, "read_register", _fake_read_register)
@@ -596,8 +598,9 @@ def test_is_instance_present_group_09_remote_accepts_secondary_header_evidence(
                 "type": "BOOL",
                 "value": False,
                 "error": None,
-                "flags_access": "state_stable",
-                "reply_kind": "simple_valid",
+                "flags_access": "read_only_visible",
+                "reply_kind": "read_only_visible",
+                "response_state": "active",
             }
         if register_id == 0x0002:
             return {
@@ -605,8 +608,9 @@ def test_is_instance_present_group_09_remote_accepts_secondary_header_evidence(
                 "type": "UCH",
                 "value": 0x15,
                 "error": None,
-                "flags_access": "state_stable",
-                "reply_kind": "simple_valid",
+                "flags_access": "read_only_visible",
+                "reply_kind": "read_only_visible",
+                "response_state": "active",
             }
         return {
             "raw_hex": None,
@@ -627,9 +631,9 @@ def test_is_instance_present_group_09_remote_accepts_secondary_header_evidence(
             instance=0x00,
             opcode=0x06,
         )
-        is True
+        is False
     )
-    assert calls == [(0x0001, "BOOL"), (0x0002, "UCH")]
+    assert calls == [(0x0001, "BOOL")]
 
 
 def test_probe_instance_availability_group_09_local_uses_rr_0001(monkeypatch) -> None:
@@ -644,7 +648,7 @@ def test_probe_instance_availability_group_09_local_uses_rr_0001(monkeypatch) ->
             "type": "UCH",
             "value": 0x34,
             "error": None,
-            "flags_access": "state_stable",
+            "flags_access": "read_only_visible",
         }
 
     monkeypatch.setattr(register, "read_register", _fake_read_register)
@@ -675,16 +679,18 @@ def test_probe_instance_availability_group_09_remote_uses_generic_header_probe(m
                 "type": "BOOL",
                 "value": False,
                 "error": None,
-                "flags_access": "state_stable",
-                "reply_kind": "simple_valid",
+                "flags_access": "read_only_visible",
+                "reply_kind": "read_only_visible",
+                "response_state": "active",
             }
         return {
             "raw_hex": "15",
             "type": "UCH",
             "value": 0x15,
             "error": None,
-            "flags_access": "state_stable",
-            "reply_kind": "simple_valid",
+            "flags_access": "read_only_visible",
+            "reply_kind": "read_only_visible",
+            "response_state": "active",
         }
 
     monkeypatch.setattr(register, "read_register", _fake_read_register)
@@ -697,10 +703,10 @@ def test_probe_instance_availability_group_09_remote_uses_generic_header_probe(m
         opcode=0x06,
     )
 
-    assert probe.present is True
+    assert probe.present is False
     assert probe.contract.probe_register == 0x0001
     assert probe.contract.probe_type_hint == "BOOL"
-    assert calls == [(0x06, 0x0001, "BOOL"), (0x06, 0x0002, "UCH")]
+    assert calls == [(0x06, 0x0001, "BOOL")]
 
 
 def test_probe_instance_availability_group_09_remote_ignores_invalid_header_fallback(
@@ -719,8 +725,9 @@ def test_probe_instance_availability_group_09_remote_ignores_invalid_header_fall
                 "type": "BOOL",
                 "value": False,
                 "error": None,
-                "flags_access": "state_stable",
-                "reply_kind": "simple_valid",
+                "flags_access": "read_only_visible",
+                "reply_kind": "read_only_visible",
+                "response_state": "active",
             }
         if register_id == 0x0002:
             return {
@@ -728,8 +735,8 @@ def test_probe_instance_availability_group_09_remote_ignores_invalid_header_fall
                 "type": "UCH",
                 "value": 0xFF,
                 "error": None,
-                "flags_access": "state_stable",
-                "reply_kind": "simple_invalid",
+                "flags_access": "read_only_visible",
+                "reply_kind": "read_only_not_visible",
             }
         return {
             "raw_hex": None,
@@ -751,12 +758,7 @@ def test_probe_instance_availability_group_09_remote_ignores_invalid_header_fall
     )
 
     assert probe.present is False
-    assert calls == [
-        (0x06, 0x0001, "BOOL"),
-        (0x06, 0x0002, "UCH"),
-        (0x06, 0x0003, "UCH"),
-        (0x06, 0x0004, "FW"),
-    ]
+    assert calls == [(0x06, 0x0001, "BOOL")]
 
 
 def test_probe_instance_availability_group_09_remote_ignores_invalid_primary_header(
@@ -775,8 +777,8 @@ def test_probe_instance_availability_group_09_remote_ignores_invalid_primary_hea
                 "type": "BOOL",
                 "value": True,
                 "error": None,
-                "flags_access": "state_stable",
-                "reply_kind": "simple_invalid",
+                "flags_access": "read_only_visible",
+                "reply_kind": "read_only_not_visible",
             }
         return {
             "raw_hex": None,
@@ -798,12 +800,7 @@ def test_probe_instance_availability_group_09_remote_ignores_invalid_primary_hea
     )
 
     assert probe.present is False
-    assert calls == [
-        (0x06, 0x0001, "BOOL"),
-        (0x06, 0x0002, "UCH"),
-        (0x06, 0x0003, "UCH"),
-        (0x06, 0x0004, "FW"),
-    ]
+    assert calls == [(0x06, 0x0001, "BOOL")]
 
 
 def test_probe_instance_availability_remote_empty_reply_does_not_mark_slot_present(
@@ -838,7 +835,7 @@ def test_probe_instance_availability_remote_empty_reply_does_not_mark_slot_prese
 
     assert probe.present is False
     assert calls == [
-        (0x06, 0x0001, "BOOL"),
+        (0x06, 0x0001, "UCH"),
         (0x06, 0x0002, "UCH"),
         (0x06, 0x0003, "UCH"),
         (0x06, 0x0004, "FW"),
@@ -857,7 +854,7 @@ def test_probe_instance_availability_group_04_local_uses_rr_0004(monkeypatch) ->
             "type": "EXP",
             "value": 1.0,
             "error": None,
-            "flags_access": "state_stable",
+            "flags_access": "read_only_visible",
             "response_state": "active",
         }
 
