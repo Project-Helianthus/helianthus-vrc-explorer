@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any, Final, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from ..protocol.b524 import RegisterOpcode
 from ..ui.planner import PlannerPreset
@@ -11,6 +11,7 @@ from .director import GROUP_CONFIG, ClassifiedGroup, group_name_for_opcode, grou
 from .identity import opcode_label, operation_label
 from .plan import GroupScanPlan, PlanKey, make_plan_key
 from .register import opcodes_for_group
+from .scan_policy import profile_opcodes
 
 if TYPE_CHECKING:
     from .b524_probe import GroupMetadata
@@ -114,15 +115,8 @@ def _is_multi_operation_group(group: int) -> bool:
     return len(_group_opcodes(group)) > 1
 
 
-_LOCAL_ALWAYS_ON: Final[frozenset[int]] = frozenset({0x00, 0x01, 0x04, 0x05})
-_LOCAL_PRESENT_GATED: Final[frozenset[int]] = frozenset({0x02, 0x03, 0x08, 0x09})
-
-
 def _planner_group_is_recommended(*, group: int, opcode: RegisterOpcode) -> bool:
-    if opcode == _LOCAL_REGISTER_OPCODE:
-        return group in _LOCAL_ALWAYS_ON or group in _LOCAL_PRESENT_GATED
-    # OP=0x06 (remote): all groups are recommended if they have present instances.
-    return True
+    return opcode in profile_opcodes(group, "recommended")
 
 
 def _instance_discovery_targets(

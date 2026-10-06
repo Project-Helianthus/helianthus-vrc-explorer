@@ -26,6 +26,7 @@ from .director import (
     discover_groups,
 )
 from .observer import ScanObserver
+from .plan import GroupScanPlan, PlanKey
 from .register import (
     RegisterEntry,
     probe_instance_availability,
@@ -358,6 +359,9 @@ def scan_b524(
     planner_ui: PlannerUiMode = "auto",
     planner_preset: PlannerPreset = "recommended",
     probe_constraints: bool = True,
+    explicit_plan: dict[PlanKey, GroupScanPlan] | None = None,
+    description_budget: int = 256,
+    request_budget: int | None = None,
 ) -> dict[str, Any]:
     """Scan a VRC regulator using B524 and return a JSON-serializable artifact.
 
@@ -383,6 +387,9 @@ def scan_b524(
         planner_ui=planner_ui,
         planner_preset=planner_preset,
         probe_constraints=probe_constraints,
+        explicit_plan=explicit_plan,
+        description_budget=description_budget,
+        request_budget=request_budget,
         discover_groups_fn=discover_groups,
         prompt_scan_plan_fn=prompt_scan_plan,
         hotkey_reader_cls=_PlannerHotkeyReader,
@@ -407,6 +414,9 @@ def scan_vrc(
     planner_ui: PlannerUiMode = "auto",
     planner_preset: PlannerPreset = "recommended",
     probe_constraints: bool = True,
+    explicit_plan: dict[PlanKey, GroupScanPlan] | None = None,
+    description_budget: int = 256,
+    request_budget: int | None = None,
 ) -> dict[str, Any]:
     """Run VRC scan flow: B524 primary scan, optional B555/B516/B509 dumps."""
 
@@ -422,6 +432,9 @@ def scan_vrc(
         planner_ui=planner_ui,
         planner_preset=planner_preset,
         probe_constraints=probe_constraints,
+        explicit_plan=explicit_plan,
+        description_budget=description_budget,
+        request_budget=request_budget,
     )
     meta = artifact.get("meta")
     if isinstance(meta, dict) and bool(meta.get("incomplete", False)):

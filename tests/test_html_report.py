@@ -1,6 +1,47 @@
 from __future__ import annotations
 
+import json
+import re
+
 from helianthus_vrc_explorer.ui.html_report import render_html_report
+
+
+def test_html_report_preserves_partial_scan_coverage_and_escapes_group_evidence() -> None:
+    scan_coverage = {
+        "preset": "research",
+        "scope": "declared_profile",
+        "request_budget": 5,
+        "actual_requests": 5,
+        "completed": False,
+        "unknown_groups": ["</script><script>alert(1)</script>"],
+    }
+    descriptions = {
+        "eligible": 10,
+        "scheduled": 5,
+        "attempted": 3,
+        "matched": 1,
+        "unavailable": 1,
+        "unqualified": 1,
+        "budget_skipped": 5,
+        "not_attempted": 2,
+        "request_budget": 256,
+        "effective_request_budget": 5,
+        "by_read_operation": {"0x06": {"eligible": 5, "not_attempted": 2}},
+    }
+    html = render_html_report(
+        {"meta": {"scan_coverage": scan_coverage, "parameter_description_coverage": descriptions}}
+    )
+    match = re.search(
+        r'<script id="artifact-data" type="application/json">(.*?)</script>', html, re.S
+    )
+    assert match is not None
+    embedded = json.loads(match.group(1))
+    assert embedded["meta"]["scan_coverage"] == scan_coverage
+    assert embedded["meta"]["parameter_description_coverage"] == descriptions
+    assert "</script><script>alert(1)</script>" not in html
+    assert 'key: "scan_coverage"' in html
+    assert '"Descriptions not attempted", descriptions.not_attempted' in html
+    assert '"scheduled", "attempted"' in html
 
 
 def test_html_report_supports_b509_tab_and_dual_naming() -> None:

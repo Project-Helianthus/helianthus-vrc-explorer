@@ -293,5 +293,5 @@ def test_issue_208_planner_opcode_fidelity_keeps_namespace_specific_keys() -> No
     assert sorted(plan) == [local_key, remote_key]
     assert plan[local_key].opcode == 0x02
     assert plan[remote_key].opcode == 0x06
-    assert plan[local_key].rr_max == 0x0010
-    assert plan[remote_key].rr_max == 0x0020
+    assert plan[local_key].rr_max == 0x00FF
+    assert plan[remote_key].rr_max == 0x00FF

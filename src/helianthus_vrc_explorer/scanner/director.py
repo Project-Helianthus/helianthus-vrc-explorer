@@ -13,6 +13,7 @@ from ..transport.base import (
     TransportInterface,
     TransportTimeout,
 )
+from ..transport.instrumented import ScanRequestBudgetExceeded
 from .observer import ScanObserver
 
 logger = logging.getLogger(__name__)
@@ -329,6 +330,13 @@ def discover_groups(
             try:
                 resp = transport.send(dst, payload)
                 last_response = resp
+            except ScanRequestBudgetExceeded as exc:
+                exc.system_information = [
+                    (item.group, item.descriptor, item.raw_hex) for item in discovered
+                ]
+                if last_response is not None:
+                    exc.system_information.append((gg, float("nan"), last_response.hex()))
+                raise
             except TransportTimeout:
                 if retrying:
                     logger.warning(

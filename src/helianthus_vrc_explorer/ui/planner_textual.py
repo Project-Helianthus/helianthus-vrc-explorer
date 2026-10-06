@@ -12,6 +12,7 @@ from ..scanner.plan import (
     parse_int_set,
     parse_int_token,
 )
+from ..scanner.scan_policy import validate_scalar_request_limit
 from .planner import (
     PlannerGroup,
     PlannerPreset,
@@ -28,6 +29,7 @@ class _EditableGroup:
     enabled: bool
     rr_max: int
     instances: tuple[int, ...]
+    registers: tuple[int, ...] | None = None
 
 
 def _namespace_text(group: PlannerGroup) -> str:
@@ -45,8 +47,31 @@ def _table_row_values(state: _EditableGroup) -> tuple[str, str, str, str, str, s
         _namespace_text(group),
         f"{group.descriptor:.1f}",
         _format_instances(group, state.instances, enabled=state.enabled),
-        f"0x{state.rr_max:04X}",
+        _format_register_scope(state),
     )
+
+
+def _format_register_scope(state: _EditableGroup) -> str:
+    if state.registers is None:
+        return f"0x{state.rr_max:04X}"
+    return ",".join(f"0x{register:04X}" for register in state.registers)
+
+
+def _parse_register_scope(spec: str) -> tuple[int, tuple[int, ...] | None]:
+    """Parse a legacy RR ceiling or an exact comma/range selector scope."""
+
+    raw = spec.strip()
+    if not raw:
+        raise ValueError("Empty register scope")
+    if not any(marker in raw for marker in (",", "..", "-")):
+        rr_max = parse_int_token(raw)
+        if not (0x0000 <= rr_max <= 0xFFFF):
+            raise ValueError("RR_max must be in 0x0000..0xFFFF")
+        return rr_max, None
+    registers = tuple(parse_int_set(raw, min_value=0x0000, max_value=0xFFFF))
+    if not registers:
+        raise ValueError("Register scope must not be empty")
+    return max(registers), registers
 
 
 def _format_instances(group: PlannerGroup, instances: tuple[int, ...], *, enabled: bool) -> str:
@@ -94,6 +119,7 @@ def _estimate_footer(
             opcode=state.group.opcode,
             rr_max=state.rr_max,
             instances=state.instances,
+            registers=state.registers,
         )
         for (key, state) in states.items()
         if state.enabled
@@ -264,6 +290,7 @@ def run_textual_scan_plan(
                         enabled=False,
                         rr_max=group.rr_max,
                         instances=instances,
+                        registers=None,
                     )
                 else:
                     self._states[group.key] = _EditableGroup(
@@ -271,6 +298,7 @@ def run_textual_scan_plan(
                         enabled=True,
                         rr_max=group_plan.rr_max,
                         instances=group_plan.instances,
+                        registers=group_plan.registers,
                     )
 
         def compose(self) -> ComposeResult:
@@ -381,6 +409,7 @@ def run_textual_scan_plan(
                 state.enabled = True
                 state.rr_max = planned.rr_max
                 state.instances = planned.instances
+                state.registers = planned.registers
             self._refresh_table()
             self._set_help(f"Applied preset: {preset}")
 
@@ -391,18 +420,15 @@ def run_textual_scan_plan(
                 self._focus_table()
                 return
             try:
-                rr_max = parse_int_token(value)
+                rr_max, registers = _parse_register_scope(value)
             except ValueError as exc:
-                self._set_help(f"Invalid RR_max: {exc}")
+                self._set_help(f"Invalid RR scope: {exc}")
                 self._suppress_enter_reactivation()
                 self._focus_table()
                 return
-            if not (0x0000 <= rr_max <= 0xFFFF):
-                self._set_help("RR_max must be in 0x0000..0xFFFF")
-                self._suppress_enter_reactivation()
-                self._focus_table()
-                return
-            self._states[self._editing_group].rr_max = rr_max
+            state = self._states[self._editing_group]
+            state.rr_max = rr_max
+            state.registers = registers
             self._refresh_table()
             edited_group = self._states[self._editing_group].group
             self._set_help(f"Updated RR_max for {edited_group.prompt_label}")
@@ -487,13 +513,14 @@ def run_textual_scan_plan(
             if key is None:
                 return
             self._editing_group = key
-            current = self._states[key].rr_max
-            planner_group = self._states[key].group
+            state = self._states[key]
+            current = _format_register_scope(state)
+            planner_group = state.group
             self.push_screen(
                 _InputDialog(
                     title=f"RR_max for {planner_group.prompt_label}",
-                    value=f"0x{current:04X}",
-                    hint="Hex or decimal. Enter=save Esc=cancel",
+                    value=current,
+                    hint="RR_max or exact list/range. Enter=save Esc=cancel",
                 ),
                 self._edit_rr_max,
             )
@@ -549,10 +576,16 @@ def run_textual_scan_plan(
                     opcode=state.group.opcode,
                     rr_max=state.rr_max,
                     instances=state.instances,
+                    registers=state.registers,
                 )
                 for (key, state) in sorted(self._states.items())
                 if state.enabled
             }
+            try:
+                validate_scalar_request_limit(plan)
+            except ValueError as exc:
+                self._set_help(f"Invalid scan plan: {exc}")
+                return
             self.exit(plan)
 
         def action_cancel(self) -> None:

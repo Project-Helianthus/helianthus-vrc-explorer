@@ -37,61 +37,81 @@ This file is generated from the CLI's `--help` output. Refresh it with
  Scan a VRC regulator using B524 (GetExtendedRegisters).
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ --transport                                          <str>   Transport: tcp (ebusd hex) or ens/enh (enhanced eBUS    │
-│                                                              adapter).                                               │
-│                                                              [default: tcp]                                          │
-│ --dst                                                <str>   Destination eBUS address (e.g. 0x15) or auto (default). │
-│                                                              [default: auto]                                         │
-│ --source-address                                     <str>   Source initiator address for enhanced transport.        │
-│                                                              Ignored for tcp.                                        │
-│                                                              [default: 0xF7]                                         │
-│ --host                                               <str>   ebusd host (TCP). [default: 127.0.0.1]                  │
-│ --port                                               <int>   ebusd port (TCP). [default: 8888]                       │
-│ --dry-run                                                    Replay a scan fixture using DummyTransport (no device   │
-│                                                              I/O).                                                   │
-│ --output-dir                                         <path>  Directory to write the scan JSON artifact to.           │
-│                                                              [default: .]                                            │
-│ --ebusd-csv-path                                     <path>  Optional ebusd configuration CSV (e.g. 15.720.csv) used │
-│                                                              to annotate register names.                             │
-│                                                              [env var: HELIA_EBUSD_CSV_PATH]                         │
-│ --myvaillant-map-path                                <path>  Optional myVaillant-equivalence mapping CSV used to     │
-│                                                              annotate register leaf names.                           │
-│                                                              [env var: HELIA_MYVAILLANT_MAP_PATH]                    │
-│ --trace-file                                         <path>  Write an ebusd request/response trace log to this file. │
-│                                                              [env var: HELIA_EBUSD_TRACE_PATH]                       │
-│ --b509-range                                         <str>   B509 register range to dump (repeatable), format:       │
-│                                                              0x0000..0x00FF. Requires --b509-dump. If omitted,       │
-│                                                              defaults to 0x0000..0x00FF.                             │
-│ --b509-dump                --no-b509-dump                    Opt-in B509 register dump (disabled by default). Use    │
-│                                                              --b509-range to narrow/expand ranges.                   │
-│                                                              [default: no-b509-dump]                                 │
-│ --b555-dump                --no-b555-dump                    Opt-in read-only B555 timer dump (A3/A4/A5). Disabled   │
-│                                                              by default to keep the standard B524/B509 scan path     │
-│                                                              unchanged.                                              │
-│                                                              [default: no-b555-dump]                                 │
-│ --b516-dump                --no-b516-dump                    Opt-in read-only B516 energy dump (active               │
-│                                                              request/response only). Disabled by default to keep the │
-│                                                              standard B524/B555/B509 scan path unchanged.            │
-│                                                              [default: no-b516-dump]                                 │
-│ --planner-ui                                         <str>   Interactive planner mode: disabled, auto, textual, or   │
-│                                                              classic.                                                │
-│                                                              [default: disabled]                                     │
-│ --preset                                             <str>   Planner preset: recommended, full, research, or custom. │
-│                                                              `full` expands all groups to full instance slots;       │
-│                                                              `research` enables all groups with expanded RR ranges.  │
-│                                                              Legacy aliases: aggressive->full, exhaustive->research, │
-│                                                              conservative->recommended.                              │
-│                                                              [default: recommended]                                  │
-│ --no-tips                                                    Hide scan header tips in interactive terminal mode.     │
-│ --redact                                                     Redact device identity fields (e.g. serial number) in   │
-│                                                              console output.                                         │
-│ --probe-constraints        --no-probe-constraints            Acquire complete OP01/OP07 descriptions for observed    │
-│                                                              writable parameters. Enabled by default, bounded to 256 │
-│                                                              additional requests; descriptions validate later        │
-│                                                              offline edits. Missing descriptions remain explicit     │
-│                                                              warnings.                                               │
-│                                                              [default: probe-constraints]                            │
-│ --help                 -h                                    Show this message and exit.                             │
+│ --transport                                          <str>               Transport: tcp (ebusd hex) or ens/enh       │
+│                                                                          (enhanced eBUS adapter).                    │
+│                                                                          [default: tcp]                              │
+│ --dst                                                <str>               Destination eBUS address (e.g. 0x15) or     │
+│                                                                          auto (default).                             │
+│                                                                          [default: auto]                             │
+│ --source-address                                     <str>               Source initiator address for enhanced       │
+│                                                                          transport. Ignored for tcp.                 │
+│                                                                          [default: 0xF7]                             │
+│ --host                                               <str>               ebusd host (TCP). [default: 127.0.0.1]      │
+│ --port                                               <int>               ebusd port (TCP). [default: 8888]           │
+│ --dry-run                                                                Replay a scan fixture using DummyTransport  │
+│                                                                          (no device I/O).                            │
+│ --output-dir                                         <path>              Directory to write the scan JSON artifact   │
+│                                                                          to.                                         │
+│                                                                          [default: .]                                │
+│ --ebusd-csv-path                                     <path>              Optional ebusd configuration CSV (e.g.      │
+│                                                                          15.720.csv) used to annotate register       │
+│                                                                          names.                                      │
+│                                                                          [env var: HELIA_EBUSD_CSV_PATH]             │
+│ --myvaillant-map-path                                <path>              Optional myVaillant-equivalence mapping CSV │
+│                                                                          used to annotate register leaf names.       │
+│                                                                          [env var: HELIA_MYVAILLANT_MAP_PATH]        │
+│ --trace-file                                         <path>              Write an ebusd request/response trace log   │
+│                                                                          to this file.                               │
+│                                                                          [env var: HELIA_EBUSD_TRACE_PATH]           │
+│ --b509-range                                         <str>               B509 register range to dump (repeatable),   │
+│                                                                          format: 0x0000..0x00FF. Requires            │
+│                                                                          --b509-dump. If omitted, defaults to        │
+│                                                                          0x0000..0x00FF.                             │
+│ --b509-dump                --no-b509-dump                                Opt-in B509 register dump (disabled by      │
+│                                                                          default). Use --b509-range to narrow/expand │
+│                                                                          ranges.                                     │
+│                                                                          [default: no-b509-dump]                     │
+│ --b555-dump                --no-b555-dump                                Opt-in read-only B555 timer dump            │
+│                                                                          (A3/A4/A5). Disabled by default to keep the │
+│                                                                          standard B524/B509 scan path unchanged.     │
+│                                                                          [default: no-b555-dump]                     │
+│ --b516-dump                --no-b516-dump                                Opt-in read-only B516 energy dump (active   │
+│                                                                          request/response only). Disabled by default │
+│                                                                          to keep the standard B524/B555/B509 scan    │
+│                                                                          path unchanged.                             │
+│                                                                          [default: no-b516-dump]                     │
+│ --planner-ui                                         <str>               Interactive planner mode: disabled, auto,   │
+│                                                                          textual, or classic.                        │
+│                                                                          [default: disabled]                         │
+│ --preset                                             <str>               Planner preset: recommended, full,          │
+│                                                                          research, or custom. `full` audits declared │
+│                                                                          profile slots independently of OP00 counts; │
+│                                                                          `research` performs bounded, non-exhaustive │
+│                                                                          exploration. Legacy aliases:                │
+│                                                                          aggressive->full, exhaustive->research,     │
+│                                                                          conservative->recommended.                  │
+│                                                                          [default: recommended]                      │
+│ --no-tips                                                                Hide scan header tips in interactive        │
+│                                                                          terminal mode.                              │
+│ --redact                                                                 Redact device identity fields (e.g. serial  │
+│                                                                          number) in console output.                  │
+│ --probe-constraints        --no-probe-constraints                        Acquire complete OP01/OP07 descriptions for │
+│                                                                          observed writable parameters. Enabled by    │
+│                                                                          default with a fair configurable request    │
+│                                                                          budget; descriptions validate later offline │
+│                                                                          edits. Missing descriptions remain explicit │
+│                                                                          warnings.                                   │
+│                                                                          [default: probe-constraints]                │
+│ --scan-plan                                          <file>              Version 1 JSON plan file for custom         │
+│                                                                          OP02/OP06, GG, II and RR16 selectors.       │
+│ --description-budget                                 <int range> [x>=0]  Maximum description requests, shared fairly │
+│                                                                          between OP01 and OP07 (unused shares        │
+│                                                                          borrowed).                                  │
+│                                                                          [default: 256]                              │
+│ --request-budget                                     <int range> [x>=1]  Maximum actual B524 sends including         │
+│                                                                          retries; research defaults to 10000.        │
+│                                                                          Exhaustion saves a partial artifact.        │
+│ --help                 -h                                                Show this message and exit.                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
