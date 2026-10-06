@@ -111,7 +111,7 @@ This file is generated from the CLI's `--help` output. Refresh it with
 │                                                                          parameters, bounded to 100000, for          │
 │                                                                          full/research.                              │
 │ --request-budget                                     <int range> [x>=1]  Maximum actual B524 sends including         │
-│                                                                          retries; research defaults to 10000.        │
+│                                                                          retries; full/research default to 10000.    │
 │                                                                          Exhaustion saves a partial artifact.        │
 │ --help                 -h                                                Show this message and exit.                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯

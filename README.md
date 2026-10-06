@@ -243,6 +243,8 @@ GPL-3.0-or-later. See `LICENSE`.
 
 ### Profile-scoped discovery and offline descriptions
 
+- Characterized OP06 device headers use numeric-byte firmware triplets (`FWU`): raw `02 11 00` displays `02.17.00`; `FF FF FF` remains unavailable. Raw components qualify the firmware profile and do not establish SemVer. Generic legacy `FW` decoding remains available for older/unrelated artifacts.
+
 - Local circuit scans always include `GG02/II0A` (`virtual_dhw` designation), independently of `circuit_count`. Acquisition does not confirm an active physical circuit; protocol role remains unknown.
 - OP06 connected-device discovery begins at II01 in the characterized profile and is independent of OP00. Recommended stops at the first qualified not-connected Boolean; full/research audit the configured bound. Transport/decode unknowns and retained inventory remain separate.
 - Bundled parameter descriptions are displayed offline in HTML and browse, with exact model/firmware, namespace and instance qualification. Rechecks report `matches`, `differs`, `unavailable`, or `profile_mismatch`. Bundled metadata never substitutes for current-target validation.

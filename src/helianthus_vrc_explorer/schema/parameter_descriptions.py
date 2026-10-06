@@ -29,9 +29,9 @@ def _device_identity(artifact: dict[str, Any], group: str, instance: str) -> dic
         .get("registers", {})
     )
 
-    def observed_bytes(register: str, codec: str, width: int) -> str | None:
+    def observed_bytes(register: str, codecs: tuple[str, ...], width: int) -> str | None:
         entry = registers.get(register, {})
-        if entry.get("type") != codec or entry.get("value") is None:
+        if entry.get("type") not in codecs or entry.get("value") is None:
             return None
         try:
             raw = bytes.fromhex(entry.get("raw_hex", ""))
@@ -42,8 +42,8 @@ def _device_identity(artifact: dict[str, Any], group: str, instance: str) -> dic
         return raw.hex()
 
     return {
-        "class_raw": observed_bytes("0x0002", "HEX:1", 1),
-        "firmware_raw": observed_bytes("0x0004", "FW", 3),
+        "class_raw": observed_bytes("0x0002", ("HEX:1",), 1),
+        "firmware_raw": observed_bytes("0x0004", ("FW", "FWU"), 3),
     }
 
 

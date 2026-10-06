@@ -560,7 +560,7 @@ __ARTIFACT_JSON__
         if (!Number.isFinite(n) || n <= 0) return [];
         if (n === 1) return ["UCH", "I8", "BOOL", "HEX:1"];
         if (n === 2) return ["UIN", "I16", "HEX:2"];
-        if (n === 3) return ["HDA:3", "HTI", "FW", "HEX:3"];
+        if (n === 3) return ["HDA:3", "HTI", "FWU", "FW", "HEX:3"];
         if (n === 4) return ["EXP", "U32", "I32", "HEX:4"];
         return [`HEX:${n}`, "STR:*"];
       }
@@ -680,6 +680,11 @@ __ARTIFACT_JSON__
                 .toString()
                 .padStart(2, "0")}`;
               return { value: txt, error: null };
+            }
+            case "FWU": {
+              expectLen(3);
+              if (bytes.every((value) => value === 255)) throw new Error("firmware unavailable");
+              return {value: bytes.map((value) => value.toString().padStart(2, "0")).join("."), error: null};
             }
             case "FW": {
               expectLen(3);

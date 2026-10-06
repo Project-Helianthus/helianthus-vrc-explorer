@@ -733,7 +733,7 @@ def scan(
         "--request-budget",
         min=1,
         help=(
-            "Maximum actual B524 sends including retries; research defaults to 10000. "
+            "Maximum actual B524 sends including retries; full/research default to 10000. "
             "Exhaustion saves a partial artifact."
         ),
     ),

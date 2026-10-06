@@ -1029,6 +1029,7 @@ if _TEXTUAL_IMPORT_ERROR is None:
                 normalized == "HDA:3"
                 or normalized == "HTI"
                 or normalized == "FW"
+                or normalized == "FWU"
                 or normalized.startswith("HEX:")
             ):
                 try:

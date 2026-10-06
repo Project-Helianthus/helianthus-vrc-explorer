@@ -590,6 +590,15 @@ def read_register(
         }
 
     raw_hex = value_bytes.hex()
+    if (
+        opcode == 6
+        and group in CONNECTED_DEVICE_GROUPS
+        and register == 4
+        and type_hint in (None, "FW")
+    ):
+        # Characterized OP06 headers use numeric bytes, including 0x0c/0x0f.
+        # Do not reinterpret unrelated/local legacy FW codecs as numeric.
+        type_hint = "FWU"
     if type_hint is not None:
         try:
             value = parse_typed_value(type_hint, value_bytes)

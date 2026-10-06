@@ -38,6 +38,28 @@ def test_generated_html_hti_override_decodes_numeric_bytes() -> None:
     assert all(row["value"] is None and row["error"] for row in parsed[4:])
 
 
+def test_generated_html_fwu_override_preserves_numeric_triplets() -> None:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node is required for the generated HTML decoder smoke test")
+    html = render_html_report({})
+    start = html.index("function parseTypedValue(")
+    end = html.index("function formatValue(", start)
+    cases = [[2, 17, 0], [12, 1, 0], [1, 15, 0], [255, 255, 255]]
+    script = html[start:end] + (
+        "console.log(JSON.stringify("
+        + json.dumps(cases)
+        + '.map(bytes => parseTypedValue("FWU", bytes))));'
+    )
+    result = subprocess.run(
+        [node, "-e", script], check=True, text=True, capture_output=True, timeout=10
+    )
+    parsed = json.loads(result.stdout)
+    assert [row["value"] for row in parsed[:3]] == ["02.17.00", "12.01.00", "01.15.00"]
+    assert all(row["error"] is None for row in parsed[:3])
+    assert parsed[3]["value"] is None and parsed[3]["error"]
+
+
 def test_html_report_preserves_partial_scan_coverage_and_escapes_group_evidence() -> None:
     scan_coverage = {
         "preset": "research",

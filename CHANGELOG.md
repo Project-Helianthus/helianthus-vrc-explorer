@@ -12,5 +12,6 @@
 - Plan all eligible OP01/OP07 descriptions in full/research profiles, retaining explicit budget and qualification coverage.
 - Keep date/time STEP opaque when its encoding is unknown; correct legacy FLAGS role/persistence interpretations.
 - Correct `HTI` parsing, offline encoding and HTML type overrides to use numeric `HH MM SS` bytes.
+- Decode characterized OP06 remote-header firmware as numeric byte components (`FWU`), preserving the generic legacy `FW` codec.
 
 Artifacts remain schema 2.3. Older artifacts are readable, and their stored values are retained. Replay raw traces or apply explicit type overrides to recompute times decoded by earlier versions. Offline edits do not write to devices. Profile coverage is bounded and does not establish exhaustive wire-space discovery or live-write qualification.

@@ -1313,8 +1313,8 @@ def test_type_hint_propagation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
         "0x0004"
     ]
     assert entry["myvaillant_name"] == "radio_device_firmware"
-    assert entry["type"] == "FW"
-    assert entry["value"] == "02.17.03"
+    assert entry["type"] == "FWU"
+    assert entry["value"] == "02.23.03"
 
 
 def test_scan_b524_replays_dual_namespace_fixture_end_to_end(
@@ -1426,11 +1426,11 @@ def test_scan_b524_replays_dual_namespace_fixture_end_to_end(
     assert local_fw["value"] == "03.17.02"
     assert local_fw["flags_access"] == "read_only_visible"
     assert local_fw["myvaillant_name"] == "radio_device_firmware_local"
-    assert remote_fw["type"] == "FW"
-    assert remote_fw["value"] == "02.17.03"
+    assert remote_fw["type"] == "FWU"
+    assert remote_fw["value"] == "02.23.03"
     assert remote_fw["flags_access"] == "read_only_visible"
     assert remote_fw["myvaillant_name"] == "radio_device_firmware"
-    assert accessory_fw["type"] == "FW"
+    assert accessory_fw["type"] == "FWU"
     assert accessory_fw["value"] == "08.05.00"
     assert accessory_fw["read_opcode_label"] == "GetDeviceParameter"
     assert accessory_fw["myvaillant_name"] == "device_firmware_version"
