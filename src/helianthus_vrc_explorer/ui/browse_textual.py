@@ -438,6 +438,7 @@ if _TEXTUAL_IMPORT_ERROR is None:
                 "Raw",
                 "Unit",
                 "FLAGS Access",
+                "Descriptions",
                 "Last Update",
                 "Age",
                 "Δ",
@@ -617,6 +618,7 @@ if _TEXTUAL_IMPORT_ERROR is None:
                     raw_hex,
                     row.unit,
                     row.access_flags,
+                    row.description_text,
                     last_update_text,
                     age_text,
                     change_indicator,
@@ -1158,13 +1160,17 @@ if _TEXTUAL_IMPORT_ERROR is None:
                 canonical_value = new_value_obj
             description_obj = entry.get("parameter_description")
             description = description_obj if isinstance(description_obj, dict) else None
-            identity_matches = description is not None and all(
-                description.get(key) == expected
-                for key, expected in (
-                    ("read_opcode", row.address.read_opcode),
-                    ("group", row.group_key),
-                    ("instance", row.instance_key),
-                    ("register", row.register_key),
+            identity_matches = (
+                description is not None
+                and description.get("target_profile_match", True) is True
+                and all(
+                    description.get(key) == expected
+                    for key, expected in (
+                        ("read_opcode", row.address.read_opcode),
+                        ("group", row.group_key),
+                        ("instance", row.instance_key),
+                        ("register", row.register_key),
+                    )
                 )
             )
             validation = validate_parameter_edit(
@@ -1179,6 +1185,9 @@ if _TEXTUAL_IMPORT_ERROR is None:
             validation_label = (
                 "Description validation: passed"
                 if validation is None
+                else "Format and limits checked; STEP encoding unknown. Edit not fully validated."
+                if description is not None
+                and description.get("validation_scope") == "format_and_range"
                 else "WARNING: no matching parameter description; this edit is unvalidated."
             )
             new_value_text = _fmt_value_text(canonical_value)

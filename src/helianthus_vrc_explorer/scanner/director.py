@@ -61,7 +61,7 @@ GROUP_CONFIG: Final[dict[int, GroupConfig]] = {
         "name_by_opcode": {0x02: "Hot Water Circuit", 0x06: "Primary Heating Source"},
         "namespace_opcodes": [0x02, 0x06],
         "rr_max_by_opcode": {0x02: 0x0013, 0x06: 0x0015},
-        "ii_max_by_opcode": {0x02: 0x00, 0x06: 0x07},
+        "ii_max_by_opcode": {0x02: 0x00, 0x06: 0x08},
     },
     0x02: {
         "desc": 1.0,
@@ -72,7 +72,7 @@ GROUP_CONFIG: Final[dict[int, GroupConfig]] = {
         "name_by_opcode": {0x02: "Heating Circuits", 0x06: "Secondary Heating Source"},
         "namespace_opcodes": [0x02, 0x06],
         "rr_max_by_opcode": {0x02: 0x0025, 0x06: 0x0015},
-        "ii_max_by_opcode": {0x02: 0x0A, 0x06: 0x07},
+        "ii_max_by_opcode": {0x02: 0x0A, 0x06: 0x08},
     },
     0x03: {
         "desc": 1.0,

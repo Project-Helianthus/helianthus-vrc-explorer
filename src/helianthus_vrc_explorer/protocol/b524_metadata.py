@@ -39,6 +39,7 @@ _WIDTHS = {
     "I32": 4,
     "EXP": 4,
     "HDA:3": 3,
+    "HTI": 3,
 }
 
 
@@ -76,23 +77,23 @@ def decode_parameter_description(
     try:
         lower = parse_typed_value(normalized, spans[0])
         upper = parse_typed_value(normalized, spans[1])
-        if normalized == "HDA:3":
-            if spans[2][2] != 0:
-                raise ValueError("Unsupported date step encoding")
-            step: object = int.from_bytes(spans[2][:2], "little")
+        if normalized in {"HDA:3", "HTI"}:
+            # STEP is named by the operation; its calendar/time encoding is
+            # not established by the scalar's three-byte current-value format.
+            step: object = None
         else:
             step = parse_typed_value(normalized, spans[2])
     except ValueParseError as exc:
         raise ValueError(str(exc)) from exc
-    if normalized != "HDA:3":
+    if normalized not in {"HDA:3", "HTI"}:
         values = (lower, upper, step)
         if any(not isinstance(v, (int, float)) or not math.isfinite(v) for v in values):
             raise ValueError("Description has non-finite or non-numeric limits")
-    if not isinstance(step, (int, float)) or step < 0:
+    if step is not None and (not isinstance(step, (int, float)) or step < 0):
         raise ValueError("Description has inconsistent step")
-    if normalized == "HDA:3":
+    if normalized in {"HDA:3", "HTI"}:
         if not isinstance(lower, str) or not isinstance(upper, str) or lower > upper:
-            raise ValueError("Description has inconsistent date limits")
+            raise ValueError("Description has inconsistent calendar/time limits")
     elif (
         not isinstance(lower, (int, float)) or not isinstance(upper, (int, float)) or lower > upper
     ):
@@ -109,9 +110,12 @@ def decode_parameter_description(
         "min": lower,
         "max": upper,
         "step": step,
+        "step_raw_hex": spans[2].hex(),
+        "step_qualification": "unknown" if step is None else "decoded",
+        "validation_scope": "format_and_range" if step is None else "format_range_and_step",
         "reply_hex": response.hex(),
         "source": "complete_description",
-        "decoder_revision": "b524-description/v1",
+        "decoder_revision": "b524-description/v2",
     }
 
 
@@ -132,7 +136,9 @@ def validate_parameter_edit(
     try:
         candidate = parse_typed_value(type_spec, encoded)
         lower, upper, step = description["min"], description["max"], description["step"]
-        if not isinstance(step, (int, float)) or not math.isfinite(step) or step < 0:
+        if step is not None and (
+            not isinstance(step, (int, float)) or not math.isfinite(step) or step < 0
+        ):
             return "Description has an invalid step"
         if type_spec.strip().upper() == "HDA:3":
             candidate_date = date.fromisoformat(str(candidate))
@@ -140,6 +146,10 @@ def validate_parameter_edit(
             if not lower_date <= candidate_date <= upper_date:
                 return "Value is outside the described range"
             delta = (candidate_date - lower_date).days
+        elif type_spec.strip().upper() == "HTI":
+            if not isinstance(candidate, str) or not lower <= candidate <= upper:
+                return "Value is outside the described range"
+            delta = 0
         else:
             if not isinstance(candidate, (int, float)) or not math.isfinite(candidate):
                 return "Value is non-finite or has an invalid format"
@@ -148,6 +158,8 @@ def validate_parameter_edit(
             if not lower <= candidate <= upper:
                 return "Value is outside the described range"
             delta = candidate - lower
+        if step is None:
+            return "unvalidated"
         if step > 0:
             quotient = delta / step
             if not math.isfinite(quotient) or not math.isclose(

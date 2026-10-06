@@ -9,6 +9,7 @@ from typing import Any
 
 from ..artifact_schema import migrate_artifact_schema
 from ..scanner.director import group_name_for_opcode
+from ..schema.parameter_descriptions import attach_bundled_descriptions
 from .emphasis import html_star_bold
 
 
@@ -951,19 +952,16 @@ __ARTIFACT_JSON__
         return rrKeys.slice(0, lastKeep + 1);
       }
 
-      // Decompose a compound flags_access into individual property badges.
-      // OP=0x02: 0=state(volatile), 1=state(stable), 2=config(installer), 3=config(user)
-      // OP=0x06: 0=volatile+sentinel, 1=volatile+valid, 2=config+sentinel, 3=config+valid
+      // Raw attributes provide profile-scoped hints, not privilege or storage.
       function flagBadges(accessValue) {
         switch (accessValue) {
-          case "state_volatile":    return [{text: "state",    cls: "flag-state"},   {text: "volatile", cls: "flag-volatile"}];
-          case "state_stable":      return [{text: "state",    cls: "flag-state"},   {text: "stable",   cls: "flag-stable"}];
-          case "config_installer":  return [{text: "config",   cls: "flag-config"},  {text: "installer", cls: "flag-installer"}];
-          case "config_user":       return [{text: "config",   cls: "flag-config"},  {text: "user",     cls: "flag-user"}];
-          case "valid":             return [{text: "valid",    cls: "flag-valid"}];
-          case "invalid":           return [{text: "invalid",  cls: "flag-invalid"}];
-          case "config_valid":      return [{text: "config",   cls: "flag-config"},  {text: "valid",    cls: "flag-valid"}];
-          case "config_sentinel":   return [{text: "config",   cls: "flag-config"},  {text: "sentinel", cls: "flag-sentinel"}];
+          case "read_only_not_visible": return [{text:"read-only hint",cls:"flag-state"},{text:"not-visible hint",cls:"flag-other"}];
+          case "read_only_visible": return [{text:"read-only hint",cls:"flag-state"},{text:"visible hint",cls:"flag-other"}];
+          case "writable_not_visible": return [{text:"writable hint",cls:"flag-config"},{text:"not-visible hint",cls:"flag-other"}];
+          case "writable_visible": return [{text:"writable hint",cls:"flag-config"},{text:"visible hint",cls:"flag-other"}];
+          case "state_volatile": case "state_stable": case "config_installer": case "config_user":
+          case "valid": case "invalid": case "config_valid": case "config_sentinel":
+            return [{text:"legacy attribute interpretation (unqualified)",cls:"flag-other"}];
           default:                  return [{text: accessValue, cls: "flag-other"}];
         }
       }
@@ -1480,8 +1478,10 @@ __ARTIFACT_JSON__
             ["Preset", scan.preset], ["Configured scope", scan.scope],
             ["Request budget", scan.request_budget], ["Actual requests", scan.actual_requests],
             ["Scan completed", scan.completed], ["Unknown groups", Array.isArray(scan.unknown_groups) ? scan.unknown_groups.join(", ") : "unknown"],
+            ["Device discovery qualified", scan.device_discovery_complete], ["Qualification incomplete", scan.qualification_incomplete],
             ["Description request budget", descriptions.request_budget], ["Effective description budget", descriptions.effective_request_budget],
             ["Description candidates", descriptions.eligible], ["Descriptions scheduled", descriptions.scheduled], ["Descriptions attempted", descriptions.attempted],
+            ["Descriptions received", descriptions.received], ["Descriptions interpreted", descriptions.interpreted], ["Descriptions omitted", descriptions.omitted],
             ["Descriptions matched", descriptions.matched], ["Descriptions unavailable", descriptions.unavailable],
             ["Descriptions unqualified", descriptions.unqualified], ["Descriptions skipped by budget", descriptions.budget_skipped],
             ["Descriptions not attempted", descriptions.not_attempted],
@@ -1491,7 +1491,7 @@ __ARTIFACT_JSON__
           for (const opcode of Object.keys(families).sort()) {
             const stats = families[opcode];
             if (!stats || typeof stats !== "object") continue;
-            for (const name of ["eligible", "scheduled", "attempted", "matched", "unavailable", "unqualified", "budget_skipped", "not_attempted", "request_attempts", "retries"]) {
+            for (const name of ["eligible", "planned", "scheduled", "attempted", "received", "interpreted", "matched", "unavailable", "unqualified", "budget_skipped", "omitted", "not_attempted", "request_attempts", "retries"]) {
               rows.push([`${opcode} ${name}`, stats[name]]);
             }
           }
@@ -1917,6 +1917,13 @@ __ARTIFACT_JSON__
               }
 
               const description = entry.parameter_description;
+              const bundled = entry.bundled_parameter_description;
+              if (bundled && typeof bundled === "object") {
+                const bundledEl = document.createElement("div");
+                bundledEl.className = "cell-raw";
+                bundledEl.textContent = `Bundled baseline (${bundled.verification || "not_verified"}): ${bundled.type || "unknown"} · min=${formatValue(bundled.min)} · max=${formatValue(bundled.max)} · step=${formatValue(bundled.step)}. Current-target verification is separate.`;
+                td.appendChild(bundledEl);
+              }
               if (description && typeof description === "object") {
                 const descriptionEl = document.createElement("div");
                 descriptionEl.className = "cell-raw";
@@ -1934,7 +1941,8 @@ __ARTIFACT_JSON__
                     `width=${formatValue(description.width)}`,
                     `min=${formatValue(description.min)}`,
                     `max=${formatValue(description.max)}`,
-                    `step=${formatValue(description.step)}`,
+                    `step=${description.step_qualification === "unknown" ? "unknown" : formatValue(description.step)}`,
+                    description.validation_scope,
                     description.reply_hex,
                   ].filter((part) => typeof part === "string" || typeof part === "number");
                   descriptionEl.textContent = `Matched ${descriptionLabel}: ${fields.join(" · ")}`;
@@ -2171,6 +2179,7 @@ __ARTIFACT_JSON__
 def render_html_report(artifact: dict[str, Any], *, title: str | None = None) -> str:
     # Ensure operations-first structure for consistent JS traversal.
     artifact, _migration = migrate_artifact_schema(artifact)
+    attach_bundled_descriptions(artifact)
     meta = artifact.get("meta")
     # Build group_name_map from operations-first structure
     group_name_map: dict[str, dict[str, str]] = {}

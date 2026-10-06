@@ -53,9 +53,9 @@ def test_estimate_register_requests() -> None:
             group=0x01, opcode=0x02, rr_max=0x0001, instances=(0x00,)
         ),
     }
-    # GG=0x02: 2 instances * (3+1) regs = 8
+    # GG=0x02: 2 ordinary instances plus mandatory II0A * (3+1) = 12
     # GG=0x01: 1 instance * (1+1) regs = 2
-    assert estimate_register_requests(plan) == 10
+    assert estimate_register_requests(plan) == 14
 
 
 def test_format_int_set_compacts_ranges() -> None:
@@ -78,6 +78,7 @@ def test_build_work_queue_skips_done_tasks() -> None:
     assert tasks == [
         RegisterTask(group=0x02, opcode=0x02, instance=0x00, register=0x0000),
         RegisterTask(group=0x02, opcode=0x02, instance=0x00, register=0x0002),
+        *(RegisterTask(group=2, opcode=2, instance=10, register=rr) for rr in range(3)),
     ]
 
 
@@ -91,10 +92,10 @@ def test_explicit_register_selectors_drive_queue_estimate_and_metadata() -> None
     )
     plan = {make_plan_key(0x02, 0x02): group_plan}
 
-    assert estimate_register_requests(plan) == 6
+    assert estimate_register_requests(plan) == 9
     assert build_work_queue(plan, done=set()) == [
         RegisterTask(group=0x02, opcode=0x02, instance=ii, register=rr)
-        for ii in (0x00, 0x03)
+        for ii in (0x00, 0x03, 0x0A)
         for rr in (0x0002, 0x0010, 0x0100)
     ]
     assert group_plan.to_meta()["registers"] == ["0x0002", "0x0010", "0x0100"]
@@ -213,6 +214,7 @@ def test_full_uses_all_declared_slots_even_when_expected_count_is_positive() -> 
     assert build_plan_from_preset([group], preset="recommended")[group.key].instances == (
         0x03,
         0x07,
+        0x0A,
     )
     assert build_plan_from_preset([group], preset="full")[group.key].instances == tuple(range(0x0B))
 

@@ -66,8 +66,29 @@ class RegisterRow:
     change_indicator: str
     search_blob: str
     parameter_description: dict[str, object] | None = None
+    bundled_parameter_description: dict[str, object] | None = None
     candidate_name: str = ""
     candidate_evidence: str = ""
+
+    @property
+    def description_text(self) -> str:
+        parts: list[str] = []
+        for label, desc in (
+            ("Verified", self.parameter_description),
+            ("Bundled", self.bundled_parameter_description),
+        ):
+            if desc is None:
+                continue
+            state = desc.get("verification", desc.get("qualification", "unknown"))
+            if desc.get("qualification") in {"matched", "bundled"}:
+                parts.append(
+                    f"{label} ({state}): {desc.get('type', 'unknown')} "
+                    f"{desc.get('min', '?')}..{desc.get('max', '?')} "
+                    f"step={desc.get('step', '?')}"
+                )
+            else:
+                parts.append(f"Description {state}")
+        return " | ".join(parts) or "Unknown"
 
 
 TreeNodeLevel = Literal[

@@ -360,7 +360,7 @@ def scan_b524(
     planner_preset: PlannerPreset = "recommended",
     probe_constraints: bool = True,
     explicit_plan: dict[PlanKey, GroupScanPlan] | None = None,
-    description_budget: int = 256,
+    description_budget: int | None = None,
     request_budget: int | None = None,
 ) -> dict[str, Any]:
     """Scan a VRC regulator using B524 and return a JSON-serializable artifact.
@@ -415,7 +415,7 @@ def scan_vrc(
     planner_preset: PlannerPreset = "recommended",
     probe_constraints: bool = True,
     explicit_plan: dict[PlanKey, GroupScanPlan] | None = None,
-    description_budget: int = 256,
+    description_budget: int | None = None,
     request_budget: int | None = None,
 ) -> dict[str, Any]:
     """Run VRC scan flow: B524 primary scan, optional B555/B516/B509 dumps."""

@@ -406,7 +406,7 @@ def parse_typed_value(type_spec: str, data: bytes) -> object:
     - `UCH`: u8
     - `STR:*`: cstring (latin1, trailing NULs stripped)
     - `HDA:3`: u24le date encoded as raw DD MM YY bytes (`YYYY-MM-DD`)
-    - `HTI`: u24le time encoded as HH:MM:SS (BCD per byte, `HH:MM:SS`)
+    - `HTI`: three numeric HH, MM, SS bytes, displayed as `HH:MM:SS`
     - `FW`: 3-byte firmware version encoded as BCD bytes (`MM.mm.pp`)
 
     Args:

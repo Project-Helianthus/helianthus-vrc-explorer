@@ -327,7 +327,10 @@ def test_replay_trace_reconstructs_system_information_and_complete_descriptions(
         "step": 2,
         "reply_hex": "02050000000a000200",
         "source": "complete_description",
-        "decoder_revision": "b524-description/v1",
+        "decoder_revision": "b524-description/v2",
+        "step_raw_hex": "0200",
+        "step_qualification": "decoded",
+        "validation_scope": "format_range_and_step",
         "trace_seq": 3,
         "trace_reply_hex": "02050000000a000200",
     }

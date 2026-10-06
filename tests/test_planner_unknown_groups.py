@@ -156,7 +156,7 @@ def test_build_plan_from_preset_recommended_skips_unknown_groups() -> None:
     plan = build_plan_from_preset(groups, preset="recommended")
     key = make_plan_key(0x02, 0x02)
     assert sorted(plan.keys()) == [key]
-    assert plan[key].instances == (0x00, 0x01)
+    assert plan[key].instances == (0x00, 0x01, 0x0A)
 
 
 def test_build_plan_from_preset_research_keeps_ff_when_present() -> None:

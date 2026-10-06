@@ -52,8 +52,8 @@ Key scan UX flags:
 - `--planner-ui auto|textual|classic`
 - `--preset recommended|full|research|custom`
 - `--probe-constraints/--no-probe-constraints` (targeted OP01/OP07 descriptions for observed writable parameters; enabled by default)
-- `--description-budget` (default 256; fair OP01/OP07 sharing with unused capacity borrowed)
-- `--request-budget` (B524 request attempts including transport retries; research defaults to 10000)
+- `--description-budget` (default 256 for recommended/custom; all eligible descriptions up to 100000 for full/research)
+- `--request-budget` (B524 request attempts including transport retries; full/research default to 10000)
 - `--scan-plan` (version 1 JSON file for exact custom read selectors)
 - `--b509-dump` (B509 is opt-in; `--b509-range` requires this flag)
 - `--no-tips`
@@ -73,9 +73,7 @@ Transport note:
 - Instance availability is namespace-specific. Dual-namespace radio groups (`0x09`, `0x0A`) are discovered independently per opcode namespace instead of sharing remote results across local and remote.
 - Artifacts retain the availability contract plus raw per-slot probe evidence under `availability_contract` and `availability_probes`, including the opcode `0x06` generic header block (`RR=0x0001..0x0004`) used for remote namespace occupancy.
 - Empty ACK / 0-byte B524 register replies are preserved as `response_state="empty_reply"` (rendered as “empty reply / dormant”), not as transport errors.
-- B524 register replies expose protocol-level `reply_kind` annotations derived from the DT byte (`RK`, effective 2-bit domain `0..3`).
-  - `OP=0x02`: bit1=config, bit0=volatile/stable (`simple_volatile`, `simple_stable`, `config_volatile`, `config_stable`)
-  - `OP=0x06`: bit1=config, bit0=invalid/valid (`simple_invalid`, `simple_valid`, `config_invalid`, `config_valid`)
+- B524 register replies expose profile-scoped attribute hints: bit 0 hints visibility, bit 1 hints writability. They do not establish User/Installer roles or persistence. Older artifacts retain their historical labels, displayed as unqualified interpretations.
 - OP `0x06` register-map fallbacks include a generic device header for `RR=0x0001..0x0004`, but BASV2 heat-source inventory is 1-indexed on `GG=0x01` (primary / type 1) and `GG=0x02` (secondary / type 2). `GG=0x00` is local-only on BASV2.
 - GG `0x09` is intentionally dual-use: local/control semantics on `0x02`, remote radio-device semantics on `0x06`.
 - Scanner annotations include the integer sentinel `0x7FFFFFFF` as `value_display="sentinel_invalid_i32 (0x7FFFFFFF)"` when decoded in integer contexts.
@@ -92,13 +90,13 @@ Transport note:
 Coverage and parameter-description note:
 
 - Send accounting includes each ebusd command attempt and Enhanced request attempt, including internal retransmissions. Connection/arbitration failure may consume an attempt; these counters do not prove physical bus delivery. Description coverage counts candidates separately from `request_attempts` and `retries`.
-- `recommended` uses qualified OP00 counts for sparse circuit/zone instance discovery, with a bounded fallback for zero, unavailable, invalid or unmet counts. It scans characterized OP02 groups `00..05,08,09` and OP06 groups `01,02,08,09,0A,0C` consistently through CLI and interactive planners.
+- `recommended` uses qualified OP00 counts for sparse circuit/zone instance discovery, with a bounded fallback for zero, unavailable, invalid or unmet counts. It scans characterized OP02 groups `00..05,08,09` and OP06 groups `01,02,08,09,0A,0C,0E,0F` consistently through CLI and interactive planners.
 - `full` audits every declared II slot in those characterized profile families independently of counts, using normal RR bounds. It reports count mismatches; configured profile coverage is not universal wire-space completeness.
 - `research` expands groups and RR bounds with multiple bounded discovery selectors. A failed first `II=00/RR=0000` probe does not veto later probes. It is non-exhaustive and defaults to 10000 actual B524 sends; budget exhaustion saves an incomplete artifact with retained observations. Legacy aliases remain `aggressive` -> `full`, `exhaustive` -> `research`, and `conservative` -> `recommended`.
-- Descriptions are acquired after scalar reads. The finite default budget of 256 reserves half for OP01 and half for OP07, borrows unused capacity, and rotates across group/instance queues. Any observed writable format is eligible, including unknown codecs whose description replies remain raw and unqualified. Artifacts report eligible, attempted, matched, unavailable, unqualified and budget-skipped coverage. Each matched record carries its scoped identity, opcode pair, codec, width, min, max, step, and raw reply.
+- Descriptions are acquired after scalar reads. Recommended/custom default to 256 logical candidates; full/research plan all eligible candidates within a finite 100000 cap and the global send budget. The budget reserves half for OP01 and half for OP07, borrows unused capacity, and rotates across group/instance queues. Any observed writable format is eligible, including unknown codecs whose description replies remain raw and unqualified. Artifacts report eligible, planned, attempted, received, interpreted, unavailable, unqualified and omitted coverage. Each matched record carries its scoped identity, opcode pair, codec, width, min, max, step, and raw reply.
 - OP00 API version/revision and other count classes remain profile context. Ventilation hints can annotate known candidates; they do not establish a same-numbered GG route or prove absence.
 
-Exact custom scans use `--preset custom --scan-plan plan.json`. The file is validated before device I/O, permits only OP02/OP06, and preserves explicit selectors regardless of discovery. Plans exceeding 100000 scalar reads are rejected before queuing.
+Exact custom scans use `--preset custom --scan-plan plan.json`. The file is validated before device I/O, permits only OP02/OP06, and preserves explicit selectors regardless of discovery, adding mandatory OP02/GG02/II0A once when local circuits are selected. Plans exceeding 100000 scalar reads are rejected before queuing.
 
 With planning or budget options, `--dry-run` executes the selected policy against the bundled fixture through DummyTransport. The default `--dry-run` invocation displays that fixture directly. The artifact records `dry_run_mode` as `deterministic_scan` or `fixture_view`.
 
@@ -242,3 +240,13 @@ If you need to add or update non-code data (schemas, fixtures, CSV/JSON dumps), 
 
 ## License
 GPL-3.0-or-later. See `LICENSE`.
+
+### Profile-scoped discovery and offline descriptions
+
+- Local circuit scans always include `GG02/II0A` (`virtual_dhw` designation), independently of `circuit_count`. Acquisition does not confirm an active physical circuit; protocol role remains unknown.
+- OP06 connected-device discovery begins at II01 in the characterized profile and is independent of OP00. Recommended stops at the first qualified not-connected Boolean; full/research audit the configured bound. Transport/decode unknowns and retained inventory remain separate.
+- Bundled parameter descriptions are displayed offline in HTML and browse, with exact model/firmware, namespace and instance qualification. Rechecks report `matches`, `differs`, `unavailable`, or `profile_mismatch`. Bundled metadata never substitutes for current-target validation.
+- Numeric descriptions retain decoded min/max/step. Date/time limits can be interpreted while STEP remains unknown; edits outside known ranges are rejected, and unknown stepping leaves edits incompletely validated. Unsupported formats retain raw description evidence.
+- FLAGS provide profile-scoped visibility/writability hints. They establish no user/installer role, volatility, persistence or physical connected-device state. Old artifact labels remain historical, unqualified interpretations.
+
+See the [public discovery and description contract](https://github.com/Project-Helianthus/helianthus-docs-ebus/blob/main/protocols/vaillant/b524-profile-discovery-and-descriptions.md).

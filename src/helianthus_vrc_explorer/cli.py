@@ -38,6 +38,7 @@ from .scanner.scan import PlannerUiMode, default_output_filename, scan_vrc
 from .scanner.scan_policy import parse_scan_plan
 from .schema.ebusd_csv import EbusdCsvSchema
 from .schema.myvaillant_map import MyvaillantRegisterMap
+from .schema.parameter_descriptions import attach_bundled_descriptions
 from .transport.base import TransportCommandNotEnabled, TransportError, TransportTimeout
 from .transport.dummy import DummyTransport
 from .transport.ebusd_tcp import EbusdTcpConfig, EbusdTcpTransport
@@ -717,13 +718,14 @@ def scan(
         readable=True,
         help="Version 1 JSON plan file for custom OP02/OP06, GG, II and RR16 selectors.",
     ),
-    description_budget: int = typer.Option(  # noqa: B008
-        256,
+    description_budget: int | None = typer.Option(  # noqa: B008
+        None,
         "--description-budget",
         min=0,
         help=(
             "Maximum description requests, shared fairly between OP01 and OP07 "
-            "(unused shares borrowed)."
+            "(unused shares borrowed). Default: 256 for recommended/custom; "
+            "all eligible parameters, bounded to 100000, for full/research."
         ),
     ),
     request_budget: int | None = typer.Option(  # noqa: B008
@@ -794,7 +796,7 @@ def scan(
     elif preset_value == "custom" and (planner_ui_value == "disabled" or not console.is_terminal):
         typer.echo("Custom scanning requires --scan-plan or an interactive planner.", err=True)
         raise typer.Exit(2)
-    if description_budget != 256:
+    if description_budget is not None:
         scan_options["description_budget"] = description_budget
     if request_budget is not None:
         scan_options["request_budget"] = request_budget
@@ -1005,6 +1007,7 @@ def scan(
             meta_obj["identity"] = dict(identity_for_artifact)
             meta_obj["resolved_identity"] = dict(identity_for_artifact)
 
+    attach_bundled_descriptions(artifact)
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / default_output_filename(
         dst=dst_u8,

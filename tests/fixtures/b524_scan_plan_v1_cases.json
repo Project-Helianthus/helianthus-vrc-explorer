@@ -21,13 +21,14 @@
           }
         ]
       },
-      "expected_requests": 6,
+      "expected_requests": 9,
       "normalized": {
         "opcode": 2,
         "group": 2,
         "instances": [
           0,
-          3
+          3,
+          10
         ],
         "registers": [
           2,
@@ -68,13 +69,14 @@
           }
         ]
       },
-      "expected_requests": 6,
+      "expected_requests": 9,
       "normalized": {
         "opcode": 2,
         "group": 2,
         "instances": [
           0,
-          3
+          3,
+          10
         ],
         "registers": [
           2,

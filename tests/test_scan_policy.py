@@ -197,7 +197,7 @@ def test_parse_scan_plan_accepts_exact_scalar_request_limit() -> None:
         "groups": [
             {
                 "opcode": 2,
-                "group": 2,
+                "group": 3,
                 "instances": ["0x00..0x01"],
                 "registers": ["0x0000..0xc34f"],
             }
@@ -205,7 +205,7 @@ def test_parse_scan_plan_accepts_exact_scalar_request_limit() -> None:
     }
 
     plan = parse_scan_plan(data)
-    assert len(plan[make_plan_key(0x02, 0x02)].registers or ()) == 50_000
+    assert len(plan[make_plan_key(0x03, 0x02)].registers or ()) == 50_000
 
 
 def test_parse_scan_plan_rejects_more_than_scalar_request_limit() -> None:

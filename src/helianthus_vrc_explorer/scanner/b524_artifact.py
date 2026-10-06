@@ -121,6 +121,7 @@ def _serialize_availability_probe(
     payload: dict[str, Any] = {
         "present": probe.present,
         "source": probe.contract.source,
+        "connection_state": probe.connection_state,
     }
     evidence = probe.evidence
     if evidence is not None:

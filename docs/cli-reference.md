@@ -106,8 +106,10 @@ This file is generated from the CLI's `--help` output. Refresh it with
 │                                                                          OP02/OP06, GG, II and RR16 selectors.       │
 │ --description-budget                                 <int range> [x>=0]  Maximum description requests, shared fairly │
 │                                                                          between OP01 and OP07 (unused shares        │
-│                                                                          borrowed).                                  │
-│                                                                          [default: 256]                              │
+│                                                                          borrowed). Default: 256 for                 │
+│                                                                          recommended/custom; all eligible            │
+│                                                                          parameters, bounded to 100000, for          │
+│                                                                          full/research.                              │
 │ --request-budget                                     <int range> [x>=1]  Maximum actual B524 sends including         │
 │                                                                          retries; research defaults to 10000.        │
 │                                                                          Exhaustion saves a partial artifact.        │

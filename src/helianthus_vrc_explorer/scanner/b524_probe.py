@@ -24,6 +24,7 @@ from .b524_artifact import _entry_is_opcode_responsive, _entry_is_readable
 from .identity import make_register_identity
 from .observer import ScanObserver
 from .register import (
+    CONNECTED_DEVICE_GROUPS,
     InstanceAvailabilityProbe,
     RegisterEntry,
     probe_instance_availability,
@@ -55,7 +56,7 @@ _UNKNOWN_GROUP_RESEARCH_SELECTORS: tuple[tuple[int, int], ...] = (
     (0x01, 0x0001),
 )
 _QUALIFIED_DESCRIPTION_CODECS = frozenset(
-    {"UCH", "BOOL", "I8", "UIN", "I16", "U32", "I32", "EXP", "HDA:3"}
+    {"UCH", "BOOL", "I8", "UIN", "I16", "U32", "I32", "EXP", "HDA:3", "HTI"}
 )
 
 
@@ -292,10 +293,13 @@ def _probe_present_instances(
     observer: ScanObserver | None,
     probe_instance_availability_fn: Any = probe_instance_availability,
     expected_count: int | None = None,
+    stop_at_first_absence: bool = False,
+    on_probe: Any = None,
 ) -> dict[int, InstanceAvailabilityProbe]:
     probes: dict[int, InstanceAvailabilityProbe] = {}
     present_count = 0
-    for ii in range(0x00, ii_max + 1):
+    first_ii = 1 if opcode == 6 and group in CONNECTED_DEVICE_GROUPS else 0
+    for ii in range(first_ii, ii_max + 1):
         if observer is not None:
             observer.status(f"Probe presence GG=0x{group:02X} OP={_hex_u8(opcode)} II=0x{ii:02X}")
         probe = probe_instance_availability_fn(
@@ -306,7 +310,13 @@ def _probe_present_instances(
             opcode=opcode,
         )
         probes[ii] = probe
-        present_count += int(probe.present)
+        if on_probe is not None:
+            on_probe(ii, probe)
+        if stop_at_first_absence and probe.connection_state == "not_connected":
+            if observer is not None:
+                observer.phase_advance("instance_discovery", advance=1)
+            break
+        present_count += int(probe.present and not (opcode == 2 and group == 2 and ii == 0x0A))
         if expected_count is not None and expected_count > 0 and present_count >= expected_count:
             if observer is not None:
                 observer.phase_advance("instance_discovery", advance=1)
