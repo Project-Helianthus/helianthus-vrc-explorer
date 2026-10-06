@@ -177,10 +177,83 @@ def test_enhanced_local_nack_retry_consumes_another_slot(
         counted.send(0x15, b"\x00")
 
     # One telegram was emitted; the local NACK retransmission was stopped before
-    # its first symbol and did not become a limit+1 request.
-    assert len(sent_symbols) == 6
+    # its first symbol and did not become a limit+1 request. The final SYN
+    # releases the transaction that was still owned after the NACK.
+    assert len(sent_symbols) == 7
+    assert sent_symbols[-1] == enhanced_tcp._EBUS_SYN
     assert counted.counters.send_calls == 1
     assert len(counted.recent_requests) == 1
+
+
+def test_enhanced_local_nack_hook_cleanup_failure_preserves_hook_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class HookRejected(RuntimeError):
+        pass
+
+    transport = EnhancedTcpTransport(EnhancedTcpConfig(nack_max_retries=1))
+    hook_error = HookRejected("reserved attempt")
+    hook_calls = 0
+    close_calls = 0
+
+    def _attempt_hook() -> None:
+        nonlocal hook_calls
+        hook_calls += 1
+        if hook_calls == 2:
+            raise hook_error
+
+    def _send_symbol(symbol: int) -> None:
+        if symbol == enhanced_tcp._EBUS_SYN:
+            raise TransportError("release failed")
+
+    def _close() -> None:
+        nonlocal close_calls
+        close_calls += 1
+        raise TransportError("close failed")
+
+    monkeypatch.setattr(transport, "_start_arbitration", lambda _src: None)
+    monkeypatch.setattr(transport, "_send_symbol_with_echo", _send_symbol)
+    monkeypatch.setattr(transport, "_recv_bus_symbol", lambda **_kwargs: enhanced_tcp._EBUS_NACK)
+    monkeypatch.setattr(transport, "close", _close)
+
+    with pytest.raises(HookRejected) as raised:
+        transport.send_with_attempt_hook(0x15, b"\x00", _attempt_hook)
+
+    assert raised.value is hook_error
+    assert hook_calls == 2
+    assert close_calls == 1
+
+
+def test_enhanced_plain_send_keeps_local_nack_retry_without_early_release(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport = EnhancedTcpTransport(EnhancedTcpConfig(nack_max_retries=1))
+    response = b"\x42"
+    response_segment = bytes((len(response),)) + response
+    received = iter(
+        (
+            enhanced_tcp._EBUS_NACK,
+            enhanced_tcp._EBUS_ACK,
+            *response_segment,
+            enhanced_tcp._crc(response_segment),
+        )
+    )
+    arbitration_calls = 0
+    sent_symbols: list[int] = []
+
+    def _start_arbitration(_src: int) -> None:
+        nonlocal arbitration_calls
+        arbitration_calls += 1
+
+    monkeypatch.setattr(transport, "_start_arbitration", _start_arbitration)
+    monkeypatch.setattr(transport, "_send_symbol_with_echo", sent_symbols.append)
+    monkeypatch.setattr(transport, "_recv_bus_symbol", lambda **_kwargs: next(received))
+
+    assert transport.send(0x15, b"\x00") == response
+
+    assert arbitration_calls == 1
+    assert sent_symbols.count(enhanced_tcp._EBUS_SYN) == 1
+    assert len(sent_symbols) == 14
 
 
 def test_no_budget_default_hook_keeps_plain_transport_behavior() -> None:

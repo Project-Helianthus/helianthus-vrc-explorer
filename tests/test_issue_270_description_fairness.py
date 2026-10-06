@@ -345,3 +345,69 @@ def test_real_transport_retry_hook_preserves_later_family_first_attempt(
     assert remote["request_attempted"] is True
     assert remote["request_attempts"] == 1
     assert remote["qualification"] == "matched"
+
+
+def test_enhanced_local_nack_rejection_releases_bus_before_reserved_remote_first(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidates = [
+        DescriptionCandidate(0x02, 0x01, 0x00, 0, "UCH"),
+        DescriptionCandidate(0x06, 0x09, 0x00, 0, "UCH"),
+    ]
+    entries = _entries(candidates)
+    coverage: dict[str, Any] = {}
+    inner = EnhancedTcpTransport(EnhancedTcpConfig(nack_max_retries=1))
+    remote_response = bytes((0x09, 0x00, 0x00, 0x00, 0x14, 0x01))
+    received = iter(
+        (
+            enhanced_tcp._EBUS_NACK,
+            enhanced_tcp._EBUS_ACK,
+            len(remote_response),
+            *remote_response,
+            enhanced_tcp._crc(bytes((len(remote_response),)) + remote_response),
+        )
+    )
+    arbitration_calls = 0
+    bus_owned = False
+    sent_symbols: list[int] = []
+
+    def _start_arbitration(_src: int) -> None:
+        nonlocal arbitration_calls, bus_owned
+        assert bus_owned is False
+        arbitration_calls += 1
+        bus_owned = True
+
+    def _send_symbol(symbol: int) -> None:
+        nonlocal bus_owned
+        assert bus_owned is True
+        sent_symbols.append(symbol)
+        if symbol == enhanced_tcp._EBUS_SYN:
+            bus_owned = False
+
+    monkeypatch.setattr(inner, "_start_arbitration", _start_arbitration)
+    monkeypatch.setattr(inner, "_send_symbol_with_echo", _send_symbol)
+    monkeypatch.setattr(inner, "_recv_bus_symbol", lambda **_kwargs: next(received))
+    transport = CountingTransport(inner, request_budget=2)
+
+    with pytest.raises(ScanRequestBudgetExceeded, match="descriptions"):
+        acquire_descriptions(
+            transport,
+            dst=0x15,
+            candidates=candidates,
+            entries=entries,
+            budget=2,
+            coverage=coverage,
+        )
+
+    assert arbitration_calls == 2
+    assert bus_owned is False
+    assert sent_symbols.count(enhanced_tcp._EBUS_SYN) == 2
+    assert transport.counters.send_calls == 2
+    assert (
+        entries[candidates[0].native_identity]["parameter_description"]["qualification"]
+        == "unavailable"
+    )
+    assert (
+        entries[candidates[1].native_identity]["parameter_description"]["qualification"]
+        == "matched"
+    )

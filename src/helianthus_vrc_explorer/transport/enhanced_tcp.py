@@ -1212,7 +1212,16 @@ class EnhancedTcpTransport(TransportInterface):
         for nack_attempt in range(max_nack_attempts):
             if nack_attempt > 0:
                 if attempt_hook is not None:
-                    attempt_hook()
+                    try:
+                        attempt_hook()
+                    except BaseException:
+                        try:
+                            self._send_end_of_message()
+                            self._reset_parser()
+                        except BaseException:
+                            with contextlib.suppress(BaseException):
+                                self.close()
+                        raise
                 self._trace(f"#{seq} LOCAL_NACK_RETRY attempt={nack_attempt}")
 
             for symbol in telegram[1:]:
