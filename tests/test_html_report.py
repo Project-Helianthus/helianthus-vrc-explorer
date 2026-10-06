@@ -2,8 +2,40 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
+import subprocess
+
+import pytest
 
 from helianthus_vrc_explorer.ui.html_report import render_html_report
+
+
+def test_generated_html_hti_override_decodes_numeric_bytes() -> None:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node is required for the generated HTML decoder smoke test")
+    html = render_html_report({})
+    start = html.index("function parseTypedValue(")
+    end = html.index("function formatValue(", start)
+    cases = [[0, 0, 0], [15, 5, 37], [16, 16, 32], [23, 59, 58]]
+    invalid = [[24, 0, 0], [0, 60, 0], [0, 0, 60], [255, 255, 255], [0, 0]]
+    script = html[start:end] + (
+        "console.log(JSON.stringify("
+        + json.dumps(cases + invalid)
+        + '.map(bytes => parseTypedValue("HTI", bytes))));'
+    )
+    result = subprocess.run(
+        [node, "-e", script], check=True, text=True, capture_output=True, timeout=10
+    )
+    parsed = json.loads(result.stdout)
+    assert [row["value"] for row in parsed[:4]] == [
+        "00:00:00",
+        "15:05:37",
+        "16:16:32",
+        "23:59:58",
+    ]
+    assert all(row["error"] is None for row in parsed[:4])
+    assert all(row["value"] is None and row["error"] for row in parsed[4:])
 
 
 def test_html_report_preserves_partial_scan_coverage_and_escapes_group_evidence() -> None:

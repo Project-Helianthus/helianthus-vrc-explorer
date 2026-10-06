@@ -45,7 +45,12 @@ def test_encode_hda3_roundtrips() -> None:
 
 def test_encode_hti_roundtrips() -> None:
     data = encode_typed_value("HTI", "23:59:58")
+    assert data.hex() == "173b3a"
     assert parse_typed_value("HTI", data) == "23:59:58"
+
+
+def test_encode_hti_uses_numeric_bytes_when_bcd_would_silently_differ() -> None:
+    assert encode_typed_value("HTI", "16:16:32").hex() == "101020"
 
 
 def test_encode_fw_roundtrips() -> None:

@@ -210,12 +210,14 @@ class _I32SentinelTransport(TransportInterface):
         return bytes((0x01, group)) + rr + b"\xff\xff\xff\x7f"
 
 
-class _UnparseableU24Transport(TransportInterface):
+class _U24TimeTransport(TransportInterface):
+    def __init__(self, data: bytes = b"\x0e\x38\x03") -> None:
+        self.data = data
+
     def send(self, dst: int, payload: bytes) -> bytes:  # noqa: ARG002
         group = payload[2]
         rr = payload[4:6]
-        # 3-byte value that is neither HTI nor HDA:3 (invalid BCD) -> should fallback to HEX:3.
-        return bytes((0x03, group)) + rr + b"\x0e\x38\x03"
+        return bytes((0x03, group)) + rr + self.data
 
 
 def test_read_register_status_only_response_is_not_decode_error() -> None:
@@ -359,8 +361,8 @@ def test_namespace_opcodes_for_group_unknown_group_requires_discovery_evidence()
         namespace_opcodes_for_group(0x69)
 
 
-def test_read_register_infers_hex_for_unparseable_u24_values() -> None:
-    transport = _UnparseableU24Transport()
+def test_read_register_infers_numeric_time_with_invalid_date_month() -> None:
+    transport = _U24TimeTransport()
 
     entry = read_register(
         transport,
@@ -375,8 +377,22 @@ def test_read_register_infers_hex_for_unparseable_u24_values() -> None:
     assert entry["flags"] == 0x03
     assert entry["flags_access"] == "config_user"
     assert entry["raw_hex"] == "0e3803"
+    assert entry["type"] == "HTI"
+    assert entry["value"] == "14:56:03"
+    assert entry["error"] is None
+
+
+def test_read_register_keeps_hex_when_u24_is_neither_time_nor_date() -> None:
+    entry = read_register(
+        _U24TimeTransport(b"\x0e\x3c\x03"),
+        0x15,
+        0x02,
+        group=0x00,
+        instance=0x00,
+        register=0x0035,
+    )
     assert entry["type"] == "HEX:3"
-    assert entry["value"] == "0x0e3803"
+    assert entry["value"] == "0x0e3c03"
     assert entry["error"] is None
 
 

@@ -55,8 +55,17 @@ def test_parse_hda3_date_u24le_raw_ddmmyy() -> None:
     assert parse_typed_value("HDA:3", bytes.fromhex("01010f")) == "2015-01-01"
 
 
-def test_parse_hti_time_u24le_hhmmss() -> None:
-    assert parse_typed_value("HTI", bytes.fromhex("235958")) == "23:59:58"
+@pytest.mark.parametrize(
+    ("data_hex", "expected"),
+    [
+        ("000000", "00:00:00"),
+        ("0f0525", "15:05:37"),
+        ("101020", "16:16:32"),
+        ("173b3a", "23:59:58"),
+    ],
+)
+def test_parse_hti_time_numeric_hhmmss(data_hex: str, expected: str) -> None:
+    assert parse_typed_value("HTI", bytes.fromhex(data_hex)) == expected
 
 
 def test_parse_fw_valid() -> None:
@@ -99,10 +108,11 @@ def test_parse_wrong_lengths_raise(type_spec: str, data_hex: str) -> None:
         ("HDA:3", "320226"),  # day=32
         ("HDA:3", "310226"),  # day=31 in Feb
         ("HDA:3", "063b1a"),  # month=59
-        ("HTI", "240000"),  # hour=24
-        ("HTI", "006000"),  # minute=60
-        ("HTI", "000060"),  # second=60
-        ("HTI", "23593a"),  # invalid BCD second (0x3A)
+        ("HTI", "180000"),  # hour=24
+        ("HTI", "003c00"),  # minute=60
+        ("HTI", "00003c"),  # second=60
+        ("HTI", "235958"),  # BCD bytes are not valid numeric HH/MM/SS
+        ("HTI", "ffffff"),  # unavailable time must not become a valid time
         ("FW", "aa0000"),  # invalid BCD major (0xAA)
     ],
 )

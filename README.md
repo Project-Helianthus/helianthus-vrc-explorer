@@ -111,6 +111,7 @@ With planning or budget options, `--dry-run` executes the selected policy agains
 }
 ```
 - The browse edit confirmation validates every supported value format against that matched description. If no matched description is available, the UI warns that confirmation is unvalidated. Browse edits only alter the local artifact view; they never write to a live device.
+- `HTI` uses three numeric bytes in `HH MM SS` order, with ranges `0..23`, `0..59`, `0..59`. Python decoding, offline edit encoding and HTML type overrides use this same contract. The separate `BTI` datatype in the [ebusd type registry](https://github.com/john30/ebusd/blob/68f6336bad89607a4200ca9e86f9cd7860b31f86/src/lib/ebus/datatype.cpp) uses BCD. Existing artifact values are retained; replay a raw trace or apply an explicit type override to recompute an older decoded time.
 
 Output:
 - JSON artifact: `b524_scan_0x??_<timestamp>.json`

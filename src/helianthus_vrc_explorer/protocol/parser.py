@@ -149,16 +149,14 @@ def parse_hda3_date(data: bytes) -> str:
 
 
 def parse_hti_time(data: bytes) -> str:
-    """Parse an `HTI` value (u24le time encoded as HH:MM:SS, BCD per byte).
+    """Parse an `HTI` value (three numeric HH, MM, SS bytes).
 
     Returns:
         ISO-ish time string: `HH:MM:SS`.
     """
 
     _expect_len("HTI", data, 3)
-    hour = _decode_bcd("HTI", "hour", data[0])
-    minute = _decode_bcd("HTI", "minute", data[1])
-    second = _decode_bcd("HTI", "second", data[2])
+    hour, minute, second = data
 
     if hour > 23:
         raise ValueParseError(f"HTI hour must be 0..23, got {hour}")
@@ -332,13 +330,7 @@ def encode_hti_time(value: str) -> bytes:
         raise ValueEncodeError(f"HTI minute must be 0..59, got {mm}")
     if not (0 <= ss <= 59):
         raise ValueEncodeError(f"HTI second must be 0..59, got {ss}")
-    return bytes(
-        (
-            _encode_bcd("HTI", "hour", hh),
-            _encode_bcd("HTI", "minute", mm),
-            _encode_bcd("HTI", "second", ss),
-        )
-    )
+    return bytes((hh, mm, ss))
 
 
 def encode_fw(value: str) -> bytes:

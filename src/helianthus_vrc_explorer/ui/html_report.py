@@ -671,10 +671,9 @@ __ARTIFACT_JSON__
             }
             case "HTI": {
               expectLen(3);
-              const hh = decodeBcdByte(bytes[0]);
-              const mi = decodeBcdByte(bytes[1]);
-              const ss = decodeBcdByte(bytes[2]);
-              if (hh === null || mi === null || ss === null) throw new Error("invalid BCD time");
+              const hh = bytes[0];
+              const mi = bytes[1];
+              const ss = bytes[2];
               if (hh > 23 || mi > 59 || ss > 59) throw new Error("time out of range");
               const txt = `${hh.toString().padStart(2, "0")}:${mi.toString().padStart(2, "0")}:${ss
                 .toString()
