@@ -93,10 +93,17 @@ from .scan_policy import profile_opcodes
 
 
 def _system_information_records(
-    values: dict[int, float], raw: dict[int, str | None]
+    values: dict[int, float],
+    raw: dict[int, str | None],
+    diagnostics: dict[int, dict[str, str | int | None]] | None = None,
 ) -> list[dict[str, Any]]:
     return [
         {
+            **(
+                {"transport_diagnostic": diagnostics[identifier], "qualification": "unknown"}
+                if diagnostics and identifier in diagnostics
+                else {}
+            ),
             "identifier": _hex_u16(identifier),
             "name": name,
             "value": values.get(identifier)
@@ -254,8 +261,24 @@ def run_b524_scan(
         information_values = {item.group: item.descriptor for item in discovered}
         information_raw = {item.group: item.raw_hex for item in discovered}
         artifact["meta"]["system_information"] = _system_information_records(
-            information_values, information_raw
+            information_values,
+            information_raw,
+            {
+                item.group: item.transport_diagnostic
+                for item in discovered
+                if item.transport_diagnostic is not None
+            },
         )
+        failed_information = [
+            item.group for item in discovered if item.transport_diagnostic is not None
+        ]
+        if failed_information:
+            coverage = artifact["meta"]["scan_coverage"]
+            coverage["qualification_incomplete"] = True
+            coverage["system_information_complete"] = False
+            coverage["unknown_system_information"] = [
+                _hex_u16(identifier) for identifier in failed_information
+            ]
         ventilation_count = information_values.get(16, float("nan"))
         ventilation_hint = (
             math.isfinite(ventilation_count)
@@ -1211,6 +1234,7 @@ def run_b524_scan(
             artifact["meta"]["system_information"] = _system_information_records(
                 {identifier: value for identifier, value, _ in exc.system_information},
                 {identifier: raw for identifier, _, raw in exc.system_information},
+                getattr(exc, "system_information_diagnostics", {}),
             )
     except TransportRecoveryExhausted as exc:
         artifact["meta"]["incomplete"] = True
@@ -1228,6 +1252,7 @@ def run_b524_scan(
             artifact["meta"]["system_information"] = _system_information_records(
                 {identifier: value for identifier, value, _ in exc.system_information},
                 {identifier: raw for identifier, _, raw in exc.system_information},
+                getattr(exc, "system_information_diagnostics", {}),
             )
         if exc.entry is not None and exc.selector is not None:
             selector = exc.selector

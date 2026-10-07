@@ -11,6 +11,7 @@ from ..transport.base import (
     TransportCommandNotEnabled,
     TransportError,
     TransportInterface,
+    TransportProtocolFailure,
     TransportRecoveryExhausted,
     TransportTimeout,
 )
@@ -273,6 +274,7 @@ class DiscoveredGroup:
     group: int
     descriptor: float
     raw_hex: str | None = None
+    transport_diagnostic: dict[str, str | int | None] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -340,6 +342,11 @@ def discover_groups(
                 resp = transport.send(dst, payload)
                 last_response = resp
             except ScanRequestBudgetExceeded as exc:
+                exc.system_information_diagnostics = {
+                    item.group: item.transport_diagnostic
+                    for item in discovered
+                    if item.transport_diagnostic is not None
+                }
                 exc.system_information = [
                     (item.group, item.descriptor, item.raw_hex) for item in discovered
                 ]
@@ -347,6 +354,11 @@ def discover_groups(
                     exc.system_information.append((gg, float("nan"), last_response.hex()))
                 raise
             except TransportRecoveryExhausted as exc:
+                exc.system_information_diagnostics = {
+                    item.group: item.transport_diagnostic
+                    for item in discovered
+                    if item.transport_diagnostic is not None
+                }
                 partial_system_information = [
                     (item.group, item.descriptor, item.raw_hex) for item in discovered
                 ]
@@ -359,6 +371,27 @@ def discover_groups(
                     "request_hex": payload.hex(),
                 }
                 raise
+            except TransportProtocolFailure as exc:
+                discovered.append(
+                    DiscoveredGroup(
+                        group=gg,
+                        descriptor=float("nan"),
+                        raw_hex=last_response.hex() if last_response is not None else None,
+                        transport_diagnostic={
+                            "cause": exc.cause,
+                            "phase": exc.phase,
+                            "request_attempts": exc.request_attempts,
+                            "retry_count": exc.retry_count,
+                            "reconnect_attempts": exc.reconnect_attempts,
+                            "unexpected_symbol": exc.unexpected_symbol,
+                        },
+                    )
+                )
+                _report_discovery_issue(
+                    observer, f"System information protocol failure for ID=0x{gg:02X}: {exc}"
+                )
+                skip_group = True
+                break
             except TransportTimeout:
                 if retrying:
                     logger.debug(
@@ -422,7 +455,7 @@ def discover_groups(
         if skip_group or descriptor is None:
             # Keep observed malformed/status bytes even if a later retry times out.
             # NaN marks the value unavailable, so this evidence cannot guide instance counts.
-            if last_response is not None:
+            if last_response is not None and not any(item.group == gg for item in discovered):
                 discovered.append(
                     DiscoveredGroup(group=gg, descriptor=float("nan"), raw_hex=last_response.hex())
                 )

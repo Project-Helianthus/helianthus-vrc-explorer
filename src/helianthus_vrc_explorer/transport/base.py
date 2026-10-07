@@ -113,6 +113,7 @@ class TransportRecoveryExhausted(TransportError):
         self.selector: dict[str, str] | None = None
         self.entry: dict[str, Any] | None = None
         self.system_information: list[tuple[int, float, str | None]] = []
+        self.system_information_diagnostics: dict[int, dict[str, str | int | None]] = {}
         self.parameter_description: dict[str, Any] | None = None
         super().__init__(
             "transport recovery exhausted: "
