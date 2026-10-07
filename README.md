@@ -175,6 +175,18 @@ device writes are planned.
 - Tabbed register views: `Config`, `Config-Limits`, `State`.
 - Watch/pin/rate controls and safe write workflow (`--allow-write` + confirmation).
 
+## Canonical B524 Register Names
+
+Bundled OP02 semantic names are keyed by `(opcode, group, register)` in
+`data/b524_register_names.csv`. They take precedence over historical leaf-name
+annotations in scan, replay, Browser and HTML output. OP06 uses the common names
+`device_connected`, `device_class_address`, `device_error_code` and
+`device_firmware_version` at RR0001..RR0004 for every GG.
+
+These naming annotations do not change codecs, attribute bytes, enrichment
+aliases, discovery limits or transport behavior. Browser and HTML apply them to
+a working copy of a saved artifact; the input file remains unchanged.
+
 ## Data Enrichment Sources (Optional)
 This tool can enrich raw scan output with human-readable names:
 - **myVaillant map** (`--myvaillant-map-path`): a small curated CSV mapping `(GG,II,RR)` to myVaillant-style leaf names.
