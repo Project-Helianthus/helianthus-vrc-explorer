@@ -11,6 +11,7 @@ from ..transport.base import (
     TransportCommandNotEnabled,
     TransportError,
     TransportInterface,
+    TransportRecoveryExhausted,
     TransportTimeout,
 )
 from ..transport.instrumented import ScanRequestBudgetExceeded
@@ -300,6 +301,15 @@ def _directory_probe_retry_budget(group: int) -> int:
     return 1
 
 
+def _report_discovery_issue(observer: ScanObserver | None, message: str) -> None:
+    """Report one terminal issue without duplicating it in TTY and logging output."""
+
+    if observer is not None:
+        observer.log(message, level="warn")
+    else:
+        logger.warning("%s", message)
+
+
 def discover_groups(
     transport: TransportInterface,
     dst: int,
@@ -318,7 +328,6 @@ def discover_groups(
     for gg in range(0x00, 0x12):
         probes += 1
         if observer is not None:
-            observer.status(f"System information ID=0x{gg:02X}")
             observer.phase_advance("group_discovery", advance=1)
         payload = build_directory_probe_payload(gg)
         attempts = _directory_probe_retry_budget(gg)
@@ -337,31 +346,36 @@ def discover_groups(
                 if last_response is not None:
                     exc.system_information.append((gg, float("nan"), last_response.hex()))
                 raise
+            except TransportRecoveryExhausted as exc:
+                partial_system_information = [
+                    (item.group, item.descriptor, item.raw_hex) for item in discovered
+                ]
+                if last_response is not None:
+                    partial_system_information.append((gg, float("nan"), last_response.hex()))
+                exc.system_information = partial_system_information
+                exc.selector = {
+                    "read_opcode": "0x00",
+                    "identifier": f"0x{gg:04x}",
+                    "request_hex": payload.hex(),
+                }
+                raise
             except TransportTimeout:
                 if retrying:
-                    logger.warning(
+                    logger.debug(
                         "System information timeout for ID=0x%02X (attempt %d/%d); retrying",
                         gg,
                         attempt,
                         attempts,
                     )
-                    if observer is not None:
-                        observer.log(
-                            f"System information timeout for ID=0x{gg:02X} "
-                            f"(attempt {attempt}/{attempts}); retrying",
-                            level="warn",
-                        )
                     continue
-                logger.warning("System information timeout for ID=0x%02X", gg)
-                if observer is not None:
-                    observer.log(f"System information timeout for ID=0x{gg:02X}", level="warn")
+                _report_discovery_issue(observer, f"System information timeout for ID=0x{gg:02X}")
                 skip_group = True
                 break
             except TransportError as exc:
                 if isinstance(exc, TransportCommandNotEnabled):
                     raise
                 if retrying:
-                    logger.warning(
+                    logger.debug(
                         "System information transport error for ID=0x%02X: %s (attempt %d/%d); "
                         "retrying",
                         gg,
@@ -369,44 +383,27 @@ def discover_groups(
                         attempt,
                         attempts,
                     )
-                    if observer is not None:
-                        observer.log(
-                            f"System information transport error for ID=0x{gg:02X}: {exc} "
-                            f"(attempt {attempt}/{attempts}); retrying",
-                            level="warn",
-                        )
                     continue
-                logger.warning("System information transport error for ID=0x%02X: %s", gg, exc)
-                if observer is not None:
-                    observer.log(
-                        f"System information transport error for ID=0x{gg:02X}: {exc}",
-                        level="warn",
-                    )
+                _report_discovery_issue(
+                    observer, f"System information transport error for ID=0x{gg:02X}: {exc}"
+                )
                 skip_group = True
                 break
 
             if gg == 0x00 and resp == b"\x00":
                 if retrying:
-                    logger.warning(
+                    logger.debug(
                         "System information ID=0x00 returned status-only 0x00 "
                         "(attempt %d/%d); retrying",
                         attempt,
                         attempts,
                     )
-                    if observer is not None:
-                        observer.log(
-                            "System information ID=0x00 returned status-only 0x00 "
-                            f"(attempt {attempt}/{attempts}); retrying",
-                            level="warn",
-                        )
                     continue
                 message = (
                     "System information ID=0x00 returned status-only 0x00; "
                     "treating as transient and continuing"
                 )
-                logger.warning("%s", message)
-                if observer is not None:
-                    observer.log(message, level="warn")
+                _report_discovery_issue(observer, message)
                 skip_group = True
                 break
 
@@ -414,16 +411,9 @@ def discover_groups(
                 descriptor = _parse_directory_descriptor(resp, gg)
             except ValueError as exc:
                 if retrying:
-                    logger.warning("%s (attempt %d/%d); retrying", exc, attempt, attempts)
-                    if observer is not None:
-                        observer.log(
-                            f"{exc} (attempt {attempt}/{attempts}); retrying",
-                            level="warn",
-                        )
+                    logger.debug("%s (attempt %d/%d); retrying", exc, attempt, attempts)
                     continue
-                logger.warning("%s", exc)
-                if observer is not None:
-                    observer.log(str(exc), level="warn")
+                _report_discovery_issue(observer, str(exc))
                 skip_group = True
                 break
 
@@ -439,8 +429,6 @@ def discover_groups(
             continue
 
         discovered.append(DiscoveredGroup(group=gg, descriptor=descriptor, raw_hex=resp.hex()))
-        if observer is not None:
-            observer.log(f"System information ID=0x{gg:02X} value={descriptor}", level="info")
 
     if observer is not None:
         observer.phase_set_total("group_discovery", total=probes)

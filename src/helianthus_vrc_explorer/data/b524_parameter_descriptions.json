@@ -1,11 +1,11 @@
 {
   "coverage": {
-    "attempted": 240,
     "complete_scan": false,
-    "eligible": 240,
-    "exported": 221,
-    "interpreted": 221,
-    "step_decoded": 197
+    "current_run_exported": 168,
+    "exported": 227,
+    "interpreted": 227,
+    "merged_observations": true,
+    "step_decoded": 201
   },
   "descriptions": [
     {
@@ -813,6 +813,31 @@
       "description_opcode": "0x01",
       "group": "0x00",
       "instance": "0x00",
+      "max": "2099-12-31",
+      "min": "2001-01-01",
+      "profile": {
+        "api_revision": 1.0,
+        "api_version": 1.0,
+        "controller_class_raw": null,
+        "controller_firmware_raw": null,
+        "firmware": "SW 0507 / HW 1704",
+        "model": "Vaillant sensoCOMFORT RF (VRC 720f/2) 0020262148",
+        "profile": "controller_b524"
+      },
+      "read_opcode": "0x02",
+      "register": "0x002c",
+      "source": "read_only_observed_baseline",
+      "step": null,
+      "step_qualification": "unknown",
+      "type": "HDA:3",
+      "validation_scope": "format_and_range",
+      "width": 3
+    },
+    {
+      "decoder_revision": "b524-description/v2",
+      "description_opcode": "0x01",
+      "group": "0x00",
+      "instance": "0x00",
       "max": 3.0,
       "min": -3.0,
       "profile": {
@@ -1307,6 +1332,31 @@
       "type": "UCH",
       "validation_scope": "format_range_and_step",
       "width": 1
+    },
+    {
+      "decoder_revision": "b524-description/v2",
+      "description_opcode": "0x01",
+      "group": "0x00",
+      "instance": "0x00",
+      "max": 65535.0,
+      "min": 0.0,
+      "profile": {
+        "api_revision": 1.0,
+        "api_version": 1.0,
+        "controller_class_raw": null,
+        "controller_firmware_raw": null,
+        "firmware": "SW 0507 / HW 1704",
+        "model": "Vaillant sensoCOMFORT RF (VRC 720f/2) 0020262148",
+        "profile": "controller_b524"
+      },
+      "read_opcode": "0x02",
+      "register": "0x007e",
+      "source": "read_only_observed_baseline",
+      "step": 1.0,
+      "step_qualification": "decoded",
+      "type": "EXP",
+      "validation_scope": "format_range_and_step",
+      "width": 4
     },
     {
       "decoder_revision": "b524-description/v2",
@@ -1851,6 +1901,31 @@
       },
       "read_opcode": "0x02",
       "register": "0x00f2",
+      "source": "read_only_observed_baseline",
+      "step": null,
+      "step_qualification": "unknown",
+      "type": "HDA:3",
+      "validation_scope": "format_and_range",
+      "width": 3
+    },
+    {
+      "decoder_revision": "b524-description/v2",
+      "description_opcode": "0x01",
+      "group": "0x00",
+      "instance": "0x00",
+      "max": "2099-12-31",
+      "min": "2001-01-01",
+      "profile": {
+        "api_revision": 1.0,
+        "api_version": 1.0,
+        "controller_class_raw": null,
+        "controller_firmware_raw": null,
+        "firmware": "SW 0507 / HW 1704",
+        "model": "Vaillant sensoCOMFORT RF (VRC 720f/2) 0020262148",
+        "profile": "controller_b524"
+      },
+      "read_opcode": "0x02",
+      "register": "0x00f3",
       "source": "read_only_observed_baseline",
       "step": null,
       "step_qualification": "unknown",
@@ -3857,6 +3932,81 @@
       "type": "EXP",
       "validation_scope": "format_range_and_step",
       "width": 4
+    },
+    {
+      "decoder_revision": "b524-description/v2",
+      "description_opcode": "0x01",
+      "group": "0x02",
+      "instance": "0x0a",
+      "max": 70.0,
+      "min": 35.0,
+      "profile": {
+        "api_revision": 1.0,
+        "api_version": 1.0,
+        "controller_class_raw": null,
+        "controller_firmware_raw": null,
+        "firmware": "SW 0507 / HW 1704",
+        "model": "Vaillant sensoCOMFORT RF (VRC 720f/2) 0020262148",
+        "profile": "controller_b524"
+      },
+      "read_opcode": "0x02",
+      "register": "0x0009",
+      "source": "read_only_observed_baseline",
+      "step": 1.0,
+      "step_qualification": "decoded",
+      "type": "EXP",
+      "validation_scope": "format_range_and_step",
+      "width": 4
+    },
+    {
+      "decoder_revision": "b524-description/v2",
+      "description_opcode": "0x01",
+      "group": "0x02",
+      "instance": "0x0a",
+      "max": 2,
+      "min": 0,
+      "profile": {
+        "api_revision": 1.0,
+        "api_version": 1.0,
+        "controller_class_raw": null,
+        "controller_firmware_raw": null,
+        "firmware": "SW 0507 / HW 1704",
+        "model": "Vaillant sensoCOMFORT RF (VRC 720f/2) 0020262148",
+        "profile": "controller_b524"
+      },
+      "read_opcode": "0x02",
+      "register": "0x0013",
+      "source": "read_only_observed_baseline",
+      "step": 1,
+      "step_qualification": "decoded",
+      "type": "UIN",
+      "validation_scope": "format_range_and_step",
+      "width": 2
+    },
+    {
+      "decoder_revision": "b524-description/v2",
+      "description_opcode": "0x01",
+      "group": "0x02",
+      "instance": "0x0a",
+      "max": 255,
+      "min": 0,
+      "profile": {
+        "api_revision": 1.0,
+        "api_version": 1.0,
+        "controller_class_raw": null,
+        "controller_firmware_raw": null,
+        "firmware": "SW 0507 / HW 1704",
+        "model": "Vaillant sensoCOMFORT RF (VRC 720f/2) 0020262148",
+        "profile": "controller_b524"
+      },
+      "read_opcode": "0x02",
+      "register": "0x001d",
+      "source": "read_only_observed_baseline",
+      "step": 1,
+      "step_qualification": "decoded",
+      "type": "UCH",
+      "validation_scope": "format_range_and_step",
+      "width": 1
     },
     {
       "decoder_revision": "b524-description/v2",

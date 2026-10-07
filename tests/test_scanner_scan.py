@@ -1454,10 +1454,12 @@ def test_scan_b524_normalizes_legacy_aggressive_preset_to_full_for_textual_defau
         request_rate_rps,
         default_plan,
         default_preset,
+        system_information,
     ):
         captured["default_preset"] = default_preset
         captured["default_plan"] = default_plan
         captured["request_rate_rps"] = request_rate_rps
+        captured["system_information"] = system_information
         return {}
 
     monkeypatch.setattr(
@@ -1498,10 +1500,12 @@ def test_scan_b524_normalizes_exhaustive_preset_to_research_for_textual_default_
         request_rate_rps,
         default_plan,
         default_preset,
+        system_information,
     ):
         captured["default_preset"] = default_preset
         captured["default_plan"] = default_plan
         captured["request_rate_rps"] = request_rate_rps
+        captured["system_information"] = system_information
         return {}
 
     monkeypatch.setattr(
@@ -1541,10 +1545,12 @@ def test_scan_b524_normalizes_conservative_preset_to_recommended_for_textual_def
         request_rate_rps,
         default_plan,
         default_preset,
+        system_information,
     ):
         captured["default_preset"] = default_preset
         captured["default_plan"] = default_plan
         captured["request_rate_rps"] = request_rate_rps
+        captured["system_information"] = system_information
         return {}
 
     monkeypatch.setattr(

@@ -286,6 +286,7 @@ def test_browse_store_hydrates_read_only_system_information_and_scoped_descripti
 
 def test_browse_store_filters_rows_for_tree_selection() -> None:
     store = BrowseStore.from_artifact(_sample_artifact())
+    root_node = next(node for node in store.tree_nodes if node.level == "root")
     protocol_node = next(node for node in store.tree_nodes if node.level == "protocol")
     controller_group_node = next(
         node for node in store.tree_nodes if node.node_id == "b524:group:controller_registers:0x00"
@@ -295,7 +296,10 @@ def test_browse_store_filters_rows_for_tree_selection() -> None:
     )
 
     assert len(store.rows_for_selection(None, tab="state")) == 2
-    assert len(store.rows_for_selection(protocol_node, tab="config")) == 1
+    assert store.rows_for_selection(root_node, tab="state") == []
+    # Protocol nodes navigate to their children.  They must not silently aggregate
+    # every descendant register into the table.
+    assert store.rows_for_selection(protocol_node, tab="config") == []
     assert len(store.rows_for_selection(device_group_node, tab="state")) == 1
     assert len(store.rows_for_selection(controller_group_node, tab="state")) == 1
 
@@ -499,8 +503,9 @@ def test_browse_store_filters_rows_for_namespace_selection() -> None:
     local_rows = store.rows_for_selection(local_node, tab="state")
     remote_rows = store.rows_for_selection(remote_node, tab="state")
 
-    assert [row.namespace_key for row in local_rows] == ["0x02"]
-    assert [row.namespace_key for row in remote_rows] == ["0x06"]
+    # These groups have instance children, so selecting them is navigation only.
+    assert local_rows == []
+    assert remote_rows == []
 
 
 def test_browse_store_instanced_groups_have_no_register_tree_nodes() -> None:

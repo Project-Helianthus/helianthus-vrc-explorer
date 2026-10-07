@@ -20,9 +20,35 @@ from helianthus_vrc_explorer.transport.base import (
     TransportCommandNotEnabled,
     TransportError,
     TransportInterface,
+    TransportRecoveryExhausted,
     TransportTimeout,
 )
 from helianthus_vrc_explorer.transport.dummy import DummyTransport
+
+
+class RecordingObserver:
+    def __init__(self) -> None:
+        self.advanced: list[tuple[str, int]] = []
+        self.statuses: list[str] = []
+        self.logs: list[tuple[str, str]] = []
+
+    def phase_start(self, _phase: str, *, total: int) -> None:  # noqa: ARG002
+        return None
+
+    def phase_advance(self, phase: str, *, advance: int = 1) -> None:
+        self.advanced.append((phase, advance))
+
+    def phase_set_total(self, _phase: str, *, total: int) -> None:  # noqa: ARG002
+        return None
+
+    def phase_finish(self, _phase: str) -> None:  # noqa: ARG002
+        return None
+
+    def status(self, message: str) -> None:
+        self.statuses.append(message)
+
+    def log(self, message: str, *, level: str = "info") -> None:
+        self.logs.append((message, level))
 
 
 class RecordingTransport(TransportInterface):
@@ -248,6 +274,63 @@ def test_discover_groups_retries_known_group_after_single_timeout(tmp_path: Path
 
     assert [group.group for group in discovered] == list(range(18))
     assert transport.probed_groups.count(0x03) == 2
+
+
+def test_discovery_keeps_progress_compact_and_quiet_after_recovered_retry(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    observer = RecordingObserver()
+    inner = DummyTransport(_write_directory_fixture(tmp_path))
+    transport = OneShotTimeoutDirectoryTransport(inner, groups={0x03})
+    caplog.set_level(logging.DEBUG, logger="helianthus_vrc_explorer.scanner.director")
+
+    discover_groups(transport, dst=0x15, observer=observer)  # type: ignore[arg-type]
+
+    assert observer.advanced == [("group_discovery", 1)] * 18
+    assert observer.statuses == []
+    assert observer.logs == []
+    assert not [record for record in caplog.records if record.levelno >= logging.WARNING]
+
+
+def test_discovery_reports_one_terminal_warning_through_observer_only(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    observer = RecordingObserver()
+    inner = DummyTransport(_write_directory_fixture(tmp_path))
+    transport = FlakyDirectoryTransport(inner, timeouts={0x04})
+    caplog.set_level(logging.DEBUG, logger="helianthus_vrc_explorer.scanner.director")
+
+    discover_groups(transport, dst=0x15, observer=observer)  # type: ignore[arg-type]
+
+    assert observer.logs == [("System information timeout for ID=0x04", "warn")]
+    assert not [record for record in caplog.records if record.levelno >= logging.WARNING]
+
+
+def test_discovery_propagates_terminal_recovery_with_earlier_op00_records(tmp_path: Path) -> None:
+    inner = DummyTransport(_write_directory_fixture(tmp_path))
+
+    class RecoveryExhaustedTransport(TransportInterface):
+        def send(self, dst: int, payload: bytes) -> bytes:
+            if payload[:3] == b"\x00\x03\x00":
+                raise TransportRecoveryExhausted(
+                    cause="disconnected",
+                    phase="receive",
+                    request_attempts=3,
+                    reconnect_attempts=2,
+                )
+            return inner.send(dst, payload)
+
+    with pytest.raises(TransportRecoveryExhausted) as raised:
+        discover_groups(RecoveryExhaustedTransport(), dst=0x15)
+
+    preserved = raised.value.system_information
+    assert [identifier for identifier, _value, _raw_hex in preserved] == [0x00, 0x01, 0x02]
+    assert all(raw_hex is not None for _identifier, _value, raw_hex in preserved)
+    assert raised.value.selector == {
+        "read_opcode": "0x00",
+        "identifier": "0x0003",
+        "request_hex": "000300",
+    }
 
 
 def test_classify_groups_logs_descriptor_mismatch_at_info(

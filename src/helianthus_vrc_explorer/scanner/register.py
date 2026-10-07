@@ -11,6 +11,7 @@ from ..transport.base import (
     TransportError,
     TransportInterface,
     TransportNack,
+    TransportRecoveryExhausted,
     TransportTimeout,
     emit_trace_label,
 )
@@ -66,6 +67,8 @@ class RegisterEntry(TypedDict):
     type: str | None
     value: object | None
     error: str | None
+    # Sanitized bounded-recovery diagnostics for a terminal adapter outage.
+    transport_diagnostic: NotRequired[dict[str, str | int]]
     # Optional constraint dictionary annotation sourced from opcode 0x01 (01 GG RR).
     constraint_qualification: NotRequired[str]
     constraint_tt: NotRequired[str]
@@ -505,6 +508,40 @@ def read_register(
             "value": None,
             "error": "timeout",
         }
+    except TransportRecoveryExhausted as exc:
+        # A bounded adapter outage is scan-terminal.  Let orchestration preserve
+        # the partial artifact and stop scheduling selectors instead of emitting
+        # one generic error entry per remaining register.
+        exc.selector = {
+            "read_opcode": read_opcode,
+            "group": f"0x{group:02x}",
+            "instance": f"0x{instance:02x}",
+            "register": f"0x{register:04x}",
+            "request_hex": payload.hex(),
+        }
+        exc.entry = {
+            "read_opcode": read_opcode,
+            "read_opcode_label": read_opcode_label,
+            "reply_hex": None,
+            "flags": None,
+            "reply_kind": None,
+            "flags_access": None,
+            "response_state": None,
+            "ebusd_name": None,
+            "myvaillant_name": None,
+            "raw_hex": None,
+            "type": None,
+            "value": None,
+            "error": f"transport_error: {exc}",
+            "transport_diagnostic": {
+                "cause": exc.cause,
+                "phase": exc.phase,
+                "request_attempts": exc.request_attempts,
+                "retry_count": exc.retry_count,
+                "reconnect_attempts": exc.reconnect_attempts,
+            },
+        }
+        raise
     except TransportError as exc:
         if isinstance(exc, TransportCommandNotEnabled):
             raise

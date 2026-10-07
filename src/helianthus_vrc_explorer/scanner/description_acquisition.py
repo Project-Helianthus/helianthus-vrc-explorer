@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..protocol.b524 import build_constraint_probe_payload
-from ..transport.base import TransportInterface
+from ..transport.base import TransportInterface, TransportRecoveryExhausted
 from ..transport.instrumented import CountingTransport, ScanRequestBudgetExceeded
 from .b524_probe import probe_parameter_description
 from .description_scheduler import DescriptionCandidate, schedule_descriptions
@@ -114,10 +114,11 @@ def finish_description_coverage(
     candidates: list[DescriptionCandidate],
     entries: dict[tuple[int, int, int, int], dict[str, Any]],
     *,
-    budget: int,
+    budget: int | None,
     coverage: dict[str, Any],
 ) -> None:
-    effective_budget = int(coverage.get("effective_request_budget", budget))
+    configured_count = len(schedule_descriptions(candidates, budget=budget).scheduled)
+    effective_budget = int(coverage.get("effective_request_budget", configured_count))
     schedule = schedule_descriptions(candidates, budget=effective_budget)
     skipped = {_identity(candidate) for candidate in schedule.budget_skipped}
     totals = {
@@ -157,7 +158,7 @@ def finish_description_coverage(
                         "qualification": "unavailable",
                         "reason": (
                             "B524 request budget exhausted"
-                            if effective_budget < budget
+                            if effective_budget < configured_count
                             else "description request budget exhausted"
                         ),
                         "request_attempted": False,
@@ -204,16 +205,16 @@ def acquire_descriptions(
     dst: int,
     candidates: list[DescriptionCandidate],
     entries: dict[tuple[int, int, int, int], dict[str, Any]],
-    budget: int,
+    budget: int | None,
     coverage: dict[str, Any],
     observer: ScanObserver | None = None,
 ) -> None:
     configured_schedule = schedule_descriptions(candidates, budget=budget)
-    effective_budget = budget
+    effective_budget = len(configured_schedule.scheduled)
     attempt_capacity: int | None = None
     if isinstance(transport, CountingTransport) and transport.request_budget is not None:
         attempt_capacity = max(0, transport.request_budget - transport.counters.send_calls)
-        effective_budget = min(budget, attempt_capacity)
+        effective_budget = min(effective_budget, attempt_capacity)
     coverage["effective_request_budget"] = effective_budget
     schedule = schedule_descriptions(candidates, budget=effective_budget)
     attempt_state: _FairDescriptionAttemptState | None = None
@@ -262,6 +263,19 @@ def acquire_descriptions(
                 register=candidate.register,
                 type_spec=candidate.type_spec,
             )
+        except TransportRecoveryExhausted as exc:
+            attempts = (
+                transport.counters.send_calls - start_attempts
+                if isinstance(transport, CountingTransport)
+                else exc.request_attempts
+            )
+            metadata = exc.parameter_description or _unavailable_description(
+                candidate, dst=dst, reason=str(exc), attempts=attempts
+            )
+            metadata.update(request_attempted=attempts > 0, request_attempts=attempts)
+            _retain_matched_or_store(entry, metadata)
+            finish_description_coverage(candidates, entries, budget=budget, coverage=coverage)
+            raise
         except _DescriptionAttemptDeferred as exc:
             attempts = (
                 transport.counters.send_calls - start_attempts

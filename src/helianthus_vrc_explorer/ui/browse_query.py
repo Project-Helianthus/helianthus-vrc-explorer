@@ -27,6 +27,59 @@ def _parse_range_key(range_key: str) -> tuple[int, int] | None:
     return start, end
 
 
+def _has_navigation_children(node: TreeNodeRef, tree_nodes: list[TreeNodeRef]) -> bool:
+    """Whether selecting *node* should navigate rather than render descendant rows.
+
+    Tree nodes intentionally omit B524 register leaves.  A singleton B524 group
+    without an instance node is therefore a genuine table leaf, while a group
+    with an instance child is a navigation node.  The same structural rule keeps
+    B509 ranges and B555 programs as leaves.
+    """
+
+    for candidate in tree_nodes:
+        if candidate.node_id == node.node_id:
+            continue
+        if node.level == "root":
+            return True
+        if node.level == "protocol" and candidate.protocol == node.protocol:
+            return True
+        if (
+            node.level == "section"
+            and candidate.protocol == node.protocol
+            and candidate.section_key == node.section_key
+            and candidate.level in {"group", "namespace", "instance", "register", "range"}
+        ):
+            return True
+        if (
+            node.level == "group"
+            and candidate.protocol == node.protocol
+            and candidate.section_key == node.section_key
+            and candidate.group_key == node.group_key
+            and candidate.level in {"namespace", "instance", "register"}
+        ):
+            return True
+        if (
+            node.level == "namespace"
+            and candidate.protocol == node.protocol
+            and candidate.section_key == node.section_key
+            and candidate.group_key == node.group_key
+            and candidate.namespace_key == node.namespace_key
+            and candidate.level in {"instance", "register"}
+        ):
+            return True
+        if (
+            node.level == "instance"
+            and candidate.protocol == node.protocol
+            and candidate.section_key == node.section_key
+            and candidate.group_key == node.group_key
+            and candidate.namespace_key == node.namespace_key
+            and candidate.instance_key == node.instance_key
+            and candidate.level == "register"
+        ):
+            return True
+    return False
+
+
 def rows_for_selection(
     rows: list[RegisterRow],
     tree_nodes: list[TreeNodeRef],
@@ -37,7 +90,11 @@ def rows_for_selection(
     """Return the same ordered rows selected by the compatible tree node."""
 
     selected = [row for row in rows if row.tab == tab]
-    if node is None or node.level == "root":
+    if node is None:
+        return selected
+    if _has_navigation_children(node, tree_nodes):
+        return []
+    if node.level == "root":
         return selected
     if node.level == "protocol" and node.protocol is not None:
         return [row for row in selected if row.protocol == node.protocol]

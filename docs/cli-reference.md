@@ -97,21 +97,19 @@ This file is generated from the CLI's `--help` output. Refresh it with
 │                                                                          number) in console output.                  │
 │ --probe-constraints        --no-probe-constraints                        Acquire complete OP01/OP07 descriptions for │
 │                                                                          observed writable parameters. Enabled by    │
-│                                                                          default with a fair configurable request    │
-│                                                                          budget; descriptions validate later offline │
-│                                                                          edits. Missing descriptions remain explicit │
+│                                                                          default for all eligible parameters;        │
+│                                                                          descriptions validate later offline edits.  │
+│                                                                          Missing descriptions remain explicit        │
 │                                                                          warnings.                                   │
 │                                                                          [default: probe-constraints]                │
 │ --scan-plan                                          <file>              Version 1 JSON plan file for custom         │
 │                                                                          OP02/OP06, GG, II and RR16 selectors.       │
 │ --description-budget                                 <int range> [x>=0]  Maximum description requests, shared fairly │
 │                                                                          between OP01 and OP07 (unused shares        │
-│                                                                          borrowed). Default: 256 for                 │
-│                                                                          recommended/custom; all eligible            │
-│                                                                          parameters, bounded to 100000, for          │
-│                                                                          full/research.                              │
-│ --request-budget                                     <int range> [x>=1]  Maximum actual B524 sends including         │
-│                                                                          retries; full/research default to 10000.    │
+│                                                                          borrowed). Default: all eligible parameters │
+│                                                                          in the selected scope.                      │
+│ --request-budget                                     <int range> [x>=1]  Optional maximum actual B524 sends          │
+│                                                                          including retries. No implicit send cap.    │
 │                                                                          Exhaustion saves a partial artifact.        │
 │ --help                 -h                                                Show this message and exit.                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯

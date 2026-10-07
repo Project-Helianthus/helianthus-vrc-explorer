@@ -25,7 +25,7 @@ from ..schema.b524_constraints import (
 )
 from ..schema.ebusd_csv import EbusdCsvSchema
 from ..schema.myvaillant_map import MyvaillantRegisterMap
-from ..transport.base import TransportInterface, emit_trace_label
+from ..transport.base import TransportInterface, TransportRecoveryExhausted, emit_trace_label
 from ..transport.instrumented import CountingTransport, ScanRequestBudgetExceeded
 from ..ui.planner import PlannerGroup, PlannerPreset, build_plan_from_preset
 from .b524_artifact import (
@@ -145,18 +145,14 @@ def run_b524_scan(
 
     planner_preset = _normalize_planner_preset(planner_preset)
     research_mode = planner_preset == "research"
-    if description_budget is None:
-        description_budget = 100_000 if planner_preset in {"full", "research"} else 256
     if explicit_plan is not None and planner_preset != "custom":
         raise ValueError("An explicit scan plan requires the custom preset")
-    if (
+    if description_budget is not None and (
         isinstance(description_budget, bool)
         or not isinstance(description_budget, int)
         or description_budget < 0
     ):
         raise ValueError("description_budget must be a nonnegative integer")
-    if planner_preset in {"full", "research"} and request_budget is None:
-        request_budget = 10_000
     configured_groups = (
         sorted({item.group for item in explicit_plan.values()})
         if explicit_plan is not None
@@ -232,9 +228,14 @@ def run_b524_scan(
                 )
             if probe_constraints:
                 observer.log(
-                    "Targeted parameter descriptions enabled for observed writable parameters "
-                    f"(OP01 system / OP07 device), bounded to {description_budget} requests.",
-                    level="warn",
+                    "Parameter descriptions enabled for all observed writable parameters "
+                    "(OP01 system / OP07 device)"
+                    + (
+                        f", limited to {description_budget} candidates by request."
+                        if description_budget is not None
+                        else "."
+                    ),
+                    level="info",
                 )
         emit_trace_label(transport, f"Starting scan dst={_hex_u8(dst)}")
 
@@ -840,6 +841,7 @@ def run_b524_scan(
                                 request_rate_rps=request_rate_rps,
                                 default_plan=planner_default_plan,
                                 default_preset=planner_preset,
+                                system_information=artifact["meta"]["system_information"],
                             )
                         except Exception as exc:
                             if planner_ui == "textual":
@@ -862,6 +864,7 @@ def run_b524_scan(
                         request_rate_rps=request_rate_rps,
                         default_plan=planner_default_plan,
                         default_preset=planner_preset,
+                        system_information=artifact["meta"]["system_information"],
                     )
 
         artifact["meta"]["scan_plan"] = {
@@ -916,6 +919,7 @@ def run_b524_scan(
                                         request_rate_rps=request_rate_rps,
                                         default_plan=plan,
                                         default_preset=planner_preset,
+                                        system_information=artifact["meta"]["system_information"],
                                     )
                                 except Exception as exc:
                                     if planner_ui == "textual":
@@ -939,6 +943,7 @@ def run_b524_scan(
                                 request_rate_rps=request_rate_rps,
                                 default_plan=plan,
                                 default_preset=planner_preset,
+                                system_information=artifact["meta"]["system_information"],
                             )
                     artifact["meta"]["scan_plan"]["groups"] = _scan_plan_meta_groups(plan)
                     artifact["meta"]["scan_plan"]["estimated_register_requests"] = (
@@ -974,7 +979,6 @@ def run_b524_scan(
                         f"II=0x{task.instance:02X} "
                         f"RR=0x{task.register:04X}"
                     )
-                    observer.phase_advance("register_scan", advance=1)
 
                 schema_entry = (
                     ebusd_schema.lookup(
@@ -1011,6 +1015,8 @@ def run_b524_scan(
                     register=task.register,
                     type_hint=type_hint,
                 )
+                if observer is not None:
+                    observer.phase_advance("register_scan", advance=1)
                 if schema_entry is not None:
                     entry["ebusd_name"] = schema_entry.name
                 if myvaillant_map is not None:
@@ -1188,6 +1194,39 @@ def run_b524_scan(
                 {identifier: value for identifier, value, _ in exc.system_information},
                 {identifier: raw for identifier, _, raw in exc.system_information},
             )
+    except TransportRecoveryExhausted as exc:
+        artifact["meta"]["incomplete"] = True
+        incomplete_reason = "transport_recovery_exhausted"
+        artifact["meta"]["transport_recovery"] = {
+            "cause": exc.cause,
+            "phase": exc.phase,
+            "request_attempts": exc.request_attempts,
+            "retry_count": exc.retry_count,
+            "reconnect_attempts": exc.reconnect_attempts,
+            "pending_selector": exc.selector,
+        }
+        artifact["meta"]["transport_boundary_evidence"] = list(counting_transport.recent_requests)
+        if exc.system_information:
+            artifact["meta"]["system_information"] = _system_information_records(
+                {identifier: value for identifier, value, _ in exc.system_information},
+                {identifier: raw for identifier, _, raw in exc.system_information},
+            )
+        if exc.entry is not None and exc.selector is not None:
+            selector = exc.selector
+            recovery_opcode = int(selector["read_opcode"], 0)
+            recovery_group = int(selector["group"], 0)
+            _ensure_group_artifact(
+                artifact,
+                group=recovery_group,
+                opcode=recovery_opcode,
+                name="Unknown",
+                descriptor_observed=0.0,
+            )
+            instances = _instances_object(artifact, group=recovery_group, opcode=recovery_opcode)
+            instance = instances.setdefault(selector["instance"], {"present": False})
+            instance.setdefault("registers", {})[selector["register"]] = exc.entry
+        if observer is not None:
+            observer.log(str(exc), level="warn")
 
     if probe_constraints:
         finish_description_coverage(

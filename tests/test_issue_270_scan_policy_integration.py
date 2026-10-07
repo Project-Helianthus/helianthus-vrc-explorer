@@ -57,6 +57,7 @@ def test_full_audits_count_underreporting_across_all_declared_slots(tmp_path: Pa
     transport = fixture_transport(tmp_path)
     artifact = scan_b524(transport, dst=0x15, planner_preset="full", probe_constraints=False)
     coverage = artifact["meta"]["instance_counts"]["0x02:0x02"]
+    assert artifact["meta"]["scan_coverage"]["request_budget"] is None
     assert coverage["expected"] == 1
     assert coverage["observed"] == 2
     assert coverage["mismatch"] is True
