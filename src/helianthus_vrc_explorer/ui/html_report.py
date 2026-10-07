@@ -9,6 +9,7 @@ from typing import Any
 
 from ..artifact_schema import migrate_artifact_schema
 from ..scanner.director import group_name_for_opcode
+from ..schema.b524_register_names import apply_b524_canonical_register_names
 from ..schema.parameter_descriptions import attach_bundled_descriptions
 from .emphasis import html_star_bold
 
@@ -2204,6 +2205,9 @@ __ARTIFACT_JSON__
 def render_html_report(artifact: dict[str, Any], *, title: str | None = None) -> str:
     # Ensure operations-first structure for consistent JS traversal.
     artifact, _migration = migrate_artifact_schema(artifact)
+    operations = artifact.get("operations")
+    if isinstance(operations, dict):
+        apply_b524_canonical_register_names(operations)
     attach_bundled_descriptions(artifact)
     meta = artifact.get("meta")
     # Build group_name_map from operations-first structure

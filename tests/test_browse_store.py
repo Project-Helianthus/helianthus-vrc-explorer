@@ -112,21 +112,24 @@ def test_browse_store_builds_rows_and_left_tree_uses_only_myvaillant_name() -> N
     assert by_register["0x0001"].tab == "config"
     assert by_register["0x0002"].tab == "state"
     assert by_register["0x0003"].tab == "state"
-    assert by_register["0x0001"].name == "0x0001"
-    assert by_register["0x0002"].name == "limit_value"
+    assert by_register["0x0001"].name == "system_dhw_bivalence_point"
+    assert by_register["0x0002"].name == "device_class_address"
     assert by_register["0x0002"].value_text == "HEATING_OR_COOLING (HEATING)"
-    assert by_register["0x0003"].name == "0x0003"
-    assert by_register["0x0001"].myvaillant_name == ""
+    assert by_register["0x0003"].name == "frost_protection_delay"
+    assert by_register["0x0001"].myvaillant_name == "system_dhw_bivalence_point"
     assert by_register["0x0001"].ebusd_name == "regulator_param_1"
-    assert by_register["0x0002"].myvaillant_name == "limit_value"
+    assert by_register["0x0002"].myvaillant_name == "device_class_address"
     assert by_register["0x0002"].ebusd_name == ""
 
     assert by_register["0x0001"].access_flags == "config_user"
     assert by_register["0x0001"].row_id == "0x00:0x02:0x00:0x0001"
     assert by_register["0x0002"].row_id == "0x00:0x06:0x00:0x0002"
-    expected_local_path = "B524/Controller Registers/GetParameter/Regulator Parameters/0x00/0x0001"
+    expected_local_path = (
+        "B524/Controller Registers/GetParameter/Regulator Parameters/0x00/"
+        "system_dhw_bivalence_point"
+    )
     expected_remote_path = (
-        "B524/Device Slots/GetDeviceParameter/Regulator Parameters/0x00/limit_value"
+        "B524/Device Slots/GetDeviceParameter/Regulator Parameters/0x00/device_class_address"
     )
     assert by_register["0x0001"].path == expected_local_path
     assert by_register["0x0002"].path == expected_remote_path
@@ -491,7 +494,7 @@ def test_browse_store_remote_namespace_instance_label_drops_local_group_assumpti
     by_node_id = {node.node_id: node for node in store.tree_nodes}
     assert by_node_id["b524:inst:device_slots:0x02:0x06:0x00"].label == "Remote Slot 1 (0x00)"
     row = store.rows[0]
-    assert row.path == "B524/Device Slots/GetDeviceParameter/Heat Pump/0x00/0x0001"
+    assert row.path == "B524/Device Slots/GetDeviceParameter/Heat Pump/0x00/device_connected"
 
 
 def test_browse_store_filters_rows_for_namespace_selection() -> None:

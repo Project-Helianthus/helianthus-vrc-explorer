@@ -25,6 +25,7 @@ from .scanner.register import (
     _sentinel_value_display,
     _strip_echo_header,
 )
+from .schema.b524_register_names import b524_register_name
 from .schema.myvaillant_map import MyvaillantRegisterMap
 
 _TRACE_LINE_RE = re.compile(r"^(?P<timestamp>\S+)\s+(?P<body>.*)$")
@@ -703,9 +704,16 @@ def _enrich_register_names(operations: dict[str, Any]) -> None:
                 for rr_key, entry in registers.items():
                     if not isinstance(entry, dict):
                         continue
+                    register = int(rr_key, 16)
+                    canonical_name = b524_register_name(
+                        opcode=opcode,
+                        group=group,
+                        register=register,
+                    )
+                    if canonical_name is not None:
+                        entry["myvaillant_name"] = canonical_name
                     if entry.get("myvaillant_name") is not None:
                         continue
-                    register = int(rr_key, 16)
                     mv = mv_map.lookup(
                         group=group,
                         instance=instance,

@@ -7,6 +7,7 @@ from typing import Any
 from ..artifact_schema import migrate_artifact_schema
 from ..scanner.director import GROUP_CONFIG, group_name_for_opcode, group_namespace_profiles
 from ..scanner.identity import operation_label
+from ..schema.b524_register_names import b524_register_name
 from ..schema.parameter_descriptions import attach_bundled_descriptions
 from .browse_models import BrowseTab, RegisterAddress, RegisterRow, TreeNodeRef
 from .register_semantics import entry_display_value_text, visible_rr_keys
@@ -822,14 +823,21 @@ class _HydratedBrowseStore:
                         if not isinstance(entry, dict):
                             continue
 
-                        myvaillant_name = str(entry.get("myvaillant_name") or "").strip()
-                        ebusd_name = str(entry.get("ebusd_name") or "").strip()
-                        name = myvaillant_name or register_key
                         tab = _tab_from_entry(entry)
                         entry_namespace_key = effective_namespace_key
                         read_opcode = _normalize_opcode_hex(entry.get("read_opcode"))
                         if read_opcode is not None:
                             entry_namespace_key = read_opcode
+                        canonical_name = b524_register_name(
+                            opcode=_safe_int_hex(entry_namespace_key or "0"),
+                            group=_safe_int_hex(group_key),
+                            register=_safe_int_hex(register_key),
+                        )
+                        myvaillant_name = (
+                            canonical_name or str(entry.get("myvaillant_name") or "").strip()
+                        )
+                        ebusd_name = str(entry.get("ebusd_name") or "").strip()
+                        name = myvaillant_name or register_key
                         entry_section_key = _b524_section_key_for_opcode(entry_namespace_key)
                         if entry_section_key not in {"controller_registers", "device_slots"}:
                             continue

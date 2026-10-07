@@ -65,9 +65,11 @@ def test_replay_trace_to_artifact_reconstructs_b524_register_reads(tmp_path: Pat
     assert local_entry["read_opcode_label"] == "GetParameter"
     assert local_entry["response_state"] == "active"
     assert local_entry["value"] == 1
+    assert local_entry["myvaillant_name"] == "circuit_circuit_type"
     assert remote_entry["read_opcode_label"] == "GetDeviceParameter"
     assert remote_entry["response_state"] == "active"
     assert remote_entry["value"] == 1
+    assert remote_entry["myvaillant_name"] == "device_connected"
 
 
 def test_replay_trace_to_artifact_rejects_non_enhanced_trace(tmp_path: Path) -> None:

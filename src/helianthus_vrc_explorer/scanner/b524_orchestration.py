@@ -23,6 +23,7 @@ from ..schema.b524_constraints import (
     constraint_scope_metadata,
     load_default_b524_constraints_catalog,
 )
+from ..schema.b524_register_names import b524_register_name
 from ..schema.ebusd_csv import EbusdCsvSchema
 from ..schema.myvaillant_map import MyvaillantRegisterMap
 from ..transport.base import TransportInterface, TransportRecoveryExhausted, emit_trace_label
@@ -1086,6 +1087,14 @@ def run_b524_scan(
                             )
                             if mapped_ebusd_name:
                                 entry["ebusd_name"] = mapped_ebusd_name
+
+                canonical_name = b524_register_name(
+                    opcode=task.opcode,
+                    group=task.group,
+                    register=task.register,
+                )
+                if canonical_name is not None:
+                    entry["myvaillant_name"] = canonical_name
 
                 constraint = _constraint_for_register(
                     opcode=task.opcode,

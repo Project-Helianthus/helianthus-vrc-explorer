@@ -74,5 +74,7 @@ def test_saved_artifacts_use_current_remote_names_without_rewriting_evidence(gro
     assert next(sheet for sheet in sheets if sheet.op_key == "0x02").name == "preserved local label"
     store = BrowseStore.from_artifact(artifact)
     assert any(node.label == f"{name} ({group_key})" for node in store.tree_nodes)
-    assert name in render_html_report(artifact)
+    html = render_html_report(artifact)
+    assert name in html
+    assert "device_connected" in html
     assert artifact == original
