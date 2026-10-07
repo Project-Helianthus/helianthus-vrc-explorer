@@ -640,6 +640,24 @@ def run_b524_scan(
                     artifact["meta"]["scan_coverage"]["qualification_incomplete"] = True
                 else:
                     artifact["meta"]["scan_coverage"].setdefault("device_discovery_complete", True)
+            uncertain_instances = [
+                ii
+                for ii, probe in probes.items()
+                if probe.evidence is not None
+                and probe.evidence.get("availability_qualification") == "unknown"
+            ]
+            if uncertain_instances:
+                coverage = artifact["meta"]["scan_coverage"]
+                coverage["qualification_incomplete"] = True
+                coverage["instance_discovery_complete"] = False
+                coverage.setdefault("unknown_instance_probes", []).extend(
+                    {
+                        "read_opcode": _hex_u8(opcode),
+                        "group": _hex_u8(group.group),
+                        "instance": _hex_u8(ii),
+                    }
+                    for ii in uncertain_instances
+                )
             present_instances = tuple(ii for ii, probe in probes.items() if probe.present)
             count_id = COUNT_GROUP_IDS.get((int(opcode), group.group))
             if count_id is not None:

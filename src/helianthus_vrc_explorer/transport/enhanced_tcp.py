@@ -20,6 +20,7 @@ from .base import (
     TransportHostError,
     TransportInterface,
     TransportNack,
+    TransportProtocolFailure,
     TransportRecoveryExhausted,
     TransportTimeout,
 )
@@ -366,10 +367,13 @@ class _EnhancedCrcMismatch(TransportError):
 class _EnhancedSessionError(TransportError):
     """Recoverable ENH/TCP session failure with sanitized diagnostics."""
 
-    def __init__(self, message: str, *, cause: str, phase: str) -> None:
+    def __init__(
+        self, message: str, *, cause: str, phase: str, unexpected_symbol: int | None = None
+    ) -> None:
         super().__init__(message)
         self.cause = cause
         self.phase = phase
+        self.unexpected_symbol = unexpected_symbol
 
 
 def _utc_ts() -> str:
@@ -1146,6 +1150,7 @@ class EnhancedTcpTransport(TransportInterface):
     ) -> bytes:
         timeout_retries = 0
         reconnect_retries = 0
+        successful_reconnects = 0
         collision_retries = 0
         nack_retries = 0
         request_attempts = 0
@@ -1173,7 +1178,8 @@ class EnhancedTcpTransport(TransportInterface):
             )
 
         def _recover_session(exc: TransportError) -> None:
-            nonlocal reconnect_retries, timeout_retries, collision_retries, nack_retries
+            nonlocal reconnect_retries, successful_reconnects
+            nonlocal timeout_retries, collision_retries, nack_retries
             if self._config.reconnect_max_retries == 0:
                 raise exc
             cause, phase = _failure_details(exc)
@@ -1203,9 +1209,24 @@ class EnhancedTcpTransport(TransportInterface):
                 timeout_retries = 0
                 collision_retries = 0
                 nack_retries = 0
+                successful_reconnects += 1
                 return
             terminal_phase = "reconnect" if reconnect_failed else phase
             terminal_cause = last_cause if reconnect_failed else cause
+            if (
+                not reconnect_failed
+                and successful_reconnects > 0
+                and terminal_cause == "protocol_sync_error"
+                and terminal_phase == "command_ack"
+            ):
+                failure = TransportProtocolFailure(
+                    request_attempts=request_attempts,
+                    reconnect_attempts=reconnect_retries,
+                    unexpected_symbol=getattr(exc, "unexpected_symbol", None),
+                )
+                self._trace(f"#{seq} REQUEST_FAILED {failure}")
+                self.close()
+                raise failure from exc
             raise _terminal(exc, cause=terminal_cause, phase=terminal_phase) from exc
 
         while True:
@@ -1365,6 +1386,7 @@ class EnhancedTcpTransport(TransportInterface):
                     f"unexpected symbol 0x{ack:02X} while waiting for command ack",
                     cause="protocol_sync_error",
                     phase="command_ack",
+                    unexpected_symbol=ack,
                 )
 
             if _is_initiator_capable_address(dst):
