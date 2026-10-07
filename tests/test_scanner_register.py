@@ -19,6 +19,7 @@ from helianthus_vrc_explorer.transport.base import (
     TransportError,
     TransportInterface,
     TransportNack,
+    TransportRecoveryExhausted,
     TransportTimeout,
 )
 
@@ -155,9 +156,43 @@ class _AlwaysTransportErrorTransport(TransportInterface):
         raise TransportError("nope")
 
 
+class _RecoveryExhaustedTransport(TransportInterface):
+    def send(self, dst: int, payload: bytes) -> bytes:  # noqa: ARG002
+        raise TransportRecoveryExhausted(
+            cause="socket_error",
+            phase="reconnect",
+            request_attempts=3,
+            reconnect_attempts=2,
+        )
+
+
 class _AlwaysCommandNotEnabledTransport(TransportInterface):
     def send(self, dst: int, payload: bytes) -> bytes:  # noqa: ARG002
         raise TransportCommandNotEnabled("ERR: command not enabled")
+
+
+def test_read_register_propagates_terminal_transport_outage() -> None:
+    with pytest.raises(TransportRecoveryExhausted) as raised:
+        read_register(
+            _RecoveryExhaustedTransport(),
+            0x15,
+            0x02,
+            group=0x02,
+            instance=0x00,
+            register=0x0002,
+            type_hint="UIN",
+        )
+
+    assert raised.value.phase == "reconnect"
+    assert raised.value.entry is not None
+    assert raised.value.entry["error"].startswith("transport_error: ")
+    assert raised.value.entry["transport_diagnostic"] == {
+        "cause": "socket_error",
+        "phase": "reconnect",
+        "request_attempts": 3,
+        "retry_count": 2,
+        "reconnect_attempts": 2,
+    }
 
 
 class _BoolFalseTransport(TransportInterface):

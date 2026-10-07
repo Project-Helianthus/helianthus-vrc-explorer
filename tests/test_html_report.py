@@ -216,7 +216,7 @@ def test_html_report_renders_modern_system_information_and_embedded_descriptions
     assert "OP=00h ReadSystemInformation" in html
     assert "circuit_count" in html
     assert "raw_hex" in html
-    assert "OP01 DescribeParameter" in html
+    assert "Describe: min=${formatValue(description.min)}" in html
     assert "description_opcode" in html
     assert "Candidate annotation:" in html
     assert "candidate_name=" in html
@@ -632,3 +632,58 @@ def test_html_report_legacy_entries_without_read_opcode_present_after_migration(
     # Operations-first: direct lookup, no merging
     assert "function getOperationGroup(opKey, groupKey)" in html
     assert "buildGroupsFromOperations" not in html
+
+
+def test_html_report_browser_presentation_keeps_html_only_corrections() -> None:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node is required for the generated HTML status smoke test")
+    artifact = {
+        "schema_version": "2.3",
+        "operations": {
+            "0x02": {
+                "groups": {
+                    "0x00": {"name": "stale", "instances": {}},
+                    "0x01": {"name": "stale", "instances": {}},
+                }
+            }
+        },
+    }
+
+    html = render_html_report(artifact)
+
+    assert '"0x00":{"0x02":{"name":"Regulator Parameters","rr_max":"0x00FF"}' in html
+    assert '"0x01":{"0x02":{"name":"Native Drinkable Hot Water"}' in html
+    assert "declared RR_max" in html
+    assert (
+        "Describe: min=${formatValue(description.min)}, max=${formatValue(description.max)}, "
+        "step=${step}, ${codec}"
+    ) in html
+    assert (
+        'case "read_only_visible": return [{text:"read-only",cls:"flag-state"},'
+        '{text:"visible",cls:"flag-other"}];'
+    ) in html
+    assert "read-only hint" not in html
+    assert "writable hint" not in html
+    assert "transport_failure" in html
+    assert 'statusKind !== "transport_failure" && errTxt' in html
+    assert 'selectedType.startsWith("STR:")' in html
+    assert 'verification === "differs" || verification === "profile_mismatch"' in html
+
+    status_start = html.index("function entryStatusKind(")
+    status_end = html.index("function rowHasExplicitName(", status_start)
+    flags_start = html.index("function flagBadges(")
+    flags_end = html.index("function appendAccessBadges(", flags_start)
+    script = (
+        html[status_start:status_end]
+        + html[flags_start:flags_end]
+        + (
+            'const transport = entryStatusLabel({error: "transport_error: TransportError"});'
+            "console.log(JSON.stringify([transport, "
+            'flagBadges("read_only_visible").map((badge) => badge.text)]));'
+        )
+    )
+    result = subprocess.run(
+        [node, "-e", script], check=True, text=True, capture_output=True, timeout=10
+    )
+    assert json.loads(result.stdout) == ["Transport failure", ["read-only", "visible"]]

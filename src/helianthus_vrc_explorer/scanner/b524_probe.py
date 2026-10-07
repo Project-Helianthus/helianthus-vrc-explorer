@@ -19,7 +19,12 @@ from ..schema.b524_constraints import (
     StaticConstraintEntry,
     lookup_static_constraint,
 )
-from ..transport.base import TransportCommandNotEnabled, TransportError, TransportInterface
+from ..transport.base import (
+    TransportCommandNotEnabled,
+    TransportError,
+    TransportInterface,
+    TransportRecoveryExhausted,
+)
 from .b524_artifact import _entry_is_opcode_responsive, _entry_is_readable
 from .identity import make_register_identity
 from .observer import ScanObserver
@@ -622,6 +627,11 @@ def probe_parameter_description(
                 type_spec=normalized_type,
             )
         )
+    except TransportRecoveryExhausted as exc:
+        metadata["reason"] = str(exc)
+        exc.selector = {**selector, "request_hex": request.hex()}
+        exc.parameter_description = metadata
+        raise
     except TransportCommandNotEnabled:
         raise
     except (TransportError, ValueError) as exc:

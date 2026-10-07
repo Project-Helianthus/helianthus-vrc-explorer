@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass
+from pathlib import Path
 
 from rich import box
 from rich.console import Console, Group, RenderableType
@@ -23,7 +24,7 @@ from ..scanner.observer import ScanObserver
 from .emphasis import rich_star_bold_text
 
 _PHASE_LABELS: dict[str, str] = {
-    "group_discovery": "Group Discovery",
+    "group_discovery": "System Information",
     "constraint_probe": "Constraint Probe",
     "instance_discovery": "Instance Discovery",
     "register_scan": "Register Scan",
@@ -113,12 +114,14 @@ class RichScanObserver(AbstractContextManager["RichScanObserver"], ScanObserver)
         title: str,
         subtitle_lines: list[str] | None = None,
         show_tips: bool = True,
+        trace_file: Path | None = None,
         session_preface: ScanSessionPreface | None = None,
     ) -> None:
         self._console = console
         self._title = title
         self._subtitle_lines = subtitle_lines or []
         self._show_tips = show_tips
+        self._trace_file = trace_file
         self._session_preface = session_preface
         self._started = False
         self._suspend_depth = 0
@@ -147,17 +150,18 @@ class RichScanObserver(AbstractContextManager["RichScanObserver"], ScanObserver)
         for line in self._subtitle_lines:
             header_parts.append(Text(line, style="dim"))
         if self._show_tips:
-            header_parts.extend(
-                [
+            if self._trace_file is None:
+                header_parts.append(
                     Text(
                         "Tip: set `--trace-file` to capture ebusd request/response exchanges.",
                         style="dim",
-                    ),
-                    Text(
-                        "Tip: press `p` during Register Scan to open the scan planner.",
-                        style="dim",
-                    ),
-                ]
+                    )
+                )
+            header_parts.append(
+                Text(
+                    "Tip: press `p` during Register Scan to open the scan planner.",
+                    style="dim",
+                )
             )
         header = Group(
             *header_parts,
@@ -247,6 +251,7 @@ def make_scan_observer(
     title: str,
     subtitle_lines: list[str] | None = None,
     show_tips: bool = True,
+    trace_file: Path | None = None,
     session_preface: ScanSessionPreface | None = None,
 ) -> AbstractContextManager[ScanObserver]:
     if console.is_terminal:
@@ -255,6 +260,7 @@ def make_scan_observer(
             title=title,
             subtitle_lines=subtitle_lines,
             show_tips=show_tips,
+            trace_file=trace_file,
             session_preface=session_preface,
         )
     return NullScanObserver()

@@ -18,7 +18,7 @@ def _candidate(
     return DescriptionCandidate(read_opcode, group, instance, register, type_spec)
 
 
-def test_default_budget_reserves_128_requests_for_each_description_family() -> None:
+def test_default_schedule_includes_every_eligible_parameter_in_both_families() -> None:
     candidates = [
         *(_candidate(0x02, 0x01, 0x00, register) for register in range(200)),
         *(_candidate(0x06, 0x09, 0x00, register) for register in range(200)),
@@ -26,13 +26,13 @@ def test_default_budget_reserves_128_requests_for_each_description_family() -> N
 
     result = schedule_descriptions(candidates)
 
-    assert len(result.scheduled) == 256
-    assert sum(candidate.read_opcode == 0x02 for candidate in result.scheduled) == 128
-    assert sum(candidate.read_opcode == 0x06 for candidate in result.scheduled) == 128
+    assert len(result.scheduled) == 400
+    assert sum(candidate.read_opcode == 0x02 for candidate in result.scheduled) == 200
+    assert sum(candidate.read_opcode == 0x06 for candidate in result.scheduled) == 200
     assert result.family_counts[0x02].eligible == 200
-    assert result.family_counts[0x02].skipped == 72
+    assert result.family_counts[0x02].skipped == 0
     assert result.family_counts[0x06].eligible == 200
-    assert result.family_counts[0x06].skipped == 72
+    assert result.family_counts[0x06].skipped == 0
 
 
 def test_unused_family_reservation_is_borrowed_and_odd_budget_favors_local() -> None:

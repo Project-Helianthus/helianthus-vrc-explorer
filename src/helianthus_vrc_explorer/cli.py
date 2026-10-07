@@ -706,7 +706,7 @@ def scan(
         "--probe-constraints/--no-probe-constraints",
         help=(
             "Acquire complete OP01/OP07 descriptions for observed writable parameters. "
-            "Enabled by default with a fair configurable request budget; descriptions validate "
+            "Enabled by default for all eligible parameters; descriptions validate "
             "later offline edits. Missing descriptions remain explicit warnings."
         ),
     ),
@@ -724,8 +724,7 @@ def scan(
         min=0,
         help=(
             "Maximum description requests, shared fairly between OP01 and OP07 "
-            "(unused shares borrowed). Default: 256 for recommended/custom; "
-            "all eligible parameters, bounded to 100000, for full/research."
+            "(unused shares borrowed). Default: all eligible parameters in the selected scope."
         ),
     ),
     request_budget: int | None = typer.Option(  # noqa: B008
@@ -733,7 +732,7 @@ def scan(
         "--request-budget",
         min=1,
         help=(
-            "Maximum actual B524 sends including retries; full/research default to 10000. "
+            "Optional maximum actual B524 sends including retries. No implicit send cap. "
             "Exhaustion saves a partial artifact."
         ),
     ),
@@ -863,6 +862,7 @@ def scan(
                     subtitle_lines=[],
                     show_tips=not no_tips,
                     session_preface=preface,
+                    trace_file=trace_file,
                 ) as observer:
                     artifact = scan_vrc(
                         DummyTransport(fixture_path),
@@ -949,6 +949,7 @@ def scan(
                         subtitle_lines=subtitle_lines,
                         show_tips=not no_tips,
                         session_preface=preface,
+                        trace_file=trace_file,
                     ) as observer:
                         artifact = scan_vrc(
                             transport,

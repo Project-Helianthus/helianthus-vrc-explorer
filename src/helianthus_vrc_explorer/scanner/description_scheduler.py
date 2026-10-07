@@ -12,7 +12,6 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 _DESCRIPTION_FAMILIES = (0x02, 0x06)
-_DEFAULT_DESCRIPTION_BUDGET = 256
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,20 +111,24 @@ def _round_robin_namespaces(
 
 def schedule_descriptions(
     candidates: Iterable[DescriptionCandidate],
-    budget: int = _DEFAULT_DESCRIPTION_BUDGET,
+    budget: int | None = None,
 ) -> DescriptionSchedule:
     """Build a finite OP01/OP07 schedule with balanced reservations.
 
     The local description family receives the extra reservation for an odd
     budget. Either family may borrow capacity that the other family cannot use.
     """
-    if isinstance(budget, bool) or not isinstance(budget, int) or budget < 0:
+    if budget is not None and (
+        isinstance(budget, bool) or not isinstance(budget, int) or budget < 0
+    ):
         raise ValueError("budget must be a non-negative integer")
 
     deduplicated = _deduplicate_candidates(candidates)
     ordered = {
         opcode: _round_robin_namespaces(deduplicated[opcode]) for opcode in _DESCRIPTION_FAMILIES
     }
+    if budget is None:
+        budget = sum(len(family) for family in ordered.values())
     reservations = {0x02: (budget + 1) // 2, 0x06: budget // 2}
     consumed = {
         opcode: min(len(ordered[opcode]), reservations[opcode]) for opcode in _DESCRIPTION_FAMILIES

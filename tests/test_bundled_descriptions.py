@@ -161,10 +161,112 @@ def test_offline_html_and_browse_display_baseline_without_live_description(monke
         lambda: bundle,
     )
     html = render_html_report(artifact)
-    assert "Bundled baseline" in html
+    assert "Cached description" in html
     assert '"verification":"not_verified"' in html
     store = BrowseStore.from_artifact(artifact)
     row = next(row for row in store.rows if row.register_key == "0x0009")
     assert row.parameter_description is None
     assert "Bundled (not_verified)" in row.description_text
     assert "20.0..70.0" in row.description_text
+
+
+def test_missing_optional_controller_reads_are_not_a_description_mismatch() -> None:
+    artifact = _artifact()
+    bundle = export_description_baseline(artifact)
+    bundle["descriptions"][0]["profile"].update(
+        controller_class_raw="15", controller_firmware_raw="080500"
+    )
+    entry = artifact["operations"]["0x02"]["groups"]["0x02"]["instances"]["0x01"]["registers"][
+        "0x0009"
+    ]
+    attach_bundled_descriptions(artifact, bundle=bundle)
+    cached = entry["bundled_parameter_description"]
+    assert cached["verification"] == "matches"
+    assert cached["profile_qualification"] == "partial"
+    assert entry["parameter_description"]["target_profile"]["controller_class_raw"] is None
+
+
+def test_missing_required_remote_identity_remains_unqualified_not_mismatched() -> None:
+    artifact = _artifact()
+    artifact["operations"]["0x06"] = deepcopy(artifact["operations"].pop("0x02"))
+    regs = artifact["operations"]["0x06"]["groups"]["0x02"]["instances"]["0x01"]["registers"]
+    regs["0x0009"]["parameter_description"].update(read_opcode="0x06", description_opcode="0x07")
+    regs["0x0002"] = {"type": "HEX:1", "raw_hex": "15", "value": "0x15"}
+    regs["0x0004"] = {"type": "FW", "raw_hex": "080500", "value": "08.05.00"}
+    bundle = export_description_baseline(artifact)
+    del regs["0x0004"]
+    attach_bundled_descriptions(artifact, bundle=bundle)
+    assert regs["0x0009"]["bundled_parameter_description"]["verification"] == "profile_unqualified"
+    assert regs["0x0009"]["parameter_description"]["target_profile_match"] is False
+
+
+def test_known_controller_identity_conflict_still_reports_profile_mismatch() -> None:
+    artifact = _artifact()
+    bundle = export_description_baseline(artifact)
+    bundle["descriptions"][0]["profile"]["controller_class_raw"] = "15"
+    artifact["operations"]["0x06"] = {
+        "groups": {
+            "0x09": {
+                "instances": {
+                    "0x01": {
+                        "registers": {"0x0002": {"type": "HEX:1", "raw_hex": "16", "value": "0x16"}}
+                    }
+                }
+            }
+        }
+    }
+    attach_bundled_descriptions(artifact, bundle=bundle)
+    entry = artifact["operations"]["0x02"]["groups"]["0x02"]["instances"]["0x01"]["registers"][
+        "0x0009"
+    ]
+    assert entry["bundled_parameter_description"]["verification"] == "profile_mismatch"
+
+
+def test_unknown_optional_identity_does_not_choose_between_conflicting_baselines() -> None:
+    artifact = _artifact()
+    bundle = export_description_baseline(artifact)
+    alternate = deepcopy(bundle["descriptions"][0])
+    bundle["descriptions"][0]["profile"]["controller_class_raw"] = "15"
+    alternate["profile"]["controller_class_raw"] = "16"
+    alternate["max"] = 60.0
+    bundle["descriptions"].append(alternate)
+    attach_bundled_descriptions(artifact, bundle=bundle)
+    entry = artifact["operations"]["0x02"]["groups"]["0x02"]["instances"]["0x01"]["registers"][
+        "0x0009"
+    ]
+    assert "bundled_parameter_description" not in entry
+
+
+def test_partial_baseline_merge_updates_valid_rows_and_retains_other_observations() -> None:
+    from helianthus_vrc_explorer.schema.parameter_descriptions import merge_description_baselines
+
+    artifact = _artifact()
+    previous = export_description_baseline(artifact)
+    previous["descriptions"][0]["profile"]["controller_class_raw"] = "15"
+    unchanged = deepcopy(previous["descriptions"][0])
+    unchanged["register"] = "0x000a"
+    previous["descriptions"].append(unchanged)
+    current = export_description_baseline(artifact)
+    current["descriptions"][0]["max"] = 60.0
+    merged = merge_description_baselines(previous, current)
+    assert len(merged["descriptions"]) == 2
+    changed = next(row for row in merged["descriptions"] if row["register"] == "0x0009")
+    assert changed["max"] == 60.0
+    assert changed["profile"]["controller_class_raw"] == "15"
+    assert previous["descriptions"][0]["max"] == 70.0
+    assert merged["coverage"]["complete_scan"] is False
+
+
+def test_baseline_merge_keeps_incompatible_firmware_profiles_separate() -> None:
+    from helianthus_vrc_explorer.schema.parameter_descriptions import merge_description_baselines
+
+    previous = export_description_baseline(_artifact())
+    artifact = _artifact()
+    artifact["meta"]["identity"]["firmware"] = "SW 0200 / HW 0200"
+    merged = merge_description_baselines(previous, export_description_baseline(artifact))
+    assert len(merged["descriptions"]) == 2
+    attach_bundled_descriptions(artifact, bundle=merged)
+    entry = artifact["operations"]["0x02"]["groups"]["0x02"]["instances"]["0x01"]["registers"][
+        "0x0009"
+    ]
+    assert entry["bundled_parameter_description"]["verification"] == "matches"

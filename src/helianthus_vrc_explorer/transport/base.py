@@ -45,6 +45,50 @@ class TransportDisconnected(TransportError):
     """
 
 
+class TransportRecoveryExhausted(TransportError):
+    """Raised when bounded recovery cannot restore an interrupted read.
+
+    The public fields intentionally contain only categorical diagnostics.  Raw
+    socket messages can contain private endpoint details and are retained only
+    as exception chaining, not in the user-facing message.
+    """
+
+    _CAUSES = frozenset(
+        {
+            "disconnected",
+            "protocol_sync_error",
+            "socket_error",
+            "timeout",
+            "transport_error",
+        }
+    )
+    _PHASES = frozenset({"command_ack", "connect", "receive", "reconnect", "send", "transaction"})
+
+    def __init__(
+        self,
+        *,
+        cause: str,
+        phase: str,
+        request_attempts: int,
+        reconnect_attempts: int,
+    ) -> None:
+        self.cause = cause if cause in self._CAUSES else "transport_error"
+        self.phase = phase if phase in self._PHASES else "transaction"
+        self.request_attempts = max(1, request_attempts)
+        self.retry_count = max(0, self.request_attempts - 1)
+        self.reconnect_attempts = max(0, reconnect_attempts)
+        self.selector: dict[str, str] | None = None
+        self.entry: dict[str, Any] | None = None
+        self.system_information: list[tuple[int, float, str | None]] = []
+        self.parameter_description: dict[str, Any] | None = None
+        super().__init__(
+            "transport recovery exhausted: "
+            f"cause={self.cause} phase={self.phase} "
+            f"request_attempts={self.request_attempts} retry_count={self.retry_count} "
+            f"reconnect_attempts={self.reconnect_attempts}"
+        )
+
+
 class TransportInterface(ABC):
     """Transport interface for sending B524 payloads and receiving raw responses."""
 

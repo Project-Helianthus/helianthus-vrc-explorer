@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
@@ -25,6 +26,7 @@ from ..scanner.scan_policy import (
     research_rr_max,
     validate_scalar_request_limit,
 )
+from .system_information import format_system_information_rows
 
 
 @dataclass(frozen=True, slots=True)
@@ -261,6 +263,21 @@ def _render_table(title: str, rows: list[PlannerGroup], *, unknown: bool, consol
         console.print(table)
 
 
+def _render_system_information(
+    console: Console, system_information: Sequence[Mapping[str, object]] | None
+) -> None:
+    rows = format_system_information_rows(system_information)
+    if not rows:
+        return
+    console.print(Rule("System Information", style="dim"))
+    table = Table.grid(padding=(0, 1))
+    table.add_column(style="bold dim")
+    table.add_column()
+    for label, value in rows:
+        table.add_row(f"{label}:", value)
+    console.print(table)
+
+
 def _print_plan_breakdown(console: Console, plan: dict[PlanKey, GroupScanPlan]) -> None:
     if not plan:
         console.print("[yellow]No groups selected.[/yellow]")
@@ -419,6 +436,7 @@ def prompt_scan_plan(
     request_rate_rps: float | None,
     default_plan: dict[PlanKey, GroupScanPlan] | None = None,
     default_preset: PlannerPreset = "recommended",
+    system_information: Sequence[Mapping[str, object]] | None = None,
 ) -> dict[PlanKey, GroupScanPlan]:
     """Prompt for a scan plan in interactive TTY mode.
 
@@ -445,6 +463,7 @@ def prompt_scan_plan(
             style="dim",
         )
     )
+    _render_system_information(console, system_information)
 
     known_groups = sorted([g for g in groups if g.known], key=lambda x: (x.group, x.opcode))
     unknown_groups = sorted(

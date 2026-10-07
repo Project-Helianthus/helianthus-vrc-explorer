@@ -291,7 +291,7 @@ def test_default_scan_keeps_system_information_separate_and_targets_writable_des
     assert "0x06:0x02" not in artifact["meta"]["instance_counts"]
 
 
-def test_default_description_requests_have_a_hard_budget() -> None:
+def test_default_description_requests_cover_all_observed_writable_parameters() -> None:
     from helianthus_vrc_explorer.scanner.scan import scan_b524
     from helianthus_vrc_explorer.transport.base import TransportInterface
 
@@ -311,10 +311,11 @@ def test_default_description_requests_have_a_hard_budget() -> None:
 
     bus = WritableBus()
     artifact = scan_b524(bus, dst=0x15)
-    assert bus.descriptions == 256
-    assert artifact["meta"]["parameter_description_requests"] == 256
+    assert bus.descriptions == 512
+    assert artifact["meta"]["parameter_description_requests"] == 512
+    assert artifact["meta"]["parameter_description_coverage"]["request_budget"] is None
     regs = artifact["operations"]["0x02"]["groups"]["0x00"]["instances"]["0x00"]["registers"]
-    assert regs["0x0100"]["parameter_description"]["qualification"] == "unavailable"
+    assert regs["0x0100"]["parameter_description"]["qualification"] == "matched"
     assert regs["0x0100"]["value"] == 1
 
 

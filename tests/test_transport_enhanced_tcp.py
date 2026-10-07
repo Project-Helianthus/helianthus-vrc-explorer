@@ -6,9 +6,17 @@ import socketserver
 import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from pathlib import Path
 from queue import Queue
 
-from helianthus_vrc_explorer.transport.base import TransportError, TransportNack, TransportTimeout
+import pytest
+
+from helianthus_vrc_explorer.transport.base import (
+    TransportError,
+    TransportNack,
+    TransportRecoveryExhausted,
+    TransportTimeout,
+)
 from helianthus_vrc_explorer.transport.enhanced_tcp import (
     _ENH_REQ_INFO,
     _ENH_REQ_INIT,
@@ -25,6 +33,7 @@ from helianthus_vrc_explorer.transport.enhanced_tcp import (
     _crc,
     _crc_update,
     _encode_enh,
+    _EnhancedSessionError,
 )
 
 
@@ -1726,3 +1735,302 @@ def test_xr_start_request_start_write_all_no_double_send() -> None:
 
     assert result == response
     assert start_frames_seen == 1  # Exactly one START, no duplicate
+
+
+def test_read_reconnects_and_retries_same_request_after_generic_session_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport = EnhancedTcpTransport(
+        EnhancedTcpConfig(reconnect_max_retries=1, reconnect_delay_s=0)
+    )
+    payload = bytes.fromhex("020002000f00")
+    attempts: list[bytes] = []
+    reconnects: list[tuple[int, int]] = []
+    hook_calls = 0
+
+    def _send_once(_seq: int, **kwargs: object) -> bytes:
+        nonlocal hook_calls
+        attempt_hook = kwargs["attempt_hook"]
+        if callable(attempt_hook):
+            attempt_hook()
+            hook_calls += 1
+        sent_payload = kwargs["payload"]
+        assert isinstance(sent_payload, bytes)
+        attempts.append(sent_payload)
+        if len(attempts) == 1:
+            raise _EnhancedSessionError(
+                "Enhanced adapter private-endpoint: socket unavailable",
+                cause="socket_error",
+                phase="send",
+            )
+        return b"\x01"
+
+    monkeypatch.setattr(transport, "_send_proto_once", _send_once)
+    monkeypatch.setattr(
+        transport,
+        "_reconnect",
+        lambda seq, attempt: reconnects.append((seq, attempt)),
+    )
+
+    result = transport.send_with_attempt_hook(0x15, payload, lambda: None)
+
+    assert result == b"\x01"
+    assert attempts == [payload, payload]
+    assert hook_calls == 2
+    assert reconnects == [(1, 1)]
+
+
+def test_recovery_trace_keeps_sanitized_initial_cause_and_phase(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    trace_path = tmp_path / "enhanced.trace"
+    transport = EnhancedTcpTransport(
+        EnhancedTcpConfig(
+            trace_path=trace_path,
+            reconnect_max_retries=1,
+            reconnect_delay_s=0,
+        )
+    )
+    attempts = 0
+
+    def _send_once(_seq: int, **_kwargs: object) -> bytes:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise _EnhancedSessionError(
+                "unexpected symbol from private-endpoint",
+                cause="protocol_sync_error",
+                phase="command_ack",
+            )
+        return b"\x01"
+
+    monkeypatch.setattr(transport, "_send_proto_once", _send_once)
+    monkeypatch.setattr(transport, "_reconnect", lambda _seq, _attempt: None)
+
+    assert transport.send(0x15, bytes.fromhex("020002000f00")) == b"\x01"
+    transport.close()
+
+    trace = trace_path.read_text(encoding="utf-8")
+    assert "RECOVERY cause=protocol_sync_error phase=command_ack" in trace
+    assert "private-endpoint" not in trace
+
+
+def test_unexpected_command_ack_reconnects_and_retries_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport = EnhancedTcpTransport(
+        EnhancedTcpConfig(reconnect_max_retries=1, reconnect_delay_s=0)
+    )
+    payload = bytes.fromhex("060009010700")
+    attempts = 0
+    reconnects = 0
+
+    def _send_once(_seq: int, **_kwargs: object) -> bytes:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise _EnhancedSessionError(
+                "unexpected symbol 0x42 while waiting for command ack",
+                cause="protocol_sync_error",
+                phase="command_ack",
+            )
+        return b"\x03"
+
+    def _reconnect(_seq: int, _attempt: int) -> None:
+        nonlocal reconnects
+        reconnects += 1
+
+    monkeypatch.setattr(transport, "_send_proto_once", _send_once)
+    monkeypatch.setattr(transport, "_reconnect", _reconnect)
+
+    assert transport.send(0x15, payload) == b"\x03"
+    assert attempts == 2
+    assert reconnects == 1
+
+
+def test_unexpected_command_ack_reconnects_over_tcp_and_completes_same_read() -> None:
+    src = 0xF1
+    dst = 0x15
+    payload = bytes.fromhex("020002000f00")
+    request_without_crc = bytes((src, dst, 0xB5, 0x24, len(payload))) + payload
+    request = request_without_crc + bytes((_crc(request_without_crc),))
+    response = bytes.fromhex("01020f0001")
+    response_segment = bytes((len(response),)) + response
+    response_crc = _crc(response_segment)
+    connection_count = 0
+    observed_payloads: list[bytes] = []
+
+    def _handler(conn: socket.socket) -> None:
+        nonlocal connection_count
+        connection_count += 1
+        assert _read_enh_frame(conn) == (_ENH_REQ_INIT, 0x01)
+        _write_enh_frame(conn, _ENH_RES_RESETTED, 0x01)
+        assert _read_enh_frame(conn) == (_ENH_REQ_START, src)
+        _write_enh_frame(conn, _ENH_RES_STARTED, src)
+
+        observed = bytearray()
+        for expected in request[1:]:
+            command, value = _read_enh_frame(conn)
+            assert command == _ENH_REQ_SEND
+            assert value == expected
+            observed.append(value)
+            _write_bus_symbol(conn, value)
+        observed_payloads.append(bytes(observed))
+
+        if connection_count == 1:
+            _write_bus_symbol(conn, 0x42)  # Invalid command ACK; session state is ambiguous.
+            return
+
+        _write_bus_symbol(conn, 0x00)
+        for value in response_segment:
+            _write_bus_symbol(conn, value)
+        _write_bus_symbol(conn, response_crc)
+        assert _read_enh_frame(conn) == (_ENH_REQ_SEND, 0x00)
+        _write_bus_symbol(conn, 0x00)
+        assert _read_enh_frame(conn) == (_ENH_REQ_SEND, 0xAA)
+        _write_bus_symbol(conn, 0xAA)
+
+    with _run_ens_test_server(_handler) as (host, port):
+        transport = EnhancedTcpTransport(
+            EnhancedTcpConfig(
+                host=host,
+                port=port,
+                timeout_s=1,
+                src=src,
+                reconnect_max_retries=1,
+                reconnect_delay_s=0,
+            )
+        )
+        result = transport.send(dst, payload)
+
+    assert result == response
+    assert connection_count == 2
+    assert observed_payloads == [request[1:], request[1:]]
+
+
+def test_exhausted_read_recovery_raises_terminal_outage_with_sanitized_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport = EnhancedTcpTransport(
+        EnhancedTcpConfig(reconnect_max_retries=2, reconnect_delay_s=0)
+    )
+    payload = bytes.fromhex("020002000f00")
+    attempts = 0
+
+    def _send_once(_seq: int, **_kwargs: object) -> bytes:
+        nonlocal attempts
+        attempts += 1
+        raise _EnhancedSessionError(
+            "Enhanced adapter 192.0.2.44:9999: connection refused",
+            cause="socket_error",
+            phase="send",
+        )
+
+    monkeypatch.setattr(transport, "_send_proto_once", _send_once)
+    monkeypatch.setattr(transport, "_reconnect", lambda _seq, _attempt: None)
+
+    with pytest.raises(TransportRecoveryExhausted) as raised:
+        transport.send(0x15, payload)
+
+    error = raised.value
+    assert error.cause == "socket_error"
+    assert error.phase == "send"
+    assert error.request_attempts == 3
+    assert error.retry_count == 2
+    assert error.reconnect_attempts == 2
+    assert "192.0.2.44" not in str(error)
+    assert attempts == 3
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        bytes.fromhex("020102000f0001"),  # SetParameter: mutative.
+        bytes.fromhex("0400000100"),  # WriteTimer: mutative.
+        b"\x02\x00",  # Malformed local request: retry safety is unknown.
+        b"\x00",  # Incomplete ReadSystemInformation selector.
+        b"\x01\x02\x03",  # Legacy/incomplete parameter description selector.
+        b"\x03\x00",  # Incomplete ReadTimer selector.
+    ],
+)
+def test_mutative_or_malformed_b524_request_is_not_retried(
+    monkeypatch: pytest.MonkeyPatch,
+    payload: bytes,
+) -> None:
+    transport = EnhancedTcpTransport(
+        EnhancedTcpConfig(reconnect_max_retries=3, reconnect_delay_s=0)
+    )
+    attempts = 0
+    reconnects = 0
+
+    def _send_once(_seq: int, **_kwargs: object) -> bytes:
+        nonlocal attempts
+        attempts += 1
+        raise TransportError("unexpected symbol 0x42 while waiting for command ack")
+
+    def _reconnect(_seq: int, _attempt: int) -> None:
+        nonlocal reconnects
+        reconnects += 1
+
+    monkeypatch.setattr(transport, "_send_proto_once", _send_once)
+    monkeypatch.setattr(transport, "_reconnect", _reconnect)
+
+    with pytest.raises(TransportError, match="unexpected symbol"):
+        transport.send(0x15, payload)
+
+    assert attempts == 1
+    assert reconnects == 0
+
+
+def test_target_nack_is_not_treated_as_recoverable_session_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport = EnhancedTcpTransport(
+        EnhancedTcpConfig(reconnect_max_retries=3, reconnect_delay_s=0)
+    )
+    attempts = 0
+    reconnects = 0
+
+    def _send_once(_seq: int, **_kwargs: object) -> bytes:
+        nonlocal attempts
+        attempts += 1
+        raise TransportNack("nack received (local retry exhausted)")
+
+    def _reconnect(_seq: int, _attempt: int) -> None:
+        nonlocal reconnects
+        reconnects += 1
+
+    monkeypatch.setattr(transport, "_send_proto_once", _send_once)
+    monkeypatch.setattr(transport, "_reconnect", _reconnect)
+
+    with pytest.raises(TransportNack, match="local retry exhausted"):
+        transport.send(0x15, bytes.fromhex("020002000f00"))
+
+    assert attempts == 1
+    assert reconnects == 0
+
+
+def test_exhausted_local_nack_releases_bus_without_session_reconnect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport = EnhancedTcpTransport(EnhancedTcpConfig(nack_max_retries=1, reconnect_max_retries=3))
+    sent_symbols: list[int] = []
+    reconnects = 0
+
+    monkeypatch.setattr(transport, "_start_arbitration", lambda _src: None)
+    monkeypatch.setattr(transport, "_send_symbol_with_echo", sent_symbols.append)
+    monkeypatch.setattr(transport, "_recv_bus_symbol", lambda **_kwargs: 0xFF)
+
+    def _reconnect(_seq: int, _attempt: int) -> None:
+        nonlocal reconnects
+        reconnects += 1
+
+    monkeypatch.setattr(transport, "_reconnect", _reconnect)
+
+    with pytest.raises(TransportNack, match="local retry exhausted"):
+        transport.send(0x15, bytes.fromhex("020002000f00"))
+
+    assert sent_symbols[-1] == 0xAA
+    assert sent_symbols.count(0xAA) == 1
+    assert reconnects == 0

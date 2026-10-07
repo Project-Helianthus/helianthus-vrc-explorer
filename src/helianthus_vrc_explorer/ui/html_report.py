@@ -818,7 +818,20 @@ __ARTIFACT_JSON__
         const entry = B524_GROUP_NAMES && typeof B524_GROUP_NAMES === "object" ? B524_GROUP_NAMES[groupKey] : null;
         if (!entry || typeof entry !== "object") return fallbackName;
         const scoped = entry[opcode];
-        return typeof scoped === "string" && scoped ? scoped : fallbackName;
+        if (typeof scoped === "string" && scoped) return scoped;
+        if (scoped && typeof scoped === "object" && typeof scoped.name === "string" && scoped.name) {
+          return scoped.name;
+        }
+        return fallbackName;
+      }
+
+      function groupPresentationForSection(groupKey, sectionKey) {
+        const opcode = requiredNamespaceForSection(sectionKey);
+        if (!opcode) return null;
+        const entry = B524_GROUP_NAMES && typeof B524_GROUP_NAMES === "object" ? B524_GROUP_NAMES[groupKey] : null;
+        if (!entry || typeof entry !== "object") return null;
+        const scoped = entry[opcode];
+        return scoped && typeof scoped === "object" ? scoped : null;
       }
 
       function operationLabelForOpcode(namespaceKey) {
@@ -957,13 +970,13 @@ __ARTIFACT_JSON__
         return rrKeys.slice(0, lastKeep + 1);
       }
 
-      // Raw attributes provide profile-scoped hints, not privilege or storage.
+      // Raw attributes provide profile-scoped annotations, not privilege or storage.
       function flagBadges(accessValue) {
         switch (accessValue) {
-          case "read_only_not_visible": return [{text:"read-only hint",cls:"flag-state"},{text:"not-visible hint",cls:"flag-other"}];
-          case "read_only_visible": return [{text:"read-only hint",cls:"flag-state"},{text:"visible hint",cls:"flag-other"}];
-          case "writable_not_visible": return [{text:"writable hint",cls:"flag-config"},{text:"not-visible hint",cls:"flag-other"}];
-          case "writable_visible": return [{text:"writable hint",cls:"flag-config"},{text:"visible hint",cls:"flag-other"}];
+          case "read_only_not_visible": return [{text:"read-only",cls:"flag-state"},{text:"not-visible",cls:"flag-other"}];
+          case "read_only_visible": return [{text:"read-only",cls:"flag-state"},{text:"visible",cls:"flag-other"}];
+          case "writable_not_visible": return [{text:"writable",cls:"flag-config"},{text:"not-visible",cls:"flag-other"}];
+          case "writable_visible": return [{text:"writable",cls:"flag-config"},{text:"visible",cls:"flag-other"}];
           case "state_volatile": case "state_stable": case "config_installer": case "config_user":
           case "valid": case "invalid": case "config_valid": case "config_sentinel":
             return [{text:"legacy attribute interpretation (unqualified)",cls:"flag-other"}];
@@ -1782,7 +1795,14 @@ __ARTIFACT_JSON__
           const ggNum = parseInt(groupKey, 16);
           const ggHex = ggNum.toString(16).toUpperCase().padStart(2, "0") + "h";
           const nameStr = resolvedGroupName !== "Unknown" ? ` ${resolvedGroupName}` : "";
-          th0.innerHTML = `Register <span style="opacity:.7;font-weight:500">(${ggHex}${nameStr})</span>`;
+          const presentation = groupPresentationForSection(
+            groupKey,
+            opKey === "0x02" ? "controller_registers" : "device_slots",
+          );
+          const rrMax = presentation && typeof presentation.rr_max === "string"
+            ? `; declared RR_max ${presentation.rr_max}`
+            : "";
+          th0.innerHTML = `Register <span style="opacity:.7;font-weight:500">(${ggHex}${nameStr}${rrMax})</span>`;
           trHead.appendChild(th0);
 
           for (const iiKey of instanceKeys) {
@@ -1926,36 +1946,36 @@ __ARTIFACT_JSON__
               if (bundled && typeof bundled === "object") {
                 const bundledEl = document.createElement("div");
                 bundledEl.className = "cell-raw";
-                bundledEl.textContent = `Bundled baseline (${bundled.verification || "not_verified"}): ${bundled.type || "unknown"} · min=${formatValue(bundled.min)} · max=${formatValue(bundled.max)} · step=${formatValue(bundled.step)}. Current-target verification is separate.`;
+                const verification = typeof bundled.verification === "string"
+                  ? bundled.verification
+                  : "not_verified";
+                const isMismatch = verification === "differs" || verification === "profile_mismatch";
+                const comparison = isMismatch
+                  ? "Description mismatch"
+                  : verification === "matches"
+                    ? "Description matches cached baseline"
+                    : `Cached description ${verification}`;
+                bundledEl.textContent = `${comparison}: ${bundled.type || "unknown"} · min=${formatValue(bundled.min)} · max=${formatValue(bundled.max)} · step=${formatValue(bundled.step)}. Current-target verification is separate.`;
                 td.appendChild(bundledEl);
               }
               if (description && typeof description === "object") {
                 const descriptionEl = document.createElement("div");
                 descriptionEl.className = "cell-raw";
                 if (description.qualification === "matched") {
-                  const descriptionLabel = description.description_opcode === "0x07"
-                    ? "OP07 DescribeDeviceParameter"
-                    : "OP01 DescribeParameter";
-                  const fields = [
-                    description.description_opcode,
-                    description.read_opcode,
-                    description.group,
-                    description.instance,
-                    description.register,
-                    description.type,
-                    `width=${formatValue(description.width)}`,
-                    `min=${formatValue(description.min)}`,
-                    `max=${formatValue(description.max)}`,
-                    `step=${description.step_qualification === "unknown" ? "unknown" : formatValue(description.step)}`,
-                    description.validation_scope,
-                    description.reply_hex,
-                  ].filter((part) => typeof part === "string" || typeof part === "number");
-                  descriptionEl.textContent = `Matched ${descriptionLabel}: ${fields.join(" · ")}`;
+                  const step = description.step_qualification === "unknown"
+                    ? "unknown"
+                    : formatValue(description.step);
+                  const codec = typeof description.type === "string" && description.type
+                    ? description.type
+                    : "unknown";
+                  descriptionEl.textContent = `Describe: min=${formatValue(description.min)}, max=${formatValue(description.max)}, step=${step}, ${codec}`;
                 } else {
-                  const reason = typeof description.reason === "string" ? `: ${description.reason}` : "";
-                  descriptionEl.textContent = `Parameter description unavailable${reason}; offline edit confirmation remains unvalidated.`;
+                  if (!(selectedType && selectedType.startsWith("STR:"))) {
+                    const reason = typeof description.reason === "string" ? `: ${description.reason}` : "";
+                    descriptionEl.textContent = `Parameter description unavailable${reason}; offline edit confirmation remains unvalidated.`;
+                  }
                 }
-                td.appendChild(descriptionEl);
+                if (descriptionEl.textContent) td.appendChild(descriptionEl);
               }
 
               if (typeof entry.flags_access === "string" && entry.flags_access && statusKind === "ok") {
@@ -1975,7 +1995,7 @@ __ARTIFACT_JSON__
                 statusEl.appendChild(badge);
                 td.appendChild(statusEl);
               }
-              if (errTxt && statusKind !== "absent") {
+              if (statusKind !== "transport_failure" && errTxt && statusKind !== "absent") {
                 td.classList.add("cell-bad");
                 const errEl = document.createElement("div");
                 errEl.className = "cell-error";
@@ -2187,7 +2207,7 @@ def render_html_report(artifact: dict[str, Any], *, title: str | None = None) ->
     attach_bundled_descriptions(artifact)
     meta = artifact.get("meta")
     # Build group_name_map from operations-first structure
-    group_name_map: dict[str, dict[str, str]] = {}
+    group_name_map: dict[str, dict[str, dict[str, str]]] = {}
     operations = artifact.get("operations")
     if isinstance(operations, dict):
         seen_groups: set[str] = set()
@@ -2202,9 +2222,17 @@ def render_html_report(artifact: dict[str, Any], *, title: str | None = None) ->
                 group = int(group_key, 0)
             except ValueError:
                 continue
+            local_name = group_name_for_opcode(group, 0x02)
+            local_presentation: dict[str, str] = {"name": local_name}
+            if group == 0x00:
+                # Presentation-only correction: scanner policy keeps its own
+                # declared profile bounds and is intentionally not changed here.
+                local_presentation["rr_max"] = "0x00FF"
+            if group == 0x01:
+                local_presentation["name"] = "Native Drinkable Hot Water"
             group_name_map[group_key] = {
-                "0x02": group_name_for_opcode(group, 0x02),
-                "0x06": group_name_for_opcode(group, 0x06),
+                "0x02": local_presentation,
+                "0x06": {"name": group_name_for_opcode(group, 0x06)},
             }
     identity_html = ""
     if isinstance(meta, dict):

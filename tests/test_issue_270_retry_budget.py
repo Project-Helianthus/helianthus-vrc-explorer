@@ -155,7 +155,7 @@ def test_enhanced_outer_retry_cannot_exceed_one_request_attempt(
     counted = CountingTransport(transport, request_budget=1)
 
     with pytest.raises(ScanRequestBudgetExceeded, match="budget exhausted"):
-        counted.send(0x15, b"\x00")
+        counted.send(0x15, b"\x00\x00\x00")
 
     assert arbitration_calls == 1
     assert counted.counters.send_calls == 1
@@ -174,12 +174,12 @@ def test_enhanced_local_nack_retry_consumes_another_slot(
     counted = CountingTransport(transport, request_budget=1)
 
     with pytest.raises(ScanRequestBudgetExceeded, match="budget exhausted"):
-        counted.send(0x15, b"\x00")
+        counted.send(0x15, b"\x00\x00\x00")
 
     # One telegram was emitted; the local NACK retransmission was stopped before
     # its first symbol and did not become a limit+1 request. The final SYN
     # releases the transaction that was still owned after the NACK.
-    assert len(sent_symbols) == 7
+    assert len(sent_symbols) == 9
     assert sent_symbols[-1] == enhanced_tcp._EBUS_SYN
     assert counted.counters.send_calls == 1
     assert len(counted.recent_requests) == 1
@@ -217,7 +217,7 @@ def test_enhanced_local_nack_hook_cleanup_failure_preserves_hook_error(
     monkeypatch.setattr(transport, "close", _close)
 
     with pytest.raises(HookRejected) as raised:
-        transport.send_with_attempt_hook(0x15, b"\x00", _attempt_hook)
+        transport.send_with_attempt_hook(0x15, b"\x00\x00\x00", _attempt_hook)
 
     assert raised.value is hook_error
     assert hook_calls == 2
@@ -249,11 +249,11 @@ def test_enhanced_plain_send_keeps_local_nack_retry_without_early_release(
     monkeypatch.setattr(transport, "_send_symbol_with_echo", sent_symbols.append)
     monkeypatch.setattr(transport, "_recv_bus_symbol", lambda **_kwargs: next(received))
 
-    assert transport.send(0x15, b"\x00") == response
+    assert transport.send(0x15, b"\x00\x00\x00") == response
 
     assert arbitration_calls == 1
     assert sent_symbols.count(enhanced_tcp._EBUS_SYN) == 1
-    assert len(sent_symbols) == 14
+    assert len(sent_symbols) == 18
 
 
 def test_no_budget_default_hook_keeps_plain_transport_behavior() -> None:

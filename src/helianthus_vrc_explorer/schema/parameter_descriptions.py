@@ -86,6 +86,33 @@ def _qualified_profile(profile: dict[str, Any]) -> bool:
     )
 
 
+def _known_profile_value(value: Any) -> bool:
+    return value is not None and (
+        not isinstance(value, str)
+        or value.strip().lower() not in {"", "n/a", "unknown", "not_available"}
+    )
+
+
+def _profiles_conflict(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    """Only contradictory observations establish a profile mismatch."""
+    return any(
+        _known_profile_value(left.get(key))
+        and _known_profile_value(right.get(key))
+        and left[key] != right[key]
+        for key in left.keys() | right.keys()
+    )
+
+
+def _compatible_profiles(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    return (
+        _qualified_profile(left)
+        and _qualified_profile(right)
+        and bool(left.get("device_identity_required"))
+        == bool(right.get("device_identity_required"))
+        and not _profiles_conflict(left, right)
+    )
+
+
 def _entries(artifact: dict[str, Any]) -> Iterator[tuple[dict[str, str], dict[str, Any]]]:
     operations = artifact.get("operations", {})
     for op in ("0x02", "0x06"):
@@ -167,6 +194,60 @@ def load_description_baseline() -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))  # type: ignore[no-any-return]
 
 
+def merge_description_baselines(
+    previous: dict[str, Any], current: dict[str, Any]
+) -> dict[str, Any]:
+    """Update qualified rows additively; a partial scan cannot erase other rows.
+
+    Known optional identity fields from the previous baseline remain historical
+    observations. They are never inserted into current-target evidence. Distinct
+    firmware or device profiles remain distinct baseline variants.
+    """
+    if any(bundle.get("schema_version") != 1 for bundle in (previous, current)):
+        raise ValueError("Unsupported B524 description baseline version")
+    rows = deepcopy(previous.get("descriptions", []))
+    for incoming in current.get("descriptions", []):
+        profile = incoming.get("profile", {})
+        if not _qualified_profile(profile):
+            continue
+        compatible = [
+            index
+            for index, existing in enumerate(rows)
+            if all(existing.get(key) == incoming.get(key) for key in _SELECTORS)
+            and _compatible_profiles(existing.get("profile", {}), profile)
+        ]
+        exact = [index for index in compatible if rows[index]["profile"] == profile]
+        matches = exact or compatible
+        replacement = deepcopy(incoming)
+        if len(matches) == 1:
+            index = matches[0]
+            replacement["profile"] = {
+                **rows[index]["profile"],
+                **{key: value for key, value in profile.items() if _known_profile_value(value)},
+            }
+            rows[index] = replacement
+        else:
+            rows.append(replacement)
+    rows.sort(
+        key=lambda row: (
+            *(row[key] for key in _SELECTORS),
+            json.dumps(row["profile"], sort_keys=True),
+        )
+    )
+    return {
+        "schema_version": 1,
+        "descriptions": rows,
+        "coverage": {
+            "complete_scan": False,
+            "exported": len(rows),
+            "interpreted": len(rows),
+            "step_decoded": sum(row.get("step_qualification") == "decoded" for row in rows),
+            "current_run_exported": len(current.get("descriptions", [])),
+            "merged_observations": True,
+        },
+    }
+
+
 def attach_bundled_descriptions(
     artifact: dict[str, Any], *, bundle: dict[str, Any] | None = None
 ) -> None:
@@ -191,18 +272,31 @@ def attach_bundled_descriptions(
             if isinstance(candidate, dict) and _same_selector(candidate, selector)
         ]
         exact = [candidate for candidate in candidates if candidate.get("profile") == profile]
-        selected = exact if _qualified_profile(profile) and exact else candidates
+        compatible = [
+            candidate
+            for candidate in candidates
+            if _compatible_profiles(candidate.get("profile", {}), profile)
+        ]
+        selected = exact or compatible or candidates
         if len(selected) != 1:
             continue
         cached = deepcopy(selected[0])
         cached["qualification"] = "bundled"
         cached["verification"] = "not_verified"
-        if not exact or not _qualified_profile(profile):
+        cached_profile = cached.get("profile", {})
+        cached["profile_qualification"] = "exact" if exact else "partial"
+        if _profiles_conflict(cached_profile, profile):
             cached["verification"] = "profile_mismatch"
+        elif not _compatible_profiles(cached_profile, profile):
+            cached["verification"] = "profile_unqualified"
         else:
             if isinstance(live, dict):
                 if not live.get("target_profile_match"):
-                    cached["verification"] = "profile_mismatch"
+                    cached["verification"] = (
+                        "profile_mismatch"
+                        if _profiles_conflict(live.get("target_profile", {}), profile)
+                        else "profile_unqualified"
+                    )
                 elif live.get("qualification") == "matched" and _same_selector(live, selector):
                     cached["verification"] = (
                         "matches"

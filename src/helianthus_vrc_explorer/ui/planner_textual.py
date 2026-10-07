@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from ..scanner.identity import opcode_label
@@ -21,6 +22,7 @@ from .planner import (
     planner_namespace_title,
     split_planner_groups_by_namespace,
 )
+from .system_information import format_system_information_text
 
 
 @dataclass(slots=True)
@@ -164,6 +166,7 @@ def run_textual_scan_plan(
     request_rate_rps: float | None,
     default_plan: dict[PlanKey, GroupScanPlan] | None = None,
     default_preset: PlannerPreset = "recommended",
+    system_information: Sequence[Mapping[str, object]] | None = None,
 ) -> dict[PlanKey, GroupScanPlan] | None:
     """Open a Textual planner and return selected plan (None when cancelled).
 
@@ -303,6 +306,11 @@ def run_textual_scan_plan(
 
         def compose(self) -> ComposeResult:
             yield Header(show_clock=False)
+            system_information_text = format_system_information_text(system_information)
+            if system_information_text:
+                yield Static(
+                    f"System Information: {system_information_text}", id="system-information"
+                )
             yield Vertical(
                 Vertical(
                     Label(planner_namespace_title(0x02)),

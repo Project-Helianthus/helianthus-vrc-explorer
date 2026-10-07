@@ -295,9 +295,10 @@ def _enhanced_retrying_transport(monkeypatch: pytest.MonkeyPatch) -> TransportIn
         payload: bytes,
         expect_response: bool,
         attempt_hook: AttemptHook | None = None,
+        retry_safe: bool,
     ) -> bytes:
         nonlocal calls
-        del dst, primary, secondary, expect_response
+        del dst, primary, secondary, expect_response, retry_safe
         calls += 1
         if attempt_hook is not None:
             attempt_hook()
