@@ -705,6 +705,36 @@ def _enrich_register_names(operations: dict[str, Any]) -> None:
                     if not isinstance(entry, dict):
                         continue
                     register = int(rr_key, 16)
+                    if entry.get("myvaillant_name") is None:
+                        mv = mv_map.lookup(
+                            group=group,
+                            instance=instance,
+                            register=register,
+                            opcode=opcode,
+                        )
+                        if mv is not None:
+                            entry["myvaillant_name"] = mv.leaf
+                            if mv.register_class is not None:
+                                entry.setdefault("register_class", mv.register_class)
+                            if entry.get("ebusd_name") is None:
+                                resolved = mv.resolved_ebusd_name(
+                                    group=group,
+                                    instance=instance,
+                                    register=register,
+                                )
+                                if resolved:
+                                    entry["ebusd_name"] = resolved
+                            if mv.type_hint and entry.get("raw_hex"):
+                                try:
+                                    raw = bytes.fromhex(entry["raw_hex"])
+                                    value = parse_typed_value(mv.type_hint, raw)
+                                    entry["type"] = mv.type_hint
+                                    entry["value"] = value
+                                    if mv.type_hint == "EXP" and value is None:
+                                        entry["value_display"] = "NaN"
+                                except (ValueParseError, ValueError):
+                                    pass
+
                     canonical_name = b524_register_name(
                         opcode=opcode,
                         group=group,
@@ -712,33 +742,3 @@ def _enrich_register_names(operations: dict[str, Any]) -> None:
                     )
                     if canonical_name is not None:
                         entry["myvaillant_name"] = canonical_name
-                    if entry.get("myvaillant_name") is not None:
-                        continue
-                    mv = mv_map.lookup(
-                        group=group,
-                        instance=instance,
-                        register=register,
-                        opcode=opcode,
-                    )
-                    if mv is not None:
-                        entry["myvaillant_name"] = mv.leaf
-                        if mv.register_class is not None:
-                            entry.setdefault("register_class", mv.register_class)
-                        if entry.get("ebusd_name") is None:
-                            resolved = mv.resolved_ebusd_name(
-                                group=group,
-                                instance=instance,
-                                register=register,
-                            )
-                            if resolved:
-                                entry["ebusd_name"] = resolved
-                        if mv.type_hint and entry.get("raw_hex"):
-                            try:
-                                raw = bytes.fromhex(entry["raw_hex"])
-                                value = parse_typed_value(mv.type_hint, raw)
-                                entry["type"] = mv.type_hint
-                                entry["value"] = value
-                                if mv.type_hint == "EXP" and value is None:
-                                    entry["value_display"] = "NaN"
-                            except (ValueParseError, ValueError):
-                                pass

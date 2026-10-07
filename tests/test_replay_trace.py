@@ -9,6 +9,7 @@ from typer.testing import CliRunner
 from helianthus_vrc_explorer.cli import app
 from helianthus_vrc_explorer.replay_trace import (
     UnsupportedTraceFormatError,
+    _enrich_register_names,
     replay_trace_to_artifact,
 )
 
@@ -70,6 +71,80 @@ def test_replay_trace_to_artifact_reconstructs_b524_register_reads(tmp_path: Pat
     assert remote_entry["response_state"] == "active"
     assert remote_entry["value"] == 1
     assert remote_entry["myvaillant_name"] == "device_connected"
+
+
+def test_replay_canonical_names_preserve_legacy_metadata_enrichment() -> None:
+    operations = {
+        "0x02": {
+            "groups": {
+                "0x00": {
+                    "instances": {
+                        "0x00": {
+                            "registers": {
+                                "0x003d": {"raw_hex": "01000000"},
+                                "0x0001": {
+                                    "raw_hex": "00000000",
+                                    "myvaillant_name": "stale_leaf",
+                                    "type": "OPAQUE",
+                                    "value": "keep",
+                                    "register_class": "config",
+                                    "ebusd_name": "existing_alias",
+                                },
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "0x06": {
+            "groups": {
+                "0x09": {
+                    "instances": {
+                        "0x01": {
+                            "registers": {
+                                "0x0004": {
+                                    "raw_hex": "021703",
+                                    "ebusd_name": "existing_alias",
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+    }
+
+    _enrich_register_names(operations)
+
+    typed_op02 = operations["0x02"]["groups"]["0x00"]["instances"]["0x00"]["registers"]["0x003d"]
+    assert typed_op02 == {
+        "raw_hex": "01000000",
+        "myvaillant_name": "system_yield_solar_total",
+        "register_class": "state",
+        "ebusd_name": "SolarYieldTotal",
+        "type": "U32",
+        "value": 1,
+    }
+
+    op06_header = operations["0x06"]["groups"]["0x09"]["instances"]["0x01"]["registers"]["0x0004"]
+    assert op06_header == {
+        "raw_hex": "021703",
+        "ebusd_name": "existing_alias",
+        "myvaillant_name": "device_firmware_version",
+        "register_class": "state",
+        "type": "FW",
+        "value": "02.17.03",
+    }
+
+    stale = operations["0x02"]["groups"]["0x00"]["instances"]["0x00"]["registers"]["0x0001"]
+    assert stale == {
+        "raw_hex": "00000000",
+        "myvaillant_name": "system_dhw_bivalence_point",
+        "type": "OPAQUE",
+        "value": "keep",
+        "register_class": "config",
+        "ebusd_name": "existing_alias",
+    }
 
 
 def test_replay_trace_to_artifact_rejects_non_enhanced_trace(tmp_path: Path) -> None:
