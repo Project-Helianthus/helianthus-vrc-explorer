@@ -1057,7 +1057,7 @@ def test_artifact_dual_namespace_structure(monkeypatch, tmp_path: Path) -> None:
     local_group = artifact_op_group(artifact, op="0x02", group="0x09")
     remote_group = artifact_op_group(artifact, op="0x06", group="0x09")
     assert local_group["name"] == "System"
-    assert remote_group["name"] == "Regulators"
+    assert remote_group["name"] == "Remote Control Regulators (VRC7xx, VRT38x)"
     assert local_group["ii_max"] == "0x0a"
     assert remote_group["ii_max"] == "0x0a"
     assert (
@@ -1934,7 +1934,7 @@ def test_scan_b524_textual_planner_receives_remote_heating_source_rows(
     name_by_key = {(group.group, group.opcode): group.name for group in planner_groups}
     assert name_by_key[(0x00, 0x02)] == "Regulator Parameters"
     assert name_by_key[(0x01, 0x02)] == "Hot Water Circuit"
-    assert name_by_key[(0x01, 0x06)] == "Primary Heating Source"
+    assert name_by_key[(0x01, 0x06)] == "Boiler"
     by_key = {(group.group, group.opcode): group for group in planner_groups}
     assert by_key[(0x01, 0x06)].ii_max == 0x08
 
@@ -1980,7 +1980,7 @@ def test_scan_b524_textual_planner_excludes_uncharacterized_remote_rows(
     assert isinstance(planner_groups, list)
 
     by_key = {(group.group, group.opcode): group for group in planner_groups}
-    assert by_key[(0x02, 0x06)].name == "Secondary Heating Source"
+    assert by_key[(0x02, 0x06)].name == "Heat Pump"
     assert (0x03, 0x06) not in by_key
     assert (0x04, 0x06) not in by_key
     assert (0x05, 0x06) not in by_key
@@ -2188,7 +2188,7 @@ def test_scan_b524_textual_planner_models_group_08_as_instanced_on_local_and_rem
     assert isinstance(planner_groups, list)
     by_key = {(group.group, group.opcode): group for group in planner_groups}
     assert by_key[(0x08, 0x02)].name == "Unknown"
-    assert by_key[(0x08, 0x06)].name == "Unknown"
+    assert by_key[(0x08, 0x06)].name == "Modul Solar (VMS) auroSTEP"
     assert by_key[(0x08, 0x02)].ii_max == 0x0A
     assert by_key[(0x08, 0x06)].ii_max == 0x0A
 
@@ -2227,9 +2227,15 @@ def test_scan_b524_textual_planner_uses_namespace_owned_labels_for_groups_09_and
         (group.group, group.opcode): (group.name, group.namespace_label) for group in planner_groups
     }
     assert planner_label_map[(0x09, 0x02)] == ("System", "local")
-    assert planner_label_map[(0x09, 0x06)] == ("Regulators", "remote")
+    assert planner_label_map[(0x09, 0x06)] == (
+        "Remote Control Regulators (VRC7xx, VRT38x)",
+        "remote",
+    )
     assert artifact_op_group(artifact, op="0x02", group="0x09")["name"] == "System"
-    assert artifact_op_group(artifact, op="0x06", group="0x09")["name"] == "Regulators"
+    assert (
+        artifact_op_group(artifact, op="0x06", group="0x09")["name"]
+        == "Remote Control Regulators (VRC7xx, VRT38x)"
+    )
 
 
 def test_scan_b524_textual_planner_uses_remote_presence_for_op06_rows(
