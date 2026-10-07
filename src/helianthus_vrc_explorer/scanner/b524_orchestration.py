@@ -523,8 +523,8 @@ def run_b524_scan(
 
         instance_discovery_start = time.perf_counter()
         instance_discovery_start_calls = counting_transport.counters.send_calls
-        known_namespace_probe_counts: dict[int, list[str]] = {}
-        unknown_namespace_probe_counts: dict[int, list[str]] = {}
+        known_namespace_probe_counts: dict[tuple[int, int], str] = {}
+        unknown_namespace_probe_counts: dict[tuple[int, int], str] = {}
         for group, meta, opcode in instance_targets:
             rr_max = meta.rr_max
             config = GROUP_CONFIG.get(group.group)
@@ -559,8 +559,8 @@ def run_b524_scan(
                     research=research_mode,
                 )
                 _mark_present_instances(instances_obj, instances=present_instances)
-                unknown_namespace_probe_counts.setdefault(group.group, []).append(
-                    f"{opcode_label(opcode)} {len(present_instances)}/{total_slots}"
+                unknown_namespace_probe_counts[(int(opcode), group.group)] = (
+                    f"{len(present_instances)}/{total_slots}"
                 )
                 continue
 
@@ -586,9 +586,7 @@ def run_b524_scan(
                 )
             if not _is_instanced_group(namespace_ii_max):
                 _mark_present_instances(instances_obj, instances=(0x00,))
-                known_namespace_probe_counts.setdefault(group.group, []).append(
-                    f"{_group_name_for_opcode(group.group, opcode)} [{opcode_label(opcode)}] 1/1"
-                )
+                known_namespace_probe_counts[(int(opcode), group.group)] = "1/1"
                 continue
 
             assert namespace_ii_max is not None
@@ -712,32 +710,29 @@ def run_b524_scan(
                     "probed_instances": len(probes),
                 }
             _mark_present_instances(instances_obj, instances=present_instances)
-            known_namespace_probe_counts.setdefault(group.group, []).append(
-                f"{_group_name_for_opcode(group.group, opcode)} "
-                f"[{opcode_label(opcode)}] "
+            known_namespace_probe_counts[(int(opcode), group.group)] = (
                 f"{len(present_instances)}/{namespace_ii_max + 1}"
             )
 
         if observer is not None:
-            for group in classified:
-                rr_max = metadata_map[group.group].rr_max
-                unknown_counts = unknown_namespace_probe_counts.get(group.group)
-                if unknown_counts:
-                    observer.log(
-                        f"GG=0x{group.group:02X} {group.name}: "
-                        f"{', '.join(unknown_counts)} present (experimental), "
-                        f"RR_max=0x{rr_max:04X} ({rr_max + 1} registers/instance)",
-                        level="info",
-                    )
+            for group, meta, opcode in instance_targets:
+                key = (int(opcode), group.group)
+                count = known_namespace_probe_counts.get(key)
+                experimental = key in unknown_namespace_probe_counts
+                if experimental:
+                    count = unknown_namespace_probe_counts[key]
+                if count is None:
                     continue
-                known_counts = known_namespace_probe_counts.get(group.group)
-                if known_counts:
-                    observer.log(
-                        f"GG=0x{group.group:02X}: "
-                        f"{', '.join(known_counts)} present, "
-                        f"RR_max=0x{rr_max:04X} ({rr_max + 1} registers/instance)",
-                        level="info",
-                    )
+                rr_max = _rr_max_for_opcode(
+                    group=group.group, default_rr_max=meta.rr_max, opcode=opcode
+                )
+                qualifier = " (experimental)" if experimental else ""
+                observer.log(
+                    f"OP=0x{opcode:02X} GG=0x{group.group:02X}: "
+                    f"{_group_name_for_opcode(group.group, opcode)} {count} present{qualifier}, "
+                    f"RR_max=0x{rr_max:04X} ({rr_max + 1} registers/instance)",
+                    level="info",
+                )
 
         if observer is not None:
             observer.phase_finish("instance_discovery")

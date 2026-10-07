@@ -11,7 +11,7 @@ from rich.table import Table
 from rich.text import Text
 
 from ..artifact_schema import migrate_artifact_schema
-from ..scanner.director import remote_group_display_name
+from ..scanner.director import operation_group_display_name
 
 
 @dataclass(frozen=True, slots=True)
@@ -302,8 +302,7 @@ def _compute_summary_rows(artifact: dict[str, Any]) -> list[_SummaryRow]:
             if not isinstance(group_key, str) or not isinstance(group_obj, dict):
                 continue
             name = str(group_obj.get("name") or "Unknown")
-            if op_key_norm == "0x06":
-                name = remote_group_display_name(group_key) or name
+            name = operation_group_display_name(group_key, int(op_key_norm, 0)) or name
             descriptor = float(
                 group_obj.get("descriptor_observed", group_obj.get("descriptor_type")) or 0.0
             )

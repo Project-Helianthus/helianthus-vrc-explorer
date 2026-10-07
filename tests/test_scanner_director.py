@@ -349,7 +349,7 @@ def test_classify_groups_logs_descriptor_mismatch_at_info(
 
 
 def test_group_00_rr_max_is_0x00ff() -> None:
-    assert GROUP_CONFIG[0x00]["rr_max"] == 0x01FF
+    assert GROUP_CONFIG[0x00]["rr_max"] == 0x00FF
 
 
 def test_group_names_match_docs() -> None:
@@ -384,7 +384,7 @@ def test_group_config_completeness() -> None:
     }
     assert GROUP_CONFIG[0x08]["name"] == "Unknown"
     assert GROUP_CONFIG[0x00]["namespace_opcodes"] == [0x02]
-    assert GROUP_CONFIG[0x00]["rr_max_by_opcode"] == {0x02: 0x01FF}
+    assert GROUP_CONFIG[0x00]["rr_max_by_opcode"] == {0x02: 0x00FF}
     assert GROUP_CONFIG[0x00]["ii_max_by_opcode"] == {0x02: 0x00}
     assert GROUP_CONFIG[0x01]["namespace_opcodes"] == [0x02, 0x06]
     assert GROUP_CONFIG[0x01]["rr_max_by_opcode"] == {0x02: 0x0013, 0x06: 0x0015}
@@ -404,7 +404,7 @@ def test_group_config_completeness() -> None:
     assert GROUP_CONFIG[0x05]["ii_max_by_opcode"] == {0x02: 0x01, 0x06: 0x0A}
     assert GROUP_CONFIG[0x08]["opcodes"] == [0x02, 0x06]
     assert GROUP_CONFIG[0x08]["name_by_opcode"] == {
-        0x02: "Unknown",
+        0x02: "DeltaT",
         0x06: "Unknown",
     }
     assert GROUP_CONFIG[0x08]["rr_max_by_opcode"] == {0x02: 0x0007, 0x06: 0x0004}
@@ -452,7 +452,7 @@ def test_group_namespace_profiles_support_opcode_first_identity() -> None:
     buffer = group_namespace_profiles(0x08)
     assert buffer[0x02].ii_max == 0x0A
     assert buffer[0x06].ii_max == 0x0A
-    assert buffer[0x02].name == "Unknown"
+    assert buffer[0x02].name == "DeltaT"
     assert buffer[0x06].name == "Modul Solar (VMS) auroSTEP"
     assert regulators[0x02].name == "System"
     assert regulators[0x06].name == "Remote Control Regulators (VRC7xx, VRT38x)"
@@ -469,7 +469,7 @@ def test_group_name_for_opcode_uses_namespace_owned_labels_for_09_and_0a() -> No
     assert group_name_for_opcode(0x03, 0x06) == "Air Recovery (VAR) recoVair"
     assert group_name_for_opcode(0x04, 0x06) == "unused"
     assert group_name_for_opcode(0x05, 0x06) == "Wärmepumpe Zubehör Appliance Interface (VWZ-AI)"
-    assert group_name_for_opcode(0x08, 0x02) == "Unknown"
+    assert group_name_for_opcode(0x08, 0x02) == "DeltaT"
     assert group_name_for_opcode(0x08, 0x06) == "Modul Solar (VMS) auroSTEP"
     assert group_name_for_opcode(0x09, 0x02) == "System"
     assert group_name_for_opcode(0x09, 0x06) == "Remote Control Regulators (VRC7xx, VRT38x)"

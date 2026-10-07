@@ -126,11 +126,11 @@ def _instance_discovery_targets(
 ) -> list[tuple[ClassifiedGroup, GroupMetadata, RegisterOpcode]]:
     targets: list[tuple[ClassifiedGroup, GroupMetadata, RegisterOpcode]] = []
     for opcode in (_LOCAL_REGISTER_OPCODE, _REMOTE_REGISTER_OPCODE):
-        for group in classified:
+        for group in sorted(classified, key=lambda item: item.group):
             if opcode not in resolved_group_opcodes.get(group.group, ()):
                 continue
             targets.append((group, metadata_map[group.group], opcode))
-    for group in classified:
+    for group in sorted(classified, key=lambda item: item.group):
         for opcode in resolved_group_opcodes.get(group.group, ()):
             if opcode in {_LOCAL_REGISTER_OPCODE, _REMOTE_REGISTER_OPCODE}:
                 continue
@@ -165,9 +165,7 @@ def _group_display_name_for_opcodes(
 
 
 def _rr_max_full_for_opcode(*, group: int, opcode: int) -> int:
-    """Research-mode RR ceiling: 0x01FF for OP=0x02/GG=0x00, 0xFF for everything else."""
-    if opcode == _LOCAL_REGISTER_OPCODE and group == 0x00:
-        return 0x01FF
+    """Research-mode RR ceiling for characterized scalar register discovery."""
     return 0xFF
 
 

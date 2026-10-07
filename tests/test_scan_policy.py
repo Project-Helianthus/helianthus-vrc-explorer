@@ -240,3 +240,13 @@ def test_parse_scan_plan_rejects_comma_separated_element() -> None:
 
     with pytest.raises(ValueError, match="one integer or range"):
         parse_scan_plan(data)
+
+
+def test_system_profile_and_research_use_ff_register_ceiling() -> None:
+    from helianthus_vrc_explorer.scanner.b524_plan import _rr_max_full_for_opcode
+    from helianthus_vrc_explorer.scanner.director import group_namespace_profiles
+    from helianthus_vrc_explorer.scanner.scan_policy import research_rr_max
+
+    assert group_namespace_profiles(0)[2].rr_max == 0xFF
+    assert _rr_max_full_for_opcode(group=0, opcode=2) == 0xFF
+    assert research_rr_max(group=0, opcode=2, normal_rr_max=0xFF) == 0xFF

@@ -305,18 +305,18 @@ def test_default_description_requests_cover_all_observed_writable_parameters() -
             if payload[0] == 1:
                 self.descriptions += 1
                 return payload[1:2] + payload[3:5] + bytes.fromhex("0000ffff0100")
-            if payload[0] == 2 and payload[2] == 0:
+            if payload[0] == 2 and payload[2] in {0, 1}:
                 return b"\x03" + payload[2:3] + payload[4:6] + b"\x01\x00"
             return b"\x00"
 
     bus = WritableBus()
     artifact = scan_b524(bus, dst=0x15)
-    assert bus.descriptions == 512
-    assert artifact["meta"]["parameter_description_requests"] == 512
+    assert bus.descriptions == 276
+    assert artifact["meta"]["parameter_description_requests"] == 276
     assert artifact["meta"]["parameter_description_coverage"]["request_budget"] is None
     regs = artifact["operations"]["0x02"]["groups"]["0x00"]["instances"]["0x00"]["registers"]
-    assert regs["0x0100"]["parameter_description"]["qualification"] == "matched"
-    assert regs["0x0100"]["value"] == 1
+    assert regs["0x00ff"]["parameter_description"]["qualification"] == "matched"
+    assert regs["0x00ff"]["value"] == 1
 
 
 def test_device_description_probe_uses_complete_op07_selector() -> None:

@@ -53,7 +53,7 @@ def research_rr_max(*, group: int, opcode: int, normal_rr_max: int) -> int:
     _require_bounded_int("group", group, max_value=0xFF)
     _require_bounded_int("opcode", opcode, max_value=0xFF)
     _require_bounded_int("normal_rr_max", normal_rr_max, max_value=0xFFFF)
-    floor = 0x01FF if opcode == 0x02 and group == 0x00 else 0x00FF
+    floor = 0x00FF
     return max(normal_rr_max, floor)
 
 

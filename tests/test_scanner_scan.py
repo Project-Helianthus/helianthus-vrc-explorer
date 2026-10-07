@@ -1619,7 +1619,7 @@ def test_scan_b524_recommended_plan_keeps_namespace_rr_max(tmp_path: Path) -> No
     assert plan["multi_op"] is True
     assert plan["operations"]["0x02"]["rr_max"] == "0x000f"
     assert plan["operations"]["0x06"]["rr_max"] == "0x0035"
-    assert artifact["meta"]["scan_plan"]["estimated_register_requests"] == 640
+    assert artifact["meta"]["scan_plan"]["estimated_register_requests"] == 384
 
 
 def test_scan_b524_instance_discovery_runs_local_namespace_before_remote(
@@ -2188,7 +2188,7 @@ def test_scan_b524_textual_planner_models_group_08_as_instanced_on_local_and_rem
     planner_groups = captured["groups"]
     assert isinstance(planner_groups, list)
     by_key = {(group.group, group.opcode): group for group in planner_groups}
-    assert by_key[(0x08, 0x02)].name == "Unknown"
+    assert by_key[(0x08, 0x02)].name == "DeltaT"
     assert by_key[(0x08, 0x06)].name == "Modul Solar (VMS) auroSTEP"
     assert by_key[(0x08, 0x02)].ii_max == 0x0A
     assert by_key[(0x08, 0x06)].ii_max == 0x0A
@@ -2691,3 +2691,40 @@ def test_scan_b524_marks_incomplete_on_keyboard_interrupt(tmp_path: Path) -> Non
 
     assert artifact["meta"]["incomplete"] is True
     assert artifact["meta"]["incomplete_reason"] == "user_interrupt"
+
+
+def test_discovery_reports_separate_sorted_operation_groups(tmp_path: Path) -> None:
+    class Observer(_NoopObserver):
+        def __init__(self):
+            self.messages = []
+
+        def log(self, message, *, level="info"):
+            self.messages.append(message)
+
+    transport = RecordingTransport(DummyTransport(_write_fixture_groups_00_and_01(tmp_path)))
+    discovery_reads = []
+
+    class DiscoveryObserver(Observer):
+        def phase_finish(self, phase):
+            if phase == "instance_discovery":
+                discovery_reads.extend(transport.register_reads)
+
+    observer = DiscoveryObserver()
+    scan_b524(
+        transport,
+        dst=0x15,
+        observer=observer,
+    )
+    rows = [m for m in observer.messages if "registers/instance)" in m]
+    identities = [
+        (int(row.split()[0].split("=")[1], 16), int(row.split()[1][3:-1], 16)) for row in rows
+    ]
+    assert identities == sorted(identities)
+    probe_identities = [(op, gg) for op, gg, _, _ in discovery_reads]
+    assert probe_identities == sorted(probe_identities)
+    assert (2, 1) in identities and (6, 1) in identities
+    local = next(row for row in rows if row.startswith("OP=0x02 GG=0x08:"))
+    remote = next(row for row in rows if row.startswith("OP=0x06 GG=0x08:"))
+    assert "DeltaT" in local and "RR_max=0x0007" in local
+    assert "auroSTEP" in remote and "RR_max=0x0004" in remote
+    assert all("[Local Devices" not in row and "[Remote Devices" not in row for row in rows)

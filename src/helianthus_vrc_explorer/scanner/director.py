@@ -49,11 +49,11 @@ GROUP_CONFIG: Final[dict[int, GroupConfig]] = {
         "desc": 3.0,
         "name": "Regulator Parameters",
         "ii_max": 0x00,
-        "rr_max": 0x01FF,
+        "rr_max": 0x00FF,
         "opcodes": [0x02],
         "namespace_opcodes": [0x02],
         "name_by_opcode": {0x02: "Regulator Parameters"},
-        "rr_max_by_opcode": {0x02: 0x01FF},
+        "rr_max_by_opcode": {0x02: 0x00FF},
         "ii_max_by_opcode": {0x02: 0x00},
     },
     0x01: {
@@ -116,7 +116,7 @@ GROUP_CONFIG: Final[dict[int, GroupConfig]] = {
         "ii_max": 0x0A,
         "rr_max": 0x0007,
         "opcodes": [0x02, 0x06],
-        "name_by_opcode": {0x02: "Unknown", 0x06: "Unknown"},
+        "name_by_opcode": {0x02: "DeltaT", 0x06: "Unknown"},
         "namespace_opcodes": [0x02, 0x06],
         "rr_max_by_opcode": {0x02: 0x0007, 0x06: 0x0004},
         "ii_max_by_opcode": {0x02: 0x0A, 0x06: 0x0A},
@@ -229,6 +229,17 @@ def remote_group_display_name(group: int | str) -> str | None:
     except ValueError:
         return None
     return _REMOTE_GROUP_NAMES.get(f"0x{number:02x}")
+
+
+def operation_group_display_name(group: int | str, opcode: int) -> str | None:
+    """Return curated operation-scoped names without overriding other saved labels."""
+    if opcode == 0x06:
+        return remote_group_display_name(group)
+    try:
+        number = int(group, 0) if isinstance(group, str) else group
+    except ValueError:
+        return None
+    return "DeltaT" if opcode == 0x02 and number == 0x08 else None
 
 
 @dataclass(frozen=True, slots=True)
