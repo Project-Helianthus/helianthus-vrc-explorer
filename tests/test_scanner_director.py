@@ -326,6 +326,11 @@ def test_discovery_propagates_terminal_recovery_with_earlier_op00_records(tmp_pa
     preserved = raised.value.system_information
     assert [identifier for identifier, _value, _raw_hex in preserved] == [0x00, 0x01, 0x02]
     assert all(raw_hex is not None for _identifier, _value, raw_hex in preserved)
+    assert raised.value.selector == {
+        "read_opcode": "0x00",
+        "identifier": "0x0003",
+        "request_hex": "000300",
+    }
 
 
 def test_classify_groups_logs_descriptor_mismatch_at_info(

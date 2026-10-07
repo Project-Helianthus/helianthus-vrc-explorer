@@ -296,12 +296,14 @@ def _enhanced_retrying_transport(monkeypatch: pytest.MonkeyPatch) -> TransportIn
         expect_response: bool,
         attempt_hook: AttemptHook | None = None,
         retry_safe: bool,
+        attempt_admitted_hook: AttemptHook,
     ) -> bytes:
         nonlocal calls
         del dst, primary, secondary, expect_response, retry_safe
         calls += 1
         if attempt_hook is not None:
             attempt_hook()
+        attempt_admitted_hook()
         if calls == 1:
             raise enhanced_tcp._EnhancedCollision("collision")
         return bytes((payload[1],)) + payload[3:5] + bytes((0, 20, 1))

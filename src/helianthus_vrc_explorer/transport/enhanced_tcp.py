@@ -1113,7 +1113,7 @@ class EnhancedTcpTransport(TransportInterface):
             payload_bytes = bytes(payload)
             return self._send_with_policy(
                 seq,
-                lambda: self._send_proto_once(
+                lambda attempt_admitted_hook: self._send_proto_once(
                     seq,
                     dst=dst,
                     primary=primary,
@@ -1122,6 +1122,7 @@ class EnhancedTcpTransport(TransportInterface):
                     expect_response=expect_response,
                     attempt_hook=attempt_hook,
                     retry_safe=retry_safe,
+                    attempt_admitted_hook=attempt_admitted_hook,
                 ),
                 retry_safe=retry_safe,
             )
@@ -1139,7 +1140,7 @@ class EnhancedTcpTransport(TransportInterface):
     def _send_with_policy(
         self,
         seq: int,
-        send_once: Callable[[], bytes],
+        send_once: Callable[[AttemptHook], bytes],
         *,
         retry_safe: bool,
     ) -> bytes:
@@ -1148,6 +1149,10 @@ class EnhancedTcpTransport(TransportInterface):
         collision_retries = 0
         nack_retries = 0
         request_attempts = 0
+
+        def _attempt_admitted() -> None:
+            nonlocal request_attempts
+            request_attempts += 1
 
         def _failure_details(exc: TransportError) -> tuple[str, str]:
             if isinstance(exc, TransportTimeout):
@@ -1205,8 +1210,7 @@ class EnhancedTcpTransport(TransportInterface):
 
         while True:
             try:
-                request_attempts += 1
-                return send_once()
+                return send_once(_attempt_admitted)
             except TransportTimeout as exc:
                 if not retry_safe:
                     raise
@@ -1295,9 +1299,11 @@ class EnhancedTcpTransport(TransportInterface):
         expect_response: bool,
         attempt_hook: AttemptHook | None = None,
         retry_safe: bool,
+        attempt_admitted_hook: AttemptHook,
     ) -> bytes:
         if attempt_hook is not None:
             attempt_hook()
+        attempt_admitted_hook()
         self._start_arbitration(self._config.src)
 
         telegram = bytearray((self._config.src, dst, primary, secondary, len(payload)))
@@ -1325,6 +1331,7 @@ class EnhancedTcpTransport(TransportInterface):
                             with contextlib.suppress(BaseException):
                                 self.close()
                         raise
+                attempt_admitted_hook()
                 self._trace(f"#{seq} LOCAL_NACK_RETRY attempt={nack_attempt}")
 
             for symbol in telegram[1:]:

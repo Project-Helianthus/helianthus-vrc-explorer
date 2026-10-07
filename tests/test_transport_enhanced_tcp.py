@@ -11,6 +11,7 @@ from queue import Queue
 
 import pytest
 
+from helianthus_vrc_explorer.scanner.register import read_register
 from helianthus_vrc_explorer.transport.base import (
     TransportError,
     TransportNack,
@@ -35,6 +36,7 @@ from helianthus_vrc_explorer.transport.enhanced_tcp import (
     _encode_enh,
     _EnhancedSessionError,
 )
+from helianthus_vrc_explorer.transport.instrumented import CountingTransport
 
 
 def _read_exact(conn: socket.socket, size: int) -> bytes:
@@ -1754,6 +1756,9 @@ def test_read_reconnects_and_retries_same_request_after_generic_session_error(
         if callable(attempt_hook):
             attempt_hook()
             hook_calls += 1
+        attempt_admitted_hook = kwargs["attempt_admitted_hook"]
+        assert callable(attempt_admitted_hook)
+        attempt_admitted_hook()
         sent_payload = kwargs["payload"]
         assert isinstance(sent_payload, bytes)
         attempts.append(sent_payload)
@@ -1794,8 +1799,11 @@ def test_recovery_trace_keeps_sanitized_initial_cause_and_phase(
     )
     attempts = 0
 
-    def _send_once(_seq: int, **_kwargs: object) -> bytes:
+    def _send_once(_seq: int, **kwargs: object) -> bytes:
         nonlocal attempts
+        attempt_admitted_hook = kwargs["attempt_admitted_hook"]
+        assert callable(attempt_admitted_hook)
+        attempt_admitted_hook()
         attempts += 1
         if attempts == 1:
             raise _EnhancedSessionError(
@@ -1826,8 +1834,11 @@ def test_unexpected_command_ack_reconnects_and_retries_read(
     attempts = 0
     reconnects = 0
 
-    def _send_once(_seq: int, **_kwargs: object) -> bytes:
+    def _send_once(_seq: int, **kwargs: object) -> bytes:
         nonlocal attempts
+        attempt_admitted_hook = kwargs["attempt_admitted_hook"]
+        assert callable(attempt_admitted_hook)
+        attempt_admitted_hook()
         attempts += 1
         if attempts == 1:
             raise _EnhancedSessionError(
@@ -1918,8 +1929,11 @@ def test_exhausted_read_recovery_raises_terminal_outage_with_sanitized_diagnosti
     payload = bytes.fromhex("020002000f00")
     attempts = 0
 
-    def _send_once(_seq: int, **_kwargs: object) -> bytes:
+    def _send_once(_seq: int, **kwargs: object) -> bytes:
         nonlocal attempts
+        attempt_admitted_hook = kwargs["attempt_admitted_hook"]
+        assert callable(attempt_admitted_hook)
+        attempt_admitted_hook()
         attempts += 1
         raise _EnhancedSessionError(
             "Enhanced adapter 192.0.2.44:9999: connection refused",
@@ -1964,8 +1978,11 @@ def test_mutative_or_malformed_b524_request_is_not_retried(
     attempts = 0
     reconnects = 0
 
-    def _send_once(_seq: int, **_kwargs: object) -> bytes:
+    def _send_once(_seq: int, **kwargs: object) -> bytes:
         nonlocal attempts
+        attempt_admitted_hook = kwargs["attempt_admitted_hook"]
+        assert callable(attempt_admitted_hook)
+        attempt_admitted_hook()
         attempts += 1
         raise TransportError("unexpected symbol 0x42 while waiting for command ack")
 
@@ -1992,8 +2009,11 @@ def test_target_nack_is_not_treated_as_recoverable_session_failure(
     attempts = 0
     reconnects = 0
 
-    def _send_once(_seq: int, **_kwargs: object) -> bytes:
+    def _send_once(_seq: int, **kwargs: object) -> bytes:
         nonlocal attempts
+        attempt_admitted_hook = kwargs["attempt_admitted_hook"]
+        assert callable(attempt_admitted_hook)
+        attempt_admitted_hook()
         attempts += 1
         raise TransportNack("nack received (local retry exhausted)")
 
@@ -2034,3 +2054,41 @@ def test_exhausted_local_nack_releases_bus_without_session_reconnect(
     assert sent_symbols[-1] == 0xAA
     assert sent_symbols.count(0xAA) == 1
     assert reconnects == 0
+
+
+def test_local_nack_then_recovery_exhaustion_uses_admitted_attempt_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    inner = EnhancedTcpTransport(
+        EnhancedTcpConfig(
+            nack_max_retries=1,
+            reconnect_max_retries=1,
+            reconnect_delay_s=0,
+        )
+    )
+    counted = CountingTransport(inner, request_budget=4)
+    received = iter((0xFF, 0x42, 0x42))
+
+    monkeypatch.setattr(inner, "_start_arbitration", lambda _src: None)
+    monkeypatch.setattr(inner, "_send_symbol_with_echo", lambda _symbol: None)
+    monkeypatch.setattr(inner, "_recv_bus_symbol", lambda **_kwargs: next(received))
+    monkeypatch.setattr(inner, "_reconnect", lambda _seq, _attempt: None)
+
+    with pytest.raises(TransportRecoveryExhausted) as raised:
+        read_register(
+            counted,
+            0x15,
+            0x02,
+            group=0x02,
+            instance=0x00,
+            register=0x000F,
+            type_hint="UCH",
+        )
+
+    error = raised.value
+    assert counted.counters.send_calls == 3
+    assert error.request_attempts == 3
+    assert error.retry_count == 2
+    assert error.entry is not None
+    assert error.entry["transport_diagnostic"]["request_attempts"] == 3
+    assert error.entry["transport_diagnostic"]["retry_count"] == 2

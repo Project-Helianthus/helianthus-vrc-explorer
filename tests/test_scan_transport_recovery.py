@@ -72,3 +72,32 @@ def test_description_outage_retains_previous_description_and_remaining_candidate
     assert registers["0x0000"]["parameter_description"]["qualification"] == "matched"
     assert "socket_error" in registers["0x0001"]["parameter_description"]["reason"]
     assert registers["0x0002"]["parameter_description"]["request_attempted"] is False
+
+
+def test_system_information_outage_preserves_exact_pending_identifier() -> None:
+    class InterruptedInformation(TransportInterface):
+        def __init__(self) -> None:
+            self.requests: list[bytes] = []
+
+        def send(self, dst: int, payload: bytes) -> bytes:
+            self.requests.append(payload)
+            identifier = int.from_bytes(payload[1:3], "little")
+            if identifier == 3:
+                raise TransportRecoveryExhausted(
+                    cause="socket_error",
+                    phase="reconnect",
+                    request_attempts=2,
+                    reconnect_attempts=1,
+                )
+            return struct.pack("<f", float(identifier))
+
+    transport = InterruptedInformation()
+    artifact = scan_b524(transport, dst=0x15)
+    assert artifact["meta"]["incomplete"] is True
+    assert artifact["meta"]["transport_recovery"]["pending_selector"] == {
+        "read_opcode": "0x00",
+        "identifier": "0x0003",
+        "request_hex": "000300",
+    }
+    assert [record["value"] for record in artifact["meta"]["system_information"][:3]] == [0, 1, 2]
+    assert len(transport.requests) == 4

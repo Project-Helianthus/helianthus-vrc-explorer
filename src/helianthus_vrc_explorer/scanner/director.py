@@ -352,7 +352,12 @@ def discover_groups(
                 ]
                 if last_response is not None:
                     partial_system_information.append((gg, float("nan"), last_response.hex()))
-                exc.system_information = partial_system_information  # type: ignore[attr-defined]
+                exc.system_information = partial_system_information
+                exc.selector = {
+                    "read_opcode": "0x00",
+                    "identifier": f"0x{gg:04x}",
+                    "request_hex": payload.hex(),
+                }
                 raise
             except TransportTimeout:
                 if retrying:
