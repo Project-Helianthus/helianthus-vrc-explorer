@@ -13,6 +13,7 @@ class ScanRequestBudgetExceeded(RuntimeError):
     def __init__(self, message: str) -> None:
         super().__init__(message)
         self.system_information: list[tuple[int, float, str | None]] = []
+        self.system_information_diagnostics: dict[int, dict[str, str | int | None]] = {}
 
 
 @dataclass(slots=True)

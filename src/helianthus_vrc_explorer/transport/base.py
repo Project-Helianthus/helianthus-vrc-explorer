@@ -45,6 +45,39 @@ class TransportDisconnected(TransportError):
     """
 
 
+class TransportProtocolFailure(TransportError):
+    """One read still lacks a valid ACK after responsive-session recovery.
+
+    This does not establish selector absence, unsupported capability, or a
+    global adapter outage. All details are sanitized categorical/numeric data.
+    """
+
+    def __init__(
+        self,
+        *,
+        request_attempts: int,
+        reconnect_attempts: int,
+        unexpected_symbol: int | None = None,
+    ) -> None:
+        self.cause = "protocol_sync_error"
+        self.phase = "command_ack"
+        self.request_attempts = max(1, request_attempts)
+        self.retry_count = self.request_attempts - 1
+        self.reconnect_attempts = max(0, reconnect_attempts)
+        self.unexpected_symbol = (
+            f"0x{unexpected_symbol:02x}"
+            if isinstance(unexpected_symbol, int) and 0 <= unexpected_symbol <= 255
+            else None
+        )
+        super().__init__(
+            "read protocol recovery exhausted: "
+            f"cause={self.cause} phase={self.phase} "
+            f"request_attempts={self.request_attempts} retry_count={self.retry_count} "
+            f"reconnect_attempts={self.reconnect_attempts} "
+            f"unexpected_symbol={self.unexpected_symbol}"
+        )
+
+
 class TransportRecoveryExhausted(TransportError):
     """Raised when bounded recovery cannot restore an interrupted read.
 
@@ -80,6 +113,7 @@ class TransportRecoveryExhausted(TransportError):
         self.selector: dict[str, str] | None = None
         self.entry: dict[str, Any] | None = None
         self.system_information: list[tuple[int, float, str | None]] = []
+        self.system_information_diagnostics: dict[int, dict[str, str | int | None]] = {}
         self.parameter_description: dict[str, Any] | None = None
         super().__init__(
             "transport recovery exhausted: "

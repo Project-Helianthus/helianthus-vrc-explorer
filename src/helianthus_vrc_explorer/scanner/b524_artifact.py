@@ -126,6 +126,8 @@ def _serialize_availability_probe(
     evidence = probe.evidence
     if evidence is not None:
         payload.update(dict(evidence))
+        if evidence.get("availability_qualification") == "unknown":
+            payload["present"] = None
     return payload
 
 

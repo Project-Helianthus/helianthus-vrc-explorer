@@ -356,7 +356,7 @@ def test_group_names_match_docs() -> None:
     assert len(GROUP_CONFIG) == 18
     assert GROUP_CONFIG[0x09]["name"] == "Regulators"
     assert GROUP_CONFIG[0x0A]["name"] == "Thermostats"
-    assert GROUP_CONFIG[0x0C]["name"] == "Functional Modules"
+    assert GROUP_CONFIG[0x0C]["name"] == "Functional Modules (VR71)"
     assert GROUP_CONFIG[0x0E]["name"] == "Clock"
     assert GROUP_CONFIG[0x0F]["name"] == "Base Stations"
 
@@ -475,8 +475,10 @@ def test_group_name_for_opcode_uses_namespace_owned_labels_for_09_and_0a() -> No
     assert group_name_for_opcode(0x09, 0x06) == "Regulators"
     assert group_name_for_opcode(0x0A, 0x02) == "Unknown"
     assert group_name_for_opcode(0x0A, 0x06) == "Thermostats"
+    assert group_name_for_opcode(0x0B, 0x02) == "Unknown"
+    assert group_name_for_opcode(0x0B, 0x06) == "Functional Modules (VR70)"
     assert group_name_for_opcode(0x0C, 0x02) == "Unknown"
-    assert group_name_for_opcode(0x0C, 0x06) == "Functional Modules"
+    assert group_name_for_opcode(0x0C, 0x06) == "Functional Modules (VR71)"
     assert group_name_for_opcode(0x0D, 0x02) == "Unknown"
     assert group_name_for_opcode(0x0D, 0x06) == "Unknown"
     assert group_name_for_opcode(0x0E, 0x06) == "Clock"

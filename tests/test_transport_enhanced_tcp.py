@@ -2056,7 +2056,7 @@ def test_exhausted_local_nack_releases_bus_without_session_reconnect(
     assert reconnects == 0
 
 
-def test_local_nack_then_recovery_exhaustion_uses_admitted_attempt_count(
+def test_local_nack_then_protocol_failure_uses_admitted_attempt_count(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     inner = EnhancedTcpTransport(
@@ -2074,21 +2074,54 @@ def test_local_nack_then_recovery_exhaustion_uses_admitted_attempt_count(
     monkeypatch.setattr(inner, "_recv_bus_symbol", lambda **_kwargs: next(received))
     monkeypatch.setattr(inner, "_reconnect", lambda _seq, _attempt: None)
 
-    with pytest.raises(TransportRecoveryExhausted) as raised:
-        read_register(
-            counted,
-            0x15,
-            0x02,
-            group=0x02,
-            instance=0x00,
-            register=0x000F,
-            type_hint="UCH",
-        )
-
-    error = raised.value
+    entry = read_register(
+        counted,
+        0x15,
+        0x02,
+        group=0x02,
+        instance=0x00,
+        register=0x000F,
+        type_hint="UCH",
+    )
     assert counted.counters.send_calls == 3
-    assert error.request_attempts == 3
-    assert error.retry_count == 2
-    assert error.entry is not None
-    assert error.entry["transport_diagnostic"]["request_attempts"] == 3
-    assert error.entry["transport_diagnostic"]["retry_count"] == 2
+    assert entry["transport_diagnostic"]["request_attempts"] == 3
+    assert entry["transport_diagnostic"]["retry_count"] == 2
+    assert entry["transport_diagnostic"]["unexpected_symbol"] == "0x42"
+    assert entry["availability_qualification"] == "unknown"
+
+
+@pytest.mark.parametrize("unexpected_ack", [0xAA, 0x42])
+def test_persistent_ack_failure_on_responsive_session_allows_next_read(
+    monkeypatch: pytest.MonkeyPatch, unexpected_ack: int
+) -> None:
+    inner = EnhancedTcpTransport(EnhancedTcpConfig(reconnect_max_retries=2, reconnect_delay_s=0))
+    received = iter((unexpected_ack,) * 3)
+    monkeypatch.setattr(inner, "_start_arbitration", lambda _src: None)
+    monkeypatch.setattr(inner, "_send_symbol_with_echo", lambda _symbol: None)
+    monkeypatch.setattr(inner, "_recv_bus_symbol", lambda **_kwargs: next(received))
+    monkeypatch.setattr(inner, "_reconnect", lambda _seq, _attempt: None)
+    entry = read_register(inner, 0x15, 2, group=8, instance=7, register=0)
+    assert entry["error"].startswith("transport_error:")
+    assert entry["response_state"] is None
+    assert entry["availability_qualification"] == "unknown"
+    assert entry["transport_diagnostic"]["request_attempts"] == 3
+    assert entry["transport_diagnostic"]["unexpected_symbol"] == f"0x{unexpected_ack:02x}"
+    monkeypatch.setattr(inner, "_send_proto_once", lambda _seq, **_kwargs: b"\x01")
+    assert inner.send(0x15, bytes.fromhex("020008080000")) == b"\x01"
+
+
+def test_ack_failure_followed_by_failed_reconnect_is_still_scan_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    inner = EnhancedTcpTransport(EnhancedTcpConfig(reconnect_max_retries=2, reconnect_delay_s=0))
+    monkeypatch.setattr(inner, "_start_arbitration", lambda _src: None)
+    monkeypatch.setattr(inner, "_send_symbol_with_echo", lambda _symbol: None)
+    monkeypatch.setattr(inner, "_recv_bus_symbol", lambda **_kwargs: 0xAA)
+
+    def failed_reconnect(_seq: int, _attempt: int) -> None:
+        raise TransportError("synthetic INIT failure")
+
+    monkeypatch.setattr(inner, "_reconnect", failed_reconnect)
+    with pytest.raises(TransportRecoveryExhausted) as raised:
+        inner.send(0x15, bytes.fromhex("020008070000"))
+    assert raised.value.phase == "reconnect"
