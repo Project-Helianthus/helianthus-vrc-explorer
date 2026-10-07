@@ -485,7 +485,7 @@ def test_render_summary_uses_discovery_namespace_for_omitted_single_namespace_gr
     text = console.export_text()
 
     assert "Remote Devices (0x06)" in text
-    assert "Hot Water Cylinder" in text
+    assert "Wärmepumpe Zubehör Appliance Interface (VWZ-AI)" in text
     assert "Other Namespaces" not in text
 
 
@@ -528,7 +528,7 @@ def test_render_summary_prefers_observed_namespace_over_discovery_fallback(
     text = console.export_text()
 
     assert "Remote Devices (0x06)" in text
-    assert "Hot Water Circuit" in text
+    assert "Boiler" in text
     assert "Local Devices (0x02)" not in text
     assert "Other Namespaces" not in text
 

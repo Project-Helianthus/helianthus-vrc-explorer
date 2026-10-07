@@ -437,7 +437,10 @@ def test_browse_store_builds_namespace_nodes_for_dual_namespace_groups() -> None
 
     by_node_id = {node.node_id: node for node in store.tree_nodes}
     assert by_node_id["b524:group:controller_registers:0x09"].label == "System (0x09)"
-    assert by_node_id["b524:group:device_slots:0x09"].label == "Regulators (0x09)"
+    assert (
+        by_node_id["b524:group:device_slots:0x09"].label
+        == "Remote Control Regulators (VRC7xx, VRT38x) (0x09)"
+    )
     assert "b524:ns:controller_registers:0x09:0x02" not in by_node_id
     assert "b524:ns:device_slots:0x09:0x06" not in by_node_id
 
@@ -488,7 +491,7 @@ def test_browse_store_remote_namespace_instance_label_drops_local_group_assumpti
     by_node_id = {node.node_id: node for node in store.tree_nodes}
     assert by_node_id["b524:inst:device_slots:0x02:0x06:0x00"].label == "Remote Slot 1 (0x00)"
     row = store.rows[0]
-    assert row.path == "B524/Device Slots/GetDeviceParameter/Secondary Heating Source/0x00/0x0001"
+    assert row.path == "B524/Device Slots/GetDeviceParameter/Heat Pump/0x00/0x0001"
 
 
 def test_browse_store_filters_rows_for_namespace_selection() -> None:

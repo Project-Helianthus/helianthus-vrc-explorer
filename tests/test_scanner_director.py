@@ -434,55 +434,55 @@ def test_group_namespace_profiles_support_opcode_first_identity() -> None:
 
     assert sorted(hw) == [0x02, 0x06]
     assert hw[0x02].rr_max == 0x0013
-    assert hw[0x06].name == "Primary Heating Source"
+    assert hw[0x06].name == "Boiler"
     assert hw[0x06].ii_max == 0x08
     assert hw[0x06].rr_max == 0x0015
 
     assert sorted(hc) == [0x02, 0x06]
     assert hc[0x02].ii_max == 0x0A
     assert hc[0x06].ii_max == 0x08
-    assert hc[0x06].name == "Secondary Heating Source"
-    assert zones[0x06].name == "Unknown"
+    assert hc[0x06].name == "Heat Pump"
+    assert zones[0x06].name == "Air Recovery (VAR) recoVair"
     assert zones[0x06].ii_max == 0x0A
     assert solar[0x02].ii_max == 0x01
-    assert solar[0x06].name == "Unknown"
+    assert solar[0x06].name == "unused"
     assert solar[0x06].ii_max == 0x0A
-    assert cylinders[0x06].name == "Unknown"
+    assert cylinders[0x06].name == "Wärmepumpe Zubehör Appliance Interface (VWZ-AI)"
     assert cylinders[0x06].ii_max == 0x0A
     buffer = group_namespace_profiles(0x08)
     assert buffer[0x02].ii_max == 0x0A
     assert buffer[0x06].ii_max == 0x0A
     assert buffer[0x02].name == "Unknown"
-    assert buffer[0x06].name == "Unknown"
+    assert buffer[0x06].name == "Modul Solar (VMS) auroSTEP"
     assert regulators[0x02].name == "System"
-    assert regulators[0x06].name == "Regulators"
+    assert regulators[0x06].name == "Remote Control Regulators (VRC7xx, VRT38x)"
     assert thermostats[0x02].name == "Unknown"
-    assert thermostats[0x06].name == "Thermostats"
+    assert thermostats[0x06].name == "Remote Control Thermostats (VR9x)"
 
 
 def test_group_name_for_opcode_uses_namespace_owned_labels_for_09_and_0a() -> None:
     assert group_name_for_opcode(0x00, 0x02) == "Regulator Parameters"
     assert group_name_for_opcode(0x00, 0x06) == "Regulator Parameters"
     assert group_name_for_opcode(0x01, 0x02) == "Hot Water Circuit"
-    assert group_name_for_opcode(0x01, 0x06) == "Primary Heating Source"
-    assert group_name_for_opcode(0x02, 0x06) == "Secondary Heating Source"
-    assert group_name_for_opcode(0x03, 0x06) == "Unknown"
-    assert group_name_for_opcode(0x04, 0x06) == "Unknown"
-    assert group_name_for_opcode(0x05, 0x06) == "Unknown"
+    assert group_name_for_opcode(0x01, 0x06) == "Boiler"
+    assert group_name_for_opcode(0x02, 0x06) == "Heat Pump"
+    assert group_name_for_opcode(0x03, 0x06) == "Air Recovery (VAR) recoVair"
+    assert group_name_for_opcode(0x04, 0x06) == "unused"
+    assert group_name_for_opcode(0x05, 0x06) == "Wärmepumpe Zubehör Appliance Interface (VWZ-AI)"
     assert group_name_for_opcode(0x08, 0x02) == "Unknown"
-    assert group_name_for_opcode(0x08, 0x06) == "Unknown"
+    assert group_name_for_opcode(0x08, 0x06) == "Modul Solar (VMS) auroSTEP"
     assert group_name_for_opcode(0x09, 0x02) == "System"
-    assert group_name_for_opcode(0x09, 0x06) == "Regulators"
+    assert group_name_for_opcode(0x09, 0x06) == "Remote Control Regulators (VRC7xx, VRT38x)"
     assert group_name_for_opcode(0x0A, 0x02) == "Unknown"
-    assert group_name_for_opcode(0x0A, 0x06) == "Thermostats"
+    assert group_name_for_opcode(0x0A, 0x06) == "Remote Control Thermostats (VR9x)"
     assert group_name_for_opcode(0x0B, 0x02) == "Unknown"
-    assert group_name_for_opcode(0x0B, 0x06) == "Functional Modules (VR70)"
+    assert group_name_for_opcode(0x0B, 0x06) == "Functional Modules (VR70) FM3"
     assert group_name_for_opcode(0x0C, 0x02) == "Unknown"
-    assert group_name_for_opcode(0x0C, 0x06) == "Functional Modules (VR71)"
+    assert group_name_for_opcode(0x0C, 0x06) == "Functional Modules (VR71) FM5"
     assert group_name_for_opcode(0x0D, 0x02) == "Unknown"
-    assert group_name_for_opcode(0x0D, 0x06) == "Unknown"
-    assert group_name_for_opcode(0x0E, 0x06) == "Clock"
-    assert group_name_for_opcode(0x0F, 0x06) == "Base Stations"
+    assert group_name_for_opcode(0x0D, 0x06) == "Relay Module (VR41)"
+    assert group_name_for_opcode(0x0E, 0x06) == "Clock Module"
+    assert group_name_for_opcode(0x0F, 0x06) == "Base Station"
 
 
 def test_classify_groups_missing_desc() -> None:

@@ -1,0 +1,17 @@
+{
+  "0x01": "Boiler",
+  "0x02": "Heat Pump",
+  "0x03": "Air Recovery (VAR) recoVair",
+  "0x04": "unused",
+  "0x05": "Wärmepumpe Zubehör Appliance Interface (VWZ-AI)",
+  "0x06": "Pumpen Module - Solar (VPM-S) auroFLOW",
+  "0x07": "Pumpen Module - Wasser (VPM-W) aguaFLOW",
+  "0x08": "Modul Solar (VMS) auroSTEP",
+  "0x09": "Remote Control Regulators (VRC7xx, VRT38x)",
+  "0x0a": "Remote Control Thermostats (VR9x)",
+  "0x0b": "Functional Modules (VR70) FM3",
+  "0x0c": "Functional Modules (VR71) FM5",
+  "0x0d": "Relay Module (VR41)",
+  "0x0e": "Clock Module",
+  "0x0f": "Base Station"
+}

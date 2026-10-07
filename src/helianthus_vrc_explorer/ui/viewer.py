@@ -14,6 +14,7 @@ from rich.table import Table
 from rich.text import Text
 
 from ..protocol.parser import ValueParseError, parse_typed_value
+from ..scanner.director import remote_group_display_name
 from .register_semantics import entry_status_kind, entry_status_label, visible_rr_keys
 
 
@@ -296,7 +297,8 @@ def _build_sheets(artifact: dict[str, Any]) -> list[_Sheet]:
             sheets.append(
                 _Sheet(
                     group_key=group_key,
-                    name=str(group_obj.get("name") or "Unknown"),
+                    name=(remote_group_display_name(group_key) if int(op_key, 0) == 0x06 else None)
+                    or str(group_obj.get("name") or "Unknown"),
                     op_key=op_key,
                     op_label=op_key,
                     descriptor=descriptor,

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import logging
 import math
 import struct
 from dataclasses import dataclass
+from importlib.resources import files
 from typing import Final, NotRequired, TypedDict, cast
 
 from ..protocol.b524 import build_directory_probe_payload
@@ -213,6 +215,21 @@ GROUP_CONFIG: Final[dict[int, GroupConfig]] = {
 }
 KNOWN_CORE_GROUPS: Final[frozenset[int]] = frozenset({0x02, 0x03})
 
+# Presentation annotations only: no changes to bounds, admission, or presence predicates.
+_REMOTE_GROUP_NAMES: Final[dict[str, str]] = json.loads(
+    files("helianthus_vrc_explorer.data")
+    .joinpath("b524_remote_group_names.json")
+    .read_text(encoding="utf-8")
+)
+
+
+def remote_group_display_name(group: int | str) -> str | None:
+    try:
+        number = int(group, 0) if isinstance(group, str) else group
+    except ValueError:
+        return None
+    return _REMOTE_GROUP_NAMES.get(f"0x{number:02x}")
+
 
 @dataclass(frozen=True, slots=True)
 class NamespaceProfile:
@@ -246,7 +263,8 @@ def group_namespace_profiles(group: int) -> dict[int, NamespaceProfile]:
         op = int(opcode)
         profiles[op] = NamespaceProfile(
             opcode=op,
-            name=str(name_overrides.get(op, default_name)),
+            name=(remote_group_display_name(group) if op == 0x06 else None)
+            or str(name_overrides.get(op, default_name)),
             ii_max=int(ii_overrides.get(op, default_ii)),
             rr_max=int(rr_overrides.get(op, default_rr)),
         )
@@ -254,6 +272,8 @@ def group_namespace_profiles(group: int) -> dict[int, NamespaceProfile]:
 
 
 def group_name_for_opcode(group: int, opcode: int) -> str:
+    if int(opcode) == 0x06 and (remote_name := remote_group_display_name(group)):
+        return remote_name
     config = GROUP_CONFIG.get(group)
     if config is None:
         return f"Unknown 0x{group:02X}"
