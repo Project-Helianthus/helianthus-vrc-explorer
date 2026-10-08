@@ -47,15 +47,15 @@ def test_estimate_register_requests() -> None:
             group=0x02,
             opcode=0x02,
             rr_max=0x0003,
-            instances=(0x00, 0x01),
+            instances=(0x01,),
         ),
         make_plan_key(0x01, 0x02): GroupScanPlan(
             group=0x01, opcode=0x02, rr_max=0x0001, instances=(0x00,)
         ),
     }
-    # GG=0x02: 2 ordinary instances plus mandatory II0A * (3+1) = 12
+    # GG=0x02: one circuit plus mandatory virtual II09 * (3+1) = 8
     # GG=0x01: 1 instance * (1+1) regs = 2
-    assert estimate_register_requests(plan) == 14
+    assert estimate_register_requests(plan) == 10
 
 
 def test_format_int_set_compacts_ranges() -> None:
@@ -70,15 +70,15 @@ def test_build_work_queue_skips_done_tasks() -> None:
             group=0x02,
             opcode=0x02,
             rr_max=0x0002,
-            instances=(0x00,),
+            instances=(0x01,),
         ),
     }
-    done = {RegisterTask(group=0x02, opcode=0x02, instance=0x00, register=0x0001)}
+    done = {RegisterTask(group=0x02, opcode=0x02, instance=0x01, register=0x0001)}
     tasks = build_work_queue(plan, done=done)
     assert tasks == [
-        RegisterTask(group=0x02, opcode=0x02, instance=0x00, register=0x0000),
-        RegisterTask(group=0x02, opcode=0x02, instance=0x00, register=0x0002),
-        *(RegisterTask(group=2, opcode=2, instance=10, register=rr) for rr in range(3)),
+        RegisterTask(group=0x02, opcode=0x02, instance=0x01, register=0x0000),
+        RegisterTask(group=0x02, opcode=0x02, instance=0x01, register=0x0002),
+        *(RegisterTask(group=2, opcode=2, instance=9, register=rr) for rr in range(3)),
     ]
 
 
@@ -87,7 +87,7 @@ def test_explicit_register_selectors_drive_queue_estimate_and_metadata() -> None
         group=0x02,
         opcode=0x02,
         rr_max=0x0100,
-        instances=(0x00, 0x03),
+        instances=(0x01, 0x03),
         registers=(0x0002, 0x0010, 0x0100),
     )
     plan = {make_plan_key(0x02, 0x02): group_plan}
@@ -95,7 +95,7 @@ def test_explicit_register_selectors_drive_queue_estimate_and_metadata() -> None
     assert estimate_register_requests(plan) == 9
     assert build_work_queue(plan, done=set()) == [
         RegisterTask(group=0x02, opcode=0x02, instance=ii, register=rr)
-        for ii in (0x00, 0x03, 0x0A)
+        for ii in (0x01, 0x03, 0x09)
         for rr in (0x0002, 0x0010, 0x0100)
     ]
     assert group_plan.to_meta()["registers"] == ["0x0002", "0x0010", "0x0100"]
@@ -107,7 +107,7 @@ def test_group_scan_plan_rejects_invalid_explicit_selectors() -> None:
             group=0x02,
             opcode=0x02,
             rr_max=0,
-            instances=(0,),
+            instances=(1,),
             registers=(0x10000,),
         )
 
@@ -137,10 +137,10 @@ def test_plan_dual_namespace_creates_two_entries() -> None:
             name="Regulators",
             descriptor=1.0,
             known=True,
-            ii_max=0x0A,
+            ii_max=0x08,
             rr_max=0x0035,
             rr_max_full=0x0035,
-            present_instances=(0x00,),
+            present_instances=(0x01,),
             namespace_label="remote",
         ),
     ]
@@ -152,11 +152,11 @@ def test_plan_dual_namespace_creates_two_entries() -> None:
     assert recommended[local_key].rr_max == 0x000F
     assert recommended[remote_key].rr_max == 0x0035
     assert recommended[local_key].instances == (0x00,)
-    assert recommended[remote_key].instances == (0x00,)
+    assert recommended[remote_key].instances == (0x01,)
 
     full = build_plan_from_preset(groups, preset="full")
     assert full[local_key].instances == tuple(range(0x0A + 1))
-    assert full[remote_key].instances == tuple(range(0x0A + 1))
+    assert full[remote_key].instances == tuple(range(0x01, 0x09))
     assert full[remote_key].rr_max == 0x0035
 
 
@@ -180,21 +180,21 @@ def test_plan_dual_namespace_presets_keep_namespace_specific_ii_max() -> None:
             name="Unknown",
             descriptor=1.0,
             known=True,
-            ii_max=0x0A,
+            ii_max=0x08,
             rr_max=0x0004,
             rr_max_full=0x0004,
-            present_instances=(0x00, 0x02),
+            present_instances=(0x01, 0x02),
             namespace_label="remote",
         ),
     ]
 
     recommended = build_plan_from_preset(groups, preset="recommended")
     assert recommended[make_plan_key(0x08, 0x02)].instances == (0x00,)
-    assert recommended[make_plan_key(0x08, 0x06)].instances == (0x00, 0x02)
+    assert recommended[make_plan_key(0x08, 0x06)].instances == (0x01, 0x02)
 
     full = build_plan_from_preset(groups, preset="full")
     assert full[make_plan_key(0x08, 0x02)].instances == tuple(range(0x0A + 1))
-    assert full[make_plan_key(0x08, 0x06)].instances == tuple(range(0x0A + 1))
+    assert full[make_plan_key(0x08, 0x06)].instances == tuple(range(0x01, 0x09))
 
 
 def test_full_uses_all_declared_slots_even_when_expected_count_is_positive() -> None:
@@ -204,7 +204,7 @@ def test_full_uses_all_declared_slots_even_when_expected_count_is_positive() -> 
         name="Heating Circuits",
         descriptor=1.0,
         known=True,
-        ii_max=0x0A,
+        ii_max=0x09,
         rr_max=0x0025,
         rr_max_full=0x0025,
         present_instances=(0x03, 0x07),
@@ -214,9 +214,11 @@ def test_full_uses_all_declared_slots_even_when_expected_count_is_positive() -> 
     assert build_plan_from_preset([group], preset="recommended")[group.key].instances == (
         0x03,
         0x07,
-        0x0A,
+        0x09,
     )
-    assert build_plan_from_preset([group], preset="full")[group.key].instances == tuple(range(0x0B))
+    assert build_plan_from_preset([group], preset="full")[group.key].instances == tuple(
+        range(0x01, 0x0A)
+    )
 
 
 def test_presets_apply_profile_pair_policy_and_research_rr_floor() -> None:

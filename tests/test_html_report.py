@@ -283,7 +283,7 @@ def test_html_report_includes_dormant_status_rendering_logic() -> None:
         "meta": {"destination_address": "0x15", "scan_timestamp": "2026-02-11T00:00:00Z"},
         "groups": {
             "0x00": {
-                "name": "Regulator Parameters",
+                "name": "System",
                 "instances": {
                     "0x00": {
                         "registers": {
@@ -513,7 +513,7 @@ def test_html_report_does_not_use_single_namespace_identity_sentinel() -> None:
         "meta": {"destination_address": "0x15", "scan_timestamp": "2026-02-11T00:00:00Z"},
         "groups": {
             "0x00": {
-                "name": "Regulator Parameters",
+                "name": "System",
                 "instances": {
                     "0x00": {
                         "registers": {
@@ -652,8 +652,10 @@ def test_html_report_browser_presentation_keeps_html_only_corrections() -> None:
 
     html = render_html_report(artifact)
 
-    assert '"0x00":{"0x02":{"name":"Regulator Parameters","rr_max":"0x00FF"}' in html
-    assert '"0x01":{"0x02":{"name":"Native Drinkable Hot Water"}' in html
+    assert '"0x00":{"0x02":{"name":"System","rr_max":"0x00FF"}' in html
+    assert '"0x01":{"0x02":{"name":"Native Domestic Hot Water"}' in html
+    assert "Description matches cached baseline" not in html
+    assert "Current-target verification is separate" not in html
     assert "declared RR_max" in html
     assert (
         "Describe: min=${formatValue(description.min)}, max=${formatValue(description.max)}, "

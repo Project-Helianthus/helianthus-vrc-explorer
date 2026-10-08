@@ -20,14 +20,14 @@ def test_parse_instances_spec_accepts_keywords_and_ranges() -> None:
         name="Heating Circuits",
         descriptor=1.0,
         known=True,
-        ii_max=0x0A,
+        ii_max=0x09,
         rr_max=0x21,
         rr_max_full=0x21,
-        present_instances=(0x00, 0x02, 0x03),
+        present_instances=(0x01, 0x02, 0x03),
     )
-    assert _parse_instances_spec("present", group=group) == (0x00, 0x02, 0x03)
-    assert _parse_instances_spec("all", group=group) == tuple(range(0x0A + 1))
-    assert _parse_instances_spec("0-2", group=group) == (0x00, 0x01, 0x02)
+    assert _parse_instances_spec("present", group=group) == (0x01, 0x02, 0x03)
+    assert _parse_instances_spec("all", group=group) == tuple(range(1, 10))
+    assert _parse_instances_spec("1-2", group=group) == (0x01, 0x02)
 
 
 def test_parse_register_scope_distinguishes_ceiling_from_exact_selectors() -> None:
@@ -45,17 +45,17 @@ def test_estimate_footer_reports_requests_and_eta() -> None:
         name="Heating Circuits",
         descriptor=1.0,
         known=True,
-        ii_max=0x0A,
+        ii_max=0x09,
         rr_max=0x02,
         rr_max_full=0x02,
-        present_instances=(0x00,),
+        present_instances=(0x01,),
     )
     states = {
         (0x02, 0x02): _EditableGroup(
             group=group,
             enabled=True,
             rr_max=0x02,
-            instances=(0x00, 0x01),
+            instances=(0x01, 0x02),
         )
     }
     footer = _estimate_footer(states, request_rate_rps=2.0)
@@ -71,17 +71,17 @@ def test_estimate_footer_uses_exact_register_selectors() -> None:
         name="Heating Circuits",
         descriptor=1.0,
         known=True,
-        ii_max=0x0A,
+        ii_max=0x09,
         rr_max=0x0100,
         rr_max_full=0x0100,
-        present_instances=(0x00,),
+        present_instances=(0x01,),
     )
     states = {
         group.key: _EditableGroup(
             group=group,
             enabled=True,
             rr_max=0x0100,
-            instances=(0x00, 0x03),
+            instances=(0x01, 0x03),
             registers=(0x0002, 0x0010, 0x0100),
         )
     }
@@ -96,10 +96,10 @@ def test_table_row_values_show_explicit_namespace_column() -> None:
         name="Primary Heating Sources",
         descriptor=3.0,
         known=True,
-        ii_max=None,
+        ii_max=8,
         rr_max=0x0015,
         rr_max_full=0x0015,
-        present_instances=(0x00,),
+        present_instances=(0x01,),
         namespace_label="remote",
     )
     local_only_group = PlannerGroup(
@@ -111,7 +111,7 @@ def test_table_row_values_show_explicit_namespace_column() -> None:
         ii_max=None,
         rr_max=0x00FF,
         rr_max_full=0x00FF,
-        present_instances=(0x00,),
+        present_instances=(0x01,),
     )
 
     remote_row = _table_row_values(
@@ -119,7 +119,7 @@ def test_table_row_values_show_explicit_namespace_column() -> None:
             group=remote_group,
             enabled=True,
             rr_max=0x0015,
-            instances=(0x00,),
+            instances=(0x01,),
         )
     )
     local_row = _table_row_values(
@@ -127,7 +127,7 @@ def test_table_row_values_show_explicit_namespace_column() -> None:
             group=local_only_group,
             enabled=False,
             rr_max=0x00FF,
-            instances=(0x00,),
+            instances=(0x01,),
         )
     )
 
@@ -137,7 +137,7 @@ def test_table_row_values_show_explicit_namespace_column() -> None:
         "Primary Heating Sources",
         "remote",
         "3.0",
-        "singleton",
+        "present 1/8",
         "0x0015",
     )
     assert local_row == (
@@ -158,10 +158,10 @@ def test_split_planner_groups_by_namespace_prefers_local_then_remote() -> None:
         name="System",
         descriptor=1.0,
         known=True,
-        ii_max=0x0A,
+        ii_max=0x09,
         rr_max=0x000F,
         rr_max_full=0x000F,
-        present_instances=(0x00,),
+        present_instances=(0x01,),
         namespace_label="local",
     )
     remote_group = PlannerGroup(
@@ -170,10 +170,10 @@ def test_split_planner_groups_by_namespace_prefers_local_then_remote() -> None:
         name="Primary Heating Sources",
         descriptor=3.0,
         known=True,
-        ii_max=None,
+        ii_max=8,
         rr_max=0x0015,
         rr_max_full=0x0015,
-        present_instances=(0x00,),
+        present_instances=(0x01,),
         namespace_label="remote",
     )
 
@@ -220,7 +220,7 @@ def test_run_textual_scan_plan_registers_enter_binding_for_rr_max(
                 ii_max=None,
                 rr_max=0x00FF,
                 rr_max_full=0x00FF,
-                present_instances=(0x00,),
+                present_instances=(0x01,),
             )
         ],
         request_rate_rps=None,
@@ -238,16 +238,16 @@ def test_run_textual_scan_plan_preserves_exact_default_registers_on_save(monkeyp
         name="Heating Circuits",
         descriptor=1.0,
         known=True,
-        ii_max=0x0A,
+        ii_max=0x09,
         rr_max=0x0100,
         rr_max_full=0x0100,
-        present_instances=(0x00, 0x03),
+        present_instances=(0x01, 0x03),
     )
     default = GroupScanPlan(
         group=0x02,
         opcode=0x02,
         rr_max=0x0100,
-        instances=(0x00, 0x03),
+        instances=(0x01, 0x03),
         registers=(0x0002, 0x0010, 0x0100),
     )
     captured: dict[str, object] = {}
@@ -303,7 +303,7 @@ def test_run_textual_scan_plan_rr_dialog_registers_enter_submit_binding(
                 ii_max=None,
                 rr_max=0x00FF,
                 rr_max_full=0x00FF,
-                present_instances=(0x00,),
+                present_instances=(0x01,),
             )
         ],
         request_rate_rps=None,
@@ -344,10 +344,10 @@ def test_run_textual_scan_plan_instances_dialog_registers_enter_submit_binding(
                 name="Heating Circuits",
                 descriptor=1.0,
                 known=True,
-                ii_max=0x0A,
+                ii_max=0x09,
                 rr_max=0x0025,
                 rr_max_full=0x0025,
-                present_instances=(0x00, 0x02, 0x03),
+                present_instances=(0x01, 0x02, 0x03),
             )
         ],
         request_rate_rps=None,
@@ -385,10 +385,10 @@ def test_instances_dialog_submit_suppresses_immediate_rr_reopen(monkeypatch) -> 
                 name="Heating Circuits",
                 descriptor=1.0,
                 known=True,
-                ii_max=0x0A,
+                ii_max=0x09,
                 rr_max=0x0025,
                 rr_max_full=0x0025,
-                present_instances=(0x00, 0x02, 0x03),
+                present_instances=(0x01, 0x02, 0x03),
             )
         ],
         request_rate_rps=None,
@@ -427,10 +427,10 @@ def test_instances_dialog_cancel_does_not_suppress_next_enter(monkeypatch) -> No
                 name="Heating Circuits",
                 descriptor=1.0,
                 known=True,
-                ii_max=0x0A,
+                ii_max=0x09,
                 rr_max=0x0025,
                 rr_max_full=0x0025,
-                present_instances=(0x00, 0x02, 0x03),
+                present_instances=(0x01, 0x02, 0x03),
             )
         ],
         request_rate_rps=None,
@@ -469,10 +469,10 @@ def test_instances_dialog_invalid_submit_suppresses_immediate_rr_reopen(monkeypa
                 name="Heating Circuits",
                 descriptor=1.0,
                 known=True,
-                ii_max=0x0A,
+                ii_max=0x09,
                 rr_max=0x0025,
                 rr_max_full=0x0025,
-                present_instances=(0x00, 0x02, 0x03),
+                present_instances=(0x01, 0x02, 0x03),
             )
         ],
         request_rate_rps=None,

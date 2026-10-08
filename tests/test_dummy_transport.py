@@ -530,6 +530,9 @@ def test_partial_system_information_keeps_valid_fixture_registers(
         "raw_hex": "0100",
         "flags": 1,
     }
+    fixture["groups"]["0x02"]["instances"]["0x01"] = fixture["groups"]["0x02"]["instances"].pop(
+        "0x00"
+    )
     path.write_text(json.dumps(fixture))
     transport = DummyTransport(path)
     if circuit_raw_hex is None:
@@ -548,8 +551,8 @@ def test_partial_system_information_keeps_valid_fixture_registers(
     assert artifact["meta"]["system_information"][2]["raw_hex"] == "00"
     circuit_counts = artifact["meta"]["instance_counts"]["0x02:0x02"]
     assert circuit_counts["expected"] is None
-    assert circuit_counts["probed_instances"] == 11
-    regs = artifact["operations"]["0x02"]["groups"]["0x02"]["instances"]["0x00"]["registers"]
+    assert circuit_counts["probed_instances"] == 9
+    regs = artifact["operations"]["0x02"]["groups"]["0x02"]["instances"]["0x01"]["registers"]
     assert regs["0x000f"]["value"] == 0x1234
     path.write_text(json.dumps(artifact))
     replay_transport = DummyTransport(path)
@@ -558,6 +561,6 @@ def test_partial_system_information_keeps_valid_fixture_registers(
             replay_transport.send(0x15, build_directory_probe_payload(0)).hex() == circuit_raw_hex
         )
     assert replay_transport.send(0x15, build_directory_probe_payload(2)) == b"\x00"
-    assert replay_transport.send(0x15, build_register_read_payload(2, 2, 0, 0xF)).endswith(
+    assert replay_transport.send(0x15, build_register_read_payload(2, 2, 1, 0xF)).endswith(
         b"\x34\x12"
     )

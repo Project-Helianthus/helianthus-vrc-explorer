@@ -187,13 +187,14 @@ def test_sparse_instance_probe_stops_after_successful_count_not_slot_count() -> 
         dst=0x15,
         group=2,
         opcode=2,
-        ii_max=10,
+        ii_max=9,
         observer=None,
         probe_instance_availability_fn=availability,
         expected_count=2,
     )
-    assert set(probes) == set(range(7))
-    assert [ii for ii, result in probes.items() if result.present] == [2, 6]
+    assert set(probes) == {*range(1, 7), 9}
+    assert [ii for ii, result in probes.items() if result.present] == [2, 6, 9]
+    assert probes[9].present is True
 
 
 @pytest.mark.parametrize("count", [None, 0, 3])
@@ -216,12 +217,12 @@ def test_missing_zero_or_unmet_count_keeps_bounded_fallback(count: int | None) -
         dst=0x15,
         group=2,
         opcode=2,
-        ii_max=10,
+        ii_max=9,
         observer=None,
         probe_instance_availability_fn=availability,
         expected_count=count,
     )
-    assert len(probes) == 11
+    assert len(probes) == 9
     assert probes[9].present
 
 
@@ -234,15 +235,17 @@ def test_full_preset_audits_slots_while_recommended_uses_sparse_count() -> None:
         name="Heating Circuits",
         descriptor=float("nan"),
         known=True,
-        ii_max=10,
+        ii_max=9,
         rr_max=37,
         rr_max_full=255,
         present_instances=(3, 7),
         expected_count=2,
     )
-    assert build_plan_from_preset([group], preset="recommended")[(2, 2)].instances == (3, 7, 10)
-    assert build_plan_from_preset([group], preset="full")[(2, 2)].instances == tuple(range(11))
-    assert build_plan_from_preset([group], preset="research")[(2, 2)].instances == tuple(range(11))
+    assert build_plan_from_preset([group], preset="recommended")[(2, 2)].instances == (3, 7, 9)
+    assert build_plan_from_preset([group], preset="full")[(2, 2)].instances == tuple(range(1, 10))
+    assert build_plan_from_preset([group], preset="research")[(2, 2)].instances == tuple(
+        range(1, 10)
+    )
 
 
 def test_default_scan_keeps_system_information_separate_and_targets_writable_descriptions() -> None:
@@ -281,7 +284,7 @@ def test_default_scan_keeps_system_information_separate_and_targets_writable_des
     assert group["descriptor_observed"] is None
     assert artifact["meta"]["scan_plan"]["groups"]["0x02"]["operations"]["0x02"]["instances"] == [
         "0x03",
-        "0x0a",
+        "0x09",
     ]
     entry = group["instances"]["0x03"]["registers"]["0x0002"]
     assert entry["parameter_description"]["qualification"] == "matched"

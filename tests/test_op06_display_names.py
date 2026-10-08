@@ -69,12 +69,12 @@ def test_saved_artifacts_use_current_remote_names_without_rewriting_evidence(gro
     rows = _compute_summary_rows(artifact)
     assert next(row for row in rows if row.namespace_key == "0x06").name == name
     assert next(row for row in rows if row.namespace_key == "0x02").name == (
-        "DeltaT" if group == 8 else "preserved local label"
+        group_name_for_opcode(group, 2) if group <= 9 else "preserved local label"
     )
     sheets = _build_sheets(artifact)
     assert next(sheet for sheet in sheets if sheet.op_key == "0x06").name == name
     assert next(sheet for sheet in sheets if sheet.op_key == "0x02").name == (
-        "DeltaT" if group == 8 else "preserved local label"
+        group_name_for_opcode(group, 2) if group <= 9 else "preserved local label"
     )
     store = BrowseStore.from_artifact(artifact)
     assert any(node.label == f"{name} ({group_key})" for node in store.tree_nodes)

@@ -10,7 +10,7 @@ from ..scanner.identity import operation_label
 from ..schema.b524_register_names import b524_register_name
 from ..schema.parameter_descriptions import attach_bundled_descriptions
 from .browse_models import BrowseTab, RegisterAddress, RegisterRow, TreeNodeRef
-from .register_semantics import entry_display_value_text, visible_rr_keys
+from .register_semantics import entry_display_value_text, entry_status_kind, visible_rr_keys
 
 _B524_SECTION_ORDER: tuple[str, ...] = (
     "system_information",
@@ -151,11 +151,16 @@ def _instance_label(
         group_name=group_name,
         namespace_key=namespace_key,
     )
-    # Human-friendly numbering: show 1-based index, but always keep the instance ID too.
+    # Remote slots and circuits already use 1-based wire selectors.
     ii = _safe_int_hex(instance_key)
-    if namespace_key == "0x02" and _safe_int_hex(group_key) == 2 and ii == 0x0A:
+    if namespace_key == "0x02" and _safe_int_hex(group_key) == 2 and ii == 0x09:
         return f"Virtual DHW Slot ({instance_key})"
-    return f"{base} {ii + 1} ({instance_key})"
+    number = (
+        ii
+        if namespace_key == "0x06" or (namespace_key == "0x02" and _safe_int_hex(group_key) == 2)
+        else ii + 1
+    )
+    return f"{base} {number} ({instance_key})"
 
 
 def _row_sort_key(row: RegisterRow) -> tuple[int, int, int, int, int, int]:
@@ -244,21 +249,37 @@ def _namespace_display_label(namespace_key: str | None, namespace_label: str | N
     return namespace_key
 
 
-def _expected_instance_keys(
+def _visible_instance_keys(
     *,
     group_key: str,
     namespace_key: str | None,
     instances: dict[str, Any],
 ) -> list[str]:
-    keys = {key for key in instances if isinstance(key, str)}
-    if namespace_key is None:
-        return sorted(keys, key=_safe_int_hex)
-
-    profiles = group_namespace_profiles(_safe_int_hex(group_key))
-    profile = profiles.get(_safe_int_hex(namespace_key))
-    if profile is not None and profile.ii_max > 0:
-        for ii in range(profile.ii_max + 1):
-            keys.add(_hex_u8(ii))
+    opcode = _safe_int_hex(namespace_key or "0")
+    group = _safe_int_hex(group_key)
+    keys = []
+    for key, instance in instances.items():
+        if not isinstance(key, str) or not isinstance(instance, dict):
+            continue
+        ii = _safe_int_hex(key)
+        if opcode == 6 and not 1 <= ii <= 8:
+            continue
+        if opcode == 2 and group == 2 and not 1 <= ii <= 9:
+            continue
+        if "present" in instance:
+            if instance["present"] is not True:
+                continue
+        else:
+            # Legacy captures omit presence; retain only successful observed rows.
+            registers = instance.get("registers")
+            if not isinstance(registers, dict) or not any(
+                isinstance(entry, dict)
+                and entry.get("raw_hex")
+                and entry_status_kind(entry) == "ok"
+                for entry in registers.values()
+            ):
+                continue
+        keys.append(key)
     return sorted(keys, key=_safe_int_hex)
 
 
@@ -461,7 +482,7 @@ def _group_namespace_views(
             namespace_instance = namespace_instances.get(instance_key)
             if not isinstance(namespace_instance, dict):
                 namespace_instance = {
-                    "present": instance_obj.get("present"),
+                    **({"present": instance_obj["present"]} if "present" in instance_obj else {}),
                     "registers": {},
                 }
                 namespace_instances[instance_key] = namespace_instance
@@ -711,23 +732,15 @@ class _HydratedBrowseStore:
                 namespace_views = [(op_key, op_label, namespace_views[0][2])]
             if not namespace_views:
                 continue
-            all_instance_keys = sorted(
-                {
-                    instance_key
-                    for (_namespace_key, _namespace_label, instances) in namespace_views
-                    for instance_key in instances
-                    if isinstance(instance_key, str)
-                },
-                key=_safe_int_hex,
-            )
-            config = GROUP_CONFIG.get(gg)
-            is_instanced = (config is not None and int(config["ii_max"]) > 0) or any(
-                instance_key != "0x00" for instance_key in all_instance_keys
-            )
-
             for namespace_key, namespace_label, instances in namespace_views:
                 effective_namespace_key = namespace_key or op_key
                 effective_namespace_label = namespace_label or op_label
+                profile = group_namespace_profiles(gg).get(_safe_int_hex(effective_namespace_key))
+                is_instanced = (
+                    effective_namespace_key == "0x06"
+                    or (profile is not None and profile.ii_max > 0)
+                    or any(key != "0x00" for key in instances)
+                )
                 section_key = _b524_section_key_for_opcode(effective_namespace_key)
                 if section_key not in {"controller_registers", "device_slots"}:
                     continue
@@ -771,17 +784,22 @@ class _HydratedBrowseStore:
                             )
                         )
 
-                instance_keys = _expected_instance_keys(
-                    group_key=group_key,
-                    namespace_key=effective_namespace_key,
-                    instances=instances,
+                tree_instance_keys = set(
+                    _visible_instance_keys(
+                        group_key=group_key,
+                        namespace_key=effective_namespace_key,
+                        instances=instances,
+                    )
+                )
+                instance_keys = sorted(
+                    (key for key in instances if isinstance(key, str)), key=_safe_int_hex
                 )
                 visible_registers = set(visible_rr_keys(instances))
                 for instance_key in instance_keys:
                     instance_obj = instances.get(instance_key)
                     if not isinstance(instance_obj, dict):
                         instance_obj = {"present": False, "registers": {}}
-                    if is_instanced:
+                    if is_instanced and instance_key in tree_instance_keys:
                         node_id = _build_b524_instance_node_id(
                             section_key=section_key,
                             group_key=group_key,

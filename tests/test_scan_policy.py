@@ -23,13 +23,13 @@ def test_parse_scan_plan_accepts_exact_instances_and_register_ranges() -> None:
                 {
                     "opcode": "0x02",
                     "group": "0x02",
-                    "instances": ["0x00", 3],
+                    "instances": ["0x01", 3],
                     "registers": ["0x0002", "0x0010..0x0012", 0x20],
                 },
                 {
                     "opcode": 0x06,
                     "group": 0x00,
-                    "instances": [0xFF],
+                    "instances": [0x01],
                     "registers": [0xFFFF],
                 },
             ],
@@ -41,14 +41,14 @@ def test_parse_scan_plan_accepts_exact_instances_and_register_ranges() -> None:
             group=0x02,
             opcode=0x02,
             rr_max=0x0020,
-            instances=(0x00, 0x03),
+            instances=(0x01, 0x03, 0x09),
             registers=(0x0002, 0x0010, 0x0011, 0x0012, 0x0020),
         ),
         make_plan_key(0x00, 0x06): GroupScanPlan(
             group=0x00,
             opcode=0x06,
             rr_max=0xFFFF,
-            instances=(0xFF,),
+            instances=(0x01,),
             registers=(0xFFFF,),
         ),
     }
@@ -56,9 +56,37 @@ def test_parse_scan_plan_accepts_exact_instances_and_register_ranges() -> None:
     assert parse_scan_plan(
         {
             "schema_version": "1",
-            "groups": [{"opcode": 2, "group": 2, "instances": [0], "registers": [0]}],
+            "groups": [{"opcode": 2, "group": 2, "instances": [1], "registers": [0]}],
         }
     )
+
+
+@pytest.mark.parametrize(
+    ("opcode", "group", "instance", "match"),
+    [
+        (0x06, 0x00, 0x00, "0x01..0x08"),
+        (0x06, 0x00, 0x09, "0x01..0x08"),
+        (0x02, 0x02, 0x00, "0x01..0x09"),
+        (0x02, 0x02, 0x0A, "0x01..0x09"),
+    ],
+)
+def test_parse_scan_plan_rejects_instances_outside_profile_domains(
+    opcode: int, group: int, instance: int, match: str
+) -> None:
+    with pytest.raises(ValueError, match=match):
+        parse_scan_plan(
+            {
+                "schema_version": 1,
+                "groups": [
+                    {
+                        "opcode": opcode,
+                        "group": group,
+                        "instances": [instance],
+                        "registers": [0],
+                    }
+                ],
+            }
+        )
 
 
 @pytest.mark.parametrize(
@@ -75,7 +103,7 @@ def test_parse_scan_plan_accepts_exact_instances_and_register_ranges() -> None:
                     {
                         "opcode": 0x03,
                         "group": 0,
-                        "instances": [0],
+                        "instances": [1],
                         "registers": [0],
                     }
                 ],
@@ -89,7 +117,7 @@ def test_parse_scan_plan_accepts_exact_instances_and_register_ranges() -> None:
                     {
                         "opcode": 2,
                         "group": True,
-                        "instances": [0],
+                        "instances": [1],
                         "registers": [0],
                     }
                 ],
@@ -117,7 +145,7 @@ def test_parse_scan_plan_accepts_exact_instances_and_register_ranges() -> None:
                     {
                         "opcode": 2,
                         "group": 2,
-                        "instances": [0],
+                        "instances": [1],
                         "registers": [1.5],
                     }
                 ],
@@ -131,7 +159,7 @@ def test_parse_scan_plan_accepts_exact_instances_and_register_ranges() -> None:
                     {
                         "opcode": 2,
                         "group": 2,
-                        "instances": [0],
+                        "instances": [1],
                         "registers": [0],
                         "surprise": 1,
                     }
@@ -150,8 +178,8 @@ def test_parse_scan_plan_rejects_conflicting_duplicate_namespace_rows() -> None:
     data = {
         "schema_version": "1",
         "groups": [
-            {"opcode": 2, "group": 2, "instances": [0], "registers": [1]},
-            {"opcode": 2, "group": 2, "instances": [0], "registers": [2]},
+            {"opcode": 2, "group": 2, "instances": [1], "registers": [1]},
+            {"opcode": 2, "group": 2, "instances": [1], "registers": [2]},
         ],
     }
 
@@ -167,13 +195,13 @@ def test_parse_scan_plan_normalizes_mixed_equivalent_selectors_and_duplicate_row
                 {
                     "opcode": "02",
                     "group": "2",
-                    "instances": [3, "0x00", "3"],
+                    "instances": [3, "0x01", "3"],
                     "registers": ["0x0012..0x0010", 2, "02"],
                 },
                 {
                     "opcode": 2,
                     "group": 2,
-                    "instances": [0, "0x03"],
+                    "instances": [1, "0x03"],
                     "registers": ["0x0002", "16-18"],
                 },
             ],
@@ -185,7 +213,7 @@ def test_parse_scan_plan_normalizes_mixed_equivalent_selectors_and_duplicate_row
             group=0x02,
             opcode=0x02,
             rr_max=18,
-            instances=(0, 3),
+            instances=(1, 3, 9),
             registers=(2, 16, 17, 18),
         )
     }
@@ -214,7 +242,7 @@ def test_parse_scan_plan_rejects_more_than_scalar_request_limit() -> None:
         "groups": [
             {
                 "opcode": 2,
-                "group": 2,
+                "group": 3,
                 "instances": ["0x00..0x01"],
                 "registers": ["0x0000..0xc350"],
             }
@@ -232,7 +260,7 @@ def test_parse_scan_plan_rejects_comma_separated_element() -> None:
             {
                 "opcode": 2,
                 "group": 2,
-                "instances": [0],
+                "instances": [1],
                 "registers": ["0x0001,0x0002"],
             }
         ],

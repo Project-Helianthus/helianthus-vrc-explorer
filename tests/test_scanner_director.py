@@ -354,8 +354,8 @@ def test_group_00_rr_max_is_0x00ff() -> None:
 
 def test_group_names_match_docs() -> None:
     assert len(GROUP_CONFIG) == 18
-    assert GROUP_CONFIG[0x09]["name"] == "Regulators"
-    assert GROUP_CONFIG[0x0A]["name"] == "Thermostats"
+    assert GROUP_CONFIG[0x09]["name"] == "Ventilation"
+    assert GROUP_CONFIG[0x0A]["name"] == "Unknown"
     assert GROUP_CONFIG[0x0C]["name"] == "Functional Modules (VR71)"
     assert GROUP_CONFIG[0x0E]["name"] == "Clock"
     assert GROUP_CONFIG[0x0F]["name"] == "Base Stations"
@@ -382,7 +382,7 @@ def test_group_config_completeness() -> None:
         0x10,
         0x11,
     }
-    assert GROUP_CONFIG[0x08]["name"] == "Unknown"
+    assert GROUP_CONFIG[0x08]["name"] == "DeltaT"
     assert GROUP_CONFIG[0x00]["namespace_opcodes"] == [0x02]
     assert GROUP_CONFIG[0x00]["rr_max_by_opcode"] == {0x02: 0x00FF}
     assert GROUP_CONFIG[0x00]["ii_max_by_opcode"] == {0x02: 0x00}
@@ -390,11 +390,11 @@ def test_group_config_completeness() -> None:
     assert GROUP_CONFIG[0x01]["rr_max_by_opcode"] == {0x02: 0x0013, 0x06: 0x0015}
     assert GROUP_CONFIG[0x01]["ii_max_by_opcode"] == {0x02: 0x00, 0x06: 0x08}
     assert GROUP_CONFIG[0x02]["name_by_opcode"] == {
-        0x02: "Heating Circuits",
+        0x02: "Circuits",
         0x06: "Secondary Heating Source",
     }
     assert GROUP_CONFIG[0x02]["namespace_opcodes"] == [0x02, 0x06]
-    assert GROUP_CONFIG[0x02]["ii_max_by_opcode"] == {0x02: 0x0A, 0x06: 0x08}
+    assert GROUP_CONFIG[0x02]["ii_max_by_opcode"] == {0x02: 0x09, 0x06: 0x08}
     assert GROUP_CONFIG[0x02]["rr_max_by_opcode"] == {0x02: 0x0025, 0x06: 0x0015}
     assert GROUP_CONFIG[0x03]["namespace_opcodes"] == [0x02, 0x06]
     assert GROUP_CONFIG[0x03]["ii_max_by_opcode"] == {0x02: 0x0A, 0x06: 0x0A}
@@ -430,7 +430,7 @@ def test_group_namespace_profiles_support_opcode_first_identity() -> None:
     thermostats = group_namespace_profiles(0x0A)
 
     assert sorted(heat_sources) == [0x02]
-    assert heat_sources[0x02].name == "Regulator Parameters"
+    assert heat_sources[0x02].name == "System"
 
     assert sorted(hw) == [0x02, 0x06]
     assert hw[0x02].rr_max == 0x0013
@@ -439,31 +439,37 @@ def test_group_namespace_profiles_support_opcode_first_identity() -> None:
     assert hw[0x06].rr_max == 0x0015
 
     assert sorted(hc) == [0x02, 0x06]
-    assert hc[0x02].ii_max == 0x0A
+    assert hc[0x02].ii_max == 0x09
     assert hc[0x06].ii_max == 0x08
     assert hc[0x06].name == "Heat Pump"
     assert zones[0x06].name == "Air Recovery (VAR) recoVair"
-    assert zones[0x06].ii_max == 0x0A
+    assert zones[0x06].ii_max == 0x08
     assert solar[0x02].ii_max == 0x01
     assert solar[0x06].name == "unused"
-    assert solar[0x06].ii_max == 0x0A
+    assert solar[0x06].ii_max == 0x08
     assert cylinders[0x06].name == "Wärmepumpe Zubehör Appliance Interface (VWZ-AI)"
-    assert cylinders[0x06].ii_max == 0x0A
+    assert cylinders[0x06].ii_max == 0x08
     buffer = group_namespace_profiles(0x08)
     assert buffer[0x02].ii_max == 0x0A
-    assert buffer[0x06].ii_max == 0x0A
+    assert buffer[0x06].ii_max == 0x08
     assert buffer[0x02].name == "DeltaT"
     assert buffer[0x06].name == "Modul Solar (VMS) auroSTEP"
-    assert regulators[0x02].name == "System"
+    assert regulators[0x02].name == "Ventilation"
     assert regulators[0x06].name == "Remote Control Regulators (VRC7xx, VRT38x)"
     assert thermostats[0x02].name == "Unknown"
     assert thermostats[0x06].name == "Remote Control Thermostats (VR9x)"
 
 
 def test_group_name_for_opcode_uses_namespace_owned_labels_for_09_and_0a() -> None:
-    assert group_name_for_opcode(0x00, 0x02) == "Regulator Parameters"
-    assert group_name_for_opcode(0x00, 0x06) == "Regulator Parameters"
-    assert group_name_for_opcode(0x01, 0x02) == "Hot Water Circuit"
+    assert group_name_for_opcode(0x00, 0x02) == "System"
+    assert group_name_for_opcode(0x00, 0x06) == "System"
+    assert group_name_for_opcode(0x01, 0x02) == "Native Domestic Hot Water"
+    assert group_name_for_opcode(0x02, 0x02) == "Circuits"
+    assert group_name_for_opcode(0x03, 0x02) == "Zones"
+    assert group_name_for_opcode(0x04, 0x02) == "Solar Circuit"
+    assert group_name_for_opcode(0x05, 0x02) == "Solar Loaded Cylinder"
+    assert group_name_for_opcode(0x06, 0x02) == "Device"
+    assert group_name_for_opcode(0x07, 0x02) == "Generator"
     assert group_name_for_opcode(0x01, 0x06) == "Boiler"
     assert group_name_for_opcode(0x02, 0x06) == "Heat Pump"
     assert group_name_for_opcode(0x03, 0x06) == "Air Recovery (VAR) recoVair"
@@ -471,7 +477,7 @@ def test_group_name_for_opcode_uses_namespace_owned_labels_for_09_and_0a() -> No
     assert group_name_for_opcode(0x05, 0x06) == "Wärmepumpe Zubehör Appliance Interface (VWZ-AI)"
     assert group_name_for_opcode(0x08, 0x02) == "DeltaT"
     assert group_name_for_opcode(0x08, 0x06) == "Modul Solar (VMS) auroSTEP"
-    assert group_name_for_opcode(0x09, 0x02) == "System"
+    assert group_name_for_opcode(0x09, 0x02) == "Ventilation"
     assert group_name_for_opcode(0x09, 0x06) == "Remote Control Regulators (VRC7xx, VRT38x)"
     assert group_name_for_opcode(0x0A, 0x02) == "Unknown"
     assert group_name_for_opcode(0x0A, 0x06) == "Remote Control Thermostats (VR9x)"
@@ -488,7 +494,7 @@ def test_group_name_for_opcode_uses_namespace_owned_labels_for_09_and_0a() -> No
 def test_classify_groups_missing_desc() -> None:
     classified = classify_groups([DiscoveredGroup(group=0x08, descriptor=0.0)])
 
-    assert classified[0].name == "Unknown"
+    assert classified[0].name == "DeltaT"
     assert classified[0].expected_descriptor is None
     assert classified[0].descriptor_mismatch is False
 

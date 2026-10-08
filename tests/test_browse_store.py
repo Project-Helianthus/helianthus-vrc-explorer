@@ -13,7 +13,7 @@ def _sample_artifact() -> dict[str, object]:
         },
         "groups": {
             "0x00": {
-                "name": "Regulator Parameters",
+                "name": "System",
                 "instances": {
                     "0x00": {
                         "registers": {
@@ -82,7 +82,7 @@ def _dual_namespace_artifact() -> dict[str, object]:
                     "0x09": {
                         "name": "Regulators",
                         "instances": {
-                            "0x00": {
+                            "0x01": {
                                 "present": True,
                                 "registers": {
                                     "0x0001": {
@@ -125,12 +125,9 @@ def test_browse_store_builds_rows_and_left_tree_uses_only_myvaillant_name() -> N
     assert by_register["0x0001"].row_id == "0x00:0x02:0x00:0x0001"
     assert by_register["0x0002"].row_id == "0x00:0x06:0x00:0x0002"
     expected_local_path = (
-        "B524/Controller Registers/GetParameter/Regulator Parameters/0x00/"
-        "system_dhw_bivalence_point"
+        "B524/Controller Registers/GetParameter/System/0x00/system_dhw_bivalence_point"
     )
-    expected_remote_path = (
-        "B524/Device Slots/GetDeviceParameter/Regulator Parameters/0x00/device_class_address"
-    )
+    expected_remote_path = "B524/Device Slots/GetDeviceParameter/System/0x00/device_class_address"
     assert by_register["0x0001"].path == expected_local_path
     assert by_register["0x0002"].path == expected_remote_path
     assert by_register["0x0001"].address.label == "B524 GG=0x0 RR=0x1 0x02"
@@ -141,8 +138,8 @@ def test_browse_store_builds_rows_and_left_tree_uses_only_myvaillant_name() -> N
     assert by_node_id["proto:b524"].label == "B524"
     assert by_node_id["b524:section:controller_registers"].label == "Controller Registers"
     assert by_node_id["b524:section:device_slots"].label == "Device Slots"
-    assert by_node_id["b524:group:controller_registers:0x00"].label == "Regulator Parameters (0x00)"
-    assert by_node_id["b524:group:device_slots:0x00"].label == "Regulator Parameters (0x00)"
+    assert by_node_id["b524:group:controller_registers:0x00"].label == "System (0x00)"
+    assert by_node_id["b524:group:device_slots:0x00"].label == "System (0x00)"
     assert "b524:section:group_directory" not in by_node_id
     assert "b524:section:register_constraints" not in by_node_id
     assert "b524:section:timer_programs" not in by_node_id
@@ -303,7 +300,7 @@ def test_browse_store_filters_rows_for_tree_selection() -> None:
     # Protocol nodes navigate to their children.  They must not silently aggregate
     # every descendant register into the table.
     assert store.rows_for_selection(protocol_node, tab="config") == []
-    assert len(store.rows_for_selection(device_group_node, tab="state")) == 1
+    assert store.rows_for_selection(device_group_node, tab="state") == []
     assert len(store.rows_for_selection(controller_group_node, tab="state")) == 1
 
 
@@ -314,7 +311,7 @@ def test_browse_store_single_namespace_instance_node_uses_opcode_identity() -> N
             "0x02": {
                 "name": "Heating Circuits",
                 "instances": {
-                    "0x00": {
+                    "0x01": {
                         "registers": {
                             "0x0002": {
                                 "value": 1,
@@ -331,7 +328,7 @@ def test_browse_store_single_namespace_instance_node_uses_opcode_identity() -> N
 
     store = BrowseStore.from_artifact(artifact)
     by_node_id = {node.node_id: node for node in store.tree_nodes}
-    assert "b524:inst:controller_registers:0x02:0x02:0x00" in by_node_id
+    assert "b524:inst:controller_registers:0x02:0x02:0x01" in by_node_id
     assert not any(
         ":single:" in node.node_id for node in store.tree_nodes if node.protocol == "b524"
     )
@@ -344,7 +341,7 @@ def test_browse_store_instance_selection_is_namespace_isolated_for_mixed_legacy_
             "0x02": {
                 "name": "Heating Circuits",
                 "instances": {
-                    "0x00": {
+                    "0x01": {
                         "registers": {
                             "0x0001": {
                                 "value": 1,
@@ -369,10 +366,10 @@ def test_browse_store_instance_selection_is_namespace_isolated_for_mixed_legacy_
     local_instance_node = next(
         node
         for node in store.tree_nodes
-        if node.node_id == "b524:inst:controller_registers:0x02:0x02:0x00"
+        if node.node_id == "b524:inst:controller_registers:0x02:0x02:0x01"
     )
     remote_instance_node = next(
-        node for node in store.tree_nodes if node.node_id == "b524:inst:device_slots:0x02:0x06:0x00"
+        node for node in store.tree_nodes if node.node_id == "b524:inst:device_slots:0x02:0x06:0x01"
     )
 
     local_rows = store.rows_for_selection(local_instance_node, tab="state")
@@ -388,7 +385,7 @@ def test_browse_store_drops_missing_namespace_entries_from_split_views() -> None
             "0x02": {
                 "name": "Heating Circuits",
                 "instances": {
-                    "0x00": {
+                    "0x01": {
                         "registers": {
                             "0x0001": {
                                 "value": 1,
@@ -421,10 +418,10 @@ def test_browse_store_drops_missing_namespace_entries_from_split_views() -> None
     local_instance_node = next(
         node
         for node in store.tree_nodes
-        if node.node_id == "b524:inst:controller_registers:0x02:0x02:0x00"
+        if node.node_id == "b524:inst:controller_registers:0x02:0x02:0x01"
     )
     remote_instance_node = next(
-        node for node in store.tree_nodes if node.node_id == "b524:inst:device_slots:0x02:0x06:0x00"
+        node for node in store.tree_nodes if node.node_id == "b524:inst:device_slots:0x02:0x06:0x01"
     )
     local_rows = store.rows_for_selection(local_instance_node, tab="state")
     remote_rows = store.rows_for_selection(remote_instance_node, tab="state")
@@ -439,7 +436,7 @@ def test_browse_store_builds_namespace_nodes_for_dual_namespace_groups() -> None
     store = BrowseStore.from_artifact(_dual_namespace_artifact())
 
     by_node_id = {node.node_id: node for node in store.tree_nodes}
-    assert by_node_id["b524:group:controller_registers:0x09"].label == "System (0x09)"
+    assert by_node_id["b524:group:controller_registers:0x09"].label == "Ventilation (0x09)"
     assert (
         by_node_id["b524:group:device_slots:0x09"].label
         == "Remote Control Regulators (VRC7xx, VRT38x) (0x09)"
@@ -450,7 +447,7 @@ def test_browse_store_builds_namespace_nodes_for_dual_namespace_groups() -> None
     row_ids = {row.row_id for row in store.rows}
     assert row_ids == {
         "0x09:0x02:0x00:0x0001",
-        "0x09:0x06:0x00:0x0001",
+        "0x09:0x06:0x01:0x0001",
     }
 
     local_row = next(row for row in store.rows if row.namespace_key == "0x02")
@@ -471,7 +468,7 @@ def test_browse_store_remote_namespace_instance_label_drops_local_group_assumpti
                     "0x02": {
                         "name": "Heating Circuits",
                         "instances": {
-                            "0x00": {
+                            "0x01": {
                                 "present": True,
                                 "registers": {
                                     "0x0001": {
@@ -492,9 +489,9 @@ def test_browse_store_remote_namespace_instance_label_drops_local_group_assumpti
 
     store = BrowseStore.from_artifact(artifact)
     by_node_id = {node.node_id: node for node in store.tree_nodes}
-    assert by_node_id["b524:inst:device_slots:0x02:0x06:0x00"].label == "Remote Slot 1 (0x00)"
+    assert by_node_id["b524:inst:device_slots:0x02:0x06:0x01"].label == "Remote Slot 1 (0x01)"
     row = store.rows[0]
-    assert row.path == "B524/Device Slots/GetDeviceParameter/Heat Pump/0x00/device_connected"
+    assert row.path == "B524/Device Slots/GetDeviceParameter/Heat Pump/0x01/device_connected"
 
 
 def test_browse_store_filters_rows_for_namespace_selection() -> None:
@@ -524,7 +521,7 @@ def test_browse_store_instanced_groups_have_no_register_tree_nodes() -> None:
     # But instance nodes should exist and selecting them should return rows
     by_node_id = {node.node_id: node for node in store.tree_nodes}
     local_instance = by_node_id["b524:inst:controller_registers:0x09:0x02:0x00"]
-    remote_instance = by_node_id["b524:inst:device_slots:0x09:0x06:0x00"]
+    remote_instance = by_node_id["b524:inst:device_slots:0x09:0x06:0x01"]
 
     local_rows = store.rows_for_selection(local_instance, tab="state")
     remote_rows = store.rows_for_selection(remote_instance, tab="state")
@@ -750,7 +747,7 @@ def test_browse_store_distinguishes_absent_from_transport_failure() -> None:
         "meta": {"destination_address": "0x15", "scan_timestamp": "2026-02-11T12:00:00Z"},
         "groups": {
             "0x00": {
-                "name": "Regulator Parameters",
+                "name": "System",
                 "instances": {
                     "0x00": {
                         "registers": {

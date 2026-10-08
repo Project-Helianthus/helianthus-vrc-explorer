@@ -47,9 +47,8 @@ def test_research_opcode_probe_continues_after_first_sentinel_failures() -> None
     )
 
     expected_selectors = [
-        (opcode, instance, register)
-        for opcode in (0x02, 0x06)
-        for instance, register in ((0, 0), (0, 1), (1, 0), (1, 1))
+        *((0x02, instance, register) for instance, register in ((0, 0), (0, 1), (1, 0), (1, 1))),
+        *((0x06, instance, register) for instance in range(1, 9) for register in (0, 1)),
     ]
     assert transport.calls == expected_selectors
     assert opcodes == (0x02,)
@@ -95,7 +94,7 @@ def test_legacy_opcode_probe_default_keeps_one_sentinel_per_family() -> None:
     transport = _LegacyBus()
     opcodes, summary = _probe_unknown_group_opcodes(transport, dst=0x15, group=0x69, observer=None)
 
-    assert transport.calls == [(0x02, 0, 0), (0x06, 0, 0)]
+    assert transport.calls == [(0x02, 0, 0), (0x06, 1, 0)]
     assert opcodes == (0x02,)
     assert summary["kind"] == "opcode_responsiveness"
 

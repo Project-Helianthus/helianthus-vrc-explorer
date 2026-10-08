@@ -29,7 +29,6 @@ from .b524_artifact import _entry_is_opcode_responsive, _entry_is_readable
 from .identity import make_register_identity
 from .observer import ScanObserver
 from .register import (
-    CONNECTED_DEVICE_GROUPS,
     InstanceAvailabilityProbe,
     RegisterEntry,
     probe_instance_availability,
@@ -63,6 +62,24 @@ _UNKNOWN_GROUP_RESEARCH_SELECTORS: tuple[tuple[int, int], ...] = (
 _QUALIFIED_DESCRIPTION_CODECS = frozenset(
     {"UCH", "BOOL", "I8", "UIN", "I16", "U32", "I32", "EXP", "HDA:3", "HTI"}
 )
+
+
+def _unknown_instance_candidates(*, opcode: RegisterOpcode, expanded: bool) -> tuple[int, ...]:
+    """Return bounded unknown-group selectors for one read namespace."""
+
+    if opcode == 0x06:
+        return tuple(range(0x01, 0x09)) if expanded else (0x01, 0x02)
+    return _UNKNOWN_GROUP_EXPANDED_INSTANCES if expanded else _UNKNOWN_GROUP_INITIAL_INSTANCES
+
+
+def _unknown_opcode_research_selectors(opcode: RegisterOpcode) -> tuple[tuple[int, int], ...]:
+    if opcode == 0x06:
+        return tuple(
+            (instance, register)
+            for instance in _unknown_instance_candidates(opcode=opcode, expanded=True)
+            for register in (0x0000, 0x0001)
+        )
+    return _UNKNOWN_GROUP_RESEARCH_SELECTORS
 
 
 def _unknown_probe_evidence(
@@ -108,7 +125,7 @@ def _probe_unknown_group_opcodes(
         research_responsive: list[RegisterOpcode] = []
         for opcode in _UNKNOWN_GROUP_OPCODE_CANDIDATES:
             probes: list[dict[str, Any]] = []
-            for instance, register in _UNKNOWN_GROUP_RESEARCH_SELECTORS:
+            for instance, register in _unknown_opcode_research_selectors(opcode):
                 if observer is not None:
                     observer.status(
                         f"Research opcode GG=0x{group:02X} OP={_hex_u8(opcode)} "
@@ -144,13 +161,16 @@ def _probe_unknown_group_opcodes(
         selected = tuple(sorted(set(research_responsive)))
         return cast(tuple[RegisterOpcode, ...], selected), {
             "kind": "bounded_research_opcode_responsiveness",
-            "selectors": [
-                {
-                    "instance": _hex_u8(instance),
-                    "register": _hex_u16(register),
-                }
-                for instance, register in _UNKNOWN_GROUP_RESEARCH_SELECTORS
-            ],
+            "selectors_by_opcode": {
+                _hex_u8(opcode): [
+                    {
+                        "instance": _hex_u8(instance),
+                        "register": _hex_u16(register),
+                    }
+                    for instance, register in _unknown_opcode_research_selectors(opcode)
+                ]
+                for opcode in _UNKNOWN_GROUP_OPCODE_CANDIDATES
+            },
             "candidates": research_evidence,
             "responsive_opcodes": [_hex_u8(opcode) for opcode in selected],
             "negative_result_meaning": "unknown_not_absent",
@@ -160,23 +180,25 @@ def _probe_unknown_group_opcodes(
     responsive: list[RegisterOpcode] = []
 
     for opcode in _UNKNOWN_GROUP_OPCODE_CANDIDATES:
+        instance = 0x01 if opcode == 0x06 else 0x00
         if observer is not None:
             observer.status(
                 f"Probe opcode GG=0x{group:02X} OP={_hex_u8(opcode)} "
-                f"II=0x00 RR={_hex_u16(_UNKNOWN_GROUP_PRESENCE_REGISTER)}"
+                f"II={_hex_u8(instance)} RR={_hex_u16(_UNKNOWN_GROUP_PRESENCE_REGISTER)}"
             )
         entry = read_register(
             transport,
             dst,
             opcode,
             group=group,
-            instance=0x00,
+            instance=instance,
             register=_UNKNOWN_GROUP_PRESENCE_REGISTER,
         )
         is_responsive = _entry_is_opcode_responsive(entry)
         if is_responsive:
             responsive.append(opcode)
         evidence[_hex_u8(opcode)] = {
+            "instance": _hex_u8(instance),
             "responsive": is_responsive,
             "response_state": entry.get("response_state"),
             "error": entry.get("error"),
@@ -188,9 +210,12 @@ def _probe_unknown_group_opcodes(
     selected = tuple(sorted(set(responsive)))
     probe_summary: dict[str, Any] = {
         "kind": "opcode_responsiveness",
-        "selector": {
-            "instance": _hex_u8(0x00),
-            "register": _hex_u16(_UNKNOWN_GROUP_PRESENCE_REGISTER),
+        "selectors_by_opcode": {
+            _hex_u8(opcode): {
+                "instance": evidence[_hex_u8(opcode)]["instance"],
+                "register": _hex_u16(_UNKNOWN_GROUP_PRESENCE_REGISTER),
+            }
+            for opcode in _UNKNOWN_GROUP_OPCODE_CANDIDATES
         },
         "candidates": evidence,
         "responsive_opcodes": [_hex_u8(opcode) for opcode in selected],
@@ -210,7 +235,7 @@ def _probe_unknown_present_instances(
 ) -> tuple[int, ...]:
     if research:
         research_present_instances: list[int] = []
-        for ii in _UNKNOWN_GROUP_EXPANDED_INSTANCES:
+        for ii in _unknown_instance_candidates(opcode=opcode, expanded=True):
             readable = False
             for register in (0x0000, 0x0001):
                 if observer is not None:
@@ -246,7 +271,7 @@ def _probe_unknown_present_instances(
     probed: set[int] = set()
     should_expand = False
 
-    for ii in _UNKNOWN_GROUP_INITIAL_INSTANCES:
+    for ii in _unknown_instance_candidates(opcode=opcode, expanded=False):
         if observer is not None:
             observer.status(f"Probe presence GG=0x{group:02X} OP={_hex_u8(opcode)} II=0x{ii:02X}")
         entry = read_register(
@@ -267,7 +292,7 @@ def _probe_unknown_present_instances(
     if not should_expand or not expand_fallback:
         return tuple(present_instances)
 
-    for ii in _UNKNOWN_GROUP_EXPANDED_INSTANCES:
+    for ii in _unknown_instance_candidates(opcode=opcode, expanded=True):
         if ii in probed:
             continue
         if observer is not None:
@@ -303,7 +328,7 @@ def _probe_present_instances(
 ) -> dict[int, InstanceAvailabilityProbe]:
     probes: dict[int, InstanceAvailabilityProbe] = {}
     present_count = 0
-    first_ii = 1 if opcode == 6 and group in CONNECTED_DEVICE_GROUPS else 0
+    first_ii = 1 if opcode == 6 or (opcode == 2 and group == 2) else 0
     for ii in range(first_ii, ii_max + 1):
         if observer is not None:
             observer.status(f"Probe presence GG=0x{group:02X} OP={_hex_u8(opcode)} II=0x{ii:02X}")
@@ -321,11 +346,34 @@ def _probe_present_instances(
             if observer is not None:
                 observer.phase_advance("instance_discovery", advance=1)
             break
-        present_count += int(probe.present and not (opcode == 2 and group == 2 and ii == 0x0A))
+        present_count += int(probe.present and not (opcode == 2 and group == 2 and ii == 0x09))
         if expected_count is not None and expected_count > 0 and present_count >= expected_count:
             if observer is not None:
                 observer.phase_advance("instance_discovery", advance=1)
             break
+        if observer is not None:
+            observer.phase_advance("instance_discovery", advance=1)
+
+    # The OP=02/GG=02 virtual water circuit is outside the count-guided
+    # heating-circuit quota. Its actual availability still needs a probe: the
+    # resulting evidence can be positive, false, or unknown and is never
+    # manufactured from the mandatory scan-plan selector.
+    virtual_instance = 0x09 if opcode == 0x02 and group == 0x02 else None
+    if (
+        virtual_instance is not None
+        and virtual_instance <= ii_max
+        and virtual_instance not in probes
+    ):
+        probe = probe_instance_availability_fn(
+            transport,
+            dst=dst,
+            group=group,
+            instance=virtual_instance,
+            opcode=opcode,
+        )
+        probes[virtual_instance] = probe
+        if on_probe is not None:
+            on_probe(virtual_instance, probe)
         if observer is not None:
             observer.phase_advance("instance_discovery", advance=1)
     return probes

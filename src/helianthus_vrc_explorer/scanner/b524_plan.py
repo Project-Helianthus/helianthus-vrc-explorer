@@ -180,6 +180,8 @@ def _rr_max_for_opcode(*, group: int, default_rr_max: int, opcode: int) -> int:
 
 
 def _ii_max_for_opcode(*, group: int, default_ii_max: int | None, opcode: int) -> int | None:
+    if opcode == 0x06:
+        return 0x08
     config = GROUP_CONFIG.get(group)
     if config is None:
         return default_ii_max

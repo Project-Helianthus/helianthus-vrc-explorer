@@ -572,5 +572,5 @@ def test_render_summary_does_not_collapse_conflicting_observed_namespaces_with_d
     # v2.3: after migration, flat groups with mixed opcodes go under a single
     # operation (determined by first entry read_opcode). The group appears in
     # the section for that operation.
-    assert "Hot Water Circuit" in text
+    assert "Native Domestic Hot Water" in text
     assert "Local Devices (0x02)" in text

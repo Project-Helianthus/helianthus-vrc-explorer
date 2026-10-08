@@ -37,7 +37,7 @@ def test_prompt_scan_plan_disables_unknown_groups_by_default(monkeypatch) -> Non
             ii_max=0x0A,
             rr_max=0x21,
             rr_max_full=0x21,
-            present_instances=(0x00,),
+            present_instances=(0x01,),
         ),
         PlannerGroup(
             group=0x69,
@@ -71,13 +71,13 @@ def test_prompt_scan_plan_preserves_exact_default_registers_without_changes(monk
         ii_max=0x0A,
         rr_max=0x0100,
         rr_max_full=0x0100,
-        present_instances=(0x00, 0x03),
+        present_instances=(0x01, 0x03),
     )
     default = GroupScanPlan(
         group=0x02,
         opcode=0x02,
         rr_max=0x0100,
-        instances=(0x00, 0x03),
+        instances=(0x01, 0x03),
         registers=(0x0002, 0x0010, 0x0100),
     )
 
@@ -137,7 +137,7 @@ def test_build_plan_from_preset_recommended_skips_unknown_groups() -> None:
             ii_max=0x0A,
             rr_max=0x21,
             rr_max_full=0x21,
-            present_instances=(0x00, 0x01),
+            present_instances=(0x01, 0x02),
         ),
         PlannerGroup(
             group=0x69,
@@ -156,10 +156,10 @@ def test_build_plan_from_preset_recommended_skips_unknown_groups() -> None:
     plan = build_plan_from_preset(groups, preset="recommended")
     key = make_plan_key(0x02, 0x02)
     assert sorted(plan.keys()) == [key]
-    assert plan[key].instances == (0x00, 0x01, 0x0A)
+    assert plan[key].instances == (0x01, 0x02, 0x09)
 
 
-def test_build_plan_from_preset_research_keeps_ff_when_present() -> None:
+def test_build_plan_from_preset_research_caps_remote_slots() -> None:
     groups = [
         PlannerGroup(
             group=0x69,
@@ -170,12 +170,12 @@ def test_build_plan_from_preset_research_keeps_ff_when_present() -> None:
             ii_max=0x0A,
             rr_max=0x30,
             rr_max_full=0x30,
-            present_instances=(0x00, 0xFF),
+            present_instances=(0x01, 0xFF),
         )
     ]
 
     plan = build_plan_from_preset(groups, preset="research")
-    assert plan[make_plan_key(0x69, 0x06)].instances == tuple(range(0x0A + 1)) + (0xFF,)
+    assert plan[make_plan_key(0x69, 0x06)].instances == tuple(range(1, 9))
 
 
 def test_print_plan_breakdown_does_not_infer_singleton_from_selected_instance() -> None:
@@ -187,11 +187,11 @@ def test_print_plan_breakdown_does_not_infer_singleton_from_selected_instance() 
                 group=0x09,
                 opcode=0x06,
                 rr_max=0x0035,
-                instances=(0x00,),
+                instances=(0x01,),
             )
         },
     )
 
     text = console.export_text()
-    assert "instances=0" in text
+    assert "instances=1" in text
     assert "instances=singleton" not in text

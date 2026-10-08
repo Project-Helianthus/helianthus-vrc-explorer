@@ -19,7 +19,9 @@ from .planner import (
     PlannerPreset,
     _format_seconds,
     build_plan_from_preset,
+    planner_instance_range,
     planner_namespace_title,
+    planner_present_instances,
     split_planner_groups_by_namespace,
 )
 from .system_information import format_system_information_text
@@ -80,12 +82,12 @@ def _format_instances(group: PlannerGroup, instances: tuple[int, ...], *, enable
     if group.ii_max is None:
         return "singleton"
 
-    total = group.ii_max + 1
+    full = planner_instance_range(group)
+    total = len(full)
     selected = len(instances)
-    full = tuple(range(0x00, total))
     if instances == full:
         label = f"all {selected}/{total}"
-    elif instances == group.present_instances:
+    elif instances == planner_present_instances(group):
         label = f"present {selected}/{total}"
     elif not instances:
         label = f"none 0/{total}"
@@ -101,12 +103,15 @@ def _parse_instances_spec(spec: str, *, group: PlannerGroup) -> tuple[int, ...]:
         return (0x00,)
     raw = spec.strip().lower()
     if raw in {"all", "*"}:
-        return tuple(range(0x00, group.ii_max + 1))
+        return planner_instance_range(group)
     if raw in {"present", "p"}:
-        return group.present_instances
+        return planner_present_instances(group)
     if raw in {"none", "no"}:
         return ()
-    parsed = parse_int_set(spec, min_value=0x00, max_value=group.ii_max)
+    allowed = planner_instance_range(group)
+    parsed = parse_int_set(spec, min_value=min(allowed), max_value=max(allowed))
+    if any(ii not in allowed for ii in parsed):
+        raise ValueError("instance is outside the operation profile range")
     return tuple(parsed)
 
 
@@ -287,7 +292,9 @@ def run_textual_scan_plan(
             for group in self._groups:
                 group_plan = initial_plan.get(group.key)
                 if group_plan is None:
-                    instances = (0x00,) if group.ii_max is None else group.present_instances
+                    instances = (
+                        (0x00,) if group.ii_max is None else planner_present_instances(group)
+                    )
                     self._states[group.key] = _EditableGroup(
                         group=group,
                         enabled=False,
@@ -553,11 +560,12 @@ def run_textual_scan_plan(
             self._editing_group = key
             current = self._states[key].instances
             default_value = format_int_set(list(current)) if current else "none"
+            allowed_text = format_int_set(list(planner_instance_range(group)))
             self.push_screen(
                 _InputDialog(
                     title=f"Instances for {group.prompt_label}",
                     value=default_value,
-                    hint="Use present|all|none|0-10",
+                    hint=f"Use present|all|none|{allowed_text}",
                 ),
                 self._edit_instances,
             )

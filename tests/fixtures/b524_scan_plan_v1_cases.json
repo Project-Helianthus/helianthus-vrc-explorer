@@ -11,7 +11,7 @@
             "group": "0x02",
             "instances": [
               3,
-              0,
+              1,
               3
             ],
             "registers": [
@@ -26,9 +26,9 @@
         "opcode": 2,
         "group": 2,
         "instances": [
-          0,
+          1,
           3,
-          10
+          9
         ],
         "registers": [
           2,
@@ -46,7 +46,7 @@
             "opcode": 2,
             "group": 2,
             "instances": [
-              0,
+              1,
               3
             ],
             "registers": [
@@ -60,7 +60,7 @@
             "group": "02",
             "instances": [
               "3",
-              0
+              1
             ],
             "registers": [
               "0x0004-0x0002",
@@ -74,9 +74,9 @@
         "opcode": 2,
         "group": 2,
         "instances": [
-          0,
+          1,
           3,
-          10
+          9
         ],
         "registers": [
           2,

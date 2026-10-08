@@ -101,6 +101,9 @@ def parse_scan_plan(data: object) -> dict[PlanKey, GroupScanPlan]:
         instances = _parse_selector_list(
             row["instances"], name=f"{context}.instances", max_value=0xFF
         )
+        _validate_profile_instances(
+            opcode=opcode, group=group, instances=instances, context=context
+        )
         registers = _parse_selector_list(
             row["registers"], name=f"{context}.registers", max_value=0xFFFF
         )
@@ -133,6 +136,19 @@ def validate_scalar_request_limit(plan: Mapping[PlanKey, GroupScanPlan]) -> None
 def _require_request_limit(requests: int) -> None:
     if requests > MAX_EXPLICIT_SCALAR_REQUESTS:
         raise ValueError("scan plan exceeds the 100000 scalar request safety limit")
+
+
+def _validate_profile_instances(
+    *, opcode: int, group: int, instances: tuple[int, ...], context: str
+) -> None:
+    if opcode == 0x06 and any(not 0x01 <= instance <= 0x08 for instance in instances):
+        raise ValueError(f"{context}.instances for OP=0x06 must be within 0x01..0x08")
+    if (
+        opcode == 0x02
+        and group == 0x02
+        and any(not 0x01 <= instance <= 0x09 for instance in instances)
+    ):
+        raise ValueError(f"{context}.instances for OP=0x02/GG=0x02 must be within 0x01..0x09")
 
 
 def _reject_unknown_fields(

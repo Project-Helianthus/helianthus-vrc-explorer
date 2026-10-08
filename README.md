@@ -74,6 +74,7 @@ Transport note:
 - An unexpected command ACK that persists after bounded retries and successful session reconnection is a per-read protocol failure. Discovery continues to later selectors and the planner. JSON retains the unexpected byte and attempt counts; failed availability probes have `present=null` and `availability_qualification="unknown"`. Unknown instances are excluded from the scan plan, and coverage reports incomplete instance qualification. This failure does not establish that an instance is absent or unsupported.
 - Legacy group-directory artifacts and old TT constraint interpretations remain viewable but are explicitly unqualified. They do not define group semantics, value codecs, or a complete parameter-description contract.
 - Discovery probes and coverage rows are ordered by operation, then ascending GG: OP02 first, OP06 second. Each row reports its own operation-specific RR limit. OP02/GG00 has RR_max=0x00FF in built-in presets; OP02/GG08 is labelled DeltaT.
+- The Browser tree shows confirmed-present instances only; absent/unknown probes remain in the artifact. OP06 device selectors use II01..08. OP02 circuits use II01..09, with virtual native hot water at II09 after the eight heating circuits.
 - Instance availability is namespace-specific. Dual-namespace radio groups (`0x09`, `0x0A`) are discovered independently per opcode namespace instead of sharing remote results across local and remote.
 - Artifacts retain the availability contract plus raw per-slot probe evidence under `availability_contract` and `availability_probes`, including the opcode `0x06` generic header block (`RR=0x0001..0x0004`) used for remote namespace occupancy.
 - Empty ACK / 0-byte B524 register replies are preserved as `response_state="empty_reply"` (rendered as “empty reply / dormant”), not as transport errors.
@@ -104,7 +105,7 @@ Coverage and parameter-description note:
 - Bundled descriptions remain prior observations. Compatible qualified live descriptions are compared by codec, width, min, max and step; missing optional identity data is marked partial rather than mismatched. Missing required remote identity remains unqualified. Known profile contradictions and actual description differences remain distinct from unavailable evidence. Sanitized baseline updates can be merged with `scripts/import_b524_descriptions.py ARTIFACT OUTPUT --merge` without erasing other observations.
 - OP00 API version/revision and other count classes remain profile context. Ventilation hints can annotate known candidates; they do not establish a same-numbered GG route or prove absence.
 
-Exact custom scans use `--preset custom --scan-plan plan.json`. The file is validated before device I/O, permits only OP02/OP06, and preserves explicit selectors regardless of discovery, adding mandatory OP02/GG02/II0A once when local circuits are selected. Plans exceeding 100000 scalar reads are rejected before queuing.
+Exact custom scans use `--preset custom --scan-plan plan.json`. The file is validated before device I/O, permits only OP02/OP06, and preserves explicit RR selectors regardless of discovery, validates OP06 II01..08 and circuit II01..09 before I/O, adding mandatory OP02/GG02/II09 once when local circuits are selected. Plans exceeding 100000 scalar reads are rejected before queuing.
 
 With planning or budget options, `--dry-run` executes the selected policy against the bundled fixture through DummyTransport. The default `--dry-run` invocation displays that fixture directly. The artifact records `dry_run_mode` as `deterministic_scan` or `fixture_view`.
 
@@ -265,7 +266,7 @@ GPL-3.0-or-later. See `LICENSE`.
 
 - Characterized OP06 device headers use numeric-byte firmware triplets (`FWU`): raw `02 11 00` displays `02.17.00`; `FF FF FF` remains unavailable. Raw components qualify the firmware profile and do not establish SemVer. Generic legacy `FW` decoding remains available for older/unrelated artifacts.
 
-- Local circuit scans always include `GG02/II0A` (`virtual_dhw` designation), independently of `circuit_count`. Acquisition does not confirm an active physical circuit; protocol role remains unknown.
+- Local circuit scans always include `GG02/II09` (`virtual_dhw` designation), independently of `circuit_count`. Acquisition does not confirm an active physical circuit; protocol role remains unknown.
 - OP06 connected-device discovery begins at II01 in the characterized profile and is independent of OP00. Recommended stops at the first qualified not-connected Boolean; full/research audit the configured bound. Transport/decode unknowns and retained inventory remain separate.
 - Bundled parameter descriptions are displayed offline in HTML and browse, with exact model/firmware, namespace and instance qualification. Rechecks report `matches`, `differs`, `unavailable`, or `profile_mismatch`. Bundled metadata never substitutes for current-target validation.
 - Numeric descriptions retain decoded min/max/step. Date/time limits can be interpreted while STEP remains unknown; edits outside known ranges are rejected, and unknown stepping leaves edits incompletely validated. Unsupported formats retain raw description evidence.

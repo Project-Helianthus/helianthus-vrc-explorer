@@ -70,6 +70,7 @@ from .b524_probe import (
     _probe_present_instances,
     _probe_unknown_group_opcodes,
     _probe_unknown_present_instances,
+    _unknown_instance_candidates,
 )
 from .description_acquisition import acquire_descriptions, finish_description_coverage
 from .description_scheduler import DescriptionCandidate
@@ -84,13 +85,33 @@ from .register import (
 from .scan import (
     _UNKNOWN_GROUP_DEFAULT_II_MAX,
     _UNKNOWN_GROUP_DEFAULT_RR_MAX,
-    _UNKNOWN_GROUP_EXPANDED_INSTANCES,
-    _UNKNOWN_GROUP_INITIAL_INSTANCES,
     ScanObserver,
     _apply_contextual_enum_annotations,
     _resolve_planner_mode,
 )
 from .scan_policy import profile_opcodes
+
+
+def _normalize_profile_plan_instances(
+    plan: dict[PlanKey, GroupScanPlan],
+) -> dict[PlanKey, GroupScanPlan]:
+    """Apply default-profile instance domains without changing custom plans."""
+
+    normalized: dict[PlanKey, GroupScanPlan] = {}
+    for key, group_plan in plan.items():
+        instances = group_plan.instances
+        if group_plan.opcode == 0x06:
+            instances = tuple(ii for ii in instances if 0x01 <= ii <= 0x08)
+        elif group_plan.opcode == 0x02 and group_plan.group == 0x02:
+            instances = tuple(ii for ii in instances if 0x01 <= ii <= 0x09)
+        normalized[key] = GroupScanPlan(
+            group=group_plan.group,
+            opcode=group_plan.opcode,
+            rr_max=group_plan.rr_max,
+            instances=instances,
+            registers=group_plan.registers,
+        )
+    return normalized
 
 
 def _system_information_records(
@@ -503,10 +524,9 @@ def run_b524_scan(
         instance_total = 0
         for group, meta, opcode in instance_targets:
             if GROUP_CONFIG.get(group.group) is None:
-                candidate_instances = (
-                    _UNKNOWN_GROUP_EXPANDED_INSTANCES
-                    if research_mode
-                    else _UNKNOWN_GROUP_INITIAL_INSTANCES
+                candidate_instances = _unknown_instance_candidates(
+                    opcode=opcode,
+                    expanded=research_mode,
                 )
                 instance_total += len(candidate_instances)
                 continue
@@ -517,7 +537,11 @@ def run_b524_scan(
             )
             if _is_instanced_group(namespace_ii_max):
                 assert namespace_ii_max is not None
-                instance_total += namespace_ii_max + 1
+                instance_total += (
+                    namespace_ii_max
+                    if opcode == 0x06 or group.group == 0x02
+                    else namespace_ii_max + 1
+                )
         if observer is not None:
             observer.phase_start("instance_discovery", total=instance_total or 1)
 
@@ -530,7 +554,7 @@ def run_b524_scan(
             config = GROUP_CONFIG.get(group.group)
 
             if config is None:
-                total_slots = len(_UNKNOWN_GROUP_EXPANDED_INSTANCES)
+                total_slots = len(_unknown_instance_candidates(opcode=opcode, expanded=True))
                 namespace_ii_max = _ii_max_for_opcode(
                     group=group.group,
                     default_ii_max=meta.ii_max,
@@ -624,7 +648,11 @@ def run_b524_scan(
                         information_values.get(
                             COUNT_GROUP_IDS.get((int(opcode), group.group), -1), float("nan")
                         ),
-                        capacity=namespace_ii_max + 1,
+                        capacity=(
+                            namespace_ii_max - 1
+                            if opcode == 2 and group.group == 2
+                            else namespace_ii_max
+                        ),
                     )
                     if planner_preset == "recommended"
                     else None
@@ -684,7 +712,12 @@ def run_b524_scan(
             count_id = COUNT_GROUP_IDS.get((int(opcode), group.group))
             if count_id is not None:
                 expected = expected_instance_count(
-                    information_values.get(count_id, float("nan")), capacity=namespace_ii_max + 1
+                    information_values.get(count_id, float("nan")),
+                    capacity=(
+                        namespace_ii_max - 1
+                        if opcode == 2 and group.group == 2
+                        else namespace_ii_max + 1
+                    ),
                 )
                 artifact["meta"].setdefault("instance_counts", {})[
                     f"{_hex_u8(opcode)}:{_hex_u8(group.group)}"
@@ -695,7 +728,7 @@ def run_b524_scan(
                         [
                             ii
                             for ii in present_instances
-                            if not (opcode == 2 and group.group == 2 and ii == 0x0A)
+                            if not (opcode == 2 and group.group == 2 and ii == 0x09)
                         ]
                     ),
                     "mismatch": expected is not None
@@ -704,14 +737,17 @@ def run_b524_scan(
                         [
                             ii
                             for ii in present_instances
-                            if not (opcode == 2 and group.group == 2 and ii == 0x0A)
+                            if not (opcode == 2 and group.group == 2 and ii == 0x09)
                         ]
                     ),
                     "probed_instances": len(probes),
                 }
             _mark_present_instances(instances_obj, instances=present_instances)
+            slot_capacity = (
+                namespace_ii_max if opcode == 0x06 or group.group == 0x02 else namespace_ii_max + 1
+            )
             known_namespace_probe_counts[(int(opcode), group.group)] = (
-                f"{len(present_instances)}/{namespace_ii_max + 1}"
+                f"{len(present_instances)}/{slot_capacity}"
             )
 
         if observer is not None:
@@ -834,7 +870,11 @@ def run_b524_scan(
                                     COUNT_GROUP_IDS.get((int(opcode), group.group), -1),
                                     float("nan"),
                                 ),
-                                capacity=planner_ii_max + 1,
+                                capacity=(
+                                    planner_ii_max - 1
+                                    if opcode == 2 and group.group == 2
+                                    else planner_ii_max
+                                ),
                             )
                             if planner_ii_max is not None
                             else None
@@ -852,6 +892,7 @@ def run_b524_scan(
                 planner_groups,
                 preset=planner_preset,
             )
+            plan = _normalize_profile_plan_instances(plan)
         elif explicit_plan is not None:
             plan = dict(explicit_plan)
 
@@ -903,6 +944,8 @@ def run_b524_scan(
                         default_preset=planner_preset,
                         system_information=artifact["meta"]["system_information"],
                     )
+                if planner_preset != "custom":
+                    plan = _normalize_profile_plan_instances(plan)
 
         artifact["meta"]["scan_plan"] = {
             "groups": _scan_plan_meta_groups(plan),
@@ -982,6 +1025,8 @@ def run_b524_scan(
                                 default_preset=planner_preset,
                                 system_information=artifact["meta"]["system_information"],
                             )
+                        if planner_preset != "custom":
+                            plan = _normalize_profile_plan_instances(plan)
                     artifact["meta"]["scan_plan"]["groups"] = _scan_plan_meta_groups(plan)
                     artifact["meta"]["scan_plan"]["estimated_register_requests"] = (
                         estimate_register_requests(plan)
@@ -1193,9 +1238,9 @@ def run_b524_scan(
                 instance_key = _hex_u8(task.instance)
                 instance_obj = instances_obj.setdefault(instance_key, {"present": False})
                 if isinstance(instance_obj, dict):
-                    if task.opcode == 2 and task.group == 2 and task.instance == 0x0A:
+                    if task.opcode == 2 and task.group == 2 and task.instance == 0x09:
                         instance_obj.update(
-                            designation="virtual_dhw",
+                            designation="virtual_water_circuit",
                             protocol_role="unknown",
                             role_qualification="unqualified",
                         )

@@ -189,16 +189,28 @@ def _build_default_plan(
     )
 
 
-def _instances_for_preset(group: PlannerGroup, preset: PlannerPreset) -> tuple[int, ...]:
+def planner_instance_range(group: PlannerGroup) -> tuple[int, ...]:
+    if group.opcode == 6:
+        return tuple(range(1, min(group.ii_max or 8, 8) + 1))
+    if group.opcode == 2 and group.group == 2:
+        return tuple(range(1, min(group.ii_max or 9, 9) + 1))
     if group.ii_max is None:
+        return (0,)
+    result = tuple(range(group.ii_max + 1))
+    return result + ((0xFF,) if 0xFF in group.present_instances else ())
+
+
+def planner_present_instances(group: PlannerGroup) -> tuple[int, ...]:
+    allowed = set(planner_instance_range(group))
+    return tuple(ii for ii in group.present_instances if ii in allowed)
+
+
+def _instances_for_preset(group: PlannerGroup, preset: PlannerPreset) -> tuple[int, ...]:
+    if group.ii_max is None and group.opcode != 6 and not (group.opcode == 2 and group.group == 2):
         return (0x00,)
     if preset == "recommended":
-        return group.present_instances
-    # full and research: scan all instance slots
-    full_range = tuple(range(0x00, group.ii_max + 1))
-    if 0xFF in group.present_instances:
-        return full_range + (0xFF,)
-    return full_range
+        return planner_present_instances(group)
+    return planner_instance_range(group)
 
 
 def build_plan_from_preset(
@@ -246,9 +258,9 @@ def _render_table(title: str, rows: list[PlannerGroup], *, unknown: bool, consol
             if g.ii_max is None:
                 instances = "singleton"
             elif unknown:
-                instances = f"0/{g.ii_max + 1} (est.)"
+                instances = f"0/{len(planner_instance_range(g))} (est.)"
             else:
-                instances = f"{len(g.present_instances)}/{g.ii_max + 1}"
+                instances = f"{len(planner_present_instances(g))}/{len(planner_instance_range(g))}"
             name = g.display_name if not unknown else f"{g.display_name} (experimental)"
             rr_max = _hex_u16(g.rr_max_full)
             if g.rr_max_full != g.rr_max:
@@ -378,11 +390,9 @@ def _ask_instances(
     current_instances: tuple[int, ...],
 ) -> tuple[int, ...]:
     assert group.ii_max is not None
-    full_range = tuple(range(0x00, group.ii_max + 1)) + (
-        (0xFF,) if 0xFF in group.present_instances else ()
-    )
+    full_range = planner_instance_range(group)
     allowed_instances = set(full_range)
-    if current_instances == group.present_instances:
+    if current_instances == planner_present_instances(group):
         default_mode = "present"
     elif current_instances == full_range:
         default_mode = "all"
@@ -393,14 +403,14 @@ def _ask_instances(
 
     while True:
         raw_instances = Prompt.ask(
-            f"{group.prompt_label} instances ('present', 'all', 'none', or '0-10')",
+            f"{group.prompt_label} instances ('present', 'all', 'none', or a selector range)",
             default=default_mode,
             show_default=True,
             console=console,
         ).strip()
         lowered = raw_instances.lower()
         if lowered in {"present", "p"}:
-            return group.present_instances
+            return planner_present_instances(group)
         if lowered in {"all", "*"}:
             return full_range
         if lowered in {"none", "no"}:
@@ -421,7 +431,7 @@ def _ask_instances(
             invalid_text = ", ".join(_hex_u8(instance) for instance in invalid_instances)
             console.print(
                 "[red]Invalid instance selection:[/red] "
-                f"allowed values are 0x00..{_hex_u8(group.ii_max)}"
+                f"allowed values are {_hex_u8(full_range[0])}..{_hex_u8(full_range[-1])}"
                 + (" plus 0xFF" if 0xFF in allowed_instances else "")
                 + f"; got {invalid_text}"
             )
@@ -519,7 +529,9 @@ def prompt_scan_plan(
                     opcode=planner_group.opcode,
                     rr_max=planner_group.rr_max,
                     instances=(
-                        (0x00,) if planner_group.ii_max is None else planner_group.present_instances
+                        (0x00,)
+                        if planner_group.ii_max is None
+                        else planner_present_instances(planner_group)
                     ),
                 ),
             )

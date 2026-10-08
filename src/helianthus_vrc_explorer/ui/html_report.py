@@ -1729,6 +1729,7 @@ __ARTIFACT_JSON__
         function instanceIsConnected(instancesObj, iiKey, namespaceKey) {
           const inst = instancesObj[iiKey];
           if (!inst || typeof inst !== "object") return false;
+          if (Object.prototype.hasOwnProperty.call(inst, "present")) return inst.present === true;
           const regs = inst.registers;
           if (!regs || typeof regs !== "object") return false;
           if (namespaceKey === "0x06" || opKey === "0x06") {
@@ -1764,7 +1765,12 @@ __ARTIFACT_JSON__
         }
 
         function buildGroupTable(instancesObj, namespaceKey = null) {
-          let instanceKeys = sortedHexKeys(Object.keys(instancesObj || {}));
+          let instanceKeys = sortedHexKeys(Object.keys(instancesObj || {})).filter((iiKey) => {
+            const ii = parseInt(iiKey, 16);
+            if (namespaceKey === "0x06" || opKey === "0x06") return ii >= 1 && ii <= 8;
+            if (groupKey === "0x02") return ii >= 1 && ii <= 9;
+            return true;
+          });
           if (state.b524Filters.hideMissingInstances) {
             instanceKeys = instanceKeys.filter((iiKey) => instanceIsConnected(instancesObj, iiKey, namespaceKey));
           }
@@ -1944,7 +1950,7 @@ __ARTIFACT_JSON__
 
               const description = entry.parameter_description;
               const bundled = entry.bundled_parameter_description;
-              if (bundled && typeof bundled === "object") {
+              if (bundled && typeof bundled === "object" && bundled.verification !== "matches") {
                 const bundledEl = document.createElement("div");
                 bundledEl.className = "cell-raw";
                 const verification = typeof bundled.verification === "string"
@@ -1953,10 +1959,8 @@ __ARTIFACT_JSON__
                 const isMismatch = verification === "differs" || verification === "profile_mismatch";
                 const comparison = isMismatch
                   ? "Description mismatch"
-                  : verification === "matches"
-                    ? "Description matches cached baseline"
-                    : `Cached description ${verification}`;
-                bundledEl.textContent = `${comparison}: ${bundled.type || "unknown"} · min=${formatValue(bundled.min)} · max=${formatValue(bundled.max)} · step=${formatValue(bundled.step)}. Current-target verification is separate.`;
+                  : `Cached description ${verification}`;
+                bundledEl.textContent = `${comparison}: ${bundled.type || "unknown"} · min=${formatValue(bundled.min)} · max=${formatValue(bundled.max)} · step=${formatValue(bundled.step)}.`;
                 td.appendChild(bundledEl);
               }
               if (description && typeof description === "object") {
@@ -2232,8 +2236,6 @@ def render_html_report(artifact: dict[str, Any], *, title: str | None = None) ->
                 # Presentation-only correction: scanner policy keeps its own
                 # declared profile bounds and is intentionally not changed here.
                 local_presentation["rr_max"] = "0x00FF"
-            if group == 0x01:
-                local_presentation["name"] = "Native Drinkable Hot Water"
             group_name_map[group_key] = {
                 "0x02": local_presentation,
                 "0x06": {"name": group_name_for_opcode(group, 0x06)},

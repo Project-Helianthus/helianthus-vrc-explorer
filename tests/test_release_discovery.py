@@ -69,9 +69,9 @@ def test_full_device_audit_preserves_all_slots_after_first_not_connected() -> No
     assert probes[3].present
 
 
-def test_local_circuit_plan_always_includes_virtual_dhw_slot_once() -> None:
-    plan = GroupScanPlan(group=2, opcode=2, instances=(0, 1, 2), rr_max=20)
-    assert plan.instances == (0, 1, 2, 10)
+def test_local_circuit_plan_always_includes_virtual_water_slot_once() -> None:
+    plan = GroupScanPlan(group=2, opcode=2, instances=(1, 2), rr_max=20)
+    assert plan.instances == (1, 2, 9)
     assert GroupScanPlan(group=2, opcode=2, instances=plan.instances, rr_max=20) == plan
     assert GroupScanPlan(group=2, opcode=6, instances=(1,), rr_max=20).instances == (1,)
 
@@ -84,14 +84,14 @@ def test_custom_circuit_plan_expands_mandatory_slot_and_estimate() -> None:
                 {
                     "opcode": "0x02",
                     "group": "0x02",
-                    "instances": [0, 1, 2],
+                    "instances": [1, 2],
                     "registers": [9, 19],
                 }
             ],
         }
     )
-    assert plan[(2, 2)].instances == (0, 1, 2, 10)
-    assert estimate_register_requests(plan) == 8
+    assert plan[(2, 2)].instances == (1, 2, 9)
+    assert estimate_register_requests(plan) == 6
 
 
 def test_recommended_count_three_retains_independent_virtual_slot() -> None:
@@ -101,14 +101,14 @@ def test_recommended_count_three_retains_independent_virtual_slot() -> None:
         name="Circuits",
         descriptor=1,
         known=True,
-        ii_max=10,
+        ii_max=9,
         rr_max=20,
         rr_max_full=255,
-        present_instances=(0, 1, 2),
+        present_instances=(1, 2),
         recommended=True,
     )
     plan = build_plan_from_preset([group], preset="recommended")
-    assert plan[(2, 2)].instances == (0, 1, 2, 10)
+    assert plan[(2, 2)].instances == (1, 2, 9)
 
 
 @pytest.mark.parametrize(
