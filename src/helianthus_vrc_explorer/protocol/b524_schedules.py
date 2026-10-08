@@ -304,13 +304,13 @@ def parse_timer_response(payload: bytes) -> B524TimerResponse:
                 )
             )
             continue
-        _validate_timer_pair(start, stop, label=f"slot {(offset + 1) // 2}")
+        qualified = 0 <= start < stop <= 0x90
         slots.append(
             B524TimerSlot(
                 start_raw=start,
                 stop_raw=stop,
-                start_minutes=start * 10,
-                stop_minutes=stop * 10,
+                start_minutes=start * 10 if qualified else None,
+                stop_minutes=stop * 10 if qualified else None,
                 unused=False,
             )
         )

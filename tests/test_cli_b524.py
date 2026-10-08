@@ -117,6 +117,17 @@ def test_timer_read_returns_raw_and_decoded_schedule(monkeypatch) -> None:
     assert output["reply"]["decoded"]["slots"][0]["stop_minutes"] == 360
 
 
+def test_timer_read_returns_unknown_codes_without_losing_wire_evidence(monkeypatch) -> None:
+    transport = _FakeTransport(device_id="70000", reply=bytes.fromhex("00919090909090"))
+    _install_transport(monkeypatch, transport)
+    result = CliRunner().invoke(app, ["b524", "read-timer", "--channel", "dhw"])
+    assert result.exit_code == 0, result.output
+    output = json.loads(result.stdout)
+    assert output["reply"]["raw_hex"] == "00919090909090"
+    assert output["reply"]["decoded"]["slots"][0]["start_raw"] == 0x91
+    assert output["reply"]["decoded"]["slots"][0]["start_minutes"] is None
+
+
 def test_event_setpoint_read_uses_profile_specific_decode(monkeypatch) -> None:
     transport = _FakeTransport(device_id="BASV2", reply=bytes.fromhex("00fdfeff00010203"))
     _install_transport(monkeypatch, transport)

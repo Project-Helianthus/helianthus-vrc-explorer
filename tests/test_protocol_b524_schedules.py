@@ -52,8 +52,21 @@ def test_timer_parser_accepts_end_of_day_only_as_stop() -> None:
     assert parsed.slots[0].start_minutes == 60
     assert parsed.slots[0].stop_minutes == 1440
 
-    with pytest.raises(ValueError, match="start code"):
-        parse_timer_response(bytes.fromhex("00900690909090"))
+    unknown = parse_timer_response(bytes.fromhex("00900690909090"))
+    assert unknown.slots[0].start_raw == 0x90
+    assert unknown.slots[0].start_minutes is None
+    assert unknown.slots[0].stop_minutes is None
+
+
+@pytest.mark.parametrize("pair", [(0x91, 0x90), (0x24, 0x10), (0xFF, 0xFF)])
+def test_timer_parser_retains_unqualified_pairs(pair: tuple[int, int]) -> None:
+    reply = bytes((0, *pair, 0x90, 0x90, 0x90, 0x90))
+    parsed = parse_timer_response(reply)
+    assert parsed.raw_hex == reply.hex()
+    assert (parsed.slots[0].start_raw, parsed.slots[0].stop_raw) == pair
+    assert parsed.slots[0].start_minutes is None
+    assert parsed.slots[0].stop_minutes is None
+    assert parsed.slots[0].unused is False
 
 
 def test_event_builders_enforce_profile_address_allowlists() -> None:

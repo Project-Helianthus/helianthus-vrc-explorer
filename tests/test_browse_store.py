@@ -17,6 +17,7 @@ def test_selected_empty_route_without_operation_observations_does_not_crash() ->
     store = BrowseStore.from_artifact(artifact)
     assert store.rows == []
     assert any(node.group_key == "0x09" and node.level == "group" for node in store.tree_nodes)
+    assert not any(node.level == "instance" for node in store.tree_nodes)
 
 
 def _sample_artifact() -> dict[str, object]:

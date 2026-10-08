@@ -1039,6 +1039,12 @@ class _HydratedBrowseStore:
             for row in rows
             if row.protocol == "b524" and isinstance(row.section_key, str)
         }
+        if final_plan_routes is not None:
+            b524_sections_present.update(
+                _b524_section_key_for_opcode(opcode)
+                for _group, opcode in final_plan_routes
+                if opcode in {"0x02", "0x06"}
+            )
         b524_sections_present.update(
             node.section_key
             for node in tree_nodes
