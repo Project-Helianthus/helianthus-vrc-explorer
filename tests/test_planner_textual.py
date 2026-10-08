@@ -164,7 +164,7 @@ def test_table_row_values_show_qualified_op00_count_without_changing_instances()
         " ",
         "0x02",
         "Circuits",
-        "3",
+        "capacity=3",
         "0x01..0x09",
         "present 1/9 (off)",
         "0x00FF",
