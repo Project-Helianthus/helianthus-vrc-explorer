@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
-from ..scanner.identity import opcode_label
 from ..scanner.plan import (
     GroupScanPlan,
     PlanKey,
@@ -20,12 +19,24 @@ from .planner import (
     _format_seconds,
     build_plan_from_preset,
     format_planner_instance_bounds,
+    format_planner_op00_count,
     planner_instance_range,
     planner_namespace_title,
     planner_present_instances,
+    planner_unmapped_system_information,
     split_planner_groups_by_namespace,
 )
 from .system_information import format_system_information_text
+
+PLANNER_TABLE_COLUMNS = (
+    "On",
+    "GG",
+    "Name",
+    "OP00 count",
+    "II range",
+    "Instances",
+    "RR_max",
+)
 
 
 @dataclass(slots=True)
@@ -37,13 +48,10 @@ class _EditableGroup:
     registers: tuple[int, ...] | None = None
 
 
-def _namespace_text(group: PlannerGroup) -> str:
-    return group.namespace_label or opcode_label(group.opcode)
-
-
 def _table_row_values(
     state: _EditableGroup,
-) -> tuple[str, str, str, str, str, str, str, str]:
+    system_information: Sequence[Mapping[str, object]] | None = None,
+) -> tuple[str, str, str, str, str, str, str]:
     group = state.group
     mark = "✓" if state.enabled else " "
     name = group.name if group.known else f"{group.name} (experimental)"
@@ -51,8 +59,7 @@ def _table_row_values(
         mark,
         f"0x{group.group:02X}",
         name,
-        _namespace_text(group),
-        f"{group.descriptor:.1f}",
+        format_planner_op00_count(group, system_information),
         format_planner_instance_bounds(group),
         _format_instances(group, state.instances, enabled=state.enabled),
         _format_register_scope(state),
@@ -283,6 +290,7 @@ def run_textual_scan_plan(
 
         def __init__(self) -> None:
             super().__init__()
+            self._system_information = system_information
             namespace_sections = split_planner_groups_by_namespace(groups)
             self._groups = [
                 group for (_title, pane_groups) in namespace_sections for group in pane_groups
@@ -317,7 +325,9 @@ def run_textual_scan_plan(
 
         def compose(self) -> ComposeResult:
             yield Header(show_clock=False)
-            system_information_text = format_system_information_text(system_information)
+            system_information_text = format_system_information_text(
+                planner_unmapped_system_information(system_information)
+            )
             if system_information_text:
                 yield Static(
                     f"System Information: {system_information_text}", id="system-information"
@@ -343,9 +353,7 @@ def run_textual_scan_plan(
             for table_id in _PANE_TABLE_IDS.values():
                 table = self.query_one(f"#{table_id}", DataTable)
                 table.cursor_type = "row"
-                table.add_columns(
-                    "On", "GG", "Name", "Namespace", "Type", "II range", "Instances", "RR_max"
-                )
+                table.add_columns(*PLANNER_TABLE_COLUMNS)
             self._refresh_table()
             self._set_help("1/2/3/4 presets | Space toggle | Enter edit RR_max | i edit instances")
             if self._row_groups["local"]:
@@ -392,7 +400,7 @@ def run_textual_scan_plan(
                 if pane_table is None:
                     continue
                 state = self._states[group.key]
-                pane_table.add_row(*_table_row_values(state))
+                pane_table.add_row(*_table_row_values(state, self._system_information))
                 self._row_groups[pane_key].append(group.key)
             for pane_key, table in table_by_pane.items():
                 row_groups = self._row_groups[pane_key]

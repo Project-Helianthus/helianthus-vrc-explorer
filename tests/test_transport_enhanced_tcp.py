@@ -15,6 +15,7 @@ from helianthus_vrc_explorer.scanner.register import read_register
 from helianthus_vrc_explorer.transport.base import (
     TransportError,
     TransportNack,
+    TransportProtocolFailure,
     TransportRecoveryExhausted,
     TransportTimeout,
 )
@@ -1920,6 +1921,135 @@ def test_unexpected_command_ack_reconnects_over_tcp_and_completes_same_read() ->
     assert observed_payloads == [request[1:], request[1:]]
 
 
+def test_syn_before_command_ack_rearbitrates_once_on_same_session() -> None:
+    src = 0xF1
+    dst = 0x15
+    payload = bytes.fromhex("020002000f00")
+    request_without_crc = bytes((src, dst, 0xB5, 0x24, len(payload))) + payload
+    request = request_without_crc + bytes((_crc(request_without_crc),))
+    response = b"\x03"
+    response_segment = bytes((len(response),)) + response
+    response_crc = _crc(response_segment)
+    connection_count = 0
+    request_attempts = 0
+
+    def _handler(conn: socket.socket) -> None:
+        nonlocal connection_count, request_attempts
+        connection_count += 1
+        assert _read_enh_frame(conn) == (_ENH_REQ_INIT, 0x01)
+        _write_enh_frame(conn, _ENH_RES_RESETTED, 0x01)
+
+        for attempt in range(2):
+            assert _read_enh_frame(conn) == (_ENH_REQ_START, src)
+            _write_enh_frame(conn, _ENH_RES_STARTED, src)
+            for expected in request[1:]:
+                assert _read_enh_frame(conn) == (_ENH_REQ_SEND, expected)
+                _write_bus_symbol(conn, expected)
+            request_attempts += 1
+            if attempt == 0:
+                _write_bus_symbol(conn, 0xAA)
+                continue
+
+            _write_bus_symbol(conn, 0x00)
+            for value in response_segment:
+                _write_bus_symbol(conn, value)
+            _write_bus_symbol(conn, response_crc)
+            assert _read_enh_frame(conn) == (_ENH_REQ_SEND, 0x00)
+            _write_bus_symbol(conn, 0x00)
+            assert _read_enh_frame(conn) == (_ENH_REQ_SEND, 0xAA)
+            _write_bus_symbol(conn, 0xAA)
+
+    with _run_ens_test_server(_handler) as (host, port):
+        transport = EnhancedTcpTransport(
+            EnhancedTcpConfig(
+                host=host,
+                port=port,
+                timeout_s=1,
+                src=src,
+                reconnect_max_retries=2,
+                reconnect_delay_s=0,
+            )
+        )
+        result = transport.send(dst, payload)
+
+    assert result == response
+    assert request_attempts == 2
+    assert connection_count == 1
+
+
+def test_syn_before_command_ack_exhaustion_preserves_session_and_diagnostics(
+    tmp_path: Path,
+) -> None:
+    src = 0xF1
+    dst = 0x15
+    payload = bytes.fromhex("020002000f00")
+    request_without_crc = bytes((src, dst, 0xB5, 0x24, len(payload))) + payload
+    request = request_without_crc + bytes((_crc(request_without_crc),))
+    response = b"\x04"
+    response_segment = bytes((len(response),)) + response
+    response_crc = _crc(response_segment)
+    connection_count = 0
+
+    def _read_request(conn: socket.socket) -> None:
+        assert _read_enh_frame(conn) == (_ENH_REQ_START, src)
+        _write_enh_frame(conn, _ENH_RES_STARTED, src)
+        for expected in request[1:]:
+            assert _read_enh_frame(conn) == (_ENH_REQ_SEND, expected)
+            _write_bus_symbol(conn, expected)
+
+    def _handler(conn: socket.socket) -> None:
+        nonlocal connection_count
+        connection_count += 1
+        assert _read_enh_frame(conn) == (_ENH_REQ_INIT, 0x01)
+        _write_enh_frame(conn, _ENH_RES_RESETTED, 0x01)
+
+        for _ in range(2):
+            _read_request(conn)
+            _write_bus_symbol(conn, 0xAA)
+
+        _read_request(conn)
+        _write_bus_symbol(conn, 0x00)
+        for value in response_segment:
+            _write_bus_symbol(conn, value)
+        _write_bus_symbol(conn, response_crc)
+        assert _read_enh_frame(conn) == (_ENH_REQ_SEND, 0x00)
+        _write_bus_symbol(conn, 0x00)
+        assert _read_enh_frame(conn) == (_ENH_REQ_SEND, 0xAA)
+        _write_bus_symbol(conn, 0xAA)
+
+    trace_path = tmp_path / "enhanced.trace"
+    with _run_ens_test_server(_handler) as (host, port):
+        transport = EnhancedTcpTransport(
+            EnhancedTcpConfig(
+                host=host,
+                port=port,
+                timeout_s=1,
+                src=src,
+                trace_path=trace_path,
+                reconnect_max_retries=2,
+                reconnect_delay_s=0,
+            )
+        )
+        with pytest.raises(TransportProtocolFailure) as raised:
+            transport.send(dst, payload)
+
+        failure = raised.value
+        assert failure.cause == "command_not_acknowledged_before_syn"
+        assert failure.phase == "command_ack"
+        assert failure.request_attempts == 2
+        assert failure.retry_count == 1
+        assert failure.reconnect_attempts == 0
+        assert failure.unexpected_symbol == "0xaa"
+
+        assert transport.send(dst, payload) == response
+
+    trace = trace_path.read_text(encoding="utf-8")
+    assert "RETRY type=command_not_acknowledged_before_syn n=1/1" in trace
+    assert "REQUEST_FAILED cause=command_not_acknowledged_before_syn" in trace
+    assert "RECONNECT" not in trace
+    assert connection_count == 1
+
+
 def test_exhausted_read_recovery_raises_terminal_outage_with_sanitized_diagnostics(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2189,11 +2319,11 @@ def test_local_nack_then_protocol_failure_uses_admitted_attempt_count(
     assert entry["availability_qualification"] == "unknown"
 
 
-@pytest.mark.parametrize("unexpected_ack", [0xAA, 0x42])
-def test_persistent_ack_failure_on_responsive_session_allows_next_read(
-    monkeypatch: pytest.MonkeyPatch, unexpected_ack: int
+def test_persistent_malformed_ack_failure_on_responsive_session_allows_next_read(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     inner = EnhancedTcpTransport(EnhancedTcpConfig(reconnect_max_retries=2, reconnect_delay_s=0))
+    unexpected_ack = 0x42
     received = iter((unexpected_ack,) * 3)
     monkeypatch.setattr(inner, "_start_arbitration", lambda _src: None)
     monkeypatch.setattr(inner, "_send_symbol_with_echo", lambda _symbol: None)
@@ -2209,13 +2339,13 @@ def test_persistent_ack_failure_on_responsive_session_allows_next_read(
     assert inner.send(0x15, bytes.fromhex("020008080000")) == b"\x01"
 
 
-def test_ack_failure_followed_by_failed_reconnect_is_still_scan_terminal(
+def test_malformed_ack_followed_by_failed_reconnect_is_still_scan_terminal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     inner = EnhancedTcpTransport(EnhancedTcpConfig(reconnect_max_retries=2, reconnect_delay_s=0))
     monkeypatch.setattr(inner, "_start_arbitration", lambda _src: None)
     monkeypatch.setattr(inner, "_send_symbol_with_echo", lambda _symbol: None)
-    monkeypatch.setattr(inner, "_recv_bus_symbol", lambda **_kwargs: 0xAA)
+    monkeypatch.setattr(inner, "_recv_bus_symbol", lambda **_kwargs: 0x42)
 
     def failed_reconnect(_seq: int, _attempt: int) -> None:
         raise TransportError("synthetic INIT failure")

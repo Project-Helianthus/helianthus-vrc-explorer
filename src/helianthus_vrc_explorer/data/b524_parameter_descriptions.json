@@ -1,11 +1,11 @@
 {
   "coverage": {
     "complete_scan": false,
-    "current_run_exported": 1217,
-    "exported": 1243,
-    "interpreted": 1243,
+    "current_run_exported": 1221,
+    "exported": 1245,
+    "interpreted": 1245,
     "merged_observations": true,
-    "step_decoded": 1121
+    "step_decoded": 1123
   },
   "descriptions": [
     {
@@ -19400,6 +19400,31 @@
         "profile": "controller_b524"
       },
       "read_opcode": "0x02",
+      "register": "0x0025",
+      "source": "read_only_observed_baseline",
+      "step": 1,
+      "step_qualification": "decoded",
+      "type": "UCH",
+      "validation_scope": "format_range_and_step",
+      "width": 1
+    },
+    {
+      "decoder_revision": "b524-description/v2",
+      "description_opcode": "0x01",
+      "group": "0x0a",
+      "instance": "0x02",
+      "max": 90,
+      "min": 10,
+      "profile": {
+        "api_revision": 1.0,
+        "api_version": 1.0,
+        "controller_class_raw": "15",
+        "controller_firmware_raw": "080500",
+        "firmware": "SW 0507 / HW 1704",
+        "model": "Vaillant sensoCOMFORT RF (VRC 720f/2) 0020262148",
+        "profile": "controller_b524"
+      },
+      "read_opcode": "0x02",
       "register": "0x0026",
       "source": "read_only_observed_baseline",
       "step": 1,
@@ -29426,6 +29451,31 @@
       },
       "read_opcode": "0x02",
       "register": "0x0024",
+      "source": "read_only_observed_baseline",
+      "step": 1,
+      "step_qualification": "decoded",
+      "type": "UCH",
+      "validation_scope": "format_range_and_step",
+      "width": 1
+    },
+    {
+      "decoder_revision": "b524-description/v2",
+      "description_opcode": "0x01",
+      "group": "0x0a",
+      "instance": "0x0a",
+      "max": 90,
+      "min": 10,
+      "profile": {
+        "api_revision": 1.0,
+        "api_version": 1.0,
+        "controller_class_raw": "15",
+        "controller_firmware_raw": "080500",
+        "firmware": "SW 0507 / HW 1704",
+        "model": "Vaillant sensoCOMFORT RF (VRC 720f/2) 0020262148",
+        "profile": "controller_b524"
+      },
+      "read_opcode": "0x02",
+      "register": "0x0025",
       "source": "read_only_observed_baseline",
       "step": 1,
       "step_qualification": "decoded",

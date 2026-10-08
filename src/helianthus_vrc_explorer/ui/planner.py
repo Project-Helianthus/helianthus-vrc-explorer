@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal
@@ -70,6 +71,25 @@ PlannerPreset = Literal[
     "research",
     "custom",
 ]
+
+
+# UI-only OP00 associations. These do not participate in planner discovery,
+# instance bounds, or presence qualification.
+OP00_GROUP_COUNT_NAMES: dict[tuple[int, int], str] = {
+    (0x02, 0x02): "circuit_count",
+    (0x02, 0x03): "zone_count",
+    (0x02, 0x04): "solar_circuit_count",
+    (0x02, 0x05): "solar_loaded_tank_count",
+    (0x02, 0x08): "delta_t_count",
+    (0x06, 0x01): "boiler_count",
+    (0x06, 0x02): "heat_pump_count",
+    (0x06, 0x03): "recovair_count",
+    (0x06, 0x06): "vpm_s_count",
+    (0x06, 0x07): "vpm_w_count",
+    (0x06, 0x0B): "vr70_count",
+    (0x06, 0x0C): "vr71_count",
+}
+_LEGACY_EXPECTED_COUNT_KEYS = frozenset({(0x02, 0x02), (0x02, 0x03)})
 
 
 def _hex_u8(value: int) -> str:
@@ -216,6 +236,55 @@ def format_planner_instance_bounds(group: PlannerGroup) -> str:
     return f"0x{ii_min:02X}..0x{ii_max:02X}"
 
 
+def format_planner_op00_count(
+    group: PlannerGroup,
+    system_information: Sequence[Mapping[str, object]] | None = None,
+) -> str:
+    """Return a UI-only qualified OP00 count for one native planner group.
+
+    The snapshot association is intentionally separate from ``expected_count``:
+    it neither guides instance probing nor asserts that an OP00 count proves
+    presence.  ``expected_count`` remains a compatibility fallback only for
+    Circuits and Zones when the snapshot has no corresponding record.
+    """
+
+    key = (int(group.opcode), group.group)
+    count_name = OP00_GROUP_COUNT_NAMES.get(key)
+    if count_name is None:
+        return "—"
+    if system_information is not None:
+        for record in system_information:
+            if record.get("name") != count_name:
+                continue
+            state = record.get("state")
+            value = record.get("value")
+            if (
+                (state is None or state == "available")
+                and not isinstance(value, bool)
+                and isinstance(value, (int, float))
+                and math.isfinite(value)
+                and value >= 0
+                and float(value).is_integer()
+            ):
+                return str(int(value))
+            return "—"
+        return "—"
+    if key in _LEGACY_EXPECTED_COUNT_KEYS and group.expected_count is not None:
+        return str(group.expected_count)
+    return "—"
+
+
+def planner_unmapped_system_information(
+    system_information: Sequence[Mapping[str, object]] | None,
+) -> tuple[Mapping[str, object], ...]:
+    """Keep planner-level OP00 details that have no dedicated group cell."""
+
+    if not system_information:
+        return ()
+    mapped_names = frozenset(OP00_GROUP_COUNT_NAMES.values())
+    return tuple(record for record in system_information if record.get("name") not in mapped_names)
+
+
 def planner_instance_range(group: PlannerGroup) -> tuple[int, ...]:
     ii_min, ii_max = planner_instance_bounds(group)
     result = tuple(range(ii_min, ii_max + 1))
@@ -267,7 +336,14 @@ def build_plan_from_preset(
     return selected
 
 
-def _render_table(title: str, rows: list[PlannerGroup], *, unknown: bool, console: Console) -> None:
+def _render_table(
+    title: str,
+    rows: list[PlannerGroup],
+    *,
+    unknown: bool,
+    console: Console,
+    system_information: Sequence[Mapping[str, object]] | None = None,
+) -> None:
     if not rows:
         return
     for namespace_title, namespace_rows in split_planner_groups_by_namespace(rows):
@@ -275,7 +351,7 @@ def _render_table(title: str, rows: list[PlannerGroup], *, unknown: bool, consol
         table = Table(show_lines=False, header_style="bold dim")
         table.add_column("GG", style="cyan", no_wrap=True)
         table.add_column("Name", style="white")
-        table.add_column("Type", style="dim", justify="right", no_wrap=True)
+        table.add_column("OP00 count", style="dim", justify="right", no_wrap=True)
         table.add_column("II range", style="dim", justify="right", no_wrap=True)
         table.add_column("Instances", style="dim", justify="right", no_wrap=True)
         table.add_column("RR_max", style="magenta", justify="right", no_wrap=True)
@@ -293,7 +369,7 @@ def _render_table(title: str, rows: list[PlannerGroup], *, unknown: bool, consol
             table.add_row(
                 _hex_u8(g.group),
                 name,
-                f"{g.descriptor:.1f}",
+                format_planner_op00_count(g, system_information),
                 format_planner_instance_bounds(g),
                 instances,
                 rr_max,
@@ -304,7 +380,7 @@ def _render_table(title: str, rows: list[PlannerGroup], *, unknown: bool, consol
 def _render_system_information(
     console: Console, system_information: Sequence[Mapping[str, object]] | None
 ) -> None:
-    rows = format_system_information_rows(system_information)
+    rows = format_system_information_rows(planner_unmapped_system_information(system_information))
     if not rows:
         return
     console.print(Rule("System Information", style="dim"))
@@ -506,9 +582,19 @@ def prompt_scan_plan(
         [g for g in groups if not g.known],
         key=lambda x: (x.group, x.opcode),
     )
-    _render_table("Known Groups", known_groups, unknown=False, console=console)
     _render_table(
-        "Unknown Groups (Disabled By Default)", unknown_groups, unknown=True, console=console
+        "Known Groups",
+        known_groups,
+        unknown=False,
+        console=console,
+        system_information=system_information,
+    )
+    _render_table(
+        "Unknown Groups (Disabled By Default)",
+        unknown_groups,
+        unknown=True,
+        console=console,
+        system_information=system_information,
     )
 
     _print_estimate(

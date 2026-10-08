@@ -365,6 +365,10 @@ class _EnhancedCrcMismatch(TransportError):
     """Retryable CRC mismatch while reading a target response."""
 
 
+class _EnhancedCommandNotAcknowledgedBeforeSyn(TransportError):
+    """The target did not ACK or NACK before the bus returned to SYN."""
+
+
 class _EnhancedSessionError(TransportError):
     """Recoverable ENH/TCP session failure with sanitized diagnostics."""
 
@@ -1159,6 +1163,7 @@ class EnhancedTcpTransport(TransportInterface):
         successful_reconnects = 0
         collision_retries = 0
         nack_retries = 0
+        command_syn_retries = 0
         request_attempts = 0
 
         def _attempt_admitted() -> None:
@@ -1310,6 +1315,34 @@ class EnhancedTcpTransport(TransportInterface):
             except TransportNack:
                 # A definitive target rejection is not a broken TCP/ENH session.
                 raise
+            except _EnhancedCommandNotAcknowledgedBeforeSyn as exc:
+                # A bare RECEIVED(0xAA) at command-ACK is the raw-wire SYN
+                # boundary.  Ownership has already ended, so the TCP/ENH
+                # session remains synchronized and one fresh arbitration is
+                # sufficient for an idempotent read.  Never apply this retry
+                # to a request whose retry safety is unknown.
+                if retry_safe and command_syn_retries == 0:
+                    command_syn_retries += 1
+                    self._reset_parser()
+                    self._trace(
+                        f"#{seq} RETRY type=command_not_acknowledged_before_syn "
+                        f"n={command_syn_retries}/1"
+                    )
+                    continue
+                failure = TransportProtocolFailure(
+                    cause="command_not_acknowledged_before_syn",
+                    request_attempts=request_attempts,
+                    reconnect_attempts=reconnect_retries,
+                    unexpected_symbol=_EBUS_SYN,
+                )
+                self._trace(
+                    f"#{seq} REQUEST_FAILED cause={failure.cause} "
+                    f"phase={failure.phase} request_attempts={failure.request_attempts} "
+                    f"reconnect_attempts={failure.reconnect_attempts} "
+                    f"unexpected_symbol={failure.unexpected_symbol}"
+                )
+                self._reset_parser()
+                raise failure from exc
             except _EnhancedSessionError as exc:
                 if not retry_safe:
                     raise
@@ -1384,10 +1417,17 @@ class EnhancedTcpTransport(TransportInterface):
                         "nack received (local retry exhausted; bus release failed)"
                     ) from release_exc
                 raise TransportNack("nack received (local retry exhausted)")
+            if ack == _EBUS_SYN:
+                # ENH RECEIVED forwards raw wire symbols.  A bare 0xAA while
+                # waiting for command ACK/NACK is therefore the transaction
+                # boundary: the command ended without target acknowledgement.
+                # It is distinct from both NACK and a malformed ACK symbol.
+                raise _EnhancedCommandNotAcknowledgedBeforeSyn(
+                    "command not acknowledged before SYN"
+                )
             if ack != _EBUS_ACK:
-                # In ENH protocol, 0xAA (SYN) from _recv_bus_symbol is a data
-                # byte, not a bus-idle signal.  Treat any non-ACK/non-NACK as
-                # an unexpected symbol error (not a timeout).
+                # Arbitrary non-ACK/non-NACK symbols leave session alignment
+                # ambiguous and continue through the bounded reconnect path.
                 raise _EnhancedSessionError(
                     f"unexpected symbol 0x{ack:02X} while waiting for command ack",
                     cause="protocol_sync_error",

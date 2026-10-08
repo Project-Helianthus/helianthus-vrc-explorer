@@ -3,6 +3,7 @@ from __future__ import annotations
 from helianthus_vrc_explorer.scanner.plan import GroupScanPlan
 from helianthus_vrc_explorer.ui.planner import PlannerGroup, split_planner_groups_by_namespace
 from helianthus_vrc_explorer.ui.planner_textual import (
+    PLANNER_TABLE_COLUMNS,
     _EditableGroup,
     _estimate_footer,
     _parse_instances_spec,
@@ -89,7 +90,19 @@ def test_estimate_footer_uses_exact_register_selectors() -> None:
     assert "Plan: 9 requests" in _estimate_footer(states, request_rate_rps=None)
 
 
-def test_table_row_values_show_explicit_namespace_column() -> None:
+def test_planner_table_columns_replace_namespace_and_type_with_op00_count() -> None:
+    assert PLANNER_TABLE_COLUMNS == (
+        "On",
+        "GG",
+        "Name",
+        "OP00 count",
+        "II range",
+        "Instances",
+        "RR_max",
+    )
+
+
+def test_table_row_values_show_qualified_op00_count_without_changing_instances() -> None:
     remote_group = PlannerGroup(
         group=0x01,
         opcode=0x06,
@@ -103,16 +116,21 @@ def test_table_row_values_show_explicit_namespace_column() -> None:
         namespace_label="remote",
     )
     local_only_group = PlannerGroup(
-        group=0x00,
+        group=0x02,
         opcode=0x02,
-        name="Regulator Parameters",
-        descriptor=3.0,
+        name="Circuits",
+        descriptor=1.0,
         known=True,
-        ii_max=None,
-        rr_max=0x00FF,
-        rr_max_full=0x00FF,
+        ii_max=0x09,
+        rr_max=0x0025,
+        rr_max_full=0x0025,
         present_instances=(0x01,),
+        expected_count=3,
     )
+    system_information = [
+        {"name": "circuit_count", "value": 3.0, "state": "available"},
+        {"name": "boiler_count", "value": 1.0, "state": "available"},
+    ]
 
     remote_row = _table_row_values(
         _EditableGroup(
@@ -120,7 +138,8 @@ def test_table_row_values_show_explicit_namespace_column() -> None:
             enabled=True,
             rr_max=0x0015,
             instances=(0x01,),
-        )
+        ),
+        system_information,
     )
     local_row = _table_row_values(
         _EditableGroup(
@@ -128,27 +147,26 @@ def test_table_row_values_show_explicit_namespace_column() -> None:
             enabled=False,
             rr_max=0x00FF,
             instances=(0x01,),
-        )
+        ),
+        system_information,
     )
 
     assert remote_row == (
         "✓",
         "0x01",
         "Primary Heating Sources",
-        "remote",
-        "3.0",
+        "1",
         "0x01..0x08",
         "present 1/8",
         "0x0015",
     )
     assert local_row == (
         " ",
-        "0x00",
-        "Regulator Parameters",
-        "local",
-        "3.0",
-        "0x00..0x00",
-        "singleton",
+        "0x02",
+        "Circuits",
+        "3",
+        "0x01..0x09",
+        "present 1/9 (off)",
         "0x00FF",
     )
 
@@ -193,6 +211,68 @@ def test_planner_pane_id_routes_unexpected_namespaces_into_remote_pane() -> None
     assert _planner_pane_id(0x02) == "local"
     assert _planner_pane_id(0x06) == "remote"
     assert _planner_pane_id(0x08) == "remote"
+
+
+def test_textual_actions_keep_local_and_remote_states_independent_after_column_removal(
+    monkeypatch,
+) -> None:
+    from textual.app import App
+
+    local = PlannerGroup(
+        group=0x02,
+        opcode=0x02,
+        name="Heating Circuits",
+        descriptor=1.0,
+        known=True,
+        ii_max=0x09,
+        rr_max=0x0025,
+        rr_max_full=0x0025,
+        present_instances=(0x01,),
+        expected_count=1,
+    )
+    remote = PlannerGroup(
+        group=0x01,
+        opcode=0x06,
+        name="Boiler",
+        descriptor=3.0,
+        known=True,
+        ii_max=0x08,
+        rr_max=0x0015,
+        rr_max_full=0x0015,
+        present_instances=(0x01,),
+    )
+    captured: dict[str, _EditableGroup] = {}
+
+    def fake_run(self: App[object], *args: object, **kwargs: object) -> None:
+        self._focused_group = lambda: remote.key  # type: ignore[method-assign]
+        self._refresh_table = lambda: None  # type: ignore[method-assign]
+        self._set_help = lambda _text: None  # type: ignore[method-assign]
+        self._focus_table = lambda: None  # type: ignore[method-assign]
+
+        self.action_toggle_enabled()
+        self._editing_group = remote.key
+        self._edit_rr_max("0x0020")
+        captured.update(self._states)
+
+    monkeypatch.setattr(App, "run", fake_run)
+
+    run_textual_scan_plan(
+        [local, remote],
+        request_rate_rps=None,
+        default_plan={
+            local.key: GroupScanPlan(
+                group=local.group,
+                opcode=local.opcode,
+                rr_max=local.rr_max,
+                instances=(0x01,),
+            )
+        },
+    )
+
+    assert captured[local.key].enabled is True
+    assert captured[local.key].rr_max == 0x0025
+    assert captured[remote.key].enabled is True
+    assert captured[remote.key].rr_max == 0x0020
 
 
 def test_run_textual_scan_plan_registers_enter_binding_for_rr_max(
