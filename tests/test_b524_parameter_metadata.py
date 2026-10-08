@@ -12,6 +12,8 @@ from helianthus_vrc_explorer.protocol.b524 import (
 from helianthus_vrc_explorer.protocol.b524_metadata import (
     decode_parameter_description,
     expected_instance_count,
+    module_capacity_crosscheck,
+    supported_capacity,
     validate_parameter_edit,
 )
 
@@ -99,6 +101,25 @@ def test_invalid_counts_do_not_limit_instance_discovery(value: float) -> None:
 def test_zero_and_sparse_count_targets_are_preserved() -> None:
     assert expected_instance_count(0.0, capacity=11) == 0
     assert expected_instance_count(3.0, capacity=11) == 3
+
+
+@pytest.mark.parametrize(
+    ("vr70", "vr71", "capacity"),
+    [(0, 0, 1), (1, 0, 2), (0, 1, 3), (1, 1, 5), (2, 1, 7), (3, 1, 8)],
+)
+def test_known_module_tuples_provide_capacity_crosschecks(
+    vr70: int, vr71: int, capacity: int
+) -> None:
+    assert module_capacity_crosscheck(float(vr70), float(vr71)) == capacity
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -1.0, 2.5])
+def test_invalid_capacity_is_unknown(value: float) -> None:
+    assert supported_capacity(value) is None
+
+
+def test_unsupported_module_tuple_does_not_extrapolate_capacity() -> None:
+    assert module_capacity_crosscheck(2.0, 0.0) is None
 
 
 def test_same_span_width_can_describe_unsigned32_or_float() -> None:
@@ -260,13 +281,13 @@ def test_default_scan_keeps_system_information_separate_and_targets_writable_des
             self.requests.append(payload)
             if payload[0] == 0:
                 identifier = int.from_bytes(payload[1:3], "little")
-                return struct.pack("<f", 1.0 if identifier == 0 else float("nan"))
+                return struct.pack("<f", 3.0 if identifier == 0 else float("nan"))
             if len(payload) == 5 and payload[0] == 1:
                 return bytes.fromhex("020200000004000100")
             if (
                 payload[0] == 2
                 and payload[2] == 2
-                and payload[3] == 3
+                and payload[3] in {2, 6, 9}
                 and int.from_bytes(payload[4:6], "little") == 2
             ):
                 return bytes.fromhex("030202000100")
@@ -277,19 +298,29 @@ def test_default_scan_keeps_system_information_separate_and_targets_writable_des
     info = artifact["meta"]["system_information"][0]
     assert info["identifier"] == "0x0000"
     assert info["name"] == "circuit_count"
-    assert info["raw_hex"] == "0000803f"
-    assert artifact["meta"]["instance_counts"]["0x02:0x02"]["observed"] == 1
-    assert artifact["meta"]["instance_counts"]["0x02:0x02"]["probed_instances"] == 4
+    assert info["raw_hex"] == "00004040"
+    assert artifact["meta"]["instance_counts"]["0x02:0x02"]["observed"] == 2
+    circuit_count = artifact["meta"]["instance_counts"]["0x02:0x02"]
+    assert circuit_count["probed_instances"] == 9
+    assert circuit_count["semantics"] == "capacity"
+    assert circuit_count["expected"] is None
+    assert circuit_count["capacity"] == 3
+    assert circuit_count["capacity_exceeded"] is False
     group = artifact["operations"]["0x02"]["groups"]["0x02"]
     assert group["descriptor_observed"] is None
     assert artifact["meta"]["scan_plan"]["groups"]["0x02"]["operations"]["0x02"]["instances"] == [
-        "0x03",
+        "0x02",
+        "0x06",
         "0x09",
     ]
-    entry = group["instances"]["0x03"]["registers"]["0x0002"]
+    entry = group["instances"]["0x02"]["registers"]["0x0002"]
     assert entry["parameter_description"]["qualification"] == "matched"
-    assert entry["parameter_description"]["instance"] == "0x03"
-    assert [p for p in bus.requests if p[0] in {1, 7}] == [bytes.fromhex("0102030200")]
+    assert entry["parameter_description"]["instance"] == "0x02"
+    assert [p for p in bus.requests if p[0] in {1, 7}] == [
+        bytes.fromhex("0102020200"),
+        bytes.fromhex("0102060200"),
+        bytes.fromhex("0102090200"),
+    ]
     # The circuit count never restricts the independent device namespace.
     remote_count = artifact["meta"]["instance_counts"]["0x06:0x02"]
     assert remote_count["identifier"] == "0x000d"

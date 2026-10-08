@@ -243,12 +243,12 @@ def format_planner_op00_count(
     group: PlannerGroup,
     system_information: Sequence[Mapping[str, object]] | None = None,
 ) -> str:
-    """Return a UI-only qualified OP00 count for one native planner group.
+    """Return a UI-only qualified OP00 count/capacity for one native planner group.
 
     The snapshot association is intentionally separate from ``expected_count``:
     it neither guides instance probing nor asserts that an OP00 count proves
-    presence.  ``expected_count`` remains a compatibility fallback only for
-    Circuits and Zones when the snapshot has no corresponding record.
+    presence.  ``expected_count`` remains a compatibility fallback for older
+    planner records when the snapshot has no corresponding record.
     """
 
     key = (int(group.opcode), group.group)
@@ -269,11 +269,12 @@ def format_planner_op00_count(
                 and value >= 0
                 and float(value).is_integer()
             ):
-                return str(int(value))
+                rendered = str(int(value))
+                return f"capacity={rendered}" if key in _LEGACY_EXPECTED_COUNT_KEYS else rendered
             return "—"
         return "—"
     if key in _LEGACY_EXPECTED_COUNT_KEYS and group.expected_count is not None:
-        return str(group.expected_count)
+        return f"capacity={group.expected_count}"
     return "—"
 
 
@@ -384,7 +385,7 @@ def _render_table(
         table = Table(show_lines=False, header_style="bold dim")
         table.add_column("GG", style="cyan", no_wrap=True)
         table.add_column("Name", style="white")
-        table.add_column("OP00 count", style="dim", justify="right", no_wrap=True)
+        table.add_column("OP00 context", style="dim", justify="right", no_wrap=True)
         table.add_column("II range", style="dim", justify="right", no_wrap=True)
         table.add_column("Instances", style="dim", justify="right", no_wrap=True)
         table.add_column("RR_max", style="magenta", justify="right", no_wrap=True)

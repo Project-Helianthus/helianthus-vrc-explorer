@@ -323,17 +323,24 @@ def _probe_present_instances(
     observer: ScanObserver | None,
     probe_instance_availability_fn: Any = probe_instance_availability,
     expected_count: int | None = None,
+    capacity: int | None = None,
     stop_at_first_absence: bool = False,
     on_probe: Any = None,
 ) -> dict[int, InstanceAvailabilityProbe]:
     probes: dict[int, InstanceAvailabilityProbe] = {}
     present_count = 0
     if expected_count == 0 and (opcode, group) != (0x02, 0x02):
-        # A qualified zero count avoids treating default slot data as installed
-        # instances. The circuit's independent virtual DHW slot still needs a probe.
+        # A qualified zero count or capacity avoids ordinary default-slot probes.
+        # The circuit's independent virtual DHW slot still needs a probe.
         return probes
     first_ii = 1 if opcode == 6 or (opcode == 2 and group == 2) else 0
-    for ii in range(first_ii, ii_max + 1):
+    ordinary_ii_max = ii_max
+    if capacity == 0:
+        if (opcode, group) != (0x02, 0x02):
+            return probes
+        # Leave II09 to the independent virtual-slot probe below.
+        ordinary_ii_max = 0
+    for ii in range(first_ii, ordinary_ii_max + 1):
         if observer is not None:
             observer.status(f"Probe presence GG=0x{group:02X} OP={_hex_u8(opcode)} II=0x{ii:02X}")
         probe = probe_instance_availability_fn(

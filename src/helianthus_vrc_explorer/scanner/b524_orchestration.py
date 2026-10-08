@@ -14,9 +14,12 @@ from rich.console import Console
 from ..artifact_schema import CURRENT_ARTIFACT_SCHEMA_VERSION
 from ..protocol.b524 import RegisterOpcode
 from ..protocol.b524_metadata import (
+    CAPACITY_SYSTEM_INFORMATION_IDS,
     COUNT_GROUP_IDS,
     SYSTEM_INFORMATION_NAMES,
     expected_instance_count,
+    module_capacity_crosscheck,
+    supported_capacity,
 )
 from ..schema.b524_constraints import (
     CONSTRAINT_SCOPE_PROTOCOL,
@@ -682,6 +685,11 @@ def run_b524_scan(
                 f"Identifying instances in group 0x{group.group:02X} ({opcode_label(opcode)})",
             )
             count_id = COUNT_GROUP_IDS.get((int(opcode), group.group))
+            capacity = (
+                supported_capacity(information_values.get(count_id, float("nan")))
+                if count_id in CAPACITY_SYSTEM_INFORMATION_IDS
+                else None
+            )
             expected_count = (
                 expected_instance_count(
                     information_values.get(count_id, float("nan")),
@@ -689,7 +697,7 @@ def run_b524_scan(
                         group=group.group, opcode=opcode, ii_max=namespace_ii_max
                     ),
                 )
-                if count_id is not None
+                if count_id is not None and count_id not in CAPACITY_SYSTEM_INFORMATION_IDS
                 else None
             )
 
@@ -722,6 +730,7 @@ def run_b524_scan(
                 stop_at_first_absence=planner_preset == "recommended" and opcode == 6,
                 on_probe=retain_probe,
                 expected_count=expected_count if planner_preset == "recommended" else None,
+                capacity=capacity if planner_preset == "recommended" else None,
             )
             _record_availability_probes(
                 artifact,
@@ -802,33 +811,39 @@ def run_b524_scan(
             present_instances = tuple(ii for ii, probe in probes.items() if probe.present)
             count_id = COUNT_GROUP_IDS.get((int(opcode), group.group))
             if count_id is not None:
-                expected = expected_instance_count(
-                    information_values.get(count_id, float("nan")),
-                    capacity=_count_capacity(
-                        group=group.group, opcode=opcode, ii_max=namespace_ii_max
-                    ),
+                is_capacity = count_id in CAPACITY_SYSTEM_INFORMATION_IDS
+                expected = (
+                    None
+                    if is_capacity
+                    else expected_instance_count(
+                        information_values.get(count_id, float("nan")),
+                        capacity=_count_capacity(
+                            group=group.group, opcode=opcode, ii_max=namespace_ii_max
+                        ),
+                    )
+                )
+                supported = (
+                    supported_capacity(information_values.get(count_id, float("nan")))
+                    if is_capacity
+                    else None
+                )
+                observed = len(
+                    [
+                        ii
+                        for ii in present_instances
+                        if not (opcode == 2 and group.group == 2 and ii == 0x09)
+                    ]
                 )
                 artifact["meta"].setdefault("instance_counts", {})[
                     f"{_hex_u8(opcode)}:{_hex_u8(group.group)}"
                 ] = {
                     "identifier": _hex_u16(count_id),
                     "expected": expected,
-                    "observed": len(
-                        [
-                            ii
-                            for ii in present_instances
-                            if not (opcode == 2 and group.group == 2 and ii == 0x09)
-                        ]
-                    ),
-                    "mismatch": expected is not None
-                    and expected
-                    != len(
-                        [
-                            ii
-                            for ii in present_instances
-                            if not (opcode == 2 and group.group == 2 and ii == 0x09)
-                        ]
-                    ),
+                    "semantics": "capacity" if is_capacity else "expected_population",
+                    "capacity": supported,
+                    "observed": observed,
+                    "mismatch": expected is not None and expected != observed,
+                    "capacity_exceeded": supported is not None and observed > supported,
                     "probed_instances": len(probes),
                 }
             _mark_present_instances(instances_obj, instances=present_instances)
@@ -879,6 +894,16 @@ def run_b524_scan(
                 and aggregate_device_count != observed_remote_instances
             ),
         }
+        module_capacity = module_capacity_crosscheck(
+            information_values.get(8, float("nan")), information_values.get(9, float("nan"))
+        )
+        if module_capacity is not None:
+            artifact["meta"]["module_capacity_crosscheck"] = {
+                "vr70_identifier": "0x0008",
+                "vr71_identifier": "0x0009",
+                "capacity": module_capacity,
+                "semantics": "crosscheck_only",
+            }
 
         if observer is not None:
             for group, meta, opcode in instance_targets:
@@ -1023,6 +1048,8 @@ def run_b524_scan(
                                 ),
                             )
                             if planner_ii_max is not None
+                            and COUNT_GROUP_IDS.get((int(opcode), group.group))
+                            not in CAPACITY_SYSTEM_INFORMATION_IDS
                             else None
                         ),
                         namespace_label=(opcode_label(opcode) if multi_op else None),

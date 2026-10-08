@@ -42,8 +42,8 @@ def _group() -> PlannerGroup:
 
 def test_system_information_formatter_uses_human_labels_and_hides_diagnostic_fields() -> None:
     assert format_system_information_rows(_system_information()) == (
-        ("Circuits", "3"),
-        ("Zones", "2"),
+        ("Circuit capacity", "3"),
+        ("Zone capacity", "2"),
         ("Generators", "unavailable"),
         ("Heat pumps", "1"),
     )
@@ -67,7 +67,7 @@ def test_classic_planner_shows_compact_system_information(monkeypatch) -> None:
     rendered = output.getvalue()
     assert "System Information" in rendered
     assert "Generators:" in rendered
-    assert "Circuits:" not in rendered and "Heat pumps:" not in rendered
+    assert "Circuit capacity:" not in rendered and "Heat pumps:" not in rendered
     assert "0x0000" not in rendered and "00004040" not in rendered
 
 
@@ -137,8 +137,8 @@ def test_planner_op00_counts_use_qualified_snapshot_mappings_without_guiding_ins
         {"name": "vr70_count", "value": 0.0, "state": "available"},
     ]
 
-    assert format_planner_op00_count(circuits, snapshot) == "3"
-    assert format_planner_op00_count(zones, snapshot) == "2"
+    assert format_planner_op00_count(circuits, snapshot) == "capacity=3"
+    assert format_planner_op00_count(zones, snapshot) == "capacity=2"
     assert format_planner_op00_count(boiler, snapshot) == "1"
     assert format_planner_op00_count(heat_pump, snapshot) == "0"
     assert format_planner_op00_count(vr70, snapshot) == "0"
@@ -207,7 +207,7 @@ def test_planner_op00_count_rejects_invalid_snapshot_values() -> None:
         expected_count=3,
     )
     assert format_planner_op00_count(circuits, []) == "—"
-    assert format_planner_op00_count(circuits) == "3"
+    assert format_planner_op00_count(circuits) == "capacity=3"
 
 
 def test_classic_planner_table_replaces_type_with_op00_count() -> None:
@@ -235,7 +235,7 @@ def test_classic_planner_table_replaces_type_with_op00_count() -> None:
     )
 
     rendered = output.getvalue()
-    assert "OP00 count" in rendered
+    assert "OP00 context" in rendered
     assert "Type" not in rendered
     assert "nan" not in rendered
 

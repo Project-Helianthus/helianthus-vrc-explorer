@@ -6,8 +6,8 @@ import math
 from collections.abc import Mapping, Sequence
 
 _LABELS: dict[str, str] = {
-    "circuit_count": "Circuits",
-    "zone_count": "Zones",
+    "circuit_count": "Circuit capacity",
+    "zone_count": "Zone capacity",
     "solar_circuit_count": "Solar circuits",
     "solar_loaded_tank_count": "Solar loaded tanks",
     "device_count": "Devices",

@@ -69,6 +69,20 @@ def test_recommended_zero_count_does_not_probe_default_delta_t_slots() -> None:
     assert transport.requests == []
 
 
+def test_zero_capacity_skips_ordinary_candidates_but_keeps_virtual_circuit_slot() -> None:
+    transport = _ReplyTransport(bytes.fromhex("030101000100"))
+    probes = _probe_present_instances(
+        transport,
+        dst=0x15,
+        group=0x02,
+        opcode=0x02,
+        ii_max=0x09,
+        observer=None,
+        capacity=0,
+    )
+    assert list(probes) == [0x09]
+
+
 def test_recommended_solar_count_stops_after_the_configured_slot() -> None:
     transport = _ReplyTransport(bytes.fromhex("030404000000a041"))
     probes = _probe_present_instances(
