@@ -272,12 +272,10 @@ def _probe_scan_identity(
         "serial": "n/a",
         "firmware": "n/a",
     }
+    payload = transport.send_proto(dst, 0x07, 0x04, b"")
     try:
-        payload = transport.send_proto(dst, 0x07, 0x04, b"")
         ident = parse_scan_identification(payload)
-    except TransportCommandNotEnabled:
-        raise
-    except Exception:
+    except ValueError:
         return identity
 
     device_name_map = model_name_map if model_name_map is not None else _load_ebus_model_name_map()
@@ -288,14 +286,12 @@ def _probe_scan_identity(
     if ident.manufacturer != 0xB5:
         return identity
 
+    chunks = [
+        transport.send_proto(dst, 0xB5, 0x09, bytes((qq,))) for qq in (0x24, 0x25, 0x26, 0x27)
+    ]
     try:
-        chunks = [
-            transport.send_proto(dst, 0xB5, 0x09, bytes((qq,))) for qq in (0x24, 0x25, 0x26, 0x27)
-        ]
         scan_id = parse_vaillant_scan_id_chunks(chunks)
-    except TransportCommandNotEnabled:
-        raise
-    except Exception:
+    except ValueError:
         return identity
 
     catalog = model_catalog if model_catalog is not None else _load_default_model_catalog()

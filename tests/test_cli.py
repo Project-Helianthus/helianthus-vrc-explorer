@@ -19,6 +19,7 @@ from helianthus_vrc_explorer.cli import (
     _resolve_scan_destination,
     app,
 )
+from helianthus_vrc_explorer.transport.base import TransportTimeout
 
 _ROLE_TARGET_TOKEN = bytes.fromhex("736c617665").decode("ascii")
 
@@ -1111,6 +1112,61 @@ def test_probe_scan_identity_formats_basv2_friendly_name() -> None:
     )
     assert identity["model"] == "Vaillant sensoCOMFORT RF (VRC 720f/2) 0020262148"
     assert identity["serial"] == "21213400202621480000000001N7"
+
+
+class _IdentityProbeTransport:
+    def __init__(self, *, failure: Exception | None = None, stage: str = "") -> None:
+        self._failure = failure
+        self._stage = stage
+
+    def send_proto(self, _dst: int, primary: int, secondary: int, payload: bytes) -> bytes:
+        if (primary, secondary) == (0x07, 0x04):
+            if self._stage == "0704" and self._failure is not None:
+                raise self._failure
+            return bytes.fromhex("b556524320373230662f3205071704")
+        if self._stage == "b509" and self._failure is not None:
+            raise self._failure
+        return _FakeTransport().send_proto(0x15, primary, secondary, payload)
+
+
+@pytest.mark.parametrize(
+    ("stage", "error"),
+    [
+        pytest.param("0704", TransportTimeout("socket timeout"), id="0704-timeout"),
+        pytest.param("b509", TransportTimeout("socket timeout"), id="b509-timeout"),
+    ],
+)
+def test_probe_scan_identity_propagates_transport_startup_failures(
+    stage: str,
+    error: Exception,
+) -> None:
+    transport = _IdentityProbeTransport(failure=error, stage=stage)
+
+    with pytest.raises(TransportTimeout, match="socket timeout"):
+        _probe_scan_identity(transport, dst=0x15)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("stage", ("0704", "b509"))
+def test_probe_scan_identity_does_not_mask_unexpected_failures(stage: str) -> None:
+    transport = _IdentityProbeTransport(failure=RuntimeError("unexpected preflight"), stage=stage)
+
+    with pytest.raises(RuntimeError, match="unexpected preflight"):
+        _probe_scan_identity(transport, dst=0x15)  # type: ignore[arg-type]
+
+
+def test_probe_scan_identity_keeps_0704_fields_when_b509_chunks_fail_to_parse() -> None:
+    class _MalformedScanIdTransport(_IdentityProbeTransport):
+        def send_proto(self, dst: int, primary: int, secondary: int, payload: bytes) -> bytes:
+            if (primary, secondary) == (0xB5, 0x09):
+                return b"\x00"
+            return super().send_proto(dst, primary, secondary, payload)
+
+    identity = _probe_scan_identity(_MalformedScanIdTransport(), dst=0x15)  # type: ignore[arg-type]
+
+    assert identity["device"] == "VRC 720f/2"
+    assert identity["firmware"] == "SW 0507 / HW 1704"
+    assert identity["model"] == "n/a"
+    assert identity["serial"] == "n/a"
 
 
 def test_resolve_scan_destination_explicit_skips_autodiscovery() -> None:
