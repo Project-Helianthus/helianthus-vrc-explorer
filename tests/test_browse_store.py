@@ -110,7 +110,7 @@ def test_browse_store_builds_rows_and_left_tree_uses_only_myvaillant_name() -> N
 
     by_register = {row.register_key: row for row in store.rows}
     assert by_register["0x0001"].tab == "config"
-    assert by_register["0x0002"].tab == "state"
+    assert by_register["0x0002"].tab == "config"
     assert by_register["0x0003"].tab == "state"
     assert by_register["0x0001"].name == "system_dhw_bivalence_point"
     assert by_register["0x0002"].name == "device_class_address"
@@ -132,6 +132,7 @@ def test_browse_store_builds_rows_and_left_tree_uses_only_myvaillant_name() -> N
     assert by_register["0x0002"].path == expected_remote_path
     assert by_register["0x0001"].address.label == "B524 GG=0x0 RR=0x1 0x02"
     assert by_register["0x0002"].address.label == "B524 GG=0x0 RR=0x2 0x06"
+    assert by_register["0x0001"].display_label == "system_dhw_bivalence_point (0x0001)"
     assert all(":single:" not in row.row_id for row in store.rows if row.protocol == "b524")
 
     by_node_id = {node.node_id: node for node in store.tree_nodes}
@@ -295,13 +296,43 @@ def test_browse_store_filters_rows_for_tree_selection() -> None:
         node for node in store.tree_nodes if node.node_id == "b524:group:device_slots:0x00"
     )
 
-    assert len(store.rows_for_selection(None, tab="state")) == 2
+    assert len(store.rows_for_selection(None, tab="state")) == 1
     assert store.rows_for_selection(root_node, tab="state") == []
     # Protocol nodes navigate to their children.  They must not silently aggregate
     # every descendant register into the table.
     assert store.rows_for_selection(protocol_node, tab="config") == []
     assert store.rows_for_selection(device_group_node, tab="state") == []
     assert len(store.rows_for_selection(controller_group_node, tab="state")) == 1
+
+
+def test_browse_store_folds_remote_writable_and_limits_into_config_with_compact_labels() -> None:
+    artifact = _dual_namespace_artifact()
+    remote_registers = artifact["operations"]["0x06"]["groups"]["0x09"]["instances"]["0x01"][
+        "registers"
+    ]
+    remote_registers["0x0002"] = {
+        "value": 4,
+        "raw_hex": "04",
+        "flags_access": "writable_not_visible",
+        "read_opcode": "0x06",
+        "register_class": "config_limits",
+    }
+    remote_registers["0x00fe"] = {
+        "value": 0,
+        "raw_hex": "00",
+        "flags_access": "config_installer",
+        "read_opcode": "0x06",
+    }
+
+    store = BrowseStore.from_artifact(artifact)
+    rows = {row.register_key: row for row in store.rows if row.namespace_key == "0x06"}
+
+    assert rows["0x0001"].tab == "config"
+    assert rows["0x0002"].tab == "config"
+    assert rows["0x00fe"].tab == "config"
+    assert rows["0x0001"].display_label == "device_connected (0x0001)"
+    assert rows["0x00fe"].display_label == "0x00fe"
+    assert store.rows_for_selection(None, tab="config")
 
 
 def test_browse_store_single_namespace_instance_node_uses_opcode_identity() -> None:
@@ -524,7 +555,7 @@ def test_browse_store_instanced_groups_have_no_register_tree_nodes() -> None:
     remote_instance = by_node_id["b524:inst:device_slots:0x09:0x06:0x01"]
 
     local_rows = store.rows_for_selection(local_instance, tab="state")
-    remote_rows = store.rows_for_selection(remote_instance, tab="state")
+    remote_rows = store.rows_for_selection(remote_instance, tab="config")
 
     assert len(local_rows) > 0
     assert all(row.namespace_key == "0x02" for row in local_rows)

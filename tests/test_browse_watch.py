@@ -74,6 +74,19 @@ def test_textual_browse_classes_are_module_scoped() -> None:
         assert name not in collector.names
 
 
+def test_textual_browse_exposes_only_config_and_state_without_address_column() -> None:
+    bindings = {(binding.key, binding.action) for binding in browse_textual._BrowseApp.BINDINGS}
+    assert ("1", "tab_config") in bindings
+    assert ("2", "tab_state") in bindings
+    assert not any("config_limits" in action for _key, action in bindings)
+    assert browse_textual._tab_id("config") == "tab-config"
+    assert browse_textual._tab_id("state") == "tab-state"
+
+    source = Path(browse_textual.__file__ or "").read_text(encoding="utf-8")
+    assert 'Tab("Config-Limits"' not in source
+    assert '"Address",' not in source
+
+
 def test_run_browse_from_artifact_preserves_artifact_and_allow_write(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

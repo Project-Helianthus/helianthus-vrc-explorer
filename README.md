@@ -176,7 +176,7 @@ device writes are planned.
   - OP06 GetDeviceParameter
   - OP0B GetEventSetPoint
   - Legacy unqualified group-directory and constraint views, when present
-- Tabbed register views: `Config`, `Config-Limits`, `State`.
+- Tabbed register views: `Config`, `State`. Writable OP02 and OP06 parameters and their limit records belong in Config.
 - Watch/pin/rate controls and safe write workflow (`--allow-write` + confirmation).
 
 ## Canonical B524 Register Names
@@ -275,3 +275,13 @@ GPL-3.0-or-later. See `LICENSE`.
 - FLAGS provide profile-scoped visibility/writability hints. They establish no user/installer role, volatility, persistence or physical connected-device state. Old artifact labels remain historical, unqualified interpretations.
 
 See the [public discovery and description contract](https://github.com/Project-Helianthus/helianthus-docs-ebus/blob/main/protocols/vaillant/b524-profile-discovery-and-descriptions.md).
+
+Description acquisition displays a Describe progress bar with scheduled requests
+and adds actual retries to the count. Only active writable parameters generate
+OP01/OP07 probes. Interrupted acquisition keeps partial evidence and is not
+marked complete. The CLI Browser shows `name (0xNNNN)`, or `0xNNNN` for unnamed
+registers, while keeping full native addresses in artifacts.
+
+For OP06/GG08 (auroSTEP), `device_connected` at RR0001 controls connection
+presence. A Boolean false is not overridden by readable header registers;
+invalid or non-Boolean responses remain unknown.

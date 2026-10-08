@@ -106,9 +106,9 @@ class InstanceAvailabilityProbe:
     connection_state: Literal["connected", "not_connected", "unknown"] | None = None
 
 
-# Connected-device predicates in the characterized controller profile. GG08
-# has an unknown status byte, rather than this Boolean connection contract.
-CONNECTED_DEVICE_GROUPS: Final[frozenset[int]] = frozenset({1, 2, 9, 10, 12, 14, 15})
+# Connected-device predicates in the characterized controller profile.
+CONNECTED_DEVICE_GROUPS: Final[frozenset[int]] = frozenset({1, 2, 8, 9, 10, 12, 14, 15})
+_NUMERIC_REMOTE_FIRMWARE_GROUPS: Final[frozenset[int]] = frozenset({1, 2, 9, 10, 12, 14, 15})
 
 
 def opcodes_for_group(group: int) -> list[RegisterOpcode]:
@@ -660,7 +660,7 @@ def read_register(
     raw_hex = value_bytes.hex()
     if (
         opcode == 6
-        and group in CONNECTED_DEVICE_GROUPS
+        and group in _NUMERIC_REMOTE_FIRMWARE_GROUPS
         and register == 4
         and type_hint in (None, "FW")
     ):
@@ -771,11 +771,17 @@ def probe_instance_availability(
 
     if opcode == 0x06 and group in CONNECTED_DEVICE_GROUPS:
         state: Literal["connected", "not_connected", "unknown"] = "unknown"
-        if entry.get("error") is None and response_state == "active":
+        if (
+            entry.get("error") is None
+            and response_state == "active"
+            and entry.get("type") == "BOOL"
+        ):
             if entry.get("value") is True:
                 state = "connected"
             elif entry.get("value") is False:
                 state = "not_connected"
+        if state == "unknown":
+            entry["availability_qualification"] = "unknown"
         return InstanceAvailabilityProbe(
             present=state == "connected",
             contract=contract,

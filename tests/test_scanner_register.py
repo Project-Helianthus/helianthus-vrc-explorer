@@ -600,6 +600,89 @@ def test_instance_present_buffer(monkeypatch: pytest.MonkeyPatch) -> None:
     assert calls == [(0x06, 0x08, 0x0001)]
 
 
+def test_instance_absent_aurostep_uses_false_device_connected_without_header_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import helianthus_vrc_explorer.scanner.register as register
+
+    calls: list[tuple[int, str | None]] = []
+
+    def _fake_read_register(*_args, **kwargs):  # type: ignore[no-untyped-def]
+        calls.append((int(kwargs["register"]), kwargs.get("type_hint")))
+        return {
+            "raw_hex": "00",
+            "type": "BOOL",
+            "value": False,
+            "error": None,
+            "flags_access": "read_only_visible",
+            "reply_kind": "read_only_visible",
+            "response_state": "active",
+        }
+
+    monkeypatch.setattr(register, "read_register", _fake_read_register)
+
+    probe = probe_instance_availability(
+        _StatusOnlyTransport(),
+        dst=0x15,
+        group=0x08,
+        instance=0x01,
+        opcode=0x06,
+    )
+
+    assert probe.present is False
+    assert probe.connection_state == "not_connected"
+    assert probe.contract.probe_register == 0x0001
+    assert probe.contract.probe_type_hint == "BOOL"
+    assert probe.contract.positive_when == "profile-qualified device_connected Boolean is true"
+    assert calls == [(0x0001, "BOOL")]
+
+
+@pytest.mark.parametrize(
+    ("entry_type", "value", "error"),
+    (
+        ("UCH", 0, None),
+        ("BOOL", None, "decode_error: invalid BOOL width"),
+    ),
+)
+def test_aurostep_non_boolean_or_invalid_device_connected_remains_unknown(
+    monkeypatch: pytest.MonkeyPatch,
+    entry_type: str,
+    value: object,
+    error: str | None,
+) -> None:
+    import helianthus_vrc_explorer.scanner.register as register
+
+    calls: list[int] = []
+
+    def _fake_read_register(*_args, **kwargs):  # type: ignore[no-untyped-def]
+        calls.append(int(kwargs["register"]))
+        return {
+            "raw_hex": "00",
+            "type": entry_type,
+            "value": value,
+            "error": error,
+            "flags_access": "read_only_visible",
+            "reply_kind": "read_only_visible",
+            "response_state": "active",
+        }
+
+    monkeypatch.setattr(register, "read_register", _fake_read_register)
+
+    probe = probe_instance_availability(
+        _StatusOnlyTransport(),
+        dst=0x15,
+        group=0x08,
+        instance=0x01,
+        opcode=0x06,
+    )
+
+    assert probe.present is False
+    assert probe.connection_state == "unknown"
+    assert probe.evidence is not None
+    assert probe.evidence["availability_qualification"] == "unknown"
+    assert calls == [0x0001]
+
+
 def test_is_instance_present_group_09_remote_requires_all_header_registers_absent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

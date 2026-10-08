@@ -58,15 +58,11 @@ def _parse_timestamp(meta: dict[str, Any]) -> datetime | None:
 
 
 def _tab_from_entry(entry: dict[str, Any]) -> BrowseTab:
-    namespace_key = _entry_namespace_key(entry)
-    if namespace_key is not None and namespace_key != "0x02":
-        return "state"
-
     register_class = str(entry.get("register_class") or "").strip().lower()
     if register_class == "config":
         return "config"
     if register_class in {"config_limits", "limits"}:
-        return "config_limits"
+        return "config"
     if register_class == "state":
         return "state"
 
@@ -74,7 +70,7 @@ def _tab_from_entry(entry: dict[str, Any]) -> BrowseTab:
     if flags_access in {"writable_not_visible", "writable_visible", "config_user"}:
         return "config"
     if flags_access == "config_installer":
-        return "config_limits"
+        return "config"
     return "state"
 
 

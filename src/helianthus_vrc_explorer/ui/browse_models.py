@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-BrowseTab = Literal["config", "config_limits", "state"]
+BrowseTab = Literal["config", "state"]
 ProtocolKey = Literal["b524", "b555", "b516", "b509"]
 
 
@@ -69,6 +69,21 @@ class RegisterRow:
     bundled_parameter_description: dict[str, object] | None = None
     candidate_name: str = ""
     candidate_evidence: str = ""
+
+    @property
+    def display_label(self) -> str:
+        """Compact user-facing register label while retaining native address metadata."""
+
+        try:
+            register = int(self.register_key, 0)
+            rr_label = f"0x{register:04x}"
+        except ValueError:
+            rr_label = self.register_key
+        semantic_name = self.myvaillant_name or self.name
+        compact_register = f"0x{register:x}" if "register" in locals() else self.register_key
+        if not semantic_name or semantic_name in {self.register_key, compact_register}:
+            return rr_label
+        return f"{semantic_name} ({rr_label})"
 
     @property
     def description_text(self) -> str:

@@ -182,7 +182,6 @@ class _PendingWrite:
 def _tab_id(tab: BrowseTab) -> str:
     return {
         "config": "tab-config",
-        "config_limits": "tab-config-limits",
         "state": "tab-state",
     }[tab]
 
@@ -190,8 +189,6 @@ def _tab_id(tab: BrowseTab) -> str:
 def _tab_from_id(tab_id: str) -> BrowseTab:
     if tab_id == "tab-config":
         return "config"
-    if tab_id == "tab-config-limits":
-        return "config_limits"
     return "state"
 
 
@@ -333,8 +330,7 @@ if _TEXTUAL_IMPORT_ERROR is None:
             Binding("tab", "focus_next_section", "Next Focus"),
             Binding("shift+tab", "focus_prev_section", "Prev Focus"),
             Binding("1", "tab_config", "Config"),
-            Binding("2", "tab_config_limits", "Config-Limits"),
-            Binding("3", "tab_state", "State"),
+            Binding("2", "tab_state", "State"),
             Binding("/", "search", "Search"),
             Binding("n", "search_next", "Next Match"),
             Binding("N", "search_prev", "Prev Match"),
@@ -418,7 +414,6 @@ if _TEXTUAL_IMPORT_ERROR is None:
                 with Vertical(id="right-pane"):
                     yield Tabs(
                         Tab("Config", id="tab-config"),
-                        Tab("Config-Limits", id="tab-config-limits"),
                         Tab("State", id="tab-state"),
                         id="browse-tabs",
                     )
@@ -431,9 +426,8 @@ if _TEXTUAL_IMPORT_ERROR is None:
             table = self.query_one("#browse-table", DataTable)
             table.cursor_type = "row"
             table.add_columns(
-                "myVaillant",
+                "Register",
                 "eBUSd",
-                "Address",
                 "Value",
                 "Raw",
                 "Unit",
@@ -611,9 +605,8 @@ if _TEXTUAL_IMPORT_ERROR is None:
                     else:
                         change_indicator = f"{_WRITE_MARK}{change_indicator}"
                 table.add_row(
-                    row.myvaillant_name or row.name,
+                    row.display_label,
                     row.ebusd_name or "—",
-                    row.address.label,
                     value_text,
                     raw_hex,
                     row.unit,
@@ -634,24 +627,16 @@ if _TEXTUAL_IMPORT_ERROR is None:
 
         def _allowed_tabs_for_selection(self, node: TreeNodeRef | None) -> tuple[BrowseTab, ...]:
             if node is None:
-                return ("config", "config_limits", "state")
+                return ("config", "state")
             if node.protocol != "b524":
                 return ("state",)
-            section_key = node.section_key
-            if section_key is None and node.level != "protocol":
-                return ("config", "config_limits", "state")
-            if section_key == "controller_registers" or (
-                node.level == "protocol" and node.protocol == "b524"
-            ):
-                return ("config", "config_limits", "state")
-            return ("state",)
+            return ("config", "state")
 
         def _sync_tabs_for_selection(self, node: TreeNodeRef | None) -> None:
             tabs_widget = self.query_one("#browse-tabs", Tabs)
             allowed = set(self._allowed_tabs_for_selection(node))
             tab_map = {
                 "config": self.query_one("#tab-config", Tab),
-                "config_limits": self.query_one("#tab-config-limits", Tab),
                 "state": self.query_one("#tab-state", Tab),
             }
             for key, tab in tab_map.items():
@@ -760,12 +745,6 @@ if _TEXTUAL_IMPORT_ERROR is None:
                 self._set_status("Config tab is not available for this B524 operation.")
                 return
             self.query_one("#browse-tabs", Tabs).active = _tab_id("config")
-
-        def action_tab_config_limits(self) -> None:
-            if "config_limits" not in self._allowed_tabs_for_selection(self._current_node()):
-                self._set_status("Config-Limits tab is not available for this B524 operation.")
-                return
-            self.query_one("#browse-tabs", Tabs).active = _tab_id("config_limits")
 
         def action_tab_state(self) -> None:
             self.query_one("#browse-tabs", Tabs).active = _tab_id("state")
