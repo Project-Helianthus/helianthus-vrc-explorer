@@ -1946,7 +1946,7 @@ def test_scan_b524_textual_planner_receives_remote_heating_source_rows(
     assert artifact["meta"]["scan_plan"]["estimated_register_requests"] == 0
 
 
-def test_scan_b524_textual_planner_excludes_uncharacterized_remote_rows(
+def test_scan_b524_textual_planner_shows_unqualified_named_remote_rows_unselected(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -1979,9 +1979,14 @@ def test_scan_b524_textual_planner_excludes_uncharacterized_remote_rows(
 
     by_key = {(group.group, group.opcode): group for group in planner_groups}
     assert by_key[(0x02, 0x06)].name == "Heat Pump"
-    assert (0x03, 0x06) not in by_key
-    assert (0x04, 0x06) not in by_key
-    assert (0x05, 0x06) not in by_key
+    assert by_key[(0x03, 0x06)].name == "Air Recovery (VAR) recoVair"
+    assert by_key[(0x03, 0x06)].rr_max == 0x002F
+    assert by_key[(0x03, 0x06)].instances_probed is False
+    default_plan = captured["default_plan"]
+    assert isinstance(default_plan, dict)
+    assert make_plan_key(0x03, 0x06) not in default_plan
+    assert by_key[(0x04, 0x06)].rr_max is None
+    assert by_key[(0x05, 0x06)].rr_max == 0x002F
     assert by_key[(0x04, 0x02)].ii_max == 0x01
     assert by_key[(0x02, 0x06)].ii_max == 0x08
 
@@ -2059,11 +2064,12 @@ def test_scan_b524_textual_full_preset_keeps_exploratory_rows_visible_but_unsele
     planner_groups = captured["groups"]
     assert isinstance(planner_groups, list)
     by_key = {(group.group, group.opcode): group for group in planner_groups}
-    # UI and CLI expose the same characterized profile pairs.
+    # The UI shows the full named inventory while the preset stays qualified.
     assert (0x02, 0x06) in by_key
-    assert (0x03, 0x06) not in by_key
-    assert (0x04, 0x06) not in by_key
-    assert (0x05, 0x06) not in by_key
+    assert (0x03, 0x06) in by_key
+    assert by_key[(0x03, 0x06)].rr_max == 0x002F
+    assert by_key[(0x04, 0x06)].rr_max is None
+    assert by_key[(0x05, 0x06)].rr_max == 0x002F
 
     default_plan = captured["default_plan"]
     assert isinstance(default_plan, dict)
@@ -2321,8 +2327,10 @@ def test_scan_b524_textual_planner_uses_remote_presence_for_op06_rows(
 
     assert by_key[(0x01, 0x06)].present_instances == (0x01,)
     assert by_key[(0x02, 0x06)].present_instances == (0x01,)
-    assert (0x03, 0x06) not in by_key
-    assert (0x05, 0x06) not in by_key
+    assert by_key[(0x03, 0x06)].present_instances == ()
+    assert by_key[(0x03, 0x06)].instances_probed is False
+    assert by_key[(0x05, 0x06)].present_instances == ()
+    assert by_key[(0x05, 0x06)].instances_probed is False
     assert by_key[(0x0A, 0x06)].present_instances == (0x03,)
     assert by_key[(0x0C, 0x06)].present_instances == (0x04,)
     assert by_key[(0x0F, 0x06)].name == "Base Station"
@@ -2338,7 +2346,8 @@ def test_scan_b524_textual_planner_uses_remote_presence_for_op06_rows(
     assert by_key[(0x02, 0x02)].present_instances == (0x01, 0x02)
     assert by_key[(0x03, 0x02)].present_instances == (0x00, 0x01)
     assert by_key[(0x05, 0x02)].present_instances == (0x00,)
-    assert (0x0A, 0x02) not in by_key
+    assert by_key[(0x0A, 0x02)].name == "Unknown"
+    assert by_key[(0x0A, 0x02)].instances_probed is False
 
 
 def test_scan_b524_textual_planner_does_not_leak_remote_presence_into_local_mirror_rows(
@@ -2733,5 +2742,5 @@ def test_discovery_reports_separate_sorted_operation_groups(tmp_path: Path) -> N
     local = next(row for row in rows if row.startswith("OP=0x02 GG=0x08:"))
     remote = next(row for row in rows if row.startswith("OP=0x06 GG=0x08:"))
     assert "DeltaT" in local and "RR_max=0x0007" in local
-    assert "auroSTEP" in remote and "RR_max=0x0004" in remote
+    assert "auroSTEP" in remote and "RR_max=0x002F" in remote
     assert all("[Local Devices" not in row and "[Remote Devices" not in row for row in rows)

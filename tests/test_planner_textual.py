@@ -275,6 +275,46 @@ def test_textual_actions_keep_local_and_remote_states_independent_after_column_r
     assert captured[remote.key].rr_max == 0x0020
 
 
+def test_textual_unqualified_rr_requires_explicit_scope_before_save(monkeypatch) -> None:
+    from textual.app import App
+
+    group = PlannerGroup(
+        group=0x03,
+        opcode=0x06,
+        name="Air Recovery (VAR) recoVair",
+        descriptor=3.0,
+        known=True,
+        ii_max=0x08,
+        rr_max=None,
+        rr_max_full=None,
+        present_instances=(),
+        instances_probed=False,
+    )
+    captured: dict[str, object] = {}
+
+    def fake_run(self: App[object], *args: object, **kwargs: object) -> None:
+        key = group.key
+        self._focused_group = lambda: key  # type: ignore[method-assign]
+        self._refresh_table = lambda: None  # type: ignore[method-assign]
+        self._set_help = lambda text: captured.__setitem__("help", text)  # type: ignore[method-assign]
+        self.exit = lambda result: captured.__setitem__("plan", result)  # type: ignore[method-assign]
+
+        self.action_toggle_enabled()
+        self.action_save()
+        self._states[key].rr_max = 0x0010
+        self._states[key].instances = (0x01,)
+        self.action_save()
+
+    monkeypatch.setattr(App, "run", fake_run)
+
+    run_textual_scan_plan([group], request_rate_rps=None, default_plan={})
+
+    assert captured["help"] == "RR scope required for: 0x03"
+    assert captured["plan"] == {
+        group.key: GroupScanPlan(group=0x03, opcode=0x06, rr_max=0x0010, instances=(0x01,))
+    }
+
+
 def test_run_textual_scan_plan_registers_enter_binding_for_rr_max(
     monkeypatch,
 ) -> None:

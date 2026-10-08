@@ -18,6 +18,19 @@ _FIELDS = ("type", "width", "min", "max", "step")
 _SELECTORS = ("read_opcode", "group", "instance", "register")
 
 
+def load_generic_description_catalog() -> dict[str, Any]:
+    """Return class observations requested with II=FF, outside slot validation.
+
+    These rows carry no verified device identity and are never a fallback for
+    ``attach_bundled_descriptions`` or current-target edit validation.
+    """
+    return json.loads(
+        resources.files("helianthus_vrc_explorer.data")
+        .joinpath("b524_generic_parameter_descriptions.json")
+        .read_text(encoding="utf-8")
+    )
+
+
 def _device_identity(artifact: dict[str, Any], group: str, instance: str) -> dict[str, Any]:
     registers = (
         artifact.get("operations", {})

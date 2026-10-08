@@ -19,7 +19,6 @@ class _SummaryRow:
     group: str
     name: str
     namespace_key: str | None
-    descriptor: float
     instances_total: int
     instances_present: int
     instances_display: str
@@ -168,18 +167,19 @@ def _parse_u8_int(value: object) -> int | None:
     return None
 
 
-def _topology_total_from_ii_max(value: object) -> int | None:
+def _topology_total_from_ii_max(value: object, minimum: object = 0) -> int | None:
     ii_max = _parse_u8_int(value)
-    if ii_max is None:
+    ii_min = _parse_u8_int(minimum)
+    if ii_max is None or ii_min is None or ii_min > ii_max:
         return None
-    return ii_max + 1
+    return ii_max - ii_min + 1
 
 
-def _counts_toward_topology_total(instance_key: object, *, total: int) -> bool:
+def _counts_toward_topology_total(instance_key: object, *, total: int, minimum: int = 0) -> bool:
     instance_id = _parse_u8_int(instance_key)
     if instance_id is None:
         return False
-    return instance_id < total
+    return minimum <= instance_id < minimum + total
 
 
 def _format_instance_summary(
@@ -303,14 +303,14 @@ def _compute_summary_rows(artifact: dict[str, Any]) -> list[_SummaryRow]:
                 continue
             name = str(group_obj.get("name") or "Unknown")
             name = operation_group_display_name(group_key, int(op_key_norm, 0)) or name
-            descriptor = float(
-                group_obj.get("descriptor_observed", group_obj.get("descriptor_type")) or 0.0
-            )
             instances = group_obj.get("instances", {})
             if not isinstance(instances, dict):
                 instances = {}
 
-            group_total = _topology_total_from_ii_max(group_obj.get("ii_max"))
+            ii_min = _parse_u8_int(group_obj.get("ii_min", 0))
+            group_total = _topology_total_from_ii_max(
+                group_obj.get("ii_max"), group_obj.get("ii_min", 0)
+            )
             topology_authoritative = group_total is not None
             if group_total is None:
                 group_total = len(instances)
@@ -323,7 +323,9 @@ def _compute_summary_rows(artifact: dict[str, Any]) -> list[_SummaryRow]:
                     continue
                 if instance_obj.get("present") is True and (
                     not topology_authoritative
-                    or _counts_toward_topology_total(instance_key, total=group_total)
+                    or _counts_toward_topology_total(
+                        instance_key, total=group_total, minimum=ii_min or 0
+                    )
                 ):
                     instances_present += 1
                 registers = instance_obj.get("registers", {})
@@ -341,7 +343,6 @@ def _compute_summary_rows(artifact: dict[str, Any]) -> list[_SummaryRow]:
                     group=group_key,
                     name=name,
                     namespace_key=op_key_norm,
-                    descriptor=descriptor,
                     instances_total=group_total,
                     instances_present=instances_present,
                     instances_display=_format_instance_summary(
@@ -366,7 +367,6 @@ def _render_summary_block(console: Console, *, title: str, rows: list[_SummaryRo
     table = Table(show_header=True, header_style="bold", box=None)
     table.add_column("Group", style="cyan", no_wrap=True)
     table.add_column("Name", style="white")
-    table.add_column("Type", style="white", justify="right", no_wrap=True)
     table.add_column("Instances", style="white", justify="right", no_wrap=True)
     table.add_column("Registers", style="white", justify="right", no_wrap=True)
     table.add_column("Errors", style="white", justify="right", no_wrap=True)
@@ -374,7 +374,6 @@ def _render_summary_block(console: Console, *, title: str, rows: list[_SummaryRo
         table.add_row(
             row.group,
             row.name,
-            f"{row.descriptor:g}",
             row.instances_display,
             str(row.registers_scanned),
             str(row.registers_errors),

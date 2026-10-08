@@ -107,7 +107,9 @@ class InstanceAvailabilityProbe:
 
 
 # Connected-device predicates in the characterized controller profile.
-CONNECTED_DEVICE_GROUPS: Final[frozenset[int]] = frozenset({1, 2, 8, 9, 10, 12, 14, 15})
+CONNECTED_DEVICE_GROUPS: Final[frozenset[int]] = frozenset(
+    {1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15}
+)
 _NUMERIC_REMOTE_FIRMWARE_GROUPS: Final[frozenset[int]] = frozenset({1, 2, 9, 10, 12, 14, 15})
 
 

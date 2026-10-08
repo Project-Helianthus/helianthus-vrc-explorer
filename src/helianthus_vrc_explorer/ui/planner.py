@@ -38,13 +38,15 @@ class PlannerGroup:
     descriptor: float
     known: bool
     ii_max: int | None
-    rr_max: int
-    rr_max_full: int
+    rr_max: int | None
+    rr_max_full: int | None
     present_instances: tuple[int, ...]
     namespace_label: str | None = None
     recommended: bool = True
     expected_count: int | None = None
     ii_min: int | None = None
+    instances_probed: bool = True
+    research_rr_max: int | None = None
 
     @property
     def key(self) -> PlanKey:
@@ -316,6 +318,8 @@ def build_plan_from_preset(
         if group.opcode not in profile_opcodes(group.group, preset):
             continue
         if preset in {"recommended", "full"}:
+            if group.rr_max is None:
+                continue
             selected[group.key] = GroupScanPlan(
                 group=group.group,
                 opcode=group.opcode,
@@ -323,13 +327,18 @@ def build_plan_from_preset(
                 instances=_instances_for_preset(group, preset),
             )
         elif preset == "research":
+            normal_rr_max = group.research_rr_max
+            if normal_rr_max is None and group.rr_max is not None:
+                normal_rr_max = max(group.rr_max, group.rr_max_full or group.rr_max)
+            if normal_rr_max is None:
+                continue
             selected[group.key] = GroupScanPlan(
                 group=group.group,
                 opcode=group.opcode,
                 rr_max=research_rr_max(
                     group=group.group,
                     opcode=group.opcode,
-                    normal_rr_max=max(group.rr_max, group.rr_max_full),
+                    normal_rr_max=normal_rr_max,
                 ),
                 instances=_instances_for_preset(group, preset),
             )
@@ -358,13 +367,17 @@ def _render_table(
         for g in namespace_rows:
             if g.ii_max is None:
                 instances = "singleton"
+            elif not g.instances_probed:
+                instances = f"unprobed/{len(planner_instance_range(g))}"
             elif unknown:
                 instances = f"0/{len(planner_instance_range(g))} (est.)"
             else:
                 instances = f"{len(planner_present_instances(g))}/{len(planner_instance_range(g))}"
             name = g.display_name if not unknown else f"{g.display_name} (experimental)"
-            rr_max = _hex_u16(g.rr_max_full)
-            if g.rr_max_full != g.rr_max:
+            rr_max = (
+                "— (explicit required)" if g.rr_max is None else _hex_u16(g.rr_max_full or g.rr_max)
+            )
+            if g.rr_max is not None and g.rr_max_full is not None and g.rr_max_full != g.rr_max:
                 rr_max = f"{_hex_u16(g.rr_max)} / {rr_max}"
             table.add_row(
                 _hex_u8(g.group),
@@ -541,6 +554,30 @@ def _ask_instances(
         return tuple(parsed_instances)
 
 
+def _custom_plan_with_required_rr(console: Console, group: PlannerGroup) -> GroupScanPlan:
+    """Create a custom row only after the operator supplies an RR scope."""
+
+    from .planner_textual import _parse_register_scope
+
+    while True:
+        raw_rr_max = Prompt.ask(
+            f"{group.prompt_label} RR scope is unqualified; enter ceiling, list, or range",
+            console=console,
+        ).strip()
+        try:
+            rr_max, registers = _parse_register_scope(raw_rr_max)
+        except ValueError as exc:
+            console.print(f"[red]Invalid RR_max:[/red] {exc}")
+            continue
+        return GroupScanPlan(
+            group=group.group,
+            opcode=group.opcode,
+            rr_max=rr_max,
+            instances=(0x00,) if group.ii_max is None else planner_present_instances(group),
+            registers=registers,
+        )
+
+
 def prompt_scan_plan(
     console: Console,
     groups: list[PlannerGroup],
@@ -611,7 +648,14 @@ def prompt_scan_plan(
 
     preset = _ask_preset(console, default_preset=default_preset)
     if preset == "custom":
-        selected_plan = dict(default_selected_plan)
+        # A research preset may have supplied its broad RR scope for an
+        # unqualified native row. Custom mode requires the operator to enter
+        # that scope explicitly, while preserving an already explicit plan.
+        selected_plan = {
+            key: group_plan
+            for key, group_plan in default_selected_plan.items()
+            if eligible[key].rr_max is not None
+        }
     else:
         selected_plan = build_plan_from_preset(groups, preset=preset)
 
@@ -645,7 +689,9 @@ def prompt_scan_plan(
                         if planner_group.ii_max is None
                         else planner_present_instances(planner_group)
                     ),
-                ),
+                )
+                if planner_group.rr_max is not None
+                else _custom_plan_with_required_rr(console, planner_group),
             )
             for group in selected_groups
             for planner_group in sorted(

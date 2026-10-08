@@ -16,6 +16,39 @@ from helianthus_vrc_explorer.scanner.plan import (
 from helianthus_vrc_explorer.ui.planner import PlannerGroup, _format_seconds, build_plan_from_preset
 
 
+def test_native_planner_inventory_and_rr_qualification_are_operation_scoped() -> None:
+    from helianthus_vrc_explorer.scanner.b524_plan import planner_native_opcodes, planner_rr_max
+
+    assert planner_native_opcodes(0x00) == (0x02,)
+    assert planner_native_opcodes(0x06) == (0x02, 0x06)
+    assert planner_native_opcodes(0x0F) == (0x06,)
+    assert planner_native_opcodes(0x10) == ()
+    assert planner_rr_max(0x03, 0x02) == 0x002E
+    assert planner_rr_max(0x03, 0x06) == 0x002F
+    assert planner_rr_max(0x06, 0x02) is None
+    assert planner_rr_max(0x0B, 0x06) == 0x002F
+
+
+def test_research_retains_unqualified_native_pair_without_defaulting_other_presets() -> None:
+    group = PlannerGroup(
+        group=0x03,
+        opcode=0x06,
+        name="Air Recovery (VAR) recoVair",
+        descriptor=3.0,
+        known=True,
+        ii_max=0x08,
+        rr_max=None,
+        rr_max_full=None,
+        present_instances=(),
+        instances_probed=False,
+        research_rr_max=0x00FF,
+    )
+
+    assert build_plan_from_preset([group], preset="recommended") == {}
+    assert build_plan_from_preset([group], preset="full") == {}
+    assert build_plan_from_preset([group], preset="research")[group.key].rr_max == 0x00FF
+
+
 def test_parse_int_token_accepts_decimal_and_hex() -> None:
     assert parse_int_token("10") == 10
     assert parse_int_token("0x0a") == 10

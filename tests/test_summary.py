@@ -574,3 +574,47 @@ def test_render_summary_does_not_collapse_conflicting_observed_namespaces_with_d
     # the section for that operation.
     assert "Native Domestic Hot Water" in text
     assert "Local Devices (0x02)" in text
+
+
+def test_summary_uses_explicit_nonzero_instance_minimum(tmp_path: Path) -> None:
+    artifact = {
+        "meta": {"destination_address": "0x15", "scan_duration_seconds": 1.0},
+        "operations": {
+            "0x02": {
+                "groups": {
+                    "0x02": {
+                        "name": "Circuits",
+                        "ii_min": "0x01",
+                        "ii_max": "0x09",
+                        "instances": {
+                            "0x00": {"present": True, "registers": {}},
+                            "0x01": {"present": True, "registers": {}},
+                            "0x02": {"present": True, "registers": {}},
+                            "0x09": {"present": True, "registers": {}},
+                        },
+                    }
+                }
+            },
+            "0x06": {
+                "groups": {
+                    "0x0f": {
+                        "name": "Base Station",
+                        "ii_min": "0x01",
+                        "ii_max": "0x08",
+                        "instances": {
+                            "0x00": {"present": True, "registers": {}},
+                            "0x08": {"present": True, "registers": {}},
+                            "0x09": {"present": True, "registers": {}},
+                        },
+                    }
+                }
+            },
+        },
+    }
+    console = Console(record=True, width=180)
+    render_summary(console, artifact, output_path=tmp_path / "artifact.json")
+    text = console.export_text()
+    assert "3/9" in text
+    assert "1/8" in text
+    assert "3/10" not in text
+    assert "Type" not in text

@@ -600,8 +600,10 @@ def test_instance_present_buffer(monkeypatch: pytest.MonkeyPatch) -> None:
     assert calls == [(0x06, 0x08, 0x0001)]
 
 
-def test_instance_absent_aurostep_uses_false_device_connected_without_header_fallback(
+@pytest.mark.parametrize("group", [0x03, 0x05, 0x06, 0x07, 0x08, 0x0B])
+def test_remote_false_device_connected_does_not_fall_back_to_readable_headers(
     monkeypatch: pytest.MonkeyPatch,
+    group: int,
 ) -> None:
     import helianthus_vrc_explorer.scanner.register as register
 
@@ -624,7 +626,7 @@ def test_instance_absent_aurostep_uses_false_device_connected_without_header_fal
     probe = probe_instance_availability(
         _StatusOnlyTransport(),
         dst=0x15,
-        group=0x08,
+        group=group,
         instance=0x01,
         opcode=0x06,
     )
@@ -644,8 +646,10 @@ def test_instance_absent_aurostep_uses_false_device_connected_without_header_fal
         ("BOOL", None, "decode_error: invalid BOOL width"),
     ),
 )
-def test_aurostep_non_boolean_or_invalid_device_connected_remains_unknown(
+@pytest.mark.parametrize("group", [0x03, 0x05, 0x06, 0x07, 0x08, 0x0B])
+def test_remote_non_boolean_or_invalid_device_connected_remains_unknown(
     monkeypatch: pytest.MonkeyPatch,
+    group: int,
     entry_type: str,
     value: object,
     error: str | None,
@@ -671,7 +675,7 @@ def test_aurostep_non_boolean_or_invalid_device_connected_remains_unknown(
     probe = probe_instance_availability(
         _StatusOnlyTransport(),
         dst=0x15,
-        group=0x08,
+        group=group,
         instance=0x01,
         opcode=0x06,
     )

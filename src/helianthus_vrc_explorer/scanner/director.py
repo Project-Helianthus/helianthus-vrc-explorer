@@ -43,7 +43,9 @@ class GroupConfig(TypedDict):
     exhaustive_only: NotRequired[bool]
 
 
-# Known groups (hardcoded reference, validated against CSV).
+# Observed profile scan windows. RR ceilings schedule reads; they do not prove
+# terminal register maxima. Opcode-specific overrides never establish another
+# namespace with the same GG.
 GROUP_CONFIG: Final[dict[int, GroupConfig]] = {
     0x00: {
         "desc": 3.0,
@@ -64,7 +66,7 @@ GROUP_CONFIG: Final[dict[int, GroupConfig]] = {
         "opcodes": [0x02],
         "name_by_opcode": {0x02: "Native Domestic Hot Water", 0x06: "Primary Heating Source"},
         "namespace_opcodes": [0x02, 0x06],
-        "rr_max_by_opcode": {0x02: 0x0013, 0x06: 0x0015},
+        "rr_max_by_opcode": {0x02: 0x0013, 0x06: 0x002F},
         "ii_max_by_opcode": {0x02: 0x00, 0x06: 0x08},
     },
     0x02: {
@@ -75,7 +77,7 @@ GROUP_CONFIG: Final[dict[int, GroupConfig]] = {
         "opcodes": [0x02],
         "name_by_opcode": {0x02: "Circuits", 0x06: "Secondary Heating Source"},
         "namespace_opcodes": [0x02, 0x06],
-        "rr_max_by_opcode": {0x02: 0x0025, 0x06: 0x0015},
+        "rr_max_by_opcode": {0x02: 0x0025, 0x06: 0x002F},
         "ii_max_by_opcode": {0x02: 0x09, 0x06: 0x08},
     },
     0x03: {
@@ -86,7 +88,7 @@ GROUP_CONFIG: Final[dict[int, GroupConfig]] = {
         "opcodes": [0x02],
         "name_by_opcode": {0x02: "Zones", 0x06: "Unknown"},
         "namespace_opcodes": [0x02, 0x06],
-        "rr_max_by_opcode": {0x02: 0x002E, 0x06: 0x002E},
+        "rr_max_by_opcode": {0x02: 0x002E, 0x06: 0x002F},
         "ii_max_by_opcode": {0x02: 0x0A, 0x06: 0x0A},
     },
     0x04: {
@@ -108,7 +110,7 @@ GROUP_CONFIG: Final[dict[int, GroupConfig]] = {
         "opcodes": [0x02],
         "name_by_opcode": {0x02: "Solar Loaded Cylinder", 0x06: "Unknown"},
         "namespace_opcodes": [0x02, 0x06],
-        "rr_max_by_opcode": {0x02: 0x0004, 0x06: 0x0004},
+        "rr_max_by_opcode": {0x02: 0x0004, 0x06: 0x002F},
         "ii_max_by_opcode": {0x02: 0x01, 0x06: 0x0A},
     },
     0x08: {
@@ -118,7 +120,7 @@ GROUP_CONFIG: Final[dict[int, GroupConfig]] = {
         "opcodes": [0x02, 0x06],
         "name_by_opcode": {0x02: "DeltaT", 0x06: "Unknown"},
         "namespace_opcodes": [0x02, 0x06],
-        "rr_max_by_opcode": {0x02: 0x0007, 0x06: 0x0004},
+        "rr_max_by_opcode": {0x02: 0x0007, 0x06: 0x002F},
         "ii_max_by_opcode": {0x02: 0x0A, 0x06: 0x0A},
     },
     0x09: {
@@ -157,7 +159,7 @@ GROUP_CONFIG: Final[dict[int, GroupConfig]] = {
         "opcodes": [0x06],
         "name_by_opcode": {0x02: "Device", 0x06: "Unknown"},
         "namespace_opcodes": [0x02, 0x06],
-        "rr_max_by_opcode": {0x02: 0x0030, 0x06: 0x0030},
+        "rr_max_by_opcode": {0x02: 0x0030, 0x06: 0x002F},
         "ii_max_by_opcode": {0x02: 0x0A, 0x06: 0x0A},
     },
     0x07: {
@@ -167,7 +169,7 @@ GROUP_CONFIG: Final[dict[int, GroupConfig]] = {
         "opcodes": [0x06],
         "name_by_opcode": {0x02: "Generator", 0x06: "Unknown"},
         "namespace_opcodes": [0x02, 0x06],
-        "rr_max_by_opcode": {0x02: 0x0030, 0x06: 0x0030},
+        "rr_max_by_opcode": {0x02: 0x0030, 0x06: 0x002F},
         "ii_max_by_opcode": {0x02: 0x0A, 0x06: 0x0A},
     },
     0x0B: {
@@ -177,7 +179,7 @@ GROUP_CONFIG: Final[dict[int, GroupConfig]] = {
         "opcodes": [0x06],
         "name_by_opcode": {0x02: "Unknown", 0x06: "Functional Modules (VR70)"},
         "namespace_opcodes": [0x02, 0x06],
-        "rr_max_by_opcode": {0x02: 0x0010, 0x06: 0x0010},
+        "rr_max_by_opcode": {0x02: 0x0010, 0x06: 0x002F},
         "ii_max_by_opcode": {0x02: 0x0A, 0x06: 0x0A},
     },
     0x0D: {
@@ -192,6 +194,7 @@ GROUP_CONFIG: Final[dict[int, GroupConfig]] = {
         "rr_max": 0x0010,
         "opcodes": [0x02, 0x06],
         "name_by_opcode": {0x02: "Unknown", 0x06: "Clock"},
+        "rr_max_by_opcode": {0x06: 0x0033},
     },
     0x0F: {
         "name": "Base Stations",
@@ -199,6 +202,7 @@ GROUP_CONFIG: Final[dict[int, GroupConfig]] = {
         "rr_max": 0x0010,
         "opcodes": [0x02, 0x06],
         "name_by_opcode": {0x02: "Unknown", 0x06: "Base Stations"},
+        "rr_max_by_opcode": {0x06: 0x0033},
     },
     0x10: {
         "name": "Unknown",

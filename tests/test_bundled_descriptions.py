@@ -6,9 +6,50 @@ from helianthus_vrc_explorer.schema.parameter_descriptions import (
     attach_bundled_descriptions,
     export_description_baseline,
     load_description_baseline,
+    load_generic_description_catalog,
 )
 from helianthus_vrc_explorer.ui.browse_store import BrowseStore
 from helianthus_vrc_explorer.ui.html_report import render_html_report
+
+
+def test_generic_class_catalog_never_qualifies_a_concrete_instance_or_edit() -> None:
+    from helianthus_vrc_explorer.protocol.b524_metadata import validate_parameter_edit
+
+    catalog = load_generic_description_catalog()
+    rows = catalog["generic_descriptions"]
+    assert len(rows) == 223
+    assert (
+        len({tuple(row[key] for key in ("read_opcode", "group", "register")) for row in rows})
+        == 223
+    )
+    for row in rows:
+        assert row["instance"] == "0xff"
+        assert row["scope"] == "generic_instance_class"
+        assert row["device_identity_verified"] is False
+        assert (
+            validate_parameter_edit(
+                row, type_spec=row["type"], value=0, encoded=bytes(row["width"])
+            )
+            == "unvalidated"
+        )
+    artifact = _artifact()
+    entry = artifact["operations"]["0x02"]["groups"]["0x02"]["instances"]["0x01"]["registers"][
+        "0x0009"
+    ]
+    del entry["parameter_description"]
+    attach_bundled_descriptions(artifact, bundle=catalog)
+    assert "bundled_parameter_description" not in entry
+    assert "parameter_description" not in entry
+    for forbidden in (
+        "reply_hex",
+        "request_hex",
+        "serial",
+        "endpoint",
+        "destination_address",
+        "device_class_raw",
+        "device_firmware_raw",
+    ):
+        assert forbidden not in str(catalog)
 
 
 def _artifact() -> dict:

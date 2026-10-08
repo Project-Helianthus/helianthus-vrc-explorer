@@ -43,7 +43,7 @@ PLANNER_TABLE_COLUMNS = (
 class _EditableGroup:
     group: PlannerGroup
     enabled: bool
-    rr_max: int
+    rr_max: int | None
     instances: tuple[int, ...]
     registers: tuple[int, ...] | None = None
 
@@ -67,6 +67,8 @@ def _table_row_values(
 
 
 def _format_register_scope(state: _EditableGroup) -> str:
+    if state.rr_max is None:
+        return "— (explicit required)"
     if state.registers is None:
         return f"0x{state.rr_max:04X}"
     return ",".join(f"0x{register:04X}" for register in state.registers)
@@ -96,7 +98,9 @@ def _format_instances(group: PlannerGroup, instances: tuple[int, ...], *, enable
     full = planner_instance_range(group)
     total = len(full)
     selected = len(instances)
-    if instances == full:
+    if not group.instances_probed and not instances:
+        label = f"unprobed 0/{total}"
+    elif instances == full:
         label = f"all {selected}/{total}"
     elif instances == planner_present_instances(group):
         label = f"present {selected}/{total}"
@@ -104,6 +108,8 @@ def _format_instances(group: PlannerGroup, instances: tuple[int, ...], *, enable
         label = f"none 0/{total}"
     else:
         label = f"{format_int_set(list(instances))} ({selected}/{total})"
+    if not group.instances_probed and instances:
+        label = f"{label} (unprobed)"
     if not enabled:
         return f"{label} (off)"
     return label
@@ -140,16 +146,18 @@ def _estimate_footer(
             registers=state.registers,
         )
         for (key, state) in states.items()
-        if state.enabled
+        if state.enabled and state.rr_max is not None
     }
     requests = estimate_register_requests(plan)
     eta_s = estimate_eta_seconds(requests=requests, request_rate_rps=request_rate_rps)
     eta_txt = _format_seconds(eta_s) if eta_s is not None else "n/a"
     rate_txt = f"{request_rate_rps:.2f}" if request_rate_rps is not None else "n/a"
     enabled_groups = sum(1 for state in states.values() if state.enabled)
+    missing_rr = sum(1 for state in states.values() if state.enabled and state.rr_max is None)
+    missing_rr_text = f" | {missing_rr} need RR scope" if missing_rr else ""
     return (
         f"Plan: {requests} requests | ETA: {eta_txt} @ {rate_txt} req/s | "
-        f"{enabled_groups} plan entries selected"
+        f"{enabled_groups} plan entries selected{missing_rr_text}"
     )
 
 
@@ -543,7 +551,7 @@ def run_textual_scan_plan(
                 return
             self._editing_group = key
             state = self._states[key]
-            current = _format_register_scope(state)
+            current = "" if state.rr_max is None else _format_register_scope(state)
             planner_group = state.group
             self.push_screen(
                 _InputDialog(
@@ -609,8 +617,16 @@ def run_textual_scan_plan(
                     registers=state.registers,
                 )
                 for (key, state) in sorted(self._states.items())
-                if state.enabled
+                if state.enabled and state.rr_max is not None
             }
+            missing_rr = [
+                state.group.prompt_label
+                for state in self._states.values()
+                if state.enabled and state.rr_max is None
+            ]
+            if missing_rr:
+                self._set_help(f"RR scope required for: {', '.join(missing_rr)}")
+                return
             try:
                 validate_scalar_request_limit(plan)
             except ValueError as exc:

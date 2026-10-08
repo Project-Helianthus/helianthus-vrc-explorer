@@ -58,6 +58,8 @@ from .b524_plan import (
     _rr_max_full_for_opcode,
     _scan_plan_meta_groups,
     opcode_label,
+    planner_native_opcodes,
+    planner_rr_max,
 )
 from .b524_probe import (
     ConstraintEntry,
@@ -821,7 +823,9 @@ def run_b524_scan(
             config = GROUP_CONFIG.get(group.group)
             group_meta = metadata_map[group.group]
             resolved_opcodes = resolved_group_opcodes.get(group.group, ())
-            opcodes = resolved_opcodes
+            opcodes = (
+                planner_native_opcodes(group.group) if config is not None else resolved_opcodes
+            )
             if not opcodes:
                 continue
             multi_op = len(opcodes) > 1
@@ -830,6 +834,15 @@ def run_b524_scan(
                     explicit_plan.get(_plan_key(group.group, opcode))
                     if explicit_plan is not None
                     else None
+                )
+                qualified_rr_max = (
+                    planner_rr_max(group.group, opcode)
+                    if config is not None
+                    else _rr_max_for_opcode(
+                        group=group.group,
+                        default_rr_max=group_meta.rr_max,
+                        opcode=opcode,
+                    )
                 )
                 planner_ii_max = _planner_ii_max(
                     _ii_max_for_opcode(
@@ -855,16 +868,15 @@ def run_b524_scan(
                         descriptor=group.descriptor,
                         known=config is not None,
                         ii_max=planner_ii_max,
-                        rr_max=requested_plan.rr_max
-                        if requested_plan is not None
-                        else _rr_max_for_opcode(
-                            group=group.group,
-                            default_rr_max=group_meta.rr_max,
-                            opcode=opcode,
+                        rr_max=(
+                            requested_plan.rr_max
+                            if requested_plan is not None
+                            else qualified_rr_max
                         ),
-                        rr_max_full=_rr_max_full_for_opcode(
-                            group=group.group,
-                            opcode=opcode,
+                        rr_max_full=(
+                            _rr_max_full_for_opcode(group=group.group, opcode=opcode)
+                            if qualified_rr_max is not None
+                            else None
                         ),
                         present_instances=present_instances,
                         ii_min=_ii_min_for_opcode(group=group.group, opcode=opcode),
@@ -885,6 +897,11 @@ def run_b524_scan(
                         ),
                         namespace_label=(opcode_label(opcode) if multi_op else None),
                         recommended=_planner_group_is_recommended(
+                            group=group.group,
+                            opcode=opcode,
+                        ),
+                        instances_probed=opcode in resolved_opcodes,
+                        research_rr_max=_rr_max_full_for_opcode(
                             group=group.group,
                             opcode=opcode,
                         ),
