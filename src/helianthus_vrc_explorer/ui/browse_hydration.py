@@ -687,7 +687,7 @@ class _HydratedBrowseStore:
                 final_plan_routes.items(),
                 key=lambda item: (_safe_int_hex(item[0][1]), _safe_int_hex(item[0][0])),
             ):
-                _op_obj = _operations.get(_op_key)
+                _op_obj = _operations.get(_op_key) if isinstance(_operations, dict) else None
                 _op_groups = _op_obj.get("groups") if isinstance(_op_obj, dict) else None
                 _observed_group = _op_groups.get(_gk) if isinstance(_op_groups, dict) else None
                 _group_obj = _project_group_for_final_plan(

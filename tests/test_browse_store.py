@@ -5,6 +5,20 @@ from copy import deepcopy
 from helianthus_vrc_explorer.ui.browse_store import BrowseStore
 
 
+def test_selected_empty_route_without_operation_observations_does_not_crash() -> None:
+    artifact = {
+        "schema_version": "2.3",
+        "meta": {
+            "scan_plan": {
+                "groups": {"0x09": {"operations": {"0x02": {"instances": [], "rr_max": "0x000f"}}}}
+            }
+        },
+    }
+    store = BrowseStore.from_artifact(artifact)
+    assert store.rows == []
+    assert any(node.group_key == "0x09" and node.level == "group" for node in store.tree_nodes)
+
+
 def _sample_artifact() -> dict[str, object]:
     return {
         "meta": {
