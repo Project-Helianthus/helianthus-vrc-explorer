@@ -291,7 +291,9 @@ def test_default_scan_keeps_system_information_separate_and_targets_writable_des
     assert entry["parameter_description"]["instance"] == "0x03"
     assert [p for p in bus.requests if p[0] in {1, 7}] == [bytes.fromhex("0102030200")]
     # The circuit count never restricts the independent device namespace.
-    assert "0x06:0x02" not in artifact["meta"]["instance_counts"]
+    remote_count = artifact["meta"]["instance_counts"]["0x06:0x02"]
+    assert remote_count["identifier"] == "0x000d"
+    assert remote_count["expected"] is None
 
 
 def test_default_description_requests_cover_all_observed_writable_parameters() -> None:

@@ -9,7 +9,8 @@ from helianthus_vrc_explorer.scanner.scan_policy import parse_scan_plan, profile
 def test_profile_opcodes_are_deterministic_for_each_preset() -> None:
     assert profile_opcodes(0x00, "recommended") == (0x02,)
     assert profile_opcodes(0x0A, "full") == (0x06,)
-    assert profile_opcodes(0x07, "recommended") == ()
+    assert profile_opcodes(0x07, "recommended") == (0x06,)
+    assert profile_opcodes(0x0B, "full") == (0x06,)
     assert profile_opcodes(0x69, "research") == (0x02, 0x06)
     assert profile_opcodes(0x00, "research") == (0x02,)
     assert profile_opcodes(0x00, "custom") == (0x02, 0x06)

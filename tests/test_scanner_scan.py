@@ -180,6 +180,7 @@ def _write_fixture_groups_00_and_01(tmp_path: Path) -> Path:
                             "0x00": {
                                 "registers": {
                                     "0x0000": {"raw_hex": "00"},
+                                    "0x0001": {"raw_hex": "0100"},
                                 }
                             }
                         }
@@ -1614,7 +1615,9 @@ def test_scan_b524_recommended_plan_keeps_namespace_rr_max(tmp_path: Path) -> No
     assert plan["multi_op"] is True
     assert plan["operations"]["0x02"]["rr_max"] == "0x000f"
     assert plan["operations"]["0x06"]["rr_max"] == "0x0035"
-    assert artifact["meta"]["scan_plan"]["estimated_register_requests"] == 384
+    # Recommended keeps only the namespace rows with affirmative instance
+    # evidence; the no-instance peer remains planner-visible but unselected.
+    assert artifact["meta"]["scan_plan"]["estimated_register_requests"] == 326
 
 
 def test_scan_b524_instance_discovery_runs_local_namespace_before_remote(
@@ -1992,14 +1995,17 @@ def test_scan_b524_textual_planner_receives_remote_heating_source_rows(
     assert name_by_key[(0x01, 0x06)] == "Boiler"
     by_key = {(group.group, group.opcode): group for group in planner_groups}
     assert by_key[(0x01, 0x06)].ii_max == 0x08
+    assert by_key[(0x01, 0x02)].native_dhw_admitted is True
 
     default_plan = captured["default_plan"]
     assert isinstance(default_plan, dict)
     assert make_plan_key(0x00, 0x02) in default_plan
     assert make_plan_key(0x01, 0x02) in default_plan
-    assert make_plan_key(0x01, 0x06) in default_plan
-    assert make_plan_key(0x02, 0x06) in default_plan
+    assert make_plan_key(0x01, 0x06) not in default_plan
+    assert make_plan_key(0x02, 0x06) not in default_plan
     assert make_plan_key(0x00, 0x06) not in default_plan
+    native_dhw = artifact_op_group(artifact, op="0x02", group="0x01")
+    assert native_dhw["availability_probes"]["0x00"]["present"] is True
     assert artifact["meta"]["scan_plan"]["estimated_register_requests"] == 0
 
 
@@ -2038,7 +2044,7 @@ def test_scan_b524_textual_planner_shows_unqualified_named_remote_rows_unselecte
     assert by_key[(0x02, 0x06)].name == "Heat Pump"
     assert by_key[(0x03, 0x06)].name == "Air Recovery (VAR) recoVair"
     assert by_key[(0x03, 0x06)].rr_max == 0x002F
-    assert by_key[(0x03, 0x06)].instances_probed is False
+    assert by_key[(0x03, 0x06)].instances_probed is True
     default_plan = captured["default_plan"]
     assert isinstance(default_plan, dict)
     assert make_plan_key(0x03, 0x06) not in default_plan
@@ -2049,11 +2055,59 @@ def test_scan_b524_textual_planner_shows_unqualified_named_remote_rows_unselecte
 
     default_plan = captured["default_plan"]
     assert isinstance(default_plan, dict)
-    assert make_plan_key(0x02, 0x06) in default_plan
+    assert make_plan_key(0x02, 0x06) not in default_plan
     assert make_plan_key(0x03, 0x06) not in default_plan
     assert make_plan_key(0x04, 0x06) not in default_plan
     assert make_plan_key(0x05, 0x06) not in default_plan
     assert artifact["meta"]["scan_plan"]["estimated_register_requests"] == 0
+
+
+@pytest.mark.parametrize("planner_ui", ["classic", "textual"])
+def test_interactive_recommended_keeps_empty_known_rows_visible_but_unselected(
+    monkeypatch,
+    tmp_path: Path,
+    planner_ui: str,
+) -> None:
+    import sys
+
+    captured: dict[str, object] = {}
+
+    def accept_empty_plan(groups, **kwargs):
+        captured["groups"] = groups
+        captured["default_plan"] = kwargs["default_plan"]
+        return {}
+
+    if planner_ui == "textual":
+        monkeypatch.setattr(
+            "helianthus_vrc_explorer.ui.planner_textual.run_textual_scan_plan",
+            accept_empty_plan,
+        )
+    else:
+        monkeypatch.setattr(
+            "helianthus_vrc_explorer.scanner.scan.prompt_scan_plan",
+            lambda _console, groups, **kwargs: accept_empty_plan(groups, **kwargs),
+        )
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
+    scan_b524(
+        DummyTransport(_write_fixture_groups_00_to_05(tmp_path)),
+        dst=0x15,
+        observer=_NoopObserver(),
+        console=Console(force_terminal=True),
+        planner_ui=planner_ui,
+        planner_preset="recommended",
+    )
+
+    planner_groups = captured["groups"]
+    assert isinstance(planner_groups, list)
+    visible_keys = {group.key for group in planner_groups}
+    assert make_plan_key(0x02, 0x06) in visible_keys
+    assert make_plan_key(0x03, 0x06) in visible_keys
+
+    default_plan = captured["default_plan"]
+    assert isinstance(default_plan, dict)
+    assert make_plan_key(0x02, 0x06) not in default_plan
+    assert make_plan_key(0x03, 0x06) not in default_plan
 
 
 def test_scan_b524_textual_planner_uses_remote_presence_for_remote_namespace_rows(
@@ -2136,9 +2190,9 @@ def test_scan_b524_textual_full_preset_keeps_exploratory_rows_visible_but_unsele
     assert make_plan_key(0x04, 0x02) in default_plan
     assert make_plan_key(0x05, 0x02) in default_plan
     assert make_plan_key(0x02, 0x06) in default_plan
-    assert make_plan_key(0x03, 0x06) not in default_plan
+    assert make_plan_key(0x03, 0x06) in default_plan
     assert make_plan_key(0x04, 0x06) not in default_plan
-    assert make_plan_key(0x05, 0x06) not in default_plan
+    assert make_plan_key(0x05, 0x06) in default_plan
 
 
 def test_scan_b524_textual_full_preset_keeps_remote_only_group_selected_on_remote_opcode(
@@ -2384,10 +2438,10 @@ def test_scan_b524_textual_planner_uses_remote_presence_for_op06_rows(
 
     assert by_key[(0x01, 0x06)].present_instances == (0x01,)
     assert by_key[(0x02, 0x06)].present_instances == (0x01,)
-    assert by_key[(0x03, 0x06)].present_instances == ()
-    assert by_key[(0x03, 0x06)].instances_probed is False
-    assert by_key[(0x05, 0x06)].present_instances == ()
-    assert by_key[(0x05, 0x06)].instances_probed is False
+    assert by_key[(0x03, 0x06)].present_instances == (0x02,)
+    assert by_key[(0x03, 0x06)].instances_probed is True
+    assert by_key[(0x05, 0x06)].present_instances == (0x01,)
+    assert by_key[(0x05, 0x06)].instances_probed is True
     assert by_key[(0x0A, 0x06)].present_instances == (0x03,)
     assert by_key[(0x0C, 0x06)].present_instances == (0x04,)
     assert by_key[(0x0F, 0x06)].name == "Base Station"

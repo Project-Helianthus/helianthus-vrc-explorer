@@ -254,6 +254,146 @@ def test_full_uses_all_declared_slots_even_when_expected_count_is_positive() -> 
     )
 
 
+def test_recommended_requires_positive_instance_evidence_but_full_keeps_known_inventory() -> None:
+    groups = [
+        PlannerGroup(
+            group=0x00,
+            opcode=0x02,
+            name="System",
+            descriptor=3.0,
+            known=True,
+            ii_max=None,
+            rr_max=0x00FF,
+            rr_max_full=0x00FF,
+            present_instances=(),
+        ),
+        PlannerGroup(
+            group=0x01,
+            opcode=0x02,
+            name="Native Domestic Hot Water",
+            descriptor=3.0,
+            known=True,
+            ii_max=None,
+            rr_max=0x0013,
+            rr_max_full=0x0013,
+            present_instances=(),
+            native_dhw_admitted=True,
+        ),
+        PlannerGroup(
+            group=0x02,
+            opcode=0x02,
+            name="Heating Circuits",
+            descriptor=1.0,
+            known=True,
+            ii_max=0x09,
+            rr_max=0x0025,
+            rr_max_full=0x0025,
+            present_instances=(0x01, 0x07),
+            expected_count=2,
+            instances_probed=True,
+        ),
+        PlannerGroup(
+            group=0x08,
+            opcode=0x02,
+            name="DeltaT",
+            descriptor=1.0,
+            known=True,
+            ii_max=0x0A,
+            rr_max=0x0007,
+            rr_max_full=0x0007,
+            present_instances=(),
+            expected_count=0,
+            instances_probed=True,
+        ),
+        PlannerGroup(
+            group=0x03,
+            opcode=0x06,
+            name="Ventilation",
+            descriptor=1.0,
+            known=True,
+            ii_max=0x08,
+            rr_max=0x0015,
+            rr_max_full=0x0015,
+            present_instances=(),
+            expected_count=None,
+            instances_probed=True,
+        ),
+        PlannerGroup(
+            group=0x02,
+            opcode=0x06,
+            name="Heat Pump",
+            descriptor=1.0,
+            known=True,
+            ii_max=0x08,
+            rr_max=0x0015,
+            rr_max_full=0x0015,
+            present_instances=(),
+            expected_count=0,
+            instances_probed=True,
+        ),
+        PlannerGroup(
+            group=0x07,
+            opcode=0x06,
+            name="auroSTEP",
+            descriptor=1.0,
+            known=True,
+            ii_max=0x08,
+            rr_max=0x0015,
+            rr_max_full=0x0015,
+            present_instances=(),
+            expected_count=None,
+            instances_probed=False,
+        ),
+    ]
+
+    recommended = build_plan_from_preset(groups, preset="recommended")
+
+    assert recommended == {
+        make_plan_key(0x00, 0x02): GroupScanPlan(
+            group=0x00,
+            opcode=0x02,
+            rr_max=0x00FF,
+            instances=(0x00,),
+        ),
+        make_plan_key(0x01, 0x02): GroupScanPlan(
+            group=0x01,
+            opcode=0x02,
+            rr_max=0x0013,
+            instances=(0x00,),
+        ),
+        make_plan_key(0x02, 0x02): GroupScanPlan(
+            group=0x02,
+            opcode=0x02,
+            rr_max=0x0025,
+            instances=(0x01, 0x07),
+        ),
+    }
+    assert {
+        make_plan_key(0x08, 0x02),
+        make_plan_key(0x02, 0x06),
+    } <= set(build_plan_from_preset(groups, preset="full"))
+    assert {group.key for group in groups} <= set(build_plan_from_preset(groups, preset="research"))
+
+
+def test_recommended_rejects_native_dhw_without_its_correlated_gate() -> None:
+    native_dhw = PlannerGroup(
+        group=0x01,
+        opcode=0x02,
+        name="Native Domestic Hot Water",
+        descriptor=3.0,
+        known=True,
+        ii_max=None,
+        rr_max=0x0013,
+        rr_max_full=0x0013,
+        present_instances=(0x00,),
+        native_dhw_admitted=False,
+    )
+
+    assert build_plan_from_preset([native_dhw], preset="recommended") == {}
+    assert native_dhw.key in build_plan_from_preset([native_dhw], preset="full")
+    assert native_dhw.key in build_plan_from_preset([native_dhw], preset="research")
+
+
 def test_presets_apply_profile_pair_policy_and_research_rr_floor() -> None:
     groups = [
         PlannerGroup(
@@ -277,7 +417,9 @@ def test_presets_apply_profile_pair_policy_and_research_rr_floor() -> None:
     ]
 
     expected_profile = {make_plan_key(0x01, 0x02), make_plan_key(0x01, 0x06)}
-    assert set(build_plan_from_preset(groups, preset="recommended")) == expected_profile
+    # Neither synthetic singleton carries the mandatory native-DHW gate, so
+    # profile admission alone cannot select it by default.
+    assert build_plan_from_preset(groups, preset="recommended") == {}
     assert set(build_plan_from_preset(groups, preset="full")) == expected_profile
 
     research = build_plan_from_preset(groups, preset="research")
@@ -309,6 +451,7 @@ def test_profile_policy_overrides_stale_per_row_recommended_flags() -> None:
             rr_max_full=0x0013,
             present_instances=(0x00,),
             recommended=False,
+            native_dhw_admitted=True,
         ),
         PlannerGroup(
             group=0x01,
@@ -316,10 +459,10 @@ def test_profile_policy_overrides_stale_per_row_recommended_flags() -> None:
             name="Primary Heating Source",
             descriptor=3.0,
             known=True,
-            ii_max=None,
+            ii_max=0x08,
             rr_max=0x0015,
             rr_max_full=0x0015,
-            present_instances=(0x00,),
+            present_instances=(0x01,),
             namespace_label="remote",
             recommended=False,
         ),

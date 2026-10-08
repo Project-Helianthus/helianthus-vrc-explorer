@@ -94,13 +94,17 @@ class TransportRecoveryExhausted(TransportError):
     _CAUSES = frozenset(
         {
             "disconnected",
+            "malformed_escape",
             "protocol_sync_error",
+            "response_ended_before_complete",
             "socket_error",
             "timeout",
             "transport_error",
         }
     )
-    _PHASES = frozenset({"command_ack", "connect", "receive", "reconnect", "send", "transaction"})
+    _PHASES = frozenset(
+        {"command_ack", "connect", "receive", "reconnect", "response", "send", "transaction"}
+    )
 
     def __init__(
         self,

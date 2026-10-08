@@ -1949,6 +1949,43 @@ def test_recovery_trace_keeps_sanitized_initial_cause_and_phase(
     assert "private-endpoint" not in trace
 
 
+@pytest.mark.parametrize("cause", ["malformed_escape", "response_ended_before_complete"])
+def test_response_recovery_exhaustion_keeps_specific_cause_and_phase(
+    monkeypatch: pytest.MonkeyPatch, cause: str
+) -> None:
+    from helianthus_vrc_explorer.transport.base import TransportRecoveryExhausted
+
+    transport = EnhancedTcpTransport(
+        EnhancedTcpConfig(reconnect_max_retries=3, reconnect_delay_s=0)
+    )
+    attempts = 0
+    reconnects: list[int] = []
+
+    def _send_once(_seq: int, **kwargs: object) -> bytes:
+        nonlocal attempts
+        hook = kwargs["attempt_admitted_hook"]
+        assert callable(hook)
+        hook()
+        attempts += 1
+        raise _EnhancedSessionError(
+            "private endpoint must not enter public diagnostics",
+            cause=cause,
+            phase="response",
+        )
+
+    monkeypatch.setattr(transport, "_send_proto_once", _send_once)
+    monkeypatch.setattr(transport, "_reconnect", lambda _seq, attempt: reconnects.append(attempt))
+    with pytest.raises(TransportRecoveryExhausted) as raised:
+        transport.send(0x15, bytes.fromhex("020000000200"))
+
+    assert raised.value.cause == cause
+    assert raised.value.phase == "response"
+    assert raised.value.request_attempts == attempts == 4
+    assert raised.value.reconnect_attempts == 3
+    assert reconnects == [1, 2, 3]
+    assert "private endpoint" not in str(raised.value)
+
+
 def test_unexpected_command_ack_reconnects_and_retries_read(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

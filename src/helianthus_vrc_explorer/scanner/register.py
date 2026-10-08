@@ -105,11 +105,12 @@ class InstanceAvailabilityProbe:
     contract: NamespaceAvailabilityContract
     evidence: RegisterEntry | None
     connection_state: Literal["connected", "not_connected", "unknown"] | None = None
+    presence_state: Literal["present", "not_present", "unknown"] | None = None
 
 
 # Connected-device predicates in the characterized controller profile.
 CONNECTED_DEVICE_GROUPS: Final[frozenset[int]] = frozenset(
-    {1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15}
+    {1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}
 )
 _NUMERIC_REMOTE_FIRMWARE_GROUPS: Final[frozenset[int]] = frozenset({1, 2, 9, 10, 12, 14, 15})
 
@@ -166,6 +167,20 @@ def namespace_availability_contract(
 
     relationship = _namespace_relationship(group)
 
+    if group == 0x01 and opcode == 0x02:
+        return NamespaceAvailabilityContract(
+            source="heuristic_probe",
+            namespace_relationship=relationship,
+            probe_register=0x0001,
+            probe_type_hint="UIN",
+            positive_when="decoded unsigned native_dhw_circuit_type is nonzero",
+            description=(
+                "The Native DHW gate is a correlated two-byte RR=0x0001 value. "
+                "Zero disables the native circuit; malformed values remain unknown. "
+                "Described configuration limits are independent of this presence gate."
+            ),
+        )
+
     if group == 0x02 and opcode == 0x02:
         return NamespaceAvailabilityContract(
             source="heuristic_probe",
@@ -214,15 +229,16 @@ def namespace_availability_contract(
         )
 
     if opcode == 0x06 and group in CONNECTED_DEVICE_GROUPS:
+        predicate_name = "device_present" if group == 0x0D else "device_connected"
         return NamespaceAvailabilityContract(
             source="heuristic_probe",
             namespace_relationship=relationship,
             probe_register=0x0001,
             probe_type_hint="BOOL",
-            positive_when="profile-qualified device_connected Boolean is true",
+            positive_when=f"profile-qualified {predicate_name} Boolean is true",
             description=(
-                "Connected-device coverage uses RR=0x0001 in the characterized "
-                "controller profile. False means not connected, not physical absence. "
+                f"Device coverage uses {predicate_name} at RR=0x0001. "
+                "False is a negative predicate for this run. "
                 "Other readable headers may retain inventory and do not override it."
             ),
         )
@@ -785,6 +801,8 @@ def probe_instance_availability(
             entry.get("error") is None
             and response_state == "active"
             and entry.get("type") == "BOOL"
+            and len(entry.get("raw_hex") or "") == 2
+            and (group != 0x0D or entry.get("raw_hex") in {"00", "01"})
         ):
             if entry.get("value") is True:
                 state = "connected"
@@ -792,6 +810,19 @@ def probe_instance_availability(
                 state = "not_connected"
         if state == "unknown":
             entry["availability_qualification"] = "unknown"
+        if group == 0x0D:
+            return InstanceAvailabilityProbe(
+                present=state == "connected",
+                contract=contract,
+                evidence=entry,
+                presence_state=(
+                    "present"
+                    if state == "connected"
+                    else "not_present"
+                    if state == "not_connected"
+                    else "unknown"
+                ),
+            )
         return InstanceAvailabilityProbe(
             present=state == "connected",
             contract=contract,
@@ -801,6 +832,21 @@ def probe_instance_availability(
 
     if response_state in {"nack", "timeout"}:
         return InstanceAvailabilityProbe(present=False, contract=contract, evidence=entry)
+
+    if group == 0x01 and opcode == 0x02:
+        value = entry.get("value")
+        valid = (
+            entry.get("error") is None
+            and response_state == "active"
+            and len(entry.get("raw_hex") or "") == 4
+            and isinstance(value, int)
+            and not isinstance(value, bool)
+        )
+        if not valid:
+            entry["availability_qualification"] = "unknown"
+        return InstanceAvailabilityProbe(
+            present=valid and value != 0, contract=contract, evidence=entry
+        )
 
     if group == 0x02 and opcode == 0x02:
         if (

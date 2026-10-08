@@ -118,6 +118,16 @@ def _normalize_profile_plan_instances(
     return normalized
 
 
+def _count_capacity(*, group: int, opcode: int, ii_max: int) -> int:
+    """Return the count-qualified slots for one OP00 family mapping."""
+
+    if (opcode, group) == (0x02, 0x09):
+        return 1
+    if (opcode, group) == (0x02, 0x02):
+        return ii_max - 1
+    return ii_max + (opcode != 0x06)
+
+
 def _system_information_records(
     values: dict[int, float],
     raw: dict[int, str | None],
@@ -421,6 +431,10 @@ def run_b524_scan(
             if config is not None:
                 resolved_group_opcodes[group.group] = profile_opcodes(group.group, planner_preset)
                 availability_group_opcodes[group.group] = resolved_group_opcodes[group.group]
+                if group.group == 0x0D:
+                    availability_group_opcodes[group.group] = _sorted_namespace_opcodes(
+                        (*availability_group_opcodes[group.group], 0x06)
+                    )
                 continue
 
             opcodes, probe_summary = _probe_unknown_group_opcodes(
@@ -554,6 +568,7 @@ def run_b524_scan(
         instance_discovery_start_calls = counting_transport.counters.send_calls
         known_namespace_probe_counts: dict[tuple[int, int], str] = {}
         unknown_namespace_probe_counts: dict[tuple[int, int], str] = {}
+        native_dhw_admitted: dict[tuple[int, int], bool] = {}
         for group, meta, opcode in instance_targets:
             rr_max = meta.rr_max
             config = GROUP_CONFIG.get(group.group)
@@ -616,6 +631,47 @@ def run_b524_scan(
                     contract=contract,
                 )
             if not _is_instanced_group(namespace_ii_max):
+                if (opcode, group.group) == (0x02, 0x01):
+                    _record_availability_contract(
+                        artifact,
+                        group=group.group,
+                        opcode=opcode,
+                        contract=contract,
+                    )
+                    probe = probe_instance_availability_fn(
+                        transport,
+                        dst=dst,
+                        group=group.group,
+                        instance=0x00,
+                        opcode=opcode,
+                    )
+                    _record_availability_probes(
+                        artifact,
+                        group=group.group,
+                        opcode=opcode,
+                        probes={0x00: probe},
+                    )
+                    native_dhw_admitted[(int(opcode), group.group)] = probe.present
+                    if probe.present:
+                        _mark_present_instances(instances_obj, instances=(0x00,))
+                    if (
+                        probe.evidence is not None
+                        and probe.evidence.get("availability_qualification") == "unknown"
+                    ):
+                        coverage = artifact["meta"]["scan_coverage"]
+                        coverage["qualification_incomplete"] = True
+                        coverage["instance_discovery_complete"] = False
+                        coverage.setdefault("unknown_instance_probes", []).append(
+                            {
+                                "read_opcode": _hex_u8(opcode),
+                                "group": _hex_u8(group.group),
+                                "instance": "0x00",
+                            }
+                        )
+                    known_namespace_probe_counts[(int(opcode), group.group)] = (
+                        "1/1" if probe.present else "0/1"
+                    )
+                    continue
                 _mark_present_instances(instances_obj, instances=(0x00,))
                 known_namespace_probe_counts[(int(opcode), group.group)] = "1/1"
                 continue
@@ -624,6 +680,17 @@ def run_b524_scan(
             emit_trace_label(
                 transport,
                 f"Identifying instances in group 0x{group.group:02X} ({opcode_label(opcode)})",
+            )
+            count_id = COUNT_GROUP_IDS.get((int(opcode), group.group))
+            expected_count = (
+                expected_instance_count(
+                    information_values.get(count_id, float("nan")),
+                    capacity=_count_capacity(
+                        group=group.group, opcode=opcode, ii_max=namespace_ii_max
+                    ),
+                )
+                if count_id is not None
+                else None
             )
 
             def retain_probe(
@@ -645,25 +712,16 @@ def run_b524_scan(
                 dst=dst,
                 group=group.group,
                 opcode=opcode,
-                ii_max=namespace_ii_max,
+                ii_max=(
+                    0x00
+                    if planner_preset == "recommended" and (opcode, group.group) == (0x02, 0x09)
+                    else namespace_ii_max
+                ),
                 observer=observer,
                 probe_instance_availability_fn=probe_instance_availability_fn,
                 stop_at_first_absence=planner_preset == "recommended" and opcode == 6,
                 on_probe=retain_probe,
-                expected_count=(
-                    expected_instance_count(
-                        information_values.get(
-                            COUNT_GROUP_IDS.get((int(opcode), group.group), -1), float("nan")
-                        ),
-                        capacity=(
-                            namespace_ii_max - 1
-                            if opcode == 2 and group.group == 2
-                            else namespace_ii_max + (opcode != 6)
-                        ),
-                    )
-                    if planner_preset == "recommended"
-                    else None
-                ),
+                expected_count=expected_count if planner_preset == "recommended" else None,
             )
             _record_availability_probes(
                 artifact,
@@ -672,21 +730,47 @@ def run_b524_scan(
                 probes=probes,
             )
             if opcode == 6 and group.group in CONNECTED_DEVICE_GROUPS:
+                presence_field = "presence_state" if group.group == 0x0D else "connection_state"
                 unknown_slots = [
-                    ii for ii, probe in probes.items() if probe.connection_state == "unknown"
+                    ii
+                    for ii, probe in probes.items()
+                    if getattr(probe, presence_field) == "unknown"
                 ]
                 stopped = any(
-                    probe.connection_state == "not_connected" for probe in probes.values()
+                    getattr(probe, presence_field)
+                    == ("not_present" if group.group == 0x0D else "not_connected")
+                    for probe in probes.values()
                 )
                 bounded = planner_preset != "recommended"
-                complete = not unknown_slots and (bounded or stopped)
+                confirmed_present = sum(probe.present for probe in probes.values())
+                count_guided_complete = (
+                    planner_preset == "recommended"
+                    and expected_count is not None
+                    and confirmed_present >= expected_count
+                )
+                complete = not unknown_slots and (bounded or stopped or count_guided_complete)
                 artifact["meta"].setdefault("device_discovery", {})[_hex_u8(group.group)] = {
                     "read_opcode": "0x06",
                     "presence_register": "0x0001",
                     "first_instance": "0x01",
                     "last_instance_bound": _hex_u8(namespace_ii_max),
-                    "policy": "bounded_audit" if bounded else "first_confirmed_absence",
-                    "absence_semantics": "not_connected_not_physical_absence",
+                    "policy": (
+                        "bounded_audit"
+                        if bounded
+                        else "count_guided"
+                        if expected_count is not None
+                        else "first_confirmed_absence"
+                    ),
+                    "count_guided_expected": expected_count,
+                    "count_guided_complete": count_guided_complete,
+                    "presence_name": "device_present"
+                    if group.group == 0x0D
+                    else "device_connected",
+                    "absence_semantics": (
+                        "not_present_current_run"
+                        if group.group == 0x0D
+                        else "not_connected_not_physical_absence"
+                    ),
                     "probed_instances": [_hex_u8(ii) for ii in probes],
                     "unknown_instances": [_hex_u8(ii) for ii in unknown_slots],
                     "complete": complete,
@@ -720,10 +804,8 @@ def run_b524_scan(
             if count_id is not None:
                 expected = expected_instance_count(
                     information_values.get(count_id, float("nan")),
-                    capacity=(
-                        namespace_ii_max - 1
-                        if opcode == 2 and group.group == 2
-                        else namespace_ii_max + 1
+                    capacity=_count_capacity(
+                        group=group.group, opcode=opcode, ii_max=namespace_ii_max
                     ),
                 )
                 artifact["meta"].setdefault("instance_counts", {})[
@@ -757,6 +839,47 @@ def run_b524_scan(
                 f"{len(present_instances)}/{slot_capacity}"
             )
 
+        remote_group_object = artifact["operations"].get("0x06", {}).get("groups", {})
+        observed_remote_instances = (
+            sum(
+                1
+                for group_key, group_object in remote_group_object.items()
+                if int(group_key, 0) in CONNECTED_DEVICE_GROUPS
+                if isinstance(group_object, dict)
+                for probe in group_object.get("availability_probes", {}).values()
+                if isinstance(probe, dict)
+                and probe.get("present") is True
+                and (
+                    probe.get("connection_state") == "connected"
+                    or probe.get("presence_state") == "present"
+                )
+            )
+            if isinstance(remote_group_object, dict)
+            else 0
+        )
+        remote_slot_capacity = sum(
+            _ii_max_for_opcode(
+                group=group.group,
+                default_ii_max=metadata_map[group.group].ii_max,
+                opcode=0x06,
+            )
+            or 0
+            for group in classified
+            if 0x06 in availability_group_opcodes.get(group.group, ())
+        )
+        aggregate_device_count = expected_instance_count(
+            information_values.get(4, float("nan")), capacity=remote_slot_capacity
+        )
+        artifact["meta"]["device_count"] = {
+            "identifier": "0x0004",
+            "expected": aggregate_device_count,
+            "observed": observed_remote_instances,
+            "mismatch": (
+                aggregate_device_count is not None
+                and aggregate_device_count != observed_remote_instances
+            ),
+        }
+
         if observer is not None:
             for group, meta, opcode in instance_targets:
                 key = (int(opcode), group.group)
@@ -766,14 +889,18 @@ def run_b524_scan(
                     count = unknown_namespace_probe_counts[key]
                 if count is None:
                     continue
-                rr_max = _rr_max_for_opcode(
-                    group=group.group, default_rr_max=meta.rr_max, opcode=opcode
-                )
                 qualifier = " (experimental)" if experimental else ""
+                if (opcode, group.group) == (0x06, 0x0D):
+                    rr_text = "RR_max=unknown (probe-only)"
+                else:
+                    rr_max = _rr_max_for_opcode(
+                        group=group.group, default_rr_max=meta.rr_max, opcode=opcode
+                    )
+                    rr_text = f"RR_max=0x{rr_max:04X} ({rr_max + 1} registers/instance)"
                 observer.log(
                     f"OP=0x{opcode:02X} GG=0x{group.group:02X}: "
                     f"{_group_name_for_opcode(group.group, opcode)} {count} present{qualifier}, "
-                    f"RR_max=0x{rr_max:04X} ({rr_max + 1} registers/instance)",
+                    f"{rr_text}",
                     level="info",
                 )
 
@@ -888,9 +1015,11 @@ def run_b524_scan(
                                     float("nan"),
                                 ),
                                 capacity=(
-                                    planner_ii_max - 1
-                                    if opcode == 2 and group.group == 2
-                                    else planner_ii_max + (opcode != 6)
+                                    _count_capacity(
+                                        group=group.group,
+                                        opcode=opcode,
+                                        ii_max=planner_ii_max,
+                                    )
                                 ),
                             )
                             if planner_ii_max is not None
@@ -905,6 +1034,9 @@ def run_b524_scan(
                         research_rr_max=_rr_max_full_for_opcode(
                             group=group.group,
                             opcode=opcode,
+                        ),
+                        native_dhw_admitted=native_dhw_admitted.get(
+                            (int(opcode), group.group), False
                         ),
                     )
                 )

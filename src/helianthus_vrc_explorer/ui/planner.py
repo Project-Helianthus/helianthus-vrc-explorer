@@ -47,6 +47,7 @@ class PlannerGroup:
     ii_min: int | None = None
     instances_probed: bool = True
     research_rr_max: int | None = None
+    native_dhw_admitted: bool = False
 
     @property
     def key(self) -> PlanKey:
@@ -308,6 +309,27 @@ def _instances_for_preset(group: PlannerGroup, preset: PlannerPreset) -> tuple[i
     return planner_instance_range(group)
 
 
+def _has_recommended_availability(group: PlannerGroup) -> bool:
+    """Return whether an admitted group has affirmative default-scan evidence.
+
+    The profile policy remains the static admission rule.  OP00 counts guide
+    discovery only: a count cannot admit a family without a confirmed instance,
+    and a confirmed instance remains usable when it contradicts a zero count.
+    System is the mandatory OP=0x02/GG=0x00 singleton.  Native DHW has a
+    dedicated, correlated gate; other singleton rows are not admitted by
+    static inventory alone.  All other rows require a confirmed present
+    instance, so unknown or unprobed results stay manually selectable only.
+    """
+
+    if group.opcode == 0x02 and group.group == 0x00:
+        return True
+    if group.opcode == 0x02 and group.group == 0x01:
+        return group.native_dhw_admitted
+    if group.ii_max is None:
+        return False
+    return bool(planner_present_instances(group))
+
+
 def build_plan_from_preset(
     groups: list[PlannerGroup],
     *,
@@ -316,6 +338,8 @@ def build_plan_from_preset(
     selected: dict[PlanKey, GroupScanPlan] = {}
     for group in sorted(groups, key=planner_group_sort_key):
         if group.opcode not in profile_opcodes(group.group, preset):
+            continue
+        if preset == "recommended" and not _has_recommended_availability(group):
             continue
         if preset in {"recommended", "full"}:
             if group.rr_max is None:

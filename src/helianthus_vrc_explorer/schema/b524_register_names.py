@@ -49,6 +49,8 @@ def b524_register_name(*, opcode: int, group: int, register: int) -> str | None:
     """Return the opcode-scoped bundled name, if the catalog has one."""
 
     if opcode == 0x06:
+        if group == 0x0D and register == 0x0001:
+            return "device_present"
         return _OP06_DEVICE_HEADER_NAMES.get(register)
     return bundled_b524_register_names().get((opcode, group, register))
 
