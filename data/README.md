@@ -11,3 +11,11 @@ The runtime myVaillant register map is packaged at
 `src/helianthus_vrc_explorer/data/myvaillant_register_map.csv`. It carries optional,
 opcode-scoped leaf-name annotations only; it does not establish a value codec or a
 wire-qualified semantic contract.
+
+`src/helianthus_vrc_explorer/data/b524_parameter_descriptions.json` is the
+profile-qualified, read-only description baseline. Each entry is keyed by native
+read opcode, group, instance and register, so same-numbered OP02 and OP06 groups
+remain distinct. It stores only decoded type, width and limits plus the identity
+needed to qualify that prior observation; it never stores endpoints, serials or
+raw request/reply captures. Remote entries require their observed device class
+and firmware identity before they can be reused.

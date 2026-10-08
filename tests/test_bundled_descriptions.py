@@ -5,6 +5,7 @@ from copy import deepcopy
 from helianthus_vrc_explorer.schema.parameter_descriptions import (
     attach_bundled_descriptions,
     export_description_baseline,
+    load_description_baseline,
 )
 from helianthus_vrc_explorer.ui.browse_store import BrowseStore
 from helianthus_vrc_explorer.ui.html_report import render_html_report
@@ -270,3 +271,63 @@ def test_baseline_merge_keeps_incompatible_firmware_profiles_separate() -> None:
         "0x0009"
     ]
     assert entry["bundled_parameter_description"]["verification"] == "matches"
+
+
+def test_packaged_baseline_keeps_op02_and_op06_gga_limits_separate() -> None:
+    bundle = load_description_baseline()
+    descriptions = bundle["descriptions"]
+
+    local = next(
+        row
+        for row in descriptions
+        if (row["read_opcode"], row["group"], row["instance"], row["register"])
+        == ("0x02", "0x0a", "0x00", "0x0001")
+    )
+    remote = next(
+        row
+        for row in descriptions
+        if (row["read_opcode"], row["group"], row["instance"], row["register"])
+        == ("0x06", "0x0a", "0x01", "0x000d")
+    )
+
+    assert local["description_opcode"] == "0x01"
+    assert (local["type"], local["min"], local["max"], local["step"]) == (
+        "UCH",
+        0,
+        3,
+        1,
+    )
+    assert remote["description_opcode"] == "0x07"
+    assert (remote["type"], remote["min"], remote["max"], remote["step"]) == ("UIN", 1, 4, 1)
+    assert remote["profile"]["device_identity_required"] is True
+
+
+def test_packaged_baseline_keeps_u32_solar_hours_per_instance() -> None:
+    descriptions = load_description_baseline()["descriptions"]
+    rows = [
+        row
+        for row in descriptions
+        if (row["read_opcode"], row["group"], row["register"]) == ("0x02", "0x04", "0x000b")
+    ]
+
+    assert {row["instance"] for row in rows} >= {"0x00", "0x01"}
+    for row in rows:
+        assert (row["type"], row["width"], row["min"], row["max"], row["step"]) == (
+            "U32",
+            4,
+            0,
+            200000,
+            1,
+        )
+
+
+def test_packaged_remote_baselines_require_device_identity() -> None:
+    descriptions = load_description_baseline()["descriptions"]
+    remote_rows = [row for row in descriptions if row["read_opcode"] == "0x06"]
+
+    assert remote_rows
+    for row in remote_rows:
+        profile = row["profile"]
+        assert profile["device_identity_required"] is True
+        assert profile["device_class_raw"]
+        assert profile["device_firmware_raw"]
