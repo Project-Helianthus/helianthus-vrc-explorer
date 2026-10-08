@@ -73,6 +73,72 @@ def test_replay_trace_to_artifact_reconstructs_b524_register_reads(tmp_path: Pat
     assert remote_entry["myvaillant_name"] == "device_connected"
 
 
+def test_replay_preserves_historical_system_registers_above_current_scan_ceiling(
+    tmp_path: Path,
+) -> None:
+    trace_path = _write_trace(
+        tmp_path,
+        "system-history.trace",
+        "\n".join(
+            [
+                "2026-04-06T10:00:00.000000Z INIT features=0x01",
+                "2026-04-06T10:00:00.050000Z START initiator=0xF7",
+                "2026-04-06T10:00:00.100000Z #1 SEND_PROTO src=0xF7 dst=0x15 "
+                "primary=0xB5 secondary=0x24 payload=020000000001",
+                "2026-04-06T10:00:00.150000Z #1 PARSED_PROTO len=5 hex=0100000101",
+            ]
+        )
+        + "\n",
+    )
+
+    artifact = replay_trace_to_artifact(trace_path)
+    registers = artifact["operations"]["0x02"]["groups"]["0x00"]["instances"]["0x00"]["registers"]
+    assert registers["0x0100"]["raw_hex"] == "01"
+
+
+def test_replay_preserves_historical_instances_and_unknown_groups(tmp_path: Path) -> None:
+    trace_path = _write_trace(
+        tmp_path,
+        "historical-selectors.trace",
+        "\n".join(
+            [
+                "2026-04-06T10:00:00.000000Z INIT features=0x01",
+                "2026-04-06T10:00:00.050000Z START initiator=0xF7",
+                "2026-04-06T10:00:00.100000Z #1 SEND_PROTO src=0xF7 dst=0x15 "
+                "primary=0xB5 secondary=0x24 payload=0200020a0200",
+                "2026-04-06T10:00:00.150000Z #1 PARSED_PROTO len=6 hex=030202000100",
+                "2026-04-06T10:00:00.200000Z #2 SEND_PROTO src=0xF7 dst=0x15 "
+                "primary=0xB5 secondary=0x24 payload=0600090a0100",
+                "2026-04-06T10:00:00.250000Z #2 PARSED_PROTO len=5 hex=0109010001",
+                "2026-04-06T10:00:00.300000Z #3 SEND_PROTO src=0xF7 dst=0x15 "
+                "primary=0xB5 secondary=0x24 payload=0200690a0500",
+                "2026-04-06T10:00:00.350000Z #3 PARSED_PROTO len=5 hex=0169050001",
+            ]
+        )
+        + "\n",
+    )
+
+    artifact = replay_trace_to_artifact(trace_path)
+    assert (
+        artifact["operations"]["0x02"]["groups"]["0x02"]["instances"]["0x0a"]["registers"][
+            "0x0002"
+        ]["raw_hex"]
+        == "0100"
+    )
+    assert (
+        artifact["operations"]["0x06"]["groups"]["0x09"]["instances"]["0x0a"]["registers"][
+            "0x0001"
+        ]["raw_hex"]
+        == "01"
+    )
+    assert (
+        artifact["operations"]["0x02"]["groups"]["0x69"]["instances"]["0x0a"]["registers"][
+            "0x0005"
+        ]["raw_hex"]
+        == "01"
+    )
+
+
 def test_replay_canonical_names_preserve_legacy_metadata_enrichment() -> None:
     operations = {
         "0x02": {
@@ -281,7 +347,9 @@ def test_replay_trace_marks_nack_when_retry_evidence_is_nack_or_crc(tmp_path: Pa
     assert entry["response_state"] == "nack_or_crc"
 
 
-def test_replay_trace_applies_current_namespace_profiles(tmp_path: Path) -> None:
+def test_replay_trace_preserves_historical_namespace_and_instance_observations(
+    tmp_path: Path,
+) -> None:
     trace_path = _write_trace(
         tmp_path,
         "profiles.trace",
@@ -289,13 +357,13 @@ def test_replay_trace_applies_current_namespace_profiles(tmp_path: Path) -> None
             [
                 "2026-04-06T10:00:00.000000Z INIT features=0x01",
                 "2026-04-06T10:00:00.050000Z START initiator=0xF7",
-                # OP=0x06 GG=0x00 is no longer part of the current profile and must be dropped.
+                # OP=0x06 GG=0x00 is no longer scheduled, but remains replay evidence.
                 (
                     "2026-04-06T10:00:00.100000Z #1 SEND_PROTO src=0xF7 dst=0x15 "
                     "primary=0xB5 secondary=0x24 payload=060000000100"
                 ),
                 "2026-04-06T10:00:00.150000Z #1 PARSED_PROTO len=5 hex=0100010001",
-                # OP=0x02 GG=0x04 keeps only II=0x00..0x01 in the current profile.
+                # OP=0x02 GG=0x04 currently schedules II=0x00..0x01 only.
                 (
                     "2026-04-06T10:00:00.200000Z #2 SEND_PROTO src=0xF7 dst=0x15 "
                     "primary=0xB5 secondary=0x24 payload=020004000400"
@@ -313,15 +381,14 @@ def test_replay_trace_applies_current_namespace_profiles(tmp_path: Path) -> None
 
     artifact = replay_trace_to_artifact(trace_path)
 
-    # OP=0x06 GG=0x00 is filtered out because GG=0x00 has no remote (0x06)
-    # namespace in its profile.
-    assert "0x00" not in artifact.get("operations", {}).get("0x02", {}).get("groups", {})
+    remote_ns = artifact["operations"]["0x06"]["groups"]["0x00"]
+    assert remote_ns["instances"]["0x00"]["registers"]["0x0001"]["raw_hex"] == "01"
     local_ns = artifact["operations"]["0x02"]["groups"]["0x04"]
-    # II=0x02 exceeds ii_max=0x01 for GG=0x04 OP=0x02 and is filtered out.
-    # rr_max / ii_max are derived from observed trace data within profile bounds.
-    assert local_ns["ii_max"] == "0x00"
+    # Metadata reflects preserved trace observations; new scan scheduling retains
+    # its separate current profile bounds.
+    assert local_ns["ii_max"] == "0x02"
     assert local_ns["rr_max"] == "0x0004"
-    assert set(local_ns["instances"]) == {"0x00"}
+    assert set(local_ns["instances"]) == {"0x00", "0x02"}
 
 
 def test_replay_trace_reconstructs_system_information_and_complete_descriptions(

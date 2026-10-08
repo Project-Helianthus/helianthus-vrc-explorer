@@ -91,6 +91,44 @@ def test_prompt_scan_plan_preserves_exact_default_registers_without_changes(monk
     assert plan == {group.key: default}
 
 
+def test_classic_custom_preserves_explicit_unqualified_route(
+    monkeypatch,
+) -> None:
+    import helianthus_vrc_explorer.ui.planner as planner
+
+    group = PlannerGroup(
+        group=0x0D,
+        opcode=0x06,
+        name="Unknown remote",
+        descriptor=float("nan"),
+        known=False,
+        ii_max=0x08,
+        rr_max=None,
+        rr_max_full=None,
+        present_instances=(0x01,),
+    )
+    default = GroupScanPlan(
+        group=0x0D,
+        opcode=0x06,
+        rr_max=0x0003,
+        instances=(0x01,),
+        registers=(0x0001, 0x0003),
+    )
+    answers = iter([True, False, False, True])
+    monkeypatch.setattr(planner, "_ask_yes_no", lambda *_args, **_kwargs: next(answers))
+    monkeypatch.setattr(planner, "_ask_preset", lambda *_args, **_kwargs: "custom")
+    monkeypatch.setattr(planner, "_ask_groups_to_scan", lambda *_args, **_kwargs: [0x0D])
+
+    plan = prompt_scan_plan(
+        Console(force_terminal=True),
+        [group],
+        request_rate_rps=None,
+        default_plan={group.key: default},
+    )
+
+    assert plan == {group.key: default}
+
+
 def test_prompt_scan_plan_full_alias_still_applies_profile_pair_policy(monkeypatch) -> None:
     import helianthus_vrc_explorer.ui.planner as planner
 

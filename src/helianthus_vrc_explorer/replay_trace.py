@@ -462,19 +462,10 @@ def replay_trace_to_artifact(trace_path: Path) -> dict[str, Any]:
             group = int(payload[2])
             instance = int(payload[3])
             register = int.from_bytes(payload[4:6], byteorder="little", signed=False)
-            # Filter by namespace profile: skip entries where the opcode is
-            # not valid for this group, or where instance/register exceed the
-            # configured bounds.  This replicates the guardrails the live
-            # scanner applies and prevents _update_namespace_bounds_from_observed
-            # from widening metadata beyond profile limits.
-            profile = _namespace_profile(group, opcode)
-            if profile is None:
-                # Opcode not in the active namespace profile for this group.
-                continue
-            if instance > profile.ii_max:
-                continue
-            if register > profile.rr_max:
-                continue
+            # Replay preserves recorded OP02/OP06 observations independently
+            # of current scheduling profiles.  Unknown groups and selectors
+            # outside current II/RR bounds remain raw evidence; new scans keep
+            # their separate profile limits.
             group_obj = _ensure_operation_group(artifact["operations"], group=group, opcode=opcode)
             instances = group_obj.setdefault("instances", {})
             instance_key = _hex_u8(instance)

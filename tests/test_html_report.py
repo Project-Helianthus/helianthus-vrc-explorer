@@ -249,6 +249,7 @@ def test_html_report_projects_final_plan_groups_without_removing_raw_evidence() 
     assert "OP06 GetDeviceParameter" in html
     assert "function finalPlanForRoute(groupKey, opcode)" in html
     assert "finalPlanForRoute(groupKey, required) !== null" in html
+    assert 'return { name: "Planned group", instances };' in html
     assert '"0x0a":{"name":"Deselected"' in html
 
 

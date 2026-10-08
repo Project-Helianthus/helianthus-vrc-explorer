@@ -34,7 +34,5 @@ def test_op06_device_headers_are_universal_for_every_group() -> None:
 
     for group in range(0x100):
         for register, name in expected.items():
-            if group == 0x0D and register == 0x0001:
-                name = "device_present"
             assert b524_register_name(opcode=0x06, group=group, register=register) == name
         assert b524_register_name(opcode=0x06, group=group, register=0x0005) is None

@@ -40,7 +40,12 @@ from .scanner.scan_policy import parse_scan_plan
 from .schema.ebusd_csv import EbusdCsvSchema
 from .schema.myvaillant_map import MyvaillantRegisterMap
 from .schema.parameter_descriptions import attach_bundled_descriptions
-from .transport.base import TransportCommandNotEnabled, TransportError, TransportTimeout
+from .transport.base import (
+    TransportCommandNotEnabled,
+    TransportError,
+    TransportNack,
+    TransportTimeout,
+)
 from .transport.dummy import DummyTransport
 from .transport.ebusd_tcp import EbusdTcpConfig, EbusdTcpTransport
 from .transport.enhanced_tcp import EnhancedTcpConfig, EnhancedTcpTransport
@@ -288,9 +293,12 @@ def _probe_scan_identity(
     if ident.manufacturer != 0xB5:
         return identity
 
-    chunks = [
-        transport.send_proto(dst, 0xB5, 0x09, bytes((qq,))) for qq in (0x24, 0x25, 0x26, 0x27)
-    ]
+    try:
+        chunks = [
+            transport.send_proto(dst, 0xB5, 0x09, bytes((qq,))) for qq in (0x24, 0x25, 0x26, 0x27)
+        ]
+    except TransportNack:
+        return identity
     try:
         scan_id = parse_vaillant_scan_id_chunks(chunks)
     except ValueError:

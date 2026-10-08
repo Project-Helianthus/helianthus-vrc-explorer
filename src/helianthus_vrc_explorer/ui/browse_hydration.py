@@ -870,6 +870,14 @@ class _HydratedBrowseStore:
                     (key for key in instances if isinstance(key, str)), key=_safe_int_hex
                 )
                 visible_registers = set(visible_rr_keys(instances))
+                if group_key == "0x00":
+                    # Current System scheduling stops at RR=0x00FF. Historical
+                    # trace evidence above that ceiling remains in JSON only.
+                    visible_registers = {
+                        register_key
+                        for register_key in visible_registers
+                        if _safe_int_hex(register_key) <= 0x00FF
+                    }
                 for instance_key in instance_keys:
                     instance_obj = instances.get(instance_key)
                     if not isinstance(instance_obj, dict):

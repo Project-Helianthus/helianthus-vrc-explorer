@@ -128,8 +128,6 @@ def _serialize_availability_probe(
         "source": probe.contract.source,
         "connection_state": probe.connection_state,
     }
-    if probe.presence_state is not None:
-        payload["presence_state"] = probe.presence_state
     evidence = probe.evidence
     if evidence is not None:
         payload.update(dict(evidence))

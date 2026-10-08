@@ -505,13 +505,17 @@ __ARTIFACT_JSON__
       // Returns the group object or null.
       function getOperationGroup(opKey, groupKey) {
         const ops = artifact && typeof artifact === "object" ? artifact.operations : null;
-        if (!ops || typeof ops !== "object") return null;
-        const opObj = ops[opKey];
-        if (!opObj || typeof opObj !== "object") return null;
-        const opGroups = opObj.groups;
-        if (!opGroups || typeof opGroups !== "object") return null;
-        const g = opGroups[groupKey];
-        return g && typeof g === "object" ? g : null;
+        const opObj = ops && typeof ops === "object" ? ops[opKey] : null;
+        const opGroups = opObj && typeof opObj === "object" ? opObj.groups : null;
+        const g = opGroups && typeof opGroups === "object" ? opGroups[groupKey] : null;
+        if (g && typeof g === "object") return g;
+        const plan = finalPlanForRoute(groupKey, opKey);
+        if (!plan || typeof plan !== "object") return null;
+        const instances = {};
+        for (const iiKey of (Array.isArray(plan.instances) ? plan.instances : [])) {
+          if (typeof iiKey === "string") instances[iiKey] = { present: false, registers: {} };
+        }
+        return { name: "Planned group", instances };
       }
 
       // Collect all unique group keys across all operations.
@@ -1804,6 +1808,9 @@ __ARTIFACT_JSON__
             if (instancesObj[iiKey]) visibleInstances[iiKey] = instancesObj[iiKey];
           }
           let rrKeys = visibleRegisterKeys(visibleInstances);
+          if (groupKey === "0x00") {
+            rrKeys = rrKeys.filter((rrKey) => parseHexKey(rrKey) <= 0x00FF);
+          }
           if (state.b524Filters.hideAbsent) {
             rrKeys = rrKeys.filter((rrKey) => !rowIsAbsent(visibleInstances, rrKey));
           }

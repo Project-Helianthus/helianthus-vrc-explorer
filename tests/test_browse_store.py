@@ -20,6 +20,33 @@ def test_selected_empty_route_without_operation_observations_does_not_crash() ->
     assert not any(node.level == "instance" for node in store.tree_nodes)
 
 
+def test_browser_hides_historical_system_registers_above_current_ceiling() -> None:
+    artifact = {
+        "schema_version": "2.3",
+        "operations": {
+            "0x02": {
+                "groups": {
+                    "0x00": {
+                        "name": "System",
+                        "instances": {
+                            "0x00": {
+                                "present": True,
+                                "registers": {
+                                    "0x0001": {"read_opcode": "0x02", "raw_hex": "01"},
+                                    "0x0100": {"read_opcode": "0x02", "raw_hex": "02"},
+                                },
+                            }
+                        },
+                    }
+                }
+            }
+        },
+    }
+
+    store = BrowseStore.from_artifact(artifact)
+    assert {row.register_key for row in store.rows} == {"0x0001"}
+
+
 def _sample_artifact() -> dict[str, object]:
     return {
         "meta": {

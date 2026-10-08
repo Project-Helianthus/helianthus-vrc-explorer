@@ -105,7 +105,6 @@ class InstanceAvailabilityProbe:
     contract: NamespaceAvailabilityContract
     evidence: RegisterEntry | None
     connection_state: Literal["connected", "not_connected", "unknown"] | None = None
-    presence_state: Literal["present", "not_present", "unknown"] | None = None
 
 
 # Connected-device predicates in the characterized controller profile.
@@ -229,15 +228,14 @@ def namespace_availability_contract(
         )
 
     if opcode == 0x06 and group in CONNECTED_DEVICE_GROUPS:
-        predicate_name = "device_present" if group == 0x0D else "device_connected"
         return NamespaceAvailabilityContract(
             source="heuristic_probe",
             namespace_relationship=relationship,
             probe_register=0x0001,
             probe_type_hint="BOOL",
-            positive_when=f"profile-qualified {predicate_name} Boolean is true",
+            positive_when="profile-qualified device_connected Boolean is true",
             description=(
-                f"Device coverage uses {predicate_name} at RR=0x0001. "
+                "Device coverage uses device_connected at RR=0x0001. "
                 "False is a negative predicate for this run. "
                 "Other readable headers may retain inventory and do not override it."
             ),
@@ -802,7 +800,7 @@ def probe_instance_availability(
             and response_state == "active"
             and entry.get("type") == "BOOL"
             and len(entry.get("raw_hex") or "") == 2
-            and (group != 0x0D or entry.get("raw_hex") in {"00", "01"})
+            and entry.get("raw_hex") in {"00", "01"}
         ):
             if entry.get("value") is True:
                 state = "connected"
@@ -810,19 +808,6 @@ def probe_instance_availability(
                 state = "not_connected"
         if state == "unknown":
             entry["availability_qualification"] = "unknown"
-        if group == 0x0D:
-            return InstanceAvailabilityProbe(
-                present=state == "connected",
-                contract=contract,
-                evidence=entry,
-                presence_state=(
-                    "present"
-                    if state == "connected"
-                    else "not_present"
-                    if state == "not_connected"
-                    else "unknown"
-                ),
-            )
         return InstanceAvailabilityProbe(
             present=state == "connected",
             contract=contract,

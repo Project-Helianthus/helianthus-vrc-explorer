@@ -673,14 +673,10 @@ def prompt_scan_plan(
 
     preset = _ask_preset(console, default_preset=default_preset)
     if preset == "custom":
-        # A research preset may have supplied its broad RR scope for an
-        # unqualified native row. Custom mode requires the operator to enter
-        # that scope explicitly, while preserving an already explicit plan.
-        selected_plan = {
-            key: group_plan
-            for key, group_plan in default_selected_plan.items()
-            if eligible[key].rr_max is not None
-        }
+        # An explicit incoming plan is already operator-selected, including
+        # unqualified native routes. Ask for an RR scope only when a new route
+        # is added below.
+        selected_plan = dict(default_selected_plan)
     else:
         selected_plan = build_plan_from_preset(groups, preset=preset)
 
@@ -702,28 +698,31 @@ def prompt_scan_plan(
             eligible_groups=eligible_groups,
             default_groups=sorted({group for (group, _opcode) in selected_plan}),
         )
-        selected_plan = {
-            planner_group.key: selected_plan.get(
-                planner_group.key,
-                GroupScanPlan(
-                    group=planner_group.group,
-                    opcode=planner_group.opcode,
-                    rr_max=planner_group.rr_max,
-                    instances=(
-                        (0x00,)
-                        if planner_group.ii_max is None
-                        else planner_present_instances(planner_group)
-                    ),
-                )
-                if planner_group.rr_max is not None
-                else _custom_plan_with_required_rr(console, planner_group),
-            )
-            for group in selected_groups
+        retained_plan: dict[PlanKey, GroupScanPlan] = {}
+        for selected_group_id in selected_groups:
             for planner_group in sorted(
-                eligible_groups[group],
+                eligible_groups[selected_group_id],
                 key=lambda item: (item.group, item.opcode),
-            )
-        }
+            ):
+                existing = selected_plan.get(planner_group.key)
+                if existing is not None:
+                    retained_plan[planner_group.key] = existing
+                elif planner_group.rr_max is not None:
+                    retained_plan[planner_group.key] = GroupScanPlan(
+                        group=planner_group.group,
+                        opcode=planner_group.opcode,
+                        rr_max=planner_group.rr_max,
+                        instances=(
+                            (0x00,)
+                            if planner_group.ii_max is None
+                            else planner_present_instances(planner_group)
+                        ),
+                    )
+                else:
+                    retained_plan[planner_group.key] = _custom_plan_with_required_rr(
+                        console, planner_group
+                    )
+        selected_plan = retained_plan
 
         if _ask_yes_no(console, "Override register selections?", default=False):
             from .planner_textual import _parse_register_scope

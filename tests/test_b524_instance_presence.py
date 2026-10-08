@@ -132,19 +132,15 @@ def test_solar_unknown_first_slot_does_not_fill_the_expected_count() -> None:
         ("010d0100", False, "unknown"),
     ],
 )
-def test_vr41_uses_device_present_without_header_fallback(
+def test_vr41_uses_device_connected_without_header_fallback(
     reply: str, present: bool, state: str
 ) -> None:
     transport = _ReplyTransport(bytes.fromhex(reply))
     probe = probe_instance_availability(transport, 0x15, 0x0D, 1, opcode=0x06)
     assert probe.present is present
-    assert (
-        probe.presence_state
-        == {"connected": "present", "not_connected": "not_present", "unknown": "unknown"}[state]
-    )
-    assert probe.connection_state is None
+    assert probe.connection_state == state
     assert transport.requests == [bytes.fromhex("06000d010100")]
-    assert b524_register_name(opcode=6, group=0x0D, register=1) == "device_present"
+    assert b524_register_name(opcode=6, group=0x0D, register=1) == "device_connected"
     assert b524_register_name(opcode=6, group=0x0C, register=1) == "device_connected"
 
 

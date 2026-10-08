@@ -739,16 +739,11 @@ def run_b524_scan(
                 probes=probes,
             )
             if opcode == 6 and group.group in CONNECTED_DEVICE_GROUPS:
-                presence_field = "presence_state" if group.group == 0x0D else "connection_state"
                 unknown_slots = [
-                    ii
-                    for ii, probe in probes.items()
-                    if getattr(probe, presence_field) == "unknown"
+                    ii for ii, probe in probes.items() if probe.connection_state == "unknown"
                 ]
                 stopped = any(
-                    getattr(probe, presence_field)
-                    == ("not_present" if group.group == 0x0D else "not_connected")
-                    for probe in probes.values()
+                    probe.connection_state == "not_connected" for probe in probes.values()
                 )
                 bounded = planner_preset != "recommended"
                 confirmed_present = sum(probe.present for probe in probes.values())
@@ -772,14 +767,8 @@ def run_b524_scan(
                     ),
                     "count_guided_expected": expected_count,
                     "count_guided_complete": count_guided_complete,
-                    "presence_name": "device_present"
-                    if group.group == 0x0D
-                    else "device_connected",
-                    "absence_semantics": (
-                        "not_present_current_run"
-                        if group.group == 0x0D
-                        else "not_connected_not_physical_absence"
-                    ),
+                    "presence_name": "device_connected",
+                    "absence_semantics": "not_connected_not_physical_absence",
                     "probed_instances": [_hex_u8(ii) for ii in probes],
                     "unknown_instances": [_hex_u8(ii) for ii in unknown_slots],
                     "complete": complete,
@@ -864,10 +853,7 @@ def run_b524_scan(
                 for probe in group_object.get("availability_probes", {}).values()
                 if isinstance(probe, dict)
                 and probe.get("present") is True
-                and (
-                    probe.get("connection_state") == "connected"
-                    or probe.get("presence_state") == "present"
-                )
+                and (probe.get("connection_state") == "connected")
             )
             if isinstance(remote_group_object, dict)
             else 0

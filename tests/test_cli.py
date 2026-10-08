@@ -19,7 +19,7 @@ from helianthus_vrc_explorer.cli import (
     _resolve_scan_destination,
     app,
 )
-from helianthus_vrc_explorer.transport.base import TransportTimeout
+from helianthus_vrc_explorer.transport.base import TransportNack, TransportTimeout
 
 _ROLE_TARGET_TOKEN = bytes.fromhex("736c617665").decode("ascii")
 
@@ -1162,6 +1162,17 @@ def test_probe_scan_identity_keeps_0704_fields_when_b509_chunks_fail_to_parse() 
             return super().send_proto(dst, primary, secondary, payload)
 
     identity = _probe_scan_identity(_MalformedScanIdTransport(), dst=0x15)  # type: ignore[arg-type]
+
+    assert identity["device"] == "VRC 720f/2"
+    assert identity["firmware"] == "SW 0507 / HW 1704"
+    assert identity["model"] == "n/a"
+    assert identity["serial"] == "n/a"
+
+
+def test_probe_scan_identity_keeps_0704_fields_when_optional_b509_nacks() -> None:
+    identity = _probe_scan_identity(
+        _IdentityProbeTransport(failure=TransportNack("nack"), stage="b509"), dst=0x15
+    )
 
     assert identity["device"] == "VRC 720f/2"
     assert identity["firmware"] == "SW 0507 / HW 1704"
