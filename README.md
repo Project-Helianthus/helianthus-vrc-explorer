@@ -62,7 +62,7 @@ Key scan UX flags:
 - `--ebusd-csv-path /path/to/15.720.csv` (optional enrichment: adds eBUSd register names)
 - `--myvaillant-map-path /path/to/myvaillant_register_map.csv` (optional enrichment: adds myVaillant-style leaf names)
 
-If startup fails on default transport (`tcp://127.0.0.1:8888`) in an interactive TTY, scan opens a retry dialog so you can adjust protocol/host/port and retry or cancel.
+If transport setup fails, scan reports a concise error and exits nonzero without a traceback. In an interactive TTY, the retry dialog applies to explicit Enhanced/ENS and custom endpoints as well as the default endpoint; you can adjust protocol/host/port or cancel. Once scanning starts, transport failure does not reopen this setup dialog or restart the scan.
 
 Transport note:
 - Default discovery reads the bounded OP00 `ReadSystemInformation` identifiers `0x0000..0x0011`. These are system-information identifiers, not group numbers. The artifact preserves `identifier`, snake-case `name`, finite `value` or `null`, and `raw_hex` for each response.

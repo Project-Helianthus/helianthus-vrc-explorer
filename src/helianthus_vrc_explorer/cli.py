@@ -364,14 +364,6 @@ def _can_prompt_transport_retry(console: Console) -> bool:
     )
 
 
-def _is_default_transport_settings(settings: _TransportSettings) -> bool:
-    return (
-        settings.protocol == _DEFAULT_TRANSPORT_PROTOCOL
-        and settings.host == _DEFAULT_EBUSD_HOST
-        and settings.port == _DEFAULT_EBUSD_PORT
-    )
-
-
 def _build_transport(
     settings: _TransportSettings,
     *,
@@ -894,7 +886,6 @@ def scan(
             port=port,
             src=source_addr_u8,
         )
-        allow_transport_retry = _is_default_transport_settings(transport_settings)
         b509_ranges: list[tuple[int, int]] = []
         if b509_dump:
             if b509_range:
@@ -915,10 +906,9 @@ def scan(
                 ),
             )
             transport = _build_transport(transport_settings, trace_file=trace_file)
-            opened_session = False
+            scan_started = False
             try:
                 with transport.session():
-                    opened_session = True
                     if requested_dst == "auto":
                         _emit_scan_status(console, "Resolving destination address from ebusd")
                         dst_u8 = _resolve_scan_destination(
@@ -951,6 +941,7 @@ def scan(
                         session_preface=preface,
                         trace_file=trace_file,
                     ) as observer:
+                        scan_started = True
                         artifact = scan_vrc(
                             transport,
                             dst=dst_u8,
@@ -978,11 +969,7 @@ def scan(
                 )
                 raise typer.Exit(2) from exc
             except (TransportError, TransportTimeout) as exc:
-                if (
-                    not opened_session
-                    and allow_transport_retry
-                    and _can_prompt_transport_retry(console)
-                ):
+                if not scan_started and _can_prompt_transport_retry(console):
                     maybe_settings = _prompt_transport_retry_settings(
                         console,
                         settings=transport_settings,
@@ -992,8 +979,10 @@ def scan(
                         typer.echo("Transport setup aborted by user.", err=True)
                         raise typer.Exit(1) from exc
                     transport_settings = maybe_settings
-                    allow_transport_retry = True
                     continue
+                if not scan_started:
+                    typer.echo(f"Transport setup failed: {exc}", err=True)
+                    raise typer.Exit(1) from exc
                 raise
 
     meta_obj = artifact.get("meta")

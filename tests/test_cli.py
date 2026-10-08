@@ -141,7 +141,7 @@ def test_scan_default_transport_failure_cancel_exits(monkeypatch, tmp_path: Path
     assert "Transport setup aborted by user." in result.stderr
 
 
-def test_scan_custom_transport_failure_does_not_prompt_retry(
+def test_scan_custom_transport_failure_can_prompt_retry_and_cancel(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -170,7 +170,146 @@ def test_scan_custom_transport_failure_does_not_prompt_retry(
         ["scan", "--host", "10.0.0.42", "--output-dir", str(tmp_path)],
     )
     assert result.exit_code == 1
-    assert prompt_called["value"] is False
+    assert prompt_called["value"] is True
+    assert "Transport setup aborted by user." in result.stderr
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        pytest.param(TimeoutError("ENS socket connect timed out"), id="timeout"),
+        pytest.param(ConnectionRefusedError("ENS connection refused"), id="refused"),
+        pytest.param(ConnectionAbortedError("ENS connection rejected"), id="rejected"),
+    ],
+)
+def test_scan_ens_startup_failure_non_tty_exits_concisely(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    error: OSError,
+) -> None:
+    import helianthus_vrc_explorer.cli as cli_mod
+
+    class _FailingEnsTransport:
+        @contextmanager
+        def session(self):
+            from helianthus_vrc_explorer.transport.base import TransportError, TransportTimeout
+
+            if isinstance(error, TimeoutError):
+                raise TransportTimeout(str(error))
+            raise TransportError(str(error))
+            yield self  # pragma: no cover - explicit startup failure
+
+    def _build_transport(settings, *, trace_file):  # noqa: ANN001
+        _ = trace_file
+        assert settings.protocol == "enhanced"
+        return _FailingEnsTransport()
+
+    monkeypatch.setattr(cli_mod, "_build_transport", _build_transport)
+    monkeypatch.setattr(cli_mod, "_can_prompt_transport_retry", lambda _console: False)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "scan",
+            "--transport",
+            "ens",
+            "--host",
+            "192.0.2.2",
+            "--dst",
+            "0x15",
+            "--output-dir",
+            str(tmp_path),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert f"Transport setup failed: {error}" in result.stderr
+    assert "Traceback" not in result.output
+
+
+def test_scan_ens_startup_failure_tty_cancel_exits_without_retry_loop(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import helianthus_vrc_explorer.cli as cli_mod
+
+    def _build_transport(_settings, *, trace_file):  # noqa: ANN001
+        _ = trace_file
+        return _SessionOnlyTransport(fail_open=True)
+
+    prompt_calls = 0
+
+    def _cancel(_console, *, settings, error_message):  # noqa: ANN001
+        nonlocal prompt_calls
+        prompt_calls += 1
+        assert settings.protocol == "enhanced"
+        assert "refused" in error_message
+        return None
+
+    monkeypatch.setattr(cli_mod, "_build_transport", _build_transport)
+    monkeypatch.setattr(cli_mod, "_can_prompt_transport_retry", lambda _console: True)
+    monkeypatch.setattr(cli_mod, "_prompt_transport_retry_settings", _cancel)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "scan",
+            "--transport",
+            "ens",
+            "--host",
+            "192.0.2.2",
+            "--dst",
+            "0x15",
+            "--output-dir",
+            str(tmp_path),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert prompt_calls == 1
+    assert "Transport setup aborted by user." in result.stderr
+
+
+def test_scan_runtime_transport_failure_does_not_restart_scan(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import helianthus_vrc_explorer.cli as cli_mod
+    from helianthus_vrc_explorer.transport.base import TransportTimeout
+
+    class _ReadyTransport:
+        @contextmanager
+        def session(self):
+            yield self
+
+    builds = 0
+    prompt_calls = 0
+
+    def _build_transport(_settings, *, trace_file):  # noqa: ANN001
+        nonlocal builds
+        _ = trace_file
+        builds += 1
+        return _ReadyTransport()
+
+    def _prompt(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        nonlocal prompt_calls
+        prompt_calls += 1
+        return None
+
+    def _runtime_timeout(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        raise TransportTimeout("runtime timeout")
+
+    monkeypatch.setattr(cli_mod, "_build_transport", _build_transport)
+    monkeypatch.setattr(cli_mod, "_can_prompt_transport_retry", lambda _console: True)
+    monkeypatch.setattr(cli_mod, "_prompt_transport_retry_settings", _prompt)
+    monkeypatch.setattr(cli_mod, "_probe_scan_identity", lambda _transport, *, dst: {})
+    monkeypatch.setattr(cli_mod, "scan_vrc", _runtime_timeout)
+
+    result = CliRunner().invoke(app, ["scan", "--dst", "0x15", "--output-dir", str(tmp_path)])
+
+    assert result.exit_code == 1
+    assert builds == 1
+    assert prompt_calls == 0
 
 
 def test_scan_command_not_enabled_exits_with_enablehex_hint(
