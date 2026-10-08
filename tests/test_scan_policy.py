@@ -278,3 +278,15 @@ def test_system_profile_and_research_use_ff_register_ceiling() -> None:
     assert group_namespace_profiles(0)[2].rr_max == 0xFF
     assert _rr_max_full_for_opcode(group=0, opcode=2) == 0xFF
     assert research_rr_max(group=0, opcode=2, normal_rr_max=0xFF) == 0xFF
+
+
+def test_readme_custom_scan_example_passes_preflight() -> None:
+    import json
+    import re
+    from pathlib import Path
+
+    readme = (Path(__file__).resolve().parents[1] / "README.md").read_text()
+    example = re.search(r"Exact custom scans.*?```json\n(.*?)\n```", readme, re.S)
+    assert example is not None
+    plan = parse_scan_plan(json.loads(example[1]))
+    assert plan[make_plan_key(2, 2)].instances == (1, 3, 9)

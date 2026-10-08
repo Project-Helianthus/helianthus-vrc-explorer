@@ -113,7 +113,7 @@ With planning or budget options, `--dry-run` executes the selected policy agains
 {
   "schema_version": 1,
   "groups": [
-    {"opcode": "0x02", "group": "0x02", "instances": ["0x00", "0x03"], "registers": ["0x0002", "0x0010..0x0015"]}
+    {"opcode": "0x02", "group": "0x02", "instances": ["0x01", "0x03"], "registers": ["0x0002", "0x0010..0x0015"]}
   ]
 }
 ```
