@@ -426,10 +426,10 @@ def _crc(data: bytes) -> int:
     feeding into the CRC polynomial.  This function accepts logical bytes
     and performs the expansion internally -- callers should NOT pre-expand.
 
-    The enhanced adapter firmware handles wire escape encoding/decoding
-    transparently: ENH SEND carries logical bytes; ENH RECEIVED returns
-    logical bytes.  CRC computation is the only place where escape expansion
-    matters to the client.
+    ENH SEND and RECEIVED carry raw wire symbols.  Telegram transmission and
+    reception therefore expand/decode escaped bytes separately.  This function
+    only computes the checksum value and callers must not pass pre-expanded
+    bytes to it.
     """
     value = 0
     for item in data:
@@ -858,6 +858,7 @@ class EnhancedTcpTransport(TransportInterface):
         raise _EnhancedCollision("Arbitration deadline expired (bus data flooding)")
 
     def _recv_bus_symbol(self, *, deadline: float | None = None) -> int:
+        """Receive exactly one raw eBUS wire symbol from the ENH stream."""
         if deadline is None:
             deadline = time.monotonic() + self._config.timeout_s
         while time.monotonic() < deadline:
@@ -905,17 +906,7 @@ class EnhancedTcpTransport(TransportInterface):
         raise TransportTimeout("Bus symbol read deadline expired")
 
     def _send_symbol_with_echo(self, symbol: int) -> None:
-        """Send a logical eBUS byte via ENH SEND and verify the echo.
-
-        The enhanced adapter firmware handles wire escape encoding
-        (0xA9->[0xA9,0x00], 0xAA->[0xA9,0x01]) transparently.  The ENH
-        protocol operates at the logical byte level -- no client-side
-        escape encoding is needed or desired.
-
-        Audit VE1/VE20: Verified correct -- adapter firmware handles wire
-        escape encoding.  Client-side escaping would cause double-encoding
-        corruption on the physical bus.
-        """
+        """Send one raw eBUS wire symbol via ENH SEND and verify its echo."""
         self._send_enh_frame(_ENH_REQ_SEND, symbol)
         echo = self._recv_bus_symbol()
         if echo == _EBUS_SYN and symbol != _EBUS_SYN:
@@ -925,7 +916,49 @@ class EnhancedTcpTransport(TransportInterface):
                 f"echo mismatch while waiting for 0x{symbol:02X}: got 0x{echo:02X}"
             )
 
+    def _send_telegram_symbol_with_echo(self, symbol: int) -> None:
+        """Escape one logical telegram byte and verify every raw wire echo."""
+        wire_symbols: tuple[int, ...]
+        if symbol == _EBUS_ESCAPE:
+            wire_symbols = (_EBUS_ESCAPE, 0x00)
+        elif symbol == _EBUS_SYN:
+            wire_symbols = (_EBUS_ESCAPE, 0x01)
+        else:
+            wire_symbols = (symbol,)
+        for wire_symbol in wire_symbols:
+            self._send_symbol_with_echo(wire_symbol)
+
+    def _recv_telegram_symbol(self, *, deadline: float) -> int:
+        """Decode one logical telegram byte from raw ENH RECEIVED symbols."""
+        symbol = self._recv_bus_symbol(deadline=deadline)
+        if symbol == _EBUS_SYN:
+            self._reset_parser()
+            raise _EnhancedSessionError(
+                "unexpected SYN before response telegram completed",
+                cause="response_ended_before_complete",
+                phase="response",
+                unexpected_symbol=symbol,
+            )
+        if symbol != _EBUS_ESCAPE:
+            return symbol
+
+        escaped = self._recv_bus_symbol(deadline=deadline)
+        if escaped == 0x00:
+            return _EBUS_ESCAPE
+        if escaped == 0x01:
+            return _EBUS_SYN
+
+        self._reset_parser()
+        raise _EnhancedSessionError(
+            f"invalid eBUS escape suffix 0x{escaped:02X}",
+            cause="malformed_escape",
+            phase="response",
+            unexpected_symbol=escaped,
+        )
+
     def _send_end_of_message(self) -> None:
+        # Structural SYN is deliberately raw.  Escaped A9 01 represents a
+        # logical 0xAA inside telegram data and must not end the transaction.
         self._send_symbol_with_echo(_EBUS_SYN)
 
     def request_info(self, info_id: int) -> bytes:
@@ -1395,7 +1428,7 @@ class EnhancedTcpTransport(TransportInterface):
                 self._trace(f"#{seq} LOCAL_NACK_RETRY attempt={nack_attempt}")
 
             for symbol in telegram[1:]:
-                self._send_symbol_with_echo(symbol)
+                self._send_telegram_symbol_with_echo(symbol)
 
             if dst == _ADDRESS_BROADCAST or not expect_response:
                 self._send_end_of_message()
@@ -1444,22 +1477,17 @@ class EnhancedTcpTransport(TransportInterface):
             response_deadline = time.monotonic() + self._config.timeout_s
 
             for response_attempt in range(2):
-                # In the ENH protocol, response bytes arrive via _ENH_RES_RECEIVED
-                # frames.  The adapter firmware handles wire-level SYN detection and
-                # reports bus loss via _ENH_RES_FAILED / _ENH_RES_ERROR_*, NOT by
-                # sending a RECEIVED frame with data=0xAA.  Therefore 0xAA from
-                # _recv_bus_symbol() is a legitimate data byte (the adapter decoded
-                # wire-escaped [0xA9, 0x01] back to logical 0xAA).  SYN guards are
-                # not needed here — _recv_bus_symbol() already raises appropriate
-                # exceptions for real bus errors and timeouts.
-                length = self._recv_bus_symbol(deadline=response_deadline)
+                # ENH RECEIVED carries raw wire symbols.  Decode escaping only
+                # across telegram length/body/CRC; ACK/NACK and end-of-message
+                # remain structural raw symbols.
+                length = self._recv_telegram_symbol(deadline=response_deadline)
 
                 response = bytearray()
                 for _ in range(length):
-                    value = self._recv_bus_symbol(deadline=response_deadline)
+                    value = self._recv_telegram_symbol(deadline=response_deadline)
                     response.append(value)
 
-                crc_value = self._recv_bus_symbol(deadline=response_deadline)
+                crc_value = self._recv_telegram_symbol(deadline=response_deadline)
 
                 segment = bytes((length,)) + bytes(response)
                 if _crc(segment) != crc_value:

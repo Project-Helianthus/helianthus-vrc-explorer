@@ -70,6 +70,23 @@ def _write_bus_symbol(conn: socket.socket, symbol: int) -> None:
     _write_enh_frame(conn, _ENH_RES_RECEIVED, symbol)
 
 
+def _wire_symbols(logical: bytes) -> bytes:
+    wire = bytearray()
+    for value in logical:
+        if value == 0xA9:
+            wire.extend((0xA9, 0x00))
+        elif value == 0xAA:
+            wire.extend((0xA9, 0x01))
+        else:
+            wire.append(value)
+    return bytes(wire)
+
+
+def _write_telegram_bytes(conn: socket.socket, logical: bytes) -> None:
+    for symbol in _wire_symbols(logical):
+        _write_bus_symbol(conn, symbol)
+
+
 @contextmanager
 def _run_ens_test_server(
     handler_fn: Callable[[socket.socket], None],
@@ -181,6 +198,57 @@ def test_ens_transport_send_wraps_b524_request() -> None:
     assert result == response
 
 
+@pytest.mark.parametrize(
+    ("payload", "expected_crc"),
+    [
+        (bytes.fromhex("020006003300"), 0xA9),
+        (bytes.fromhex("020006010e00"), 0xAA),
+    ],
+)
+def test_ens_transport_escapes_b524_crc_as_raw_wire_symbols(
+    payload: bytes,
+    expected_crc: int,
+) -> None:
+    """ENH SEND carries raw eBUS symbols, including escaped telegram CRC."""
+    src = 0xF7
+    dst = 0x15
+    request_without_crc = bytes((src, dst, 0xB5, 0x24, len(payload))) + payload
+    request = request_without_crc + bytes((_crc(request_without_crc),))
+    assert request[-1] == expected_crc
+    response = b"\x01"
+    response_segment = bytes((len(response),)) + response
+    response_crc = _crc(response_segment)
+
+    def _handler(conn: socket.socket) -> None:
+        assert _read_enh_frame(conn) == (_ENH_REQ_INIT, 0x01)
+        _write_enh_frame(conn, _ENH_RES_RESETTED, 0x01)
+
+        assert _read_enh_frame(conn) == (_ENH_REQ_START, src)
+        _write_enh_frame(conn, _ENH_RES_STARTED, src)
+
+        expected_wire = _wire_symbols(request[1:])
+        for expected in expected_wire:
+            assert _read_enh_frame(conn) == (_ENH_REQ_SEND, expected)
+            _write_bus_symbol(conn, expected)
+
+        _write_bus_symbol(conn, 0x00)
+        _write_telegram_bytes(conn, response_segment + bytes((response_crc,)))
+
+        assert _read_enh_frame(conn) == (_ENH_REQ_SEND, 0x00)
+        _write_bus_symbol(conn, 0x00)
+        # End-of-message is one structural raw SYN, not escaped telegram data.
+        assert _read_enh_frame(conn) == (_ENH_REQ_SEND, 0xAA)
+        _write_bus_symbol(conn, 0xAA)
+
+    with _run_ens_test_server(_handler) as (host, port):
+        transport = EnhancedTcpTransport(
+            EnhancedTcpConfig(host=host, port=port, timeout_s=0.5, src=src)
+        )
+        result = transport.send(dst, payload)
+
+    assert result == response
+
+
 def test_ens_transport_broadcast_does_not_expect_response() -> None:
     src = 0xF1
     dst = 0xFE
@@ -217,11 +285,7 @@ def test_internal_enhanced_nack_maps_to_transport_nack() -> None:
 
 
 def test_ve1_send_payload_containing_escape_byte() -> None:
-    """VE1/VE20: Verify that 0xA9 (ESCAPE) in payload sends correctly via ENH.
-
-    The enhanced adapter firmware handles wire escape encoding.  The ENH
-    SEND command carries logical bytes -- the client must NOT pre-escape.
-    """
+    """VE1/VE20: ENH SEND expands 0xA9/0xAA payload bytes on the wire."""
     src = 0xF1
     dst = 0x15
     # Payload deliberately contains 0xA9 (eBUS escape) and 0xAA (eBUS SYN).
@@ -239,8 +303,7 @@ def test_ve1_send_payload_containing_escape_byte() -> None:
         assert _read_enh_frame(conn) == (_ENH_REQ_START, src)
         _write_enh_frame(conn, _ENH_RES_STARTED, src)
 
-        # Adapter receives logical bytes via ENH -- no wire escaping at this layer.
-        for expected in request[1:]:
+        for expected in _wire_symbols(request[1:]):
             assert _read_enh_frame(conn) == (_ENH_REQ_SEND, expected)
             _write_bus_symbol(conn, expected)
 
@@ -269,10 +332,8 @@ def test_ve21_response_crc_with_escape_bytes() -> None:
     The _crc() function correctly applies escape expansion to logical bytes
     before CRC computation, matching what the bus target does.
 
-    Note: 0xAA (SYN) cannot appear as a logical data byte in eBUS responses
-    because SYN is the bus frame delimiter.  The escape byte 0xA9 CAN appear
-    as logical data (wire-escaped to [0xA9, 0x00] and un-escaped by the
-    adapter firmware).
+    ENH RECEIVED carries raw wire symbols, so the client decodes A9 00/01 in
+    response length, body, and CRC fields.
     """
     src = 0xF1
     dst = 0x15
@@ -296,10 +357,7 @@ def test_ve21_response_crc_with_escape_bytes() -> None:
             _write_bus_symbol(conn, expected)
 
         _write_bus_symbol(conn, 0x00)  # ACK
-        # Adapter sends logical (un-escaped) response bytes via ENH RECEIVED.
-        for value in response_segment:
-            _write_bus_symbol(conn, value)
-        _write_bus_symbol(conn, response_crc)
+        _write_telegram_bytes(conn, response_segment + bytes((response_crc,)))
 
         assert _read_enh_frame(conn) == (_ENH_REQ_SEND, 0x00)  # ACK
         _write_bus_symbol(conn, 0x00)
@@ -313,6 +371,64 @@ def test_ve21_response_crc_with_escape_bytes() -> None:
         result = transport.send_proto(dst, 0x07, 0x04, b"")
 
     assert result == response
+
+
+@pytest.mark.parametrize(
+    ("wire", "logical"),
+    [
+        ((0xA9, 0x00), 0xA9),
+        ((0xA9, 0x01), 0xAA),
+    ],
+)
+def test_response_telegram_decoder_unescapes_raw_wire_pairs(
+    monkeypatch: pytest.MonkeyPatch,
+    wire: tuple[int, int],
+    logical: int,
+) -> None:
+    transport = EnhancedTcpTransport(EnhancedTcpConfig())
+    received = iter(wire)
+    monkeypatch.setattr(transport, "_recv_bus_symbol", lambda **_kwargs: next(received))
+
+    assert transport._recv_telegram_symbol(deadline=1.0) == logical
+
+
+def test_response_telegram_decoder_rejects_malformed_escape(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport = EnhancedTcpTransport(EnhancedTcpConfig())
+    received = iter((0xA9, 0x02))
+    monkeypatch.setattr(transport, "_recv_bus_symbol", lambda **_kwargs: next(received))
+
+    with pytest.raises(_EnhancedSessionError, match="invalid eBUS escape suffix 0x02"):
+        transport._recv_telegram_symbol(deadline=1.0)
+
+
+def test_response_telegram_decoder_rejects_truncated_escape(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport = EnhancedTcpTransport(EnhancedTcpConfig())
+    received = iter((0xA9,))
+
+    def _receive(**_kwargs: object) -> int:
+        try:
+            return next(received)
+        except StopIteration as exc:
+            raise TransportTimeout("truncated eBUS escape") from exc
+
+    monkeypatch.setattr(transport, "_recv_bus_symbol", _receive)
+
+    with pytest.raises(TransportTimeout, match="truncated eBUS escape"):
+        transport._recv_telegram_symbol(deadline=1.0)
+
+
+def test_response_telegram_decoder_treats_bare_syn_as_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport = EnhancedTcpTransport(EnhancedTcpConfig())
+    monkeypatch.setattr(transport, "_recv_bus_symbol", lambda **_kwargs: 0xAA)
+
+    with pytest.raises(_EnhancedSessionError, match="unexpected SYN"):
+        transport._recv_telegram_symbol(deadline=1.0)
 
 
 def test_ve25_crc_escape_expansion_is_correct() -> None:
@@ -666,7 +782,7 @@ def test_adv_all_escape_syn_payload() -> None:
         _write_enh_frame(conn, _ENH_RES_RESETTED, 0x01)
         assert _read_enh_frame(conn) == (_ENH_REQ_START, src)
         _write_enh_frame(conn, _ENH_RES_STARTED, src)
-        for expected in request[1:]:
+        for expected in _wire_symbols(request[1:]):
             assert _read_enh_frame(conn) == (_ENH_REQ_SEND, expected)
             _write_bus_symbol(conn, expected)
         _write_bus_symbol(conn, 0x00)
@@ -706,9 +822,7 @@ def test_adv_crc_value_is_escape_byte() -> None:
             assert _read_enh_frame(conn) == (_ENH_REQ_SEND, expected)
             _write_bus_symbol(conn, expected)
         _write_bus_symbol(conn, 0x00)
-        for value in response_segment:
-            _write_bus_symbol(conn, value)
-        _write_bus_symbol(conn, response_crc)
+        _write_telegram_bytes(conn, response_segment + bytes((response_crc,)))
         assert _read_enh_frame(conn) == (_ENH_REQ_SEND, 0x00)
         _write_bus_symbol(conn, 0x00)
         assert _read_enh_frame(conn) == (_ENH_REQ_SEND, 0xAA)
@@ -723,13 +837,7 @@ def test_adv_crc_value_is_escape_byte() -> None:
 
 
 def test_adv_crc_value_is_syn_byte_succeeds() -> None:
-    """ADV: Response CRC value 0xAA must succeed (not false-timeout).
-
-    In the ENH protocol, 0xAA from _recv_bus_symbol() is a legitimate
-    data byte — the adapter decoded wire-escaped [0xA9, 0x01] back to
-    logical 0xAA.  Bus SYN loss is reported via _ENH_RES_FAILED, not
-    as a RECEIVED frame with data=0xAA.
-    """
+    """ADV: Wire-escaped logical response CRC 0xAA must succeed."""
     src = 0xF1
     dst = 0x15
     request_without_crc = bytes((src, dst, 0x07, 0x04, 0x00))
@@ -748,9 +856,7 @@ def test_adv_crc_value_is_syn_byte_succeeds() -> None:
             assert _read_enh_frame(conn) == (_ENH_REQ_SEND, expected)
             _write_bus_symbol(conn, expected)
         _write_bus_symbol(conn, 0x00)  # ACK
-        for value in response_segment:
-            _write_bus_symbol(conn, value)
-        _write_bus_symbol(conn, response_crc)  # 0xAA — valid CRC byte
+        _write_telegram_bytes(conn, response_segment + bytes((response_crc,)))
 
         # Transport should send ACK + SYN (success, not timeout)
         assert _read_enh_frame(conn) == (_ENH_REQ_SEND, 0x00)  # ACK
@@ -768,7 +874,7 @@ def test_adv_crc_value_is_syn_byte_succeeds() -> None:
 
 
 def test_adv_response_data_containing_0xaa() -> None:
-    """ADV: Response data byte 0xAA must not trigger false SYN timeout."""
+    """ADV: Wire-escaped logical response byte 0xAA is decoded as data."""
     src = 0xF1
     dst = 0x15
     request_without_crc = bytes((src, dst, 0x07, 0x04, 0x00))
@@ -787,9 +893,7 @@ def test_adv_response_data_containing_0xaa() -> None:
             assert _read_enh_frame(conn) == (_ENH_REQ_SEND, expected)
             _write_bus_symbol(conn, expected)
         _write_bus_symbol(conn, 0x00)  # ACK
-        for value in response_segment:
-            _write_bus_symbol(conn, value)
-        _write_bus_symbol(conn, response_crc)
+        _write_telegram_bytes(conn, response_segment + bytes((response_crc,)))
         assert _read_enh_frame(conn) == (_ENH_REQ_SEND, 0x00)  # ACK
         _write_bus_symbol(conn, 0x00)
         assert _read_enh_frame(conn) == (_ENH_REQ_SEND, 0xAA)  # SYN
@@ -914,7 +1018,7 @@ def test_adv_stream_of_0xff_to_enh_parser() -> None:
 
 
 def test_adv_send_symbol_escape_byte_explicit() -> None:
-    """ADV: _send_symbol_with_echo with symbol=0xA9 (ESCAPE) explicitly."""
+    """ADV: Telegram payload 0xA9 emits raw A9 00 with both echoes checked."""
     src = 0xF1
     dst = 0x15
     payload = bytes((0xA9,))
@@ -930,7 +1034,7 @@ def test_adv_send_symbol_escape_byte_explicit() -> None:
         _write_enh_frame(conn, _ENH_RES_RESETTED, 0x01)
         assert _read_enh_frame(conn) == (_ENH_REQ_START, src)
         _write_enh_frame(conn, _ENH_RES_STARTED, src)
-        for expected in request[1:]:
+        for expected in _wire_symbols(request[1:]):
             cmd, data = _read_enh_frame(conn)
             assert cmd == _ENH_REQ_SEND
             assert data == expected
@@ -951,7 +1055,7 @@ def test_adv_send_symbol_escape_byte_explicit() -> None:
         )
         result = transport.send(dst, payload)
     assert result == response
-    assert 0xA9 in symbols_sent
+    assert bytes((0xA9, 0x00)) in bytes(symbols_sent)
 
 
 def test_ve_new_07_started_mismatch_aborts_early() -> None:
@@ -1050,8 +1154,7 @@ def test_send_symbol_with_echo_suppresses_post_grant_syn() -> None:
 
 
 def test_post_grant_syn_guard_clears_on_first_non_syn() -> None:
-    """XR-SYN-GUARD: Flag clears on first non-SYN byte, so SYN after echo
-    is treated as a real bus symbol, not suppressed."""
+    """XR-SYN-GUARD: Escaped response 0xAA remains data after first echo."""
     src = 0xF1
     dst = 0x15
     response = bytes((0xAA, 0x42))
@@ -1069,11 +1172,7 @@ def test_post_grant_syn_guard_clears_on_first_non_syn() -> None:
             assert _read_enh_frame(conn) == (_ENH_REQ_SEND, expected)
             _write_bus_symbol(conn, expected)
         _write_bus_symbol(conn, 0x00)  # ACK
-        # Response contains 0xAA as data; it must not be suppressed after
-        # the flag was cleared by the first echo.
-        for value in response_segment:
-            _write_bus_symbol(conn, value)
-        _write_bus_symbol(conn, response_crc)
+        _write_telegram_bytes(conn, response_segment + bytes((response_crc,)))
         assert _read_enh_frame(conn) == (_ENH_REQ_SEND, 0x00)
         _write_bus_symbol(conn, 0x00)
         assert _read_enh_frame(conn) == (_ENH_REQ_SEND, 0xAA)
@@ -1655,7 +1754,7 @@ def test_xr_init_timeout_fail_closed_bounded() -> None:
 
 
 def test_xr_enh_0xaa_data_not_syn() -> None:
-    """XR_ENH_0xAA_DataNotSYN: 0xAA in response data/CRC must not trigger false timeout."""
+    """XR_ENH_0xAA_DataNotSYN: Escaped logical 0xAA remains response data."""
     src = 0xF1
     dst = 0x15
     request_without_crc = bytes((src, dst, 0x07, 0x04, 0x00))
@@ -1674,9 +1773,7 @@ def test_xr_enh_0xaa_data_not_syn() -> None:
             assert _read_enh_frame(conn) == (_ENH_REQ_SEND, expected)
             _write_bus_symbol(conn, expected)
         _write_bus_symbol(conn, 0x00)  # ACK
-        for value in response_segment:
-            _write_bus_symbol(conn, value)
-        _write_bus_symbol(conn, response_crc)
+        _write_telegram_bytes(conn, response_segment + bytes((response_crc,)))
         assert _read_enh_frame(conn) == (_ENH_REQ_SEND, 0x00)  # ACK
         _write_bus_symbol(conn, 0x00)
         assert _read_enh_frame(conn) == (_ENH_REQ_SEND, 0xAA)  # SYN
