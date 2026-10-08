@@ -259,6 +259,7 @@ def operation_group_display_name(group: int | str, opcode: int) -> str | None:
 class NamespaceProfile:
     opcode: int
     name: str
+    ii_min: int
     ii_max: int
     rr_max: int
 
@@ -290,6 +291,7 @@ def group_namespace_profiles(group: int) -> dict[int, NamespaceProfile]:
             name=(remote_group_display_name(group) if op == 0x06 else None)
             or operation_group_display_name(group, op)
             or str(name_overrides.get(op, default_name)),
+            ii_min=0x01 if op == 0x06 or (op == 0x02 and group == 0x02) else 0x00,
             ii_max=0x08 if op == 0x06 else int(ii_overrides.get(op, default_ii)),
             rr_max=int(rr_overrides.get(op, default_rr)),
         )

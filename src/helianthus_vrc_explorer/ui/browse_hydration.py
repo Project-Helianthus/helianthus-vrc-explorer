@@ -965,6 +965,13 @@ class _HydratedBrowseStore:
             for row in rows
             if row.protocol == "b524" and isinstance(row.section_key, str)
         }
+        b524_sections_present.update(
+            node.section_key
+            for node in tree_nodes
+            if node.protocol == "b524"
+            and node.level == "instance"
+            and isinstance(node.section_key, str)
+        )
         for section_key in _B524_SECTION_ORDER:
             if _b524_operation_rows_present(
                 artifact=artifact,

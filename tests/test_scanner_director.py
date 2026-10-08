@@ -435,16 +435,19 @@ def test_group_namespace_profiles_support_opcode_first_identity() -> None:
     assert sorted(hw) == [0x02, 0x06]
     assert hw[0x02].rr_max == 0x0013
     assert hw[0x06].name == "Boiler"
+    assert hw[0x06].ii_min == 0x01
     assert hw[0x06].ii_max == 0x08
     assert hw[0x06].rr_max == 0x0015
 
     assert sorted(hc) == [0x02, 0x06]
     assert hc[0x02].ii_max == 0x09
+    assert hc[0x02].ii_min == 0x01
     assert hc[0x06].ii_max == 0x08
     assert hc[0x06].name == "Heat Pump"
     assert zones[0x06].name == "Air Recovery (VAR) recoVair"
     assert zones[0x06].ii_max == 0x08
     assert solar[0x02].ii_max == 0x01
+    assert solar[0x02].ii_min == 0x00
     assert solar[0x06].name == "unused"
     assert solar[0x06].ii_max == 0x08
     assert cylinders[0x06].name == "Wärmepumpe Zubehör Appliance Interface (VWZ-AI)"

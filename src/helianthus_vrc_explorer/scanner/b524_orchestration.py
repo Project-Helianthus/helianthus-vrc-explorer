@@ -46,6 +46,7 @@ from .b524_plan import (
     PlannerUiMode,
     _group_name_for_opcode,
     _ii_max_for_opcode,
+    _ii_min_for_opcode,
     _instance_discovery_decision,
     _instance_discovery_targets,
     _is_instanced_group,
@@ -510,6 +511,7 @@ def run_b524_scan(
                     opcode=opcode,
                     name=artifact_group_name,
                     descriptor_observed=desc_for_artifact,
+                    ii_min=_ii_min_for_opcode(group=group.group, opcode=opcode),
                     ii_max=namespace_ii_max,
                     discovery_advisory=discovery_advisory,
                 )
@@ -564,6 +566,7 @@ def run_b524_scan(
                     artifact,
                     group=group.group,
                     opcode=opcode,
+                    ii_min=_ii_min_for_opcode(group=group.group, opcode=opcode),
                     ii_max=namespace_ii_max,
                 )
                 instances_obj = _instances_object(artifact, group=group.group, opcode=opcode)
@@ -597,6 +600,7 @@ def run_b524_scan(
                 artifact,
                 group=group.group,
                 opcode=opcode,
+                ii_min=_ii_min_for_opcode(group=group.group, opcode=opcode),
                 ii_max=namespace_ii_max,
             )
             contract = namespace_availability_contract(group=group.group, opcode=opcode)
@@ -841,7 +845,6 @@ def run_b524_scan(
                 )
                 if requested_plan is not None:
                     present_instances = requested_plan.instances
-                    planner_ii_max = max(requested_plan.instances) or None
                 if planner_ii_max is None and not present_instances:
                     present_instances = (0x00,)
                 planner_groups.append(
@@ -864,6 +867,7 @@ def run_b524_scan(
                             opcode=opcode,
                         ),
                         present_instances=present_instances,
+                        ii_min=_ii_min_for_opcode(group=group.group, opcode=opcode),
                         expected_count=(
                             expected_instance_count(
                                 information_values.get(
@@ -1224,6 +1228,7 @@ def run_b524_scan(
                         artifact,
                         group=task.group,
                         opcode=task.opcode,
+                        ii_min=_ii_min_for_opcode(group=task.group, opcode=task.opcode),
                         ii_max=_ii_max_for_opcode(
                             group=task.group,
                             default_ii_max=task_group_meta.ii_max,

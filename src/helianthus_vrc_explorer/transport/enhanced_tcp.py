@@ -30,6 +30,7 @@ _EBUS_SYN = 0xAA
 _EBUS_ACK = 0x00
 _EBUS_NACK = 0xFF
 _ADDRESS_BROADCAST = 0xFE
+_B509_READ_ONLY_SELECTORS: frozenset[int] = frozenset(range(0x24, 0x28))
 
 _ENH_REQ_INIT = 0x0
 _ENH_REQ_SEND = 0x1
@@ -483,6 +484,11 @@ def _is_retry_safe_proto_read(
         return False
     if primary == 0xB5 and secondary == 0x24:
         return _is_retry_safe_b524_read(payload)
+    # B5/09 is mostly a control family.  Only these recovered one-byte
+    # identity reads are known non-mutating and may re-arbitrate.
+    if primary == 0xB5 and secondary == 0x09:
+        value = bytes(payload)
+        return len(value) == 1 and value[0] in _B509_READ_ONLY_SELECTORS
     # Standard device identification request used by scan discovery.
     return primary == 0x07 and secondary == 0x04 and len(payload) == 0
 

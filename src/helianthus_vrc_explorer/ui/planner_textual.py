@@ -19,6 +19,7 @@ from .planner import (
     PlannerPreset,
     _format_seconds,
     build_plan_from_preset,
+    format_planner_instance_bounds,
     planner_instance_range,
     planner_namespace_title,
     planner_present_instances,
@@ -40,7 +41,9 @@ def _namespace_text(group: PlannerGroup) -> str:
     return group.namespace_label or opcode_label(group.opcode)
 
 
-def _table_row_values(state: _EditableGroup) -> tuple[str, str, str, str, str, str, str]:
+def _table_row_values(
+    state: _EditableGroup,
+) -> tuple[str, str, str, str, str, str, str, str]:
     group = state.group
     mark = "✓" if state.enabled else " "
     name = group.name if group.known else f"{group.name} (experimental)"
@@ -50,6 +53,7 @@ def _table_row_values(state: _EditableGroup) -> tuple[str, str, str, str, str, s
         name,
         _namespace_text(group),
         f"{group.descriptor:.1f}",
+        format_planner_instance_bounds(group),
         _format_instances(group, state.instances, enabled=state.enabled),
         _format_register_scope(state),
     )
@@ -339,7 +343,9 @@ def run_textual_scan_plan(
             for table_id in _PANE_TABLE_IDS.values():
                 table = self.query_one(f"#{table_id}", DataTable)
                 table.cursor_type = "row"
-                table.add_columns("On", "GG", "Name", "Namespace", "Type", "Instances", "RR_max")
+                table.add_columns(
+                    "On", "GG", "Name", "Namespace", "Type", "II range", "Instances", "RR_max"
+                )
             self._refresh_table()
             self._set_help("1/2/3/4 presets | Space toggle | Enter edit RR_max | i edit instances")
             if self._row_groups["local"]:

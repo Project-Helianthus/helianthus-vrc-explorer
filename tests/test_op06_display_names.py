@@ -82,3 +82,32 @@ def test_saved_artifacts_use_current_remote_names_without_rewriting_evidence(gro
     assert name in html
     assert "device_connected" in html
     assert artifact == original
+
+
+def test_base_station_confirmed_present_empty_instance_is_reachable_in_browser_tree():
+    artifact = {
+        "meta": {},
+        "operations": {
+            "0x06": {
+                "groups": {
+                    "0x0f": {
+                        "name": "Base Station",
+                        "ii_min": "0x01",
+                        "ii_max": "0x08",
+                        "instances": {
+                            "0x01": {
+                                "present": True,
+                                "registers": {},
+                            }
+                        },
+                    }
+                }
+            }
+        },
+    }
+
+    store = BrowseStore.from_artifact(artifact)
+    nodes = {node.node_id: node for node in store.tree_nodes}
+
+    assert nodes["b524:group:device_slots:0x0f"].label == "Base Station (0x0f)"
+    assert "b524:inst:device_slots:0x0f:0x06:0x01" in nodes

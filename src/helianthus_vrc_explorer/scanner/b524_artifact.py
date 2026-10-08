@@ -44,6 +44,7 @@ def _ensure_group_artifact(
     opcode: int,
     name: str,
     descriptor_observed: float | None,
+    ii_min: int | None = None,
     ii_max: int | None = None,
     discovery_advisory: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -57,12 +58,16 @@ def _ensure_group_artifact(
         "descriptor_observed": descriptor_observed,
         "instances": {},
     }
+    if ii_min is not None:
+        default["ii_min"] = _hex_u8(ii_min)
     if ii_max is not None:
         default["ii_max"] = _hex_u8(ii_max)
     group_obj = op_groups.setdefault(group_key, default)
     group_obj.setdefault("instances", {})
     group_obj.setdefault("name", name)
     group_obj.setdefault("descriptor_observed", descriptor_observed)
+    if ii_min is not None:
+        group_obj["ii_min"] = _hex_u8(ii_min)
     if ii_max is not None:
         group_obj["ii_max"] = _hex_u8(ii_max)
     if discovery_advisory is not None:
@@ -161,9 +166,10 @@ def _record_namespace_topology(
     *,
     group: int,
     opcode: int,
+    ii_min: int | None,
     ii_max: int | None,
 ) -> None:
-    """Write ii_max to operations[op_hex].groups[group_key]."""
+    """Write configured instance bounds to one operation/group artifact row."""
     op_hex = _hex_u8(opcode)
     group_key = _hex_u8(group)
     op_obj = artifact["operations"].get(op_hex)
@@ -175,6 +181,8 @@ def _record_namespace_topology(
     group_obj = op_groups.get(group_key)
     if not isinstance(group_obj, dict):
         return
+    if ii_min is not None:
+        group_obj["ii_min"] = _hex_u8(ii_min)
     if ii_max is not None:
         group_obj["ii_max"] = _hex_u8(ii_max)
 

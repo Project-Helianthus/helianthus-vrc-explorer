@@ -137,6 +137,7 @@ def test_table_row_values_show_explicit_namespace_column() -> None:
         "Primary Heating Sources",
         "remote",
         "3.0",
+        "0x01..0x08",
         "present 1/8",
         "0x0015",
     )
@@ -146,6 +147,7 @@ def test_table_row_values_show_explicit_namespace_column() -> None:
         "Regulator Parameters",
         "local",
         "3.0",
+        "0x00..0x00",
         "singleton",
         "0x00FF",
     )

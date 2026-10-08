@@ -2000,6 +2000,105 @@ def test_mutative_or_malformed_b524_request_is_not_retried(
     assert reconnects == 0
 
 
+@pytest.mark.parametrize("selector", range(0x24, 0x28))
+def test_b509_read_only_identity_selector_retries_after_collision(
+    monkeypatch: pytest.MonkeyPatch,
+    selector: int,
+) -> None:
+    """Only the recovered one-byte B5/09 read selectors may re-arbitrate."""
+    from helianthus_vrc_explorer.transport import enhanced_tcp
+
+    transport = EnhancedTcpTransport(EnhancedTcpConfig(collision_max_retries=1))
+    attempts: list[bytes] = []
+
+    def _send_once(_seq: int, **kwargs: object) -> bytes:
+        attempt_admitted_hook = kwargs["attempt_admitted_hook"]
+        assert callable(attempt_admitted_hook)
+        attempt_admitted_hook()
+        payload = kwargs["payload"]
+        assert isinstance(payload, bytes)
+        attempts.append(payload)
+        if len(attempts) == 1:
+            raise enhanced_tcp._EnhancedCollision("startup collision")
+        return b"\x01"
+
+    monkeypatch.setattr(transport, "_send_proto_once", _send_once)
+
+    assert transport.send_proto(0x15, 0xB5, 0x09, bytes((selector,))) == b"\x01"
+    assert attempts == [bytes((selector,)), bytes((selector,))]
+
+
+@pytest.mark.parametrize(
+    ("payload", "expect_response"),
+    [
+        (b"", True),
+        (b"\x24\x00", True),
+        (b"\x23", True),
+        (b"\x28", True),
+        (b"\x24", False),
+    ],
+)
+def test_b509_non_allowlisted_shape_is_not_retried_after_collision(
+    monkeypatch: pytest.MonkeyPatch,
+    payload: bytes,
+    expect_response: bool,
+) -> None:
+    """The B5/09 retry exception is an exact allowlist, never a family rule."""
+    from helianthus_vrc_explorer.transport import enhanced_tcp
+
+    transport = EnhancedTcpTransport(EnhancedTcpConfig(collision_max_retries=1))
+    attempts = 0
+
+    def _send_once(_seq: int, **kwargs: object) -> bytes:
+        nonlocal attempts
+        attempt_admitted_hook = kwargs["attempt_admitted_hook"]
+        assert callable(attempt_admitted_hook)
+        attempt_admitted_hook()
+        attempts += 1
+        raise enhanced_tcp._EnhancedCollision("startup collision")
+
+    monkeypatch.setattr(transport, "_send_proto_once", _send_once)
+
+    with pytest.raises(enhanced_tcp._EnhancedCollision, match="startup collision"):
+        transport.send_proto(0x15, 0xB5, 0x09, payload, expect_response=expect_response)
+
+    assert attempts == 1
+
+
+def test_b509_read_only_identity_selector_recovers_session_after_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from helianthus_vrc_explorer.transport import enhanced_tcp
+
+    transport = EnhancedTcpTransport(
+        EnhancedTcpConfig(timeout_max_retries=0, reconnect_max_retries=1, reconnect_delay_s=0)
+    )
+    attempts: list[bytes] = []
+    reconnects: list[tuple[int, int]] = []
+
+    def _send_once(_seq: int, **kwargs: object) -> bytes:
+        attempt_admitted_hook = kwargs["attempt_admitted_hook"]
+        assert callable(attempt_admitted_hook)
+        attempt_admitted_hook()
+        payload = kwargs["payload"]
+        assert isinstance(payload, bytes)
+        attempts.append(payload)
+        if len(attempts) == 1:
+            raise enhanced_tcp.TransportTimeout("adapter timeout")
+        return b"\x01"
+
+    monkeypatch.setattr(transport, "_send_proto_once", _send_once)
+    monkeypatch.setattr(
+        transport,
+        "_reconnect",
+        lambda seq, attempt: reconnects.append((seq, attempt)),
+    )
+
+    assert transport.send_proto(0x15, 0xB5, 0x09, b"\x24") == b"\x01"
+    assert attempts == [b"\x24", b"\x24"]
+    assert reconnects == [(1, 1)]
+
+
 def test_target_nack_is_not_treated_as_recoverable_session_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

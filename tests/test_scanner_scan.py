@@ -647,6 +647,8 @@ def test_scan_b524_scans_all_instances_and_register_range(tmp_path: Path) -> Non
     group = artifact_op_group(artifact, op="0x02", group="0x02")
     # v2.3: dual_namespace removed from operations-first structure
     assert group["descriptor_observed"] is None
+    assert group["ii_min"] == "0x01"
+    assert group["ii_max"] == "0x09"
 
     instance_01 = group["instances"]["0x01"]
     assert instance_01["present"] is True
@@ -2261,6 +2263,7 @@ def test_scan_b524_textual_planner_uses_remote_presence_for_op06_rows(
         (0x05, 0x06): {0x01},
         (0x0A, 0x06): {0x03},
         (0x0C, 0x06): {0x04},
+        (0x0F, 0x06): {0x01},
     }
     local_present = {
         (0x02, 0x02): {0x00, 0x01, 0x02},
@@ -2297,12 +2300,13 @@ def test_scan_b524_textual_planner_uses_remote_presence_for_op06_rows(
             DiscoveredGroup(group=0x05, descriptor=1.0),
             DiscoveredGroup(group=0x0A, descriptor=1.0),
             DiscoveredGroup(group=0x0C, descriptor=1.0),
+            DiscoveredGroup(group=0x0F, descriptor=1.0),
         ],
     )
     monkeypatch.setattr(scan_mod, "probe_instance_availability", fake_probe_instance_availability)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
-    scan_b524(
+    artifact = scan_b524(
         DummyTransport(_write_fixture_groups_00_to_05(tmp_path)),
         dst=0x15,
         observer=_NoopObserver(),
@@ -2321,6 +2325,14 @@ def test_scan_b524_textual_planner_uses_remote_presence_for_op06_rows(
     assert (0x05, 0x06) not in by_key
     assert by_key[(0x0A, 0x06)].present_instances == (0x03,)
     assert by_key[(0x0C, 0x06)].present_instances == (0x04,)
+    assert by_key[(0x0F, 0x06)].name == "Base Station"
+    assert by_key[(0x0F, 0x06)].present_instances == (0x01,)
+    assert by_key[(0x0F, 0x06)].ii_min == 0x01
+    assert by_key[(0x0F, 0x06)].ii_max == 0x08
+    base_station = artifact_op_group(artifact, op="0x06", group="0x0f")
+    assert base_station["ii_min"] == "0x01"
+    assert base_station["ii_max"] == "0x08"
+    assert base_station["instances"]["0x01"]["present"] is True
 
     # Local rows keep their own namespace evidence.
     assert by_key[(0x02, 0x02)].present_instances == (0x01, 0x02)

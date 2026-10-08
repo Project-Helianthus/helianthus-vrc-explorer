@@ -169,8 +169,12 @@ def namespace_availability_contract(
             namespace_relationship=relationship,
             probe_register=0x0002,
             probe_type_hint="UIN",
-            positive_when="value not in {0x0000, 0xFFFF}",
-            description="Heating circuit CircuitType must decode to a non-empty u16.",
+            positive_when=("decoded RR=0x0002 is non-sentinel and either nonzero or FLAGS=0x03"),
+            description=(
+                "In the characterized controller profile, a non-sentinel nonzero "
+                "RR=0x0002 value or a zero value with active visible FLAGS=0x03 "
+                "retains the local circuit slot. FLAGS=0x02 with zero does not."
+            ),
         )
 
     if group == 0x03 and opcode == 0x02:
@@ -785,16 +789,17 @@ def probe_instance_availability(
     if group == 0x02 and opcode == 0x02:
         if response_state == "empty_reply":
             return InstanceAvailabilityProbe(present=True, contract=contract, evidence=entry)
-        if entry["error"] is None and entry.get("flags_access") != "absent":
+        if (
+            entry["error"] is None
+            and response_state == "active"
+            and entry.get("flags_access") != "absent"
+        ):
             value = entry["value"]
             present = (
                 isinstance(value, int)
                 and not isinstance(value, bool)
-                and value
-                not in {
-                    0x0000,
-                    0xFFFF,
-                }
+                and value != 0xFFFF
+                and (value != 0x0000 or entry.get("flags") == 0x03)
             )
         return InstanceAvailabilityProbe(present=present, contract=contract, evidence=entry)
 

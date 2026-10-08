@@ -194,6 +194,13 @@ def _ii_max_for_opcode(*, group: int, default_ii_max: int | None, opcode: int) -
     return int(value)
 
 
+def _ii_min_for_opcode(*, group: int, opcode: int) -> int:
+    """Return the first configured instance index for one operation namespace."""
+    if opcode == 0x06 or (opcode == 0x02 and group == 0x02):
+        return 0x01
+    return 0x00
+
+
 def _plan_key(group: int, opcode: int) -> PlanKey:
     return make_plan_key(group, opcode)
 

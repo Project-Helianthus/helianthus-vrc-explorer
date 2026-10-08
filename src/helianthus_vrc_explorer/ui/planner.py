@@ -43,6 +43,7 @@ class PlannerGroup:
     namespace_label: str | None = None
     recommended: bool = True
     expected_count: int | None = None
+    ii_min: int | None = None
 
     @property
     def key(self) -> PlanKey:
@@ -189,14 +190,37 @@ def _build_default_plan(
     )
 
 
+def planner_instance_bounds(group: PlannerGroup) -> tuple[int, int]:
+    """Return the configured inclusive II bounds shown by planner surfaces."""
+    if group.opcode == 0x06:
+        ii_min = group.ii_min if group.ii_min is not None else 0x01
+        ii_max = min(group.ii_max if group.ii_max is not None else 0x08, 0x08)
+    elif group.opcode == 0x02 and group.group == 0x02:
+        ii_min = group.ii_min if group.ii_min is not None else 0x01
+        ii_max = min(group.ii_max if group.ii_max is not None else 0x09, 0x09)
+    elif group.ii_max is None:
+        return (0x00, 0x00)
+    else:
+        ii_min = group.ii_min if group.ii_min is not None else 0x00
+        ii_max = group.ii_max
+    if ii_min > ii_max:
+        raise ValueError(
+            f"Invalid II bounds for GG=0x{group.group:02X}/OP=0x{group.opcode:02X}: "
+            f"0x{ii_min:02X}..0x{ii_max:02X}"
+        )
+    return (ii_min, ii_max)
+
+
+def format_planner_instance_bounds(group: PlannerGroup) -> str:
+    ii_min, ii_max = planner_instance_bounds(group)
+    return f"0x{ii_min:02X}..0x{ii_max:02X}"
+
+
 def planner_instance_range(group: PlannerGroup) -> tuple[int, ...]:
-    if group.opcode == 6:
-        return tuple(range(1, min(group.ii_max or 8, 8) + 1))
-    if group.opcode == 2 and group.group == 2:
-        return tuple(range(1, min(group.ii_max or 9, 9) + 1))
-    if group.ii_max is None:
-        return (0,)
-    result = tuple(range(group.ii_max + 1))
+    ii_min, ii_max = planner_instance_bounds(group)
+    result = tuple(range(ii_min, ii_max + 1))
+    if group.opcode == 0x06 or (group.opcode == 0x02 and group.group == 0x02):
+        return result
     return result + ((0xFF,) if 0xFF in group.present_instances else ())
 
 
@@ -252,6 +276,7 @@ def _render_table(title: str, rows: list[PlannerGroup], *, unknown: bool, consol
         table.add_column("GG", style="cyan", no_wrap=True)
         table.add_column("Name", style="white")
         table.add_column("Type", style="dim", justify="right", no_wrap=True)
+        table.add_column("II range", style="dim", justify="right", no_wrap=True)
         table.add_column("Instances", style="dim", justify="right", no_wrap=True)
         table.add_column("RR_max", style="magenta", justify="right", no_wrap=True)
         for g in namespace_rows:
@@ -269,6 +294,7 @@ def _render_table(title: str, rows: list[PlannerGroup], *, unknown: bool, consol
                 _hex_u8(g.group),
                 name,
                 f"{g.descriptor:.1f}",
+                format_planner_instance_bounds(g),
                 instances,
                 rr_max,
             )

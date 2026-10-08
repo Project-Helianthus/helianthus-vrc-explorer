@@ -367,6 +367,52 @@ def test_flags_interpretation_multi_byte() -> None:
     assert _interpret_flags(0x03, response_len=7) == "writable_visible"
 
 
+@pytest.mark.parametrize(
+    ("flags", "value", "expected_present"),
+    (
+        (0x03, 0x0000, True),
+        (0x02, 0x0000, False),
+        (0x02, 0x0001, True),
+        (0x03, 0xFFFF, False),
+    ),
+)
+def test_local_circuit_presence_retains_visible_zero_value_slots(
+    monkeypatch: pytest.MonkeyPatch,
+    flags: int,
+    value: int,
+    expected_present: bool,
+) -> None:
+    import helianthus_vrc_explorer.scanner.register as register
+
+    monkeypatch.setattr(
+        register,
+        "read_register",
+        lambda *_args, **_kwargs: {
+            "raw_hex": value.to_bytes(2, "little").hex(),
+            "type": "UIN",
+            "value": value,
+            "error": None,
+            "flags": flags,
+            "flags_access": _interpret_flags(flags, response_len=6),
+            "response_state": "active",
+        },
+    )
+
+    probe = probe_instance_availability(
+        _StatusOnlyTransport(),
+        dst=0x15,
+        group=0x02,
+        instance=0x02,
+        opcode=0x02,
+    )
+
+    assert probe.present is expected_present
+    assert probe.contract.probe_register == 0x0002
+    assert probe.contract.positive_when == (
+        "decoded RR=0x0002 is non-sentinel and either nonzero or FLAGS=0x03"
+    )
+
+
 def test_opcodes_for_group_dual_namespace() -> None:
     assert opcodes_for_group(0x09) == [0x02, 0x06]
 
