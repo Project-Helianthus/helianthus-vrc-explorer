@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass
 from typing import Any, Final, Literal, NotRequired, TypedDict, cast
 
@@ -205,8 +206,11 @@ def namespace_availability_contract(
             namespace_relationship=relationship,
             probe_register=0x0004,
             probe_type_hint="EXP",
-            positive_when="decoded EXP value is not null",
-            description="Solar circuit availability requires a decodable float payload.",
+            positive_when="visible RR=0x0004 has a finite decoded EXP value",
+            description=(
+                "The characterized solar profile exposes RR=0x0004 for a configured slot. "
+                "Hidden default temperatures alone do not establish presence."
+            ),
         )
 
     if opcode == 0x06 and group in CONNECTED_DEVICE_GROUPS:
@@ -771,6 +775,10 @@ def probe_instance_availability(
     present = False
     response_state = entry.get("response_state")
 
+    if opcode == 0x02 and (entry.get("error") is not None or response_state == "empty_reply"):
+        entry["availability_qualification"] = "unknown"
+        return InstanceAvailabilityProbe(present=False, contract=contract, evidence=entry)
+
     if opcode == 0x06 and group in CONNECTED_DEVICE_GROUPS:
         state: Literal["connected", "not_connected", "unknown"] = "unknown"
         if (
@@ -795,8 +803,6 @@ def probe_instance_availability(
         return InstanceAvailabilityProbe(present=False, contract=contract, evidence=entry)
 
     if group == 0x02 and opcode == 0x02:
-        if response_state == "empty_reply":
-            return InstanceAvailabilityProbe(present=True, contract=contract, evidence=entry)
         if (
             entry["error"] is None
             and response_state == "active"
@@ -812,16 +818,12 @@ def probe_instance_availability(
         return InstanceAvailabilityProbe(present=present, contract=contract, evidence=entry)
 
     if group == 0x03 and opcode == 0x02:
-        if response_state == "empty_reply":
-            return InstanceAvailabilityProbe(present=True, contract=contract, evidence=entry)
         if entry["error"] is None and entry.get("flags_access") != "absent":
             value = entry["value"]
             present = isinstance(value, int) and not isinstance(value, bool) and value != 0xFF
         return InstanceAvailabilityProbe(present=present, contract=contract, evidence=entry)
 
     if group == 0x05 and opcode == 0x02:
-        if response_state == "empty_reply":
-            return InstanceAvailabilityProbe(present=True, contract=contract, evidence=entry)
         present = (
             entry["error"] is None
             and entry.get("flags_access") != "absent"
@@ -830,13 +832,16 @@ def probe_instance_availability(
         return InstanceAvailabilityProbe(present=present, contract=contract, evidence=entry)
 
     if group == 0x04 and opcode == 0x02:
-        if response_state == "empty_reply":
-            return InstanceAvailabilityProbe(present=True, contract=contract, evidence=entry)
+        value = entry.get("value")
         present = (
             entry["error"] is None
-            and entry.get("flags_access") != "absent"
-            and entry["value"] is not None
+            and entry.get("flags_access") in {"read_only_visible", "writable_visible"}
+            and isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(value)
         )
+        if not present and entry.get("flags_access") != "absent":
+            entry["availability_qualification"] = "unknown"
         return InstanceAvailabilityProbe(present=present, contract=contract, evidence=entry)
 
     if opcode == 0x06:
@@ -882,14 +887,10 @@ def probe_instance_availability(
         )
 
     if group in {0x09, 0x0A} and opcode == 0x02:
-        if response_state == "empty_reply":
-            return InstanceAvailabilityProbe(present=True, contract=contract, evidence=entry)
         present = entry["error"] is None and entry.get("flags_access") != "absent"
         return InstanceAvailabilityProbe(present=present, contract=contract, evidence=entry)
 
     if group in {0x06, 0x07, 0x08, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10, 0x11} and opcode == 0x02:
-        if response_state == "empty_reply":
-            return InstanceAvailabilityProbe(present=True, contract=contract, evidence=entry)
         present = entry["error"] is None and entry.get("flags_access") != "absent"
         return InstanceAvailabilityProbe(present=present, contract=contract, evidence=entry)
 

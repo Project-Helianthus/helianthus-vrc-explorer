@@ -19,6 +19,7 @@ from rich.text import Text
 
 from . import __version__
 from .artifact_schema import ArtifactSchemaError, migrate_artifact_schema
+from .commands.b524 import app as b524_app
 from .ebusd import parse_ebusd_info_target_addresses
 from .protocol.b524 import build_directory_probe_payload
 from .protocol.basv import (
@@ -56,6 +57,7 @@ app = typer.Typer(
     no_args_is_help=True,
     context_settings={"help_option_names": ["-h", "--help"]},
 )
+app.add_typer(b524_app, name="b524")
 
 _DEFAULT_TRANSPORT_PROTOCOL = "tcp"
 _DEFAULT_EBUSD_HOST = "127.0.0.1"

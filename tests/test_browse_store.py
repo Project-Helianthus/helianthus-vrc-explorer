@@ -124,10 +124,8 @@ def test_browse_store_builds_rows_and_left_tree_uses_only_myvaillant_name() -> N
     assert by_register["0x0001"].access_flags == "config_user"
     assert by_register["0x0001"].row_id == "0x00:0x02:0x00:0x0001"
     assert by_register["0x0002"].row_id == "0x00:0x06:0x00:0x0002"
-    expected_local_path = (
-        "B524/Controller Registers/GetParameter/System/0x00/system_dhw_bivalence_point"
-    )
-    expected_remote_path = "B524/Device Slots/GetDeviceParameter/System/0x00/device_class_address"
+    expected_local_path = "B524/OP02 GetParameter/System/0x00/system_dhw_bivalence_point"
+    expected_remote_path = "B524/OP06 GetDeviceParameter/System/0x00/device_class_address"
     assert by_register["0x0001"].path == expected_local_path
     assert by_register["0x0002"].path == expected_remote_path
     assert by_register["0x0001"].address.label == "B524 GG=0x0 RR=0x1 0x02"
@@ -137,8 +135,8 @@ def test_browse_store_builds_rows_and_left_tree_uses_only_myvaillant_name() -> N
 
     by_node_id = {node.node_id: node for node in store.tree_nodes}
     assert by_node_id["proto:b524"].label == "B524"
-    assert by_node_id["b524:section:controller_registers"].label == "Controller Registers"
-    assert by_node_id["b524:section:device_slots"].label == "Device Slots"
+    assert by_node_id["b524:section:controller_registers"].label == "OP02 GetParameter"
+    assert by_node_id["b524:section:device_slots"].label == "OP06 GetDeviceParameter"
     assert by_node_id["b524:group:controller_registers:0x00"].label == "System (0x00)"
     assert by_node_id["b524:group:device_slots:0x00"].label == "System (0x00)"
     assert "b524:section:group_directory" not in by_node_id
@@ -283,6 +281,86 @@ def test_browse_store_hydrates_read_only_system_information_and_scoped_descripti
         nodes["b524:section:group_directory"].label
         == "Legacy unqualified group-directory artifacts"
     )
+
+
+def test_browse_store_projects_only_finally_selected_plan_routes() -> None:
+    artifact = {
+        "schema_version": "2.3",
+        "meta": {
+            "scan_plan": {
+                "groups": {
+                    "0x09": {"operations": {"0x02": {"instances": ["0x00"]}}},
+                    "0x0a": {"operations": {"0x02": {"instances": []}}},
+                }
+            }
+        },
+        "operations": {
+            "0x02": {
+                "groups": {
+                    "0x09": {
+                        "name": "Selected",
+                        "instances": {
+                            "0x00": {
+                                "present": True,
+                                "registers": {
+                                    "0x0001": {
+                                        "raw_hex": "01",
+                                        "read_opcode": "0x02",
+                                    }
+                                },
+                            }
+                        },
+                    },
+                    "0x0a": {
+                        "name": "Selected Empty",
+                        "instances": {
+                            "0x01": {
+                                "present": True,
+                                "registers": {
+                                    "0x0001": {
+                                        "raw_hex": "01",
+                                        "read_opcode": "0x02",
+                                    }
+                                },
+                            }
+                        },
+                    },
+                    "0x0b": {
+                        "name": "Deselected",
+                        "instances": {
+                            "0x00": {
+                                "present": True,
+                                "registers": {
+                                    "0x0001": {
+                                        "raw_hex": "01",
+                                        "read_opcode": "0x02",
+                                    }
+                                },
+                            }
+                        },
+                    },
+                }
+            }
+        },
+    }
+
+    store = BrowseStore.from_artifact(artifact)
+    group_nodes = [node for node in store.tree_nodes if node.level == "group"]
+
+    assert {node.group_key for node in group_nodes} == {"0x09", "0x0a"}
+    assert {row.group_key for row in store.rows} == {"0x09"}
+    assert not any(
+        node.group_key == "0x0a" and node.level == "instance" for node in store.tree_nodes
+    )
+    assert "0x0b" in artifact["operations"]["0x02"]["groups"]
+
+
+def test_browse_store_keeps_legacy_artifacts_visible_without_final_plan() -> None:
+    artifact = _sample_artifact()
+
+    store = BrowseStore.from_artifact(artifact)
+
+    assert {row.register_key for row in store.rows} == {"0x0001", "0x0002", "0x0003"}
 
 
 def test_browse_store_filters_rows_for_tree_selection() -> None:
@@ -522,7 +600,7 @@ def test_browse_store_remote_namespace_instance_label_drops_local_group_assumpti
     by_node_id = {node.node_id: node for node in store.tree_nodes}
     assert by_node_id["b524:inst:device_slots:0x02:0x06:0x01"].label == "Remote Slot 1 (0x01)"
     row = store.rows[0]
-    assert row.path == "B524/Device Slots/GetDeviceParameter/Heat Pump/0x01/device_connected"
+    assert row.path == "B524/OP06 GetDeviceParameter/Heat Pump/0x01/device_connected"
 
 
 def test_browse_store_filters_rows_for_namespace_selection() -> None:

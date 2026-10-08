@@ -585,8 +585,15 @@ if _TEXTUAL_IMPORT_ERROR is None:
         def _refresh_table(self) -> None:
             table = self.query_one("#browse-table", DataTable)
             selected = self._current_node()
-            self._sync_tabs_for_selection(selected)
-            self._table_rows = self._store.rows_for_selection(selected, tab=self._active_tab)
+            allowed_tabs = self._sync_tabs_for_selection(selected)
+            if not allowed_tabs and selected is not None:
+                self._table_rows = [
+                    row
+                    for row in self._store.rows
+                    if row.protocol == "b524" and row.section_key == selected.section_key
+                ]
+            else:
+                self._table_rows = self._store.rows_for_selection(selected, tab=self._active_tab)
             cursor = max(0, table.cursor_row)
             table.clear(columns=False)
             now = monotonic()
@@ -630,11 +637,15 @@ if _TEXTUAL_IMPORT_ERROR is None:
                 return ("config", "state")
             if node.protocol != "b524":
                 return ("state",)
+            if node.section_key not in {None, "controller_registers", "device_slots"}:
+                return ()
             return ("config", "state")
 
-        def _sync_tabs_for_selection(self, node: TreeNodeRef | None) -> None:
+        def _sync_tabs_for_selection(self, node: TreeNodeRef | None) -> tuple[BrowseTab, ...]:
             tabs_widget = self.query_one("#browse-tabs", Tabs)
-            allowed = set(self._allowed_tabs_for_selection(node))
+            allowed_tabs = self._allowed_tabs_for_selection(node)
+            allowed = set(allowed_tabs)
+            tabs_widget.display = bool(allowed)
             tab_map = {
                 "config": self.query_one("#tab-config", Tab),
                 "state": self.query_one("#tab-state", Tab),
@@ -644,6 +655,7 @@ if _TEXTUAL_IMPORT_ERROR is None:
             if self._active_tab not in allowed:
                 self._active_tab = "state"
                 tabs_widget.active = _tab_id("state")
+            return allowed_tabs
 
         def _selected_table_row(self) -> RegisterRow | None:
             if not self._table_rows:
@@ -747,6 +759,9 @@ if _TEXTUAL_IMPORT_ERROR is None:
             self.query_one("#browse-tabs", Tabs).active = _tab_id("config")
 
         def action_tab_state(self) -> None:
+            if "state" not in self._allowed_tabs_for_selection(self._current_node()):
+                self._set_status("Config/State tabs are not available for this B524 operation.")
+                return
             self.query_one("#browse-tabs", Tabs).active = _tab_id("state")
 
         def on_tabs_tab_activated(self, event: Tabs.TabActivated) -> None:

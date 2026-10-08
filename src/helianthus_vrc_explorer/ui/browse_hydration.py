@@ -25,9 +25,9 @@ _B524_SECTION_LABELS: dict[str, str] = {
     "system_information": "OP00 ReadSystemInformation",
     "group_directory": "Legacy unqualified group-directory artifacts",
     "register_constraints": "Legacy unqualified constraint artifacts",
-    "controller_registers": "Controller Registers",
+    "controller_registers": "OP02 GetParameter",
     "timer_programs": "Timer Programs",
-    "device_slots": "Device Slots",
+    "device_slots": "OP06 GetDeviceParameter",
     "register_tables": "Register Tables",
 }
 
@@ -355,6 +355,65 @@ def _namespace_label_for_key(namespace_key: str | None) -> str | None:
     return namespace_key
 
 
+def _final_plan_routes(artifact: dict[str, Any]) -> dict[tuple[str, str], tuple[str, ...]] | None:
+    """Return the final selected B524 routes, or ``None`` for legacy artifacts.
+
+    Scan artifacts retain all observed/discovery evidence even when a later
+    planner choice deselects a route.  The browser is a projection, so it uses
+    the final ``scan_plan`` when available without mutating that evidence.
+    """
+
+    meta = artifact.get("meta")
+    if not isinstance(meta, dict):
+        return None
+    scan_plan = meta.get("scan_plan")
+    if not isinstance(scan_plan, dict) or "groups" not in scan_plan:
+        return None
+    groups = scan_plan.get("groups")
+    if not isinstance(groups, dict):
+        return None
+
+    routes: dict[tuple[str, str], tuple[str, ...]] = {}
+    for raw_group_key, group_plan in groups.items():
+        group_key = _normalize_opcode_hex(raw_group_key)
+        if group_key is None or not isinstance(group_plan, dict):
+            continue
+        operations = group_plan.get("operations")
+        if not isinstance(operations, dict):
+            operations = {group_plan.get("opcode"): group_plan}
+        for raw_opcode, operation_plan in operations.items():
+            opcode = _normalize_opcode_hex(raw_opcode)
+            if opcode is None or not isinstance(operation_plan, dict):
+                continue
+            raw_instances = operation_plan.get("instances")
+            instances = (
+                tuple(
+                    instance
+                    for value in raw_instances
+                    if (instance := _normalize_opcode_hex(value)) is not None
+                )
+                if isinstance(raw_instances, list)
+                else ()
+            )
+            routes[(group_key, opcode)] = instances
+    return routes
+
+
+def _project_group_for_final_plan(
+    group_obj: dict[str, Any] | None, *, selected_instances: tuple[str, ...]
+) -> dict[str, Any]:
+    """Copy only the selected instance routes for browser display."""
+
+    projected = dict(group_obj) if isinstance(group_obj, dict) else {}
+    instances = projected.get("instances")
+    if not isinstance(instances, dict):
+        projected["instances"] = {}
+        return projected
+    selected = set(selected_instances)
+    projected["instances"] = {key: value for key, value in instances.items() if key in selected}
+    return projected
+
+
 def _single_namespace_key(group_key: str, group_obj: dict[str, Any]) -> str | None:
     discovery_advisory = group_obj.get("discovery_advisory")
     if isinstance(discovery_advisory, dict):
@@ -606,7 +665,8 @@ class _HydratedBrowseStore:
         _op_group_views: list[tuple[str, str, str, dict[str, Any]]] = []
         _seen_group_keys: set[str] = set()
         _operations = artifact.get("operations")
-        if isinstance(_operations, dict):
+        final_plan_routes = _final_plan_routes(artifact)
+        if isinstance(_operations, dict) and final_plan_routes is None:
             for _op_key in sorted(
                 (k for k in _operations if isinstance(k, str)), key=_safe_int_hex
             ):
@@ -622,6 +682,25 @@ class _HydratedBrowseStore:
                     if isinstance(_gk, str) and isinstance(_go, dict):
                         _op_group_views.append((_gk, _op_key, _op_label, _go))
                         _seen_group_keys.add(_gk)
+        elif final_plan_routes is not None:
+            for (_gk, _op_key), _instances in sorted(
+                final_plan_routes.items(),
+                key=lambda item: (_safe_int_hex(item[0][1]), _safe_int_hex(item[0][0])),
+            ):
+                _op_obj = _operations.get(_op_key)
+                _op_groups = _op_obj.get("groups") if isinstance(_op_obj, dict) else None
+                _observed_group = _op_groups.get(_gk) if isinstance(_op_groups, dict) else None
+                _group_obj = _project_group_for_final_plan(
+                    _observed_group if isinstance(_observed_group, dict) else None,
+                    selected_instances=_instances,
+                )
+                if not _group_obj.get("name"):
+                    _group_obj["name"] = group_name_for_opcode(
+                        _safe_int_hex(_gk), _safe_int_hex(_op_key)
+                    )
+                _op_label = _namespace_label_for_key(_op_key) or _op_key
+                _op_group_views.append((_gk, _op_key, _op_label, _group_obj))
+                _seen_group_keys.add(_gk)
 
         group_keys = sorted(_seen_group_keys, key=_safe_int_hex)
         b524_operations = artifact.get("b524_operations")
@@ -884,7 +963,6 @@ class _HydratedBrowseStore:
                         path_parts = [
                             "B524",
                             _b524_section_label(entry_section_key),
-                            operation_name,
                             entry_group_name,
                         ]
                         if entry_namespace_display is not None:

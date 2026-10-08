@@ -36,8 +36,35 @@ from helianthus_vrc_explorer.transport.enhanced_tcp import (
     _crc_update,
     _encode_enh,
     _EnhancedSessionError,
+    _is_retry_safe_b524_read,
 )
 from helianthus_vrc_explorer.transport.instrumented import CountingTransport
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        bytes.fromhex("08"),
+        bytes.fromhex("0900000100"),
+        bytes.fromhex("0b01000206"),
+    ],
+)
+def test_event_family_exact_read_shapes_are_retry_safe(payload: bytes) -> None:
+    assert _is_retry_safe_b524_read(payload) is True
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        bytes.fromhex("0800"),
+        bytes.fromhex("09000001"),
+        bytes.fromhex("0b0100020600"),
+        bytes.fromhex("0a0000010000010203040506"),
+        bytes.fromhex("0c01000100fdfefffdfefffd"),
+    ],
+)
+def test_event_family_mutative_or_malformed_shapes_are_not_retry_safe(payload: bytes) -> None:
+    assert _is_retry_safe_b524_read(payload) is False
 
 
 def _read_exact(conn: socket.socket, size: int) -> bytes:

@@ -472,6 +472,10 @@ def _is_retry_safe_b524_read(payload: bytes | bytearray | memoryview) -> bool:
     opcode = value[0]
     if opcode == 0x00:
         return len(value) == 3
+    if opcode == 0x08:
+        return len(value) == 1
+    if opcode in {0x09, 0x0B}:
+        return len(value) == 5
     if opcode in {0x01, 0x03, 0x07}:
         return len(value) == 5
     return opcode in {0x02, 0x06} and len(value) == 6 and value[1] == 0x00

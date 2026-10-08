@@ -725,11 +725,11 @@ __ARTIFACT_JSON__
 
       const B524_SECTIONS = [
         { key: "scan_coverage", label: "Scan coverage and descriptions" },
-        { key: "system_information", label: "OP=00h ReadSystemInformation" },
-        { key: "controller_registers", label: "OP=02h GetParameter" },
-        { key: "timer_programs", label: "OP=03h ReadTimer" },
-        { key: "device_slots", label: "OP=06h GetDeviceParameter" },
-        { key: "register_tables", label: "OP=0Bh GetEventSetPoint" },
+        { key: "system_information", label: "OP00 ReadSystemInformation" },
+        { key: "controller_registers", label: "OP02 GetParameter" },
+        { key: "timer_programs", label: "OP03 ReadTimer" },
+        { key: "device_slots", label: "OP06 GetDeviceParameter" },
+        { key: "register_tables", label: "OP0B GetEventSetPoint" },
         { key: "group_directory", label: "Legacy unqualified group-directory artifacts" },
         { key: "register_constraints", label: "Legacy unqualified constraint artifacts" },
       ];
@@ -1454,7 +1454,31 @@ __ARTIFACT_JSON__
       function b524GroupKeysForSection(sectionKey) {
         const required = requiredNamespaceForSection(sectionKey);
         if (!required) return [];
-        return groupKeysForOp(required);
+        const all = groupKeysForOp(required);
+        const groups = finalPlanGroups();
+        if (groups === null) return all;
+        return Object.keys(groups)
+          .filter((groupKey) => finalPlanForRoute(groupKey, required) !== null)
+          .sort((a, b) => Number(a) - Number(b));
+      }
+
+      function finalPlanGroups() {
+        const scanPlan = meta && typeof meta === "object" ? meta.scan_plan : null;
+        if (!scanPlan || typeof scanPlan !== "object" || !("groups" in scanPlan)) return null;
+        return scanPlan.groups && typeof scanPlan.groups === "object" ? scanPlan.groups : null;
+      }
+
+      function finalPlanForRoute(groupKey, opcode) {
+        const groups = finalPlanGroups();
+        if (groups === null) return undefined;
+        const groupPlan = groups[groupKey];
+        if (!groupPlan || typeof groupPlan !== "object") return null;
+        const operations = groupPlan.operations;
+        if (operations && typeof operations === "object") {
+          const operationPlan = operations[opcode];
+          return operationPlan && typeof operationPlan === "object" ? operationPlan : null;
+        }
+        return normalizeOpcodeKey(groupPlan.opcode) === opcode ? groupPlan : null;
       }
 
       function b524SectionHasContent(sectionKey, operations, metaObj) {
@@ -2084,7 +2108,11 @@ __ARTIFACT_JSON__
 
         // Operations-first: instances come directly from the operation's group.
         // No merging or namespace splitting needed.
-        const activeInstances = groupObj.instances || {};
+        const finalPlan = finalPlanForRoute(groupKey, opKey);
+        const sourceInstances = groupObj.instances || {};
+        const activeInstances = finalPlan && Array.isArray(finalPlan.instances)
+          ? Object.fromEntries(finalPlan.instances.map((key) => [key, sourceInstances[key]]).filter(([, value]) => value && typeof value === "object"))
+          : sourceInstances;
         mountTarget.appendChild(buildGroupTable(activeInstances, opKey));
       }
 

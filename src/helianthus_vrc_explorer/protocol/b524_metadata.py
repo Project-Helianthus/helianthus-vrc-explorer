@@ -28,7 +28,13 @@ SYSTEM_INFORMATION_NAMES = (
     "recovair_count",
     "cooling_heat_pump_count",
 )
-COUNT_GROUP_IDS = {(0x02, 0x02): 0, (0x02, 0x03): 1}
+COUNT_GROUP_IDS = {
+    (0x02, 0x02): 0,
+    (0x02, 0x03): 1,
+    (0x02, 0x04): 2,
+    (0x02, 0x05): 3,
+    (0x02, 0x08): 11,
+}
 _WIDTHS = {
     "UCH": 1,
     "BOOL": 1,

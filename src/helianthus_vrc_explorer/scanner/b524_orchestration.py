@@ -658,7 +658,7 @@ def run_b524_scan(
                         capacity=(
                             namespace_ii_max - 1
                             if opcode == 2 and group.group == 2
-                            else namespace_ii_max
+                            else namespace_ii_max + (opcode != 6)
                         ),
                     )
                     if planner_preset == "recommended"
@@ -890,7 +890,7 @@ def run_b524_scan(
                                 capacity=(
                                     planner_ii_max - 1
                                     if opcode == 2 and group.group == 2
-                                    else planner_ii_max
+                                    else planner_ii_max + (opcode != 6)
                                 ),
                             )
                             if planner_ii_max is not None

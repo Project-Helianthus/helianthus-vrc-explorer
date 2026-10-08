@@ -328,6 +328,10 @@ def _probe_present_instances(
 ) -> dict[int, InstanceAvailabilityProbe]:
     probes: dict[int, InstanceAvailabilityProbe] = {}
     present_count = 0
+    if expected_count == 0 and (opcode, group) != (0x02, 0x02):
+        # A qualified zero count avoids treating default slot data as installed
+        # instances. The circuit's independent virtual DHW slot still needs a probe.
+        return probes
     first_ii = 1 if opcode == 6 or (opcode == 2 and group == 2) else 0
     for ii in range(first_ii, ii_max + 1):
         if observer is not None:
