@@ -1852,6 +1852,63 @@ def test_scan_unknown_group_uses_bounded_op06_instances_after_readable_probe(
     assert (0x06, 0x69, 0xFF, 0x0000) not in transport.register_reads
 
 
+@pytest.mark.parametrize("group", [0x0D, 0x0E])
+@pytest.mark.parametrize("planner_ui", ["textual", "classic"])
+def test_interactive_planner_preserves_explicit_routes_outside_native_inventory(
+    monkeypatch,
+    tmp_path: Path,
+    group: int,
+    planner_ui: str,
+) -> None:
+    import sys
+
+    from textual.app import App
+
+    import helianthus_vrc_explorer.scanner.scan as scan_mod
+    from helianthus_vrc_explorer.ui.planner import _build_default_plan
+
+    transport = RecordingTransport(DummyTransport(_write_fixture_groups_00_and_01(tmp_path)))
+    key = make_plan_key(group, 0x02)
+    requested = GroupScanPlan(
+        group=group, opcode=0x02, rr_max=0x0003, instances=(0x00,), registers=(0x0001, 0x0003)
+    )
+
+    def classic_accept_default(_console, groups, **kwargs):
+        return _build_default_plan(
+            {row.key: row for row in groups},
+            kwargs["default_plan"],
+            default_preset="custom",
+        )
+
+    original_run = App.run
+
+    async def save_plan(pilot):
+        await pilot.press("s")
+
+    def headless_run(app, *_args, **_kwargs):
+        return original_run(app, headless=True, auto_pilot=save_plan)
+
+    monkeypatch.setattr(App, "run", headless_run)
+    monkeypatch.setattr(scan_mod, "prompt_scan_plan", classic_accept_default)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    artifact = scan_b524(
+        transport,
+        dst=0x15,
+        observer=_NoopObserver(),
+        console=Console(force_terminal=True),
+        planner_ui=planner_ui,
+        planner_preset="custom",
+        explicit_plan={key: requested},
+        probe_constraints=False,
+    )
+    operation_plan = artifact["meta"]["scan_plan"]["groups"][f"0x{group:02x}"]["operations"]["0x02"]
+    assert operation_plan["registers"] == ["0x0001", "0x0003"]
+    assert operation_plan["instances"] == ["0x00"]
+    assert (0x02, group, 0x00, 0x0001) in transport.register_reads
+    assert (0x02, group, 0x00, 0x0003) in transport.register_reads
+    assert (0x02, group, 0x00, 0x0002) not in transport.register_reads
+
+
 def test_scan_b524_textual_failure_falls_back_to_classic_in_auto_mode(
     monkeypatch,
     tmp_path: Path,

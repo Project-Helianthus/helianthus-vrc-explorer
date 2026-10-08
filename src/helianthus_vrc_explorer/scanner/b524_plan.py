@@ -120,7 +120,10 @@ def planner_native_opcodes(group: int) -> tuple[RegisterOpcode, ...]:
 def planner_rr_max(group: int, opcode: RegisterOpcode) -> int | None:
     """Return an observed scheduling ceiling, or None when custom input is required."""
 
-    if (int(opcode), group) in _UNQUALIFIED_PLANNER_RR_KEYS:
+    if (
+        opcode not in planner_native_opcodes(group)
+        or (int(opcode), group) in _UNQUALIFIED_PLANNER_RR_KEYS
+    ):
         return None
     config = GROUP_CONFIG.get(group)
     if config is None:

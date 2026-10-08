@@ -57,6 +57,7 @@ from .b524_plan import (
     _rr_max_for_opcode,
     _rr_max_full_for_opcode,
     _scan_plan_meta_groups,
+    _sorted_namespace_opcodes,
     opcode_label,
     planner_native_opcodes,
     planner_rr_max,
@@ -823,8 +824,8 @@ def run_b524_scan(
             config = GROUP_CONFIG.get(group.group)
             group_meta = metadata_map[group.group]
             resolved_opcodes = resolved_group_opcodes.get(group.group, ())
-            opcodes = (
-                planner_native_opcodes(group.group) if config is not None else resolved_opcodes
+            opcodes = _sorted_namespace_opcodes(
+                (*planner_native_opcodes(group.group), *resolved_opcodes)
             )
             if not opcodes:
                 continue

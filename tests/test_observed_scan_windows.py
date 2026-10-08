@@ -28,6 +28,8 @@ def test_remote_windows_do_not_supply_unobserved_local_windows() -> None:
     assert planner_rr_max(0x07, 0x02) is None
     assert planner_rr_max(0x04, 0x06) is None
     assert planner_rr_max(0x0D, 0x06) is None
+    assert planner_rr_max(0x0D, 0x02) is None
+    assert planner_rr_max(0x0E, 0x02) is None
 
 
 def test_observed_unknown_local_0a_remains_selectable_as_an_independent_namespace() -> None:
