@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from contextlib import contextmanager
 
 import pytest
@@ -252,7 +253,13 @@ def test_event_weekday_code_is_required_before_transport(command, monkeypatch) -
     import helianthus_vrc_explorer.commands.b524 as command_mod
 
     monkeypatch.setattr(command_mod, "_make_transport", lambda **kwargs: 1 / 0)
-    result = CliRunner().invoke(app, ["b524", command, "--profile", "zone", "--address", "1"])
+    result = CliRunner().invoke(
+        app,
+        ["b524", command, "--profile", "zone", "--address", "1"],
+        color=True,
+        env={"FORCE_COLOR": "1"},
+    )
     assert result.exit_code == 2
-    assert "--weekday-code" in result.output
-    assert "Missing option" in result.output
+    plain_output = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", result.output)
+    assert "--weekday-code" in plain_output
+    assert "Missing option" in plain_output
