@@ -2,6 +2,8 @@
 
 ## 0.6.0
 
+- Integrate explicit OP03/08/09/0B read plans into scan, planner, progress, artifacts and replay; preserve raw evidence and distinct failure outcomes.
+- Add timer and paired Event offline edit plans, payload diffs and export. Qualified OP04 execution checks identity/baseline, sends once and reads back; OP0A/0C native execution remains unavailable pending qualification.
 - Classify 38 exact regulator EID/SPN pairs, deriving SPN from the software PIN and displaying matched model/family profiles in scan, Browser and HTML identity headers. Preserve raw identity and unknown pairs.
 - Correct B524 OP00 `ReadSystemInformation` discovery: circuit and zone fields are supported capacities, while configured instances require independent presence evidence.
 - Acquire scoped OP01 and OP07 descriptions for observed writable parameters and validate supported formats during offline browse edits.

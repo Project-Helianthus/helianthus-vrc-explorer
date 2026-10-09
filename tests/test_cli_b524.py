@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from contextlib import contextmanager
 
+import pytest
 from typer.testing import CliRunner
 
 from helianthus_vrc_explorer.cli import app
@@ -141,6 +142,8 @@ def test_event_setpoint_read_uses_profile_specific_decode(monkeypatch) -> None:
             "dhw",
             "--address",
             "1",
+            "--weekday-code",
+            "0",
         ],
     )
 
@@ -233,7 +236,23 @@ def test_event_profile_rejects_unknown_address_before_transport(monkeypatch) -> 
             "zone",
             "--address",
             "3",
+            "--weekday-code",
+            "0",
         ],
     )
     assert result.exit_code == 2
     assert "is not documented for zone" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["read-event", "read-event-setpoint", "preview-set-event", "preview-set-event-setpoint"],
+)
+def test_event_weekday_code_is_required_before_transport(command, monkeypatch) -> None:
+    import helianthus_vrc_explorer.commands.b524 as command_mod
+
+    monkeypatch.setattr(command_mod, "_make_transport", lambda **kwargs: 1 / 0)
+    result = CliRunner().invoke(app, ["b524", command, "--profile", "zone", "--address", "1"])
+    assert result.exit_code == 2
+    assert "--weekday-code" in result.output
+    assert "Missing option" in result.output

@@ -311,6 +311,7 @@ def _probe_scan_identity(
             matched = None
         if matched is not None:
             identity["assigned_model"] = matched.model_name
+            identity["model_assignment_qualification"] = "project_catalog"
             identity["protocol_family"] = matched.protocol_family
             identity["model"] = matched.model_name
 
@@ -741,6 +742,19 @@ def scan(
         readable=True,
         help="Version 1 JSON plan file for custom OP02/OP06, GG, II and RR16 selectors.",
     ),
+    b524_read_plan_path: Path | None = typer.Option(  # noqa: B008
+        None,
+        "--b524-read-plan",
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        help="Explicit JSON read plan for B524 Timer, VR91, Event and EventSetPoint operations.",
+    ),
+    preview_read_plan: bool = typer.Option(  # noqa: B008
+        False,
+        "--preview-read-plan",
+        help="Validate and encode --b524-read-plan offline, without opening a transport.",
+    ),
     description_budget: int | None = typer.Option(  # noqa: B008
         None,
         "--description-budget",
@@ -804,6 +818,38 @@ def scan(
         raise typer.Exit(2)
 
     scan_options: dict[str, Any] = {}
+    if preview_read_plan and b524_read_plan_path is None:
+        typer.echo("--preview-read-plan requires --b524-read-plan.", err=True)
+        raise typer.Exit(2)
+    if b524_read_plan_path is not None:
+        from .scanner.b524_operation_reads import load_operation_read_plan
+
+        try:
+            operation_requests = load_operation_read_plan(b524_read_plan_path)
+        except ValueError as exc:
+            typer.echo(f"Invalid B524 operation read plan: {exc}", err=True)
+            raise typer.Exit(2) from exc
+        if preview_read_plan:
+            typer.echo(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "live_send": False,
+                        "target_support": "unverified",
+                        "requests": [
+                            {
+                                "operation": request.operation,
+                                "selector": request.selector,
+                                "payload_hex": request.payload.hex(),
+                            }
+                            for request in operation_requests
+                        ],
+                    },
+                    indent=2,
+                )
+            )
+            return
+        scan_options["operation_requests"] = operation_requests
     if scan_plan_path is not None:
         if preset_value != "custom":
             typer.echo("--scan-plan requires --preset custom.", err=True)
@@ -815,6 +861,16 @@ def scan(
         except (OSError, ValueError) as exc:
             typer.echo(f"Invalid custom scan plan: {exc}", err=True)
             raise typer.Exit(2) from exc
+        from .scanner.plan import estimate_register_requests
+        from .scanner.scan_policy import MAX_EXPLICIT_SCALAR_REQUESTS
+
+        if (
+            estimate_register_requests(scan_options["explicit_plan"])
+            + len(scan_options.get("operation_requests", ()))
+            > MAX_EXPLICIT_SCALAR_REQUESTS
+        ):
+            typer.echo("Combined scalar/operation plan exceeds 100000 explicit requests.", err=True)
+            raise typer.Exit(2)
     elif preset_value == "custom" and (planner_ui_value == "disabled" or not console.is_terminal):
         typer.echo("Custom scanning requires --scan-plan or an interactive planner.", err=True)
         raise typer.Exit(2)
@@ -876,6 +932,11 @@ def scan(
         )
         _emit_non_tty_session_preface(preface)
         if scan_options or preset_value != "recommended" or planner_ui_value != "disabled":
+            if "operation_requests" in scan_options:
+                fixture_meta = artifact.get("meta", {})
+                scan_options["operation_identity"] = fixture_meta.get(
+                    "identity", fixture_meta.get("resolved_identity", {})
+                )
             with TemporaryDirectory(prefix="vrc-explorer-dry-run-") as fixture_dir:
                 fixture_path = Path(fixture_dir) / "fixture.json"
                 fixture_path.write_text(json.dumps(artifact), encoding="utf-8")
@@ -957,6 +1018,19 @@ def scan(
                     if redact:
                         identity["serial"] = "<SERIAL_NUMBER_REDACTED>"
                     identity_for_artifact = dict(identity)
+                    if "operation_requests" in scan_options:
+                        from .scanner.b524_operation_reads import validate_operation_read_identity
+
+                        try:
+                            validate_operation_read_identity(
+                                scan_options["operation_requests"],
+                                device_id=identity.get("eid", identity.get("device_id")),
+                                manufacturer=int(identity.get("manufacturer", "-1"), 0),
+                            )
+                        except ValueError as exc:
+                            typer.echo(f"B524 operation target is not qualified: {exc}", err=True)
+                            raise typer.Exit(2) from exc
+                        scan_options["operation_identity"] = dict(identity)
                     preface = _build_scan_session_preface(
                         dst=dst_u8,
                         endpoint=f"{transport_settings.host}:{transport_settings.port}",

@@ -6,6 +6,7 @@ import math
 import sys
 import time
 from collections import deque
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -43,6 +44,12 @@ from .b524_artifact import (
     _record_availability_contract,
     _record_availability_probes,
     _record_namespace_topology,
+)
+from .b524_operation_reads import (
+    B524OperationReadRequest,
+    acquire_operation_reads,
+    record_operation_read_observation,
+    validate_operation_read_identity,
 )
 from .b524_plan import (
     _KNOWN_DESCRIPTOR_TYPES,
@@ -96,7 +103,7 @@ from .scan import (
     _apply_contextual_enum_annotations,
     _resolve_planner_mode,
 )
-from .scan_policy import profile_opcodes
+from .scan_policy import MAX_EXPLICIT_SCALAR_REQUESTS, profile_opcodes
 
 
 def _normalize_profile_plan_instances(
@@ -173,6 +180,8 @@ def run_b524_scan(
     explicit_plan: dict[PlanKey, GroupScanPlan] | None = None,
     description_budget: int | None = None,
     request_budget: int | None = None,
+    operation_requests: tuple[B524OperationReadRequest, ...] = (),
+    operation_identity: Mapping[str, Any] | None = None,
     discover_groups_fn: Any,
     prompt_scan_plan_fn: Any,
     hotkey_reader_cls: Any,
@@ -190,6 +199,24 @@ def run_b524_scan(
     """
 
     planner_preset = _normalize_planner_preset(planner_preset)
+    read_identity = operation_identity or {}
+    device_id = read_identity.get("eid", read_identity.get("device_id"))
+    manufacturer = read_identity.get("manufacturer")
+    if isinstance(manufacturer, str):
+        try:
+            manufacturer = int(manufacturer, 0)
+        except ValueError:
+            manufacturer = None
+    if operation_requests:
+        validate_operation_read_identity(
+            operation_requests, device_id=device_id, manufacturer=manufacturer
+        )
+    operation_selection = [True] * len(operation_requests)
+    operation_planner_options: dict[str, Any] = (
+        {"operation_requests": operation_requests, "operation_selection": operation_selection}
+        if operation_requests
+        else {}
+    )
     research_mode = planner_preset == "research"
     if explicit_plan is not None and planner_preset != "custom":
         raise ValueError("An explicit scan plan requires the custom preset")
@@ -1087,6 +1114,7 @@ def run_b524_scan(
                                 default_plan=planner_default_plan,
                                 default_preset=planner_preset,
                                 system_information=artifact["meta"]["system_information"],
+                                **operation_planner_options,
                             )
                         except Exception as exc:
                             if planner_ui == "textual":
@@ -1110,10 +1138,17 @@ def run_b524_scan(
                         default_plan=planner_default_plan,
                         default_preset=planner_preset,
                         system_information=artifact["meta"]["system_information"],
+                        **operation_planner_options,
                     )
                 if planner_preset != "custom":
                     plan = _normalize_profile_plan_instances(plan)
 
+        if (
+            operation_requests
+            and estimate_register_requests(plan) + sum(operation_selection)
+            > MAX_EXPLICIT_SCALAR_REQUESTS
+        ):
+            raise ValueError("Combined scalar/operation plan exceeds 100000 explicit requests")
         artifact["meta"]["scan_plan"] = {
             "groups": _scan_plan_meta_groups(plan),
             "estimated_register_requests": estimate_register_requests(plan),
@@ -1167,6 +1202,7 @@ def run_b524_scan(
                                         default_plan=plan,
                                         default_preset=planner_preset,
                                         system_information=artifact["meta"]["system_information"],
+                                        **operation_planner_options,
                                     )
                                 except Exception as exc:
                                     if planner_ui == "textual":
@@ -1191,10 +1227,19 @@ def run_b524_scan(
                                 default_plan=plan,
                                 default_preset=planner_preset,
                                 system_information=artifact["meta"]["system_information"],
+                                **operation_planner_options,
                             )
                         if planner_preset != "custom":
                             plan = _normalize_profile_plan_instances(plan)
                     artifact["meta"]["scan_plan"]["groups"] = _scan_plan_meta_groups(plan)
+                    if (
+                        operation_requests
+                        and estimate_register_requests(plan) + sum(operation_selection)
+                        > MAX_EXPLICIT_SCALAR_REQUESTS
+                    ):
+                        raise ValueError(
+                            "Combined scalar/operation plan exceeds 100000 explicit requests"
+                        )
                     artifact["meta"]["scan_plan"]["estimated_register_requests"] = (
                         estimate_register_requests(plan)
                     )
@@ -1440,6 +1485,36 @@ def run_b524_scan(
         if observer is not None:
             observer.phase_finish("register_scan")
 
+        if operation_requests:
+            selected_operations = tuple(
+                request
+                for request, operation_enabled in zip(
+                    operation_requests, operation_selection, strict=True
+                )
+                if operation_enabled
+            )
+            artifact["meta"]["b524_operation_read_plan"] = [
+                {
+                    "operation": request.operation,
+                    "selector": request.selector,
+                    "request_payload_hex": request.payload.hex(),
+                    "selected": operation_enabled,
+                }
+                for request, operation_enabled in zip(
+                    operation_requests, operation_selection, strict=True
+                )
+            ]
+            if selected_operations:
+                acquire_operation_reads(
+                    transport,
+                    dst=dst,
+                    artifact=artifact,
+                    requests=selected_operations,
+                    device_id=device_id,
+                    manufacturer=manufacturer,
+                    observer=observer,
+                )
+
     except KeyboardInterrupt:
         artifact["meta"]["incomplete"] = True
         incomplete_reason = "user_interrupt"
@@ -1495,6 +1570,15 @@ def run_b524_scan(
             budget=description_budget,
             coverage=description_coverage,
         )
+    if operation_requests and "b524_operation_reads" not in artifact:
+        artifact["b524_operation_reads_schema_version"] = 1
+        artifact["b524_operation_reads"] = []
+        for request, operation_enabled in zip(operation_requests, operation_selection, strict=True):
+            if operation_enabled:
+                record = record_operation_read_observation(request)
+                record["response_state"] = "unattempted"
+                record["error"] = incomplete_reason or "not_acquired"
+                artifact["b524_operation_reads"].append(record)
     artifact["meta"]["parameter_description_coverage"] = description_coverage
     artifact["meta"]["parameter_description_requests"] = description_coverage.get(
         "request_attempts", 0

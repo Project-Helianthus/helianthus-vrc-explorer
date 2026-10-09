@@ -322,6 +322,178 @@ def test_replay_trace_instance_presence_uses_response_state(tmp_path: Path) -> N
     assert instances["0x01"]["registers"]["0x0001"]["response_state"] == "empty_reply"
 
 
+def test_replay_preserves_operation_reads_and_raw_write_history(tmp_path: Path) -> None:
+    exchanges = [
+        ("0301000100", "00002430909090"),
+        ("0401000100002430489090", ""),
+        ("08", "0102030405060708"),
+        ("0903020181", "03ff242a30363c42"),
+        ("0a03020181ff242a30363c42", "7f"),
+        ("0b03020181", "002d2e2f30313233"),
+        ("0c030201812d2e2f30313233", ""),
+    ]
+    lines = [
+        "2026-04-06T10:00:00.000000Z INIT features=0x01",
+        "2026-04-06T10:00:00.050000Z START initiator=0xF7",
+    ]
+    for seq, (payload, reply) in enumerate(exchanges, 1):
+        lines.append(
+            f"2026-04-06T10:00:{seq:02d}.000000Z #{seq} SEND_PROTO src=0xF7 "
+            f"dst=0x15 primary=0xB5 secondary=0x24 payload={payload}"
+        )
+        lines.append(
+            f"2026-04-06T10:00:{seq:02d}.050000Z #{seq} PARSED_PROTO "
+            f"len={len(bytes.fromhex(reply))} hex={reply}"
+        )
+    artifact = replay_trace_to_artifact(
+        _write_trace(tmp_path, "operations.trace", "\n".join(lines) + "\n")
+    )
+
+    reads = artifact["b524_operation_reads"]
+    assert [item["operation"] for item in reads] == [
+        "ReadTimer",
+        "ReadVR91",
+        "GetEvent",
+        "GetEventSetPoint",
+    ]
+    assert reads[0]["decoded"]["slots"][0]["stop_minutes"] == 360
+    assert reads[0]["selector"] == {"channel": "dhw", "instance": 0, "weekday": 0}
+    assert reads[2]["decoded"]["start1_raw"] == 0xFF
+    assert reads[2]["selector"] == {
+        "profile": "zone",
+        "instance": 2,
+        "address": 1,
+        "weekday_code": 129,
+    }
+    assert reads[2]["pair_context"] == {
+        "profile": "zone",
+        "instance": 2,
+        "address": 1,
+        "weekday_code": 129,
+    }
+    assert all(item["selector_correlation"] == "request_context" for item in reads)
+    assert all(item["decode_qualification"] == "schema_unqualified" for item in reads)
+
+    writes = artifact["b524_operations"]["raw_write_history"]
+    assert [item["opcode_hex"] for item in writes] == ["0x04", "0x0a", "0x0c"]
+    assert writes[0]["selector"] == {
+        "system_type": 1,
+        "instance": 0,
+        "address": 1,
+        "weekday": 0,
+    }
+    assert writes[1]["selector"]["weekday_code"] == 129
+    assert all(item["selector_correlation"] == "request_context" for item in writes)
+    assert [item["response_state"] for item in writes] == ["empty", "value", "empty"]
+    assert all(item["feedback_interpretation"] == "unknown" for item in writes)
+
+
+def test_replay_keeps_unknown_operation_selectors_raw_and_separate(tmp_path: Path) -> None:
+    trace_path = _write_trace(
+        tmp_path,
+        "unknown_operation_selectors.trace",
+        "\n".join(
+            [
+                "2026-04-06T10:00:00.000000Z INIT features=0x01",
+                "2026-04-06T10:00:00.050000Z START initiator=0xF7",
+                (
+                    "2026-04-06T10:00:01.000000Z #1 SEND_PROTO src=0xF7 dst=0x15 "
+                    "primary=0xB5 secondary=0x24 payload=0302020181"
+                ),
+                "2026-04-06T10:00:01.100000Z #1 PARSED_PROTO len=7 hex=00002430909090",
+                (
+                    "2026-04-06T10:00:02.000000Z #2 SEND_PROTO src=0xF7 dst=0x15 "
+                    "primary=0xB5 secondary=0x24 payload=0902020181"
+                ),
+                "2026-04-06T10:00:02.100000Z #2 PARSED_PROTO len=8 hex=0001020304050607",
+                (
+                    "2026-04-06T10:00:03.000000Z #3 SEND_PROTO src=0xF7 dst=0x15 "
+                    "primary=0xB5 secondary=0x24 payload=0b02020181"
+                ),
+                "2026-04-06T10:00:03.100000Z #3 PARSED_PROTO len=8 hex=0001020304050607",
+            ]
+        )
+        + "\n",
+    )
+    reads = replay_trace_to_artifact(trace_path)["b524_operation_reads"]
+
+    assert reads[0]["selector"] == {}
+    assert reads[0]["raw_selector"] == {
+        "system_type": 2,
+        "instance": 2,
+        "address": 1,
+        "weekday": 129,
+    }
+    assert reads[0]["decode_qualification"] == "schema_unqualified"
+    assert reads[0]["decoded"] is None
+    assert reads[0]["error"] == "unknown_timer_channel"
+    assert reads[1]["selector"] == {}
+    assert reads[1]["raw_selector"] == {
+        "system_type": 2,
+        "instance": 2,
+        "address": 1,
+        "weekday_code": 129,
+    }
+    assert reads[1]["error"] == "unknown_event_profile"
+    assert reads[1]["decoded"] is None
+    assert reads[2]["selector"] == {}
+    assert reads[2]["raw_selector"] == {
+        "system_type": 2,
+        "instance": 2,
+        "address": 1,
+        "weekday_code": 129,
+    }
+    assert reads[2]["error"] == "unknown_event_profile"
+    assert reads[2]["decoded"] is None
+
+
+def test_replay_keeps_operation_empty_nack_timeout_and_malformed_distinct(tmp_path: Path) -> None:
+    trace_path = _write_trace(
+        tmp_path,
+        "operation_failures.trace",
+        "\n".join(
+            [
+                "2026-04-06T10:00:00.000000Z INIT features=0x01",
+                "2026-04-06T10:00:00.050000Z START initiator=0xF7",
+                (
+                    "2026-04-06T10:00:01.000000Z #1 SEND_PROTO src=0xF7 dst=0x15 "
+                    "primary=0xB5 secondary=0x24 payload=0900000100"
+                ),
+                (
+                    "2026-04-06T10:00:02.000000Z #2 SEND_PROTO src=0xF7 dst=0x15 "
+                    "primary=0xB5 secondary=0x24 payload=0900000200"
+                ),
+                "2026-04-06T10:00:02.100000Z #2 RETRY type=nack n=1/1",
+                (
+                    "2026-04-06T10:00:03.000000Z #3 SEND_PROTO src=0xF7 dst=0x15 "
+                    "primary=0xB5 secondary=0x24 payload=0b01000100"
+                ),
+                "2026-04-06T10:00:03.100000Z #3 PARSED_PROTO len=0 hex=",
+                (
+                    "2026-04-06T10:00:04.000000Z #4 SEND_PROTO src=0xF7 dst=0x15 "
+                    "primary=0xB5 secondary=0x24 payload=0b01000200"
+                ),
+                "2026-04-06T10:00:04.100000Z #4 PARSED_PROTO len=2 hex=0102",
+                (
+                    "2026-04-06T10:00:05.000000Z #5 SEND_PROTO src=0xF7 dst=0x15 "
+                    "primary=0xB5 secondary=0x24 payload=0900000300"
+                ),
+                "2026-04-06T10:00:05.100000Z #5 RETRY type=protocol_sync_error n=1/1",
+            ]
+        )
+        + "\n",
+    )
+    artifact = replay_trace_to_artifact(trace_path)
+    assert [item["response_state"] for item in artifact["b524_operation_reads"]] == [
+        "timeout",
+        "nack",
+        "empty",
+        "malformed",
+        "transport_error",
+    ]
+    assert artifact["b524_operation_reads"][4]["error"] == "protocol_sync_error"
+
+
 def test_replay_trace_marks_nack_when_retry_evidence_is_nack_or_crc(tmp_path: Path) -> None:
     trace_path = _write_trace(
         tmp_path,

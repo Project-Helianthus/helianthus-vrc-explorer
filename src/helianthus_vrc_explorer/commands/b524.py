@@ -33,7 +33,7 @@ app = typer.Typer(
     add_completion=False,
     no_args_is_help=True,
     context_settings={"help_option_names": ["-h", "--help"]},
-    help="Read B524 timers and event tables or preview mutative payloads offline.",
+    help="Read B524 operation tables, edit offline, or apply a qualified timer change.",
 )
 
 _VRC700_DEVICE_IDS = frozenset({"70000", "B7S00"})
@@ -177,6 +177,10 @@ def _read_output(
         "operation": operation,
         "opcode": f"0x{opcode:02X}",
         "destination": f"0x{dst:02X}",
+        "decode_qualification": (
+            "schema_unqualified" if opcode in {0x09, 0x0B} else "profile_vrc700"
+        ),
+        "selector_correlation": "request_context",
         "request": {
             "selector": selector,
             "payload_hex": payload.hex(),
@@ -191,6 +195,87 @@ def _read_output(
     if device_id is not None:
         output["device_id"] = device_id
     typer.echo(json.dumps(output, indent=2, sort_keys=True))
+
+
+@app.command("apply-operation")
+def apply_operation(
+    plan_path: Path = typer.Option(..., "--plan", exists=True, dir_okay=False),  # noqa: B008
+    execute: bool = typer.Option(False, "--execute", help="Apply one qualified native write."),  # noqa: B008
+    qualification_path: Path | None = typer.Option(  # noqa: B008
+        None, "--qualification", exists=True, dir_okay=False
+    ),  # noqa: B008
+    confirm: str | None = typer.Option(
+        None, "--confirm", help="Exact confirmation from the offline preview."
+    ),  # noqa: B008
+    dst: str = typer.Option("0x15", "--dst"),  # noqa: B008
+    transport_protocol: str = typer.Option("tcp", "--transport"),  # noqa: B008
+    source_address: str = typer.Option("0xF7", "--source-address"),  # noqa: B008
+    host: str = typer.Option("127.0.0.1", "--host"),  # noqa: B008
+    port: int = typer.Option(8888, "--port", min=1, max=65535),  # noqa: B008
+    trace_file: Path | None = typer.Option(None, "--trace-file"),  # noqa: B008
+    output: Path | None = typer.Option(  # noqa: B008
+        None, "--output", help="Save the preview or execution evidence."
+    ),  # noqa: B008
+) -> None:
+    """Preview an operation edit; --execute requires native qualification and confirmation."""
+    from ..scanner.b524_operation_edit import build_operation_edit_preview, parse_operation_edit
+    from ..scanner.b524_operation_writes import (
+        execute_controlled_write,
+        parse_native_write_qualification,
+        validate_operation_write_qualification,
+    )
+
+    dst_value = _parse_u8(dst, "dst")
+    source_value = _parse_u8(source_address, "source-address")
+    try:
+        document = json.loads(plan_path.read_text(encoding="utf-8"))
+        request = parse_operation_edit(document)
+        result = build_operation_edit_preview(document, dst=dst_value)
+        if execute:
+            if result["availability"]["state"] == "schema_unqualified":
+                raise ValueError(
+                    "schema_unqualified: Events/EventSetPoint native writes unavailable"
+                )
+            if qualification_path is None:
+                raise ValueError("--execute requires --qualification and exact --confirm")
+            qualification = parse_native_write_qualification(
+                json.loads(qualification_path.read_text(encoding="utf-8"))
+            )
+            validate_operation_write_qualification(request, qualification)
+            if confirm != result["required_confirmation"]:
+                raise ValueError("--confirm must match the exact confirmation from the preview")
+    except (OSError, TypeError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    if execute:
+        transport = _make_transport(
+            transport_protocol=transport_protocol,
+            host=host,
+            port=port,
+            source_address=source_value,
+            trace_file=trace_file,
+        )
+        try:
+            with transport.session():
+                result = execute_controlled_write(
+                    transport,
+                    dst=dst_value,
+                    request=request,
+                    qualification=qualification,
+                    concrete_confirmation=cast(str, confirm),
+                )
+        except (ValueError, TransportError) as exc:
+            typer.echo(f"B524 write was not verified: {exc}", err=True)
+            raise typer.Exit(1) from exc
+    encoded = json.dumps(result, indent=2, sort_keys=True)
+    typer.echo(encoded)
+    if output is not None:
+        try:
+            output.write_text(encoded + "\n", encoding="utf-8")
+        except OSError as exc:
+            typer.echo(f"Could not save B524 evidence: {exc}", err=True)
+            raise typer.Exit(1) from exc
+    if execute and result.get("outcome") != "verified":
+        raise typer.Exit(1)
 
 
 def _preview_output(operation: str, opcode: int, payload: bytes) -> None:
@@ -361,7 +446,9 @@ def read_event(
     profile: str = typer.Option(..., "--profile", help="Profile: system, dhw, or zone."),  # noqa: B008
     instance: int = typer.Option(0, "--instance", min=0, max=255),  # noqa: B008
     address: str = typer.Option(..., "--address"),  # noqa: B008
-    weekday_code: str = typer.Option("0", "--weekday-code"),  # noqa: B008
+    weekday_code: str = typer.Option(
+        ..., "--weekday-code", help="Explicit raw weekday selector; no default interpretation."
+    ),  # noqa: B008
     transport_protocol: str = typer.Option("tcp", "--transport"),  # noqa: B008
     dst: str = typer.Option("0x15", "--dst"),  # noqa: B008
     source_address: str = typer.Option("0xF7", "--source-address"),  # noqa: B008
@@ -391,7 +478,9 @@ def read_event_setpoint(
     profile: str = typer.Option(..., "--profile", help="Profile: system, dhw, or zone."),  # noqa: B008
     instance: int = typer.Option(0, "--instance", min=0, max=255),  # noqa: B008
     address: str = typer.Option(..., "--address"),  # noqa: B008
-    weekday_code: str = typer.Option("0", "--weekday-code"),  # noqa: B008
+    weekday_code: str = typer.Option(
+        ..., "--weekday-code", help="Explicit raw weekday selector; no default interpretation."
+    ),  # noqa: B008
     transport_protocol: str = typer.Option("tcp", "--transport"),  # noqa: B008
     dst: str = typer.Option("0x15", "--dst"),  # noqa: B008
     source_address: str = typer.Option("0xF7", "--source-address"),  # noqa: B008
@@ -509,7 +598,9 @@ def preview_set_event(
     profile: str = typer.Option(..., "--profile"),  # noqa: B008
     instance: int = typer.Option(0, "--instance", min=0, max=255),  # noqa: B008
     address: str = typer.Option(..., "--address"),  # noqa: B008
-    weekday_code: str = typer.Option("0", "--weekday-code"),  # noqa: B008
+    weekday_code: str = typer.Option(
+        ..., "--weekday-code", help="Explicit raw weekday selector; no default interpretation."
+    ),  # noqa: B008
     values: list[str] | None = typer.Option(None, "--value"),  # noqa: B008
 ) -> None:
     """Build an OP0A SetEvent payload without sending it."""
@@ -529,7 +620,9 @@ def preview_set_event_setpoint(
     profile: str = typer.Option(..., "--profile"),  # noqa: B008
     instance: int = typer.Option(0, "--instance", min=0, max=255),  # noqa: B008
     address: str = typer.Option(..., "--address"),  # noqa: B008
-    weekday_code: str = typer.Option("0", "--weekday-code"),  # noqa: B008
+    weekday_code: str = typer.Option(
+        ..., "--weekday-code", help="Explicit raw weekday selector; no default interpretation."
+    ),  # noqa: B008
     values: list[str] | None = typer.Option(None, "--value"),  # noqa: B008
 ) -> None:
     """Build an OP0C SetEventSetPoint payload without sending it."""

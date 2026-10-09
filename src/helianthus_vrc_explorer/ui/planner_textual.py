@@ -37,6 +37,7 @@ PLANNER_TABLE_COLUMNS = (
     "Instances",
     "RR_max",
 )
+_OPERATION_TABLE_ID = "planner-table-operations"
 
 
 @dataclass(slots=True)
@@ -191,6 +192,8 @@ def run_textual_scan_plan(
     default_plan: dict[PlanKey, GroupScanPlan] | None = None,
     default_preset: PlannerPreset = "recommended",
     system_information: Sequence[Mapping[str, object]] | None = None,
+    operation_requests: Sequence[object] | None = None,
+    operation_selection: list[bool] | None = None,
 ) -> dict[PlanKey, GroupScanPlan] | None:
     """Open a Textual planner and return selected plan (None when cancelled).
 
@@ -203,6 +206,10 @@ def run_textual_scan_plan(
     from textual.events import Key
     from textual.screen import ModalScreen
     from textual.widgets import DataTable, Footer, Header, Input, Label, Static
+
+    requests = operation_requests or ()
+    if operation_selection is not None and len(operation_selection) != len(requests):
+        raise ValueError("operation_selection must match operation_requests")
 
     class _InputDialog(ModalScreen[str | None]):
         BINDINGS = [
@@ -307,6 +314,7 @@ def run_textual_scan_plan(
             initial_plan = default_plan if default_plan is not None else preset_plan
             self._states: dict[PlanKey, _EditableGroup] = {}
             self._row_groups: dict[str, list[PlanKey]] = {"local": [], "remote": []}
+            self._operation_rows = list(range(len(requests)))
             self._editing_group: PlanKey | None = None
             self._suppress_next_enter = False
             for group in self._groups:
@@ -353,6 +361,12 @@ def run_textual_scan_plan(
                 ),
                 id="planner-panes",
             )
+            if requests:
+                yield Vertical(
+                    Label("Explicit B524 Operation Reads"),
+                    DataTable(id=_OPERATION_TABLE_ID),
+                    id="planner-pane-operations",
+                )
             yield Static("", id="status")
             yield Static("", id="help")
             yield Footer()
@@ -362,12 +376,18 @@ def run_textual_scan_plan(
                 table = self.query_one(f"#{table_id}", DataTable)
                 table.cursor_type = "row"
                 table.add_columns(*PLANNER_TABLE_COLUMNS)
+            if requests:
+                operation_table = self.query_one(f"#{_OPERATION_TABLE_ID}", DataTable)
+                operation_table.cursor_type = "row"
+                operation_table.add_columns("On", "Operation", "Selector", "Payload")
             self._refresh_table()
             self._set_help("1/2/3/4 presets | Space toggle | Enter edit RR_max | i edit instances")
             if self._row_groups["local"]:
                 self.query_one("#planner-table-local", DataTable).focus()
             else:
-                self.query_one("#planner-table-remote", DataTable).focus()
+                self.query_one(
+                    f"#{_OPERATION_TABLE_ID}" if requests else "#planner-table-remote", DataTable
+                ).focus()
 
         def _set_help(self, text: str) -> None:
             self.query_one("#help", Static).update(text)
@@ -390,6 +410,14 @@ def run_textual_scan_plan(
             if row < 0 or row >= len(row_groups):
                 return None
             return row_groups[row]
+
+        def _focused_operation(self) -> int | None:
+            if not requests:
+                return None
+            if not isinstance(self.focused, DataTable) or self.focused.id != _OPERATION_TABLE_ID:
+                return None
+            row = self.focused.cursor_row
+            return row if 0 <= row < len(requests) else None
 
         def _refresh_table(self) -> None:
             table_by_pane = {
@@ -414,6 +442,25 @@ def run_textual_scan_plan(
                 row_groups = self._row_groups[pane_key]
                 if row_groups:
                     table.move_cursor(row=min(cursor_by_pane[pane_key], len(row_groups) - 1))
+            if requests:
+                table = self.query_one(f"#{_OPERATION_TABLE_ID}", DataTable)
+                cursor = max(0, table.cursor_row)
+                table.clear(columns=False)
+                for index, request in enumerate(requests):
+                    selector = getattr(request, "selector", {})
+                    selector_text = (
+                        ", ".join(f"{key}={value}" for key, value in selector.items())
+                        if isinstance(selector, Mapping)
+                        else ""
+                    )
+                    payload = getattr(request, "payload", b"")
+                    table.add_row(
+                        "✓" if operation_selection and operation_selection[index] else " ",
+                        str(getattr(request, "operation", "operation")),
+                        selector_text,
+                        payload.hex() if isinstance(payload, bytes) else "",
+                    )
+                table.move_cursor(row=min(cursor, len(requests) - 1))
             self._set_status()
 
         def _focus_table(self) -> None:
@@ -422,6 +469,9 @@ def run_textual_scan_plan(
                 and _table_id_to_pane_key(self.focused.id) is not None
             ):
                 self.focused.focus()
+                return
+            if requests:
+                self.query_one(f"#{_OPERATION_TABLE_ID}", DataTable).focus()
                 return
             for pane_key in ("local", "remote"):
                 if self._row_groups[pane_key]:
@@ -504,6 +554,8 @@ def run_textual_scan_plan(
                 self.query_one("#planner-table-local", DataTable),
                 self.query_one("#planner-table-remote", DataTable),
             ]
+            if requests:
+                tables.append(self.query_one(f"#{_OPERATION_TABLE_ID}", DataTable))
             if not any(self._row_groups[pane_key] for pane_key in _PANE_TABLE_IDS):
                 return
             if isinstance(self.focused, DataTable):
@@ -537,6 +589,11 @@ def run_textual_scan_plan(
                 self.action_edit_rr_max()
 
         def action_toggle_enabled(self) -> None:
+            operation_index = self._focused_operation()
+            if operation_index is not None and operation_selection is not None:
+                operation_selection[operation_index] = not operation_selection[operation_index]
+                self._refresh_table()
+                return
             key = self._focused_group()
             if key is None:
                 return
@@ -567,7 +624,8 @@ def run_textual_scan_plan(
             if self._suppress_next_enter:
                 self._suppress_next_enter = False
                 return
-            self.action_edit_rr_max()
+            if self._focused_operation() is None:
+                self.action_edit_rr_max()
 
         def action_edit_instances(self) -> None:
             if len(self.screen_stack) > 1:
@@ -605,7 +663,10 @@ def run_textual_scan_plan(
             self._apply_preset("custom")
 
         def action_show_help(self) -> None:
-            self._set_help("Space=toggle Enter=RR i=instances 1/2/3/4=presets s=save q=cancel")
+            self._set_help(
+                "Space toggles a scalar group or explicit operation; "
+                "Enter edits RR; i edits instances; s saves"
+            )
 
         def action_save(self) -> None:
             plan = {

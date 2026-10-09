@@ -9,6 +9,7 @@ from ..scanner.director import GROUP_CONFIG, group_name_for_opcode, group_namesp
 from ..scanner.identity import operation_label
 from ..schema.b524_register_names import b524_register_name
 from ..schema.parameter_descriptions import attach_bundled_descriptions
+from .b524_operation_reads import operation_read_views
 from .browse_models import BrowseTab, RegisterAddress, RegisterRow, TreeNodeRef
 from .register_semantics import entry_display_value_text, entry_status_kind, visible_rr_keys
 
@@ -1067,6 +1068,87 @@ class _HydratedBrowseStore:
                 section_key=section_key,
             ):
                 b524_sections_present.add(section_key)
+        # Operation reads have selector leaves, never scalar Config/State
+        # routing.  Their parent operation sections only navigate.
+        operation_views = operation_read_views(artifact)
+        b524_sections_present.update(f"operation_{view.opcode_hex[2:]}" for view in operation_views)
+        if operation_views and not any(node.node_id == "proto:b524" for node in tree_nodes):
+            tree_nodes.append(
+                TreeNodeRef(node_id="proto:b524", label="B524", level="protocol", protocol="b524")
+            )
+        for view in operation_views:
+            section_key = f"operation_{view.opcode_hex[2:]}"
+            section_id = f"b524:section:{section_key}"
+            if not any(node.node_id == section_id for node in tree_nodes):
+                tree_nodes.append(
+                    TreeNodeRef(
+                        node_id=section_id,
+                        label=view.title,
+                        level="section",
+                        protocol="b524",
+                        section_key=section_key,
+                    )
+                )
+            selector_id = (
+                f"b524:operation:{view.opcode_hex}:{view.request_payload_hex}:{view.selector_key}"
+            )
+            tree_nodes.append(
+                TreeNodeRef(
+                    node_id=selector_id,
+                    label=view.selector_label,
+                    level="group",
+                    protocol="b524",
+                    section_key=section_key,
+                    group_key=selector_id,
+                    namespace_key=view.opcode_hex,
+                )
+            )
+            for field_name, field_value in view.fields:
+                path = f"B524/{view.title}/{view.selector_label}/{field_name}"
+                row = RegisterRow(
+                    row_id=f"{selector_id}:{field_name}",
+                    protocol="b524",
+                    group_key=selector_id,
+                    namespace_key=view.opcode_hex,
+                    namespace_label=view.title,
+                    section_key=section_key,
+                    group_name=view.selector_label,
+                    instance_key=None,
+                    register_key=field_name,
+                    name=field_name,
+                    myvaillant_name="",
+                    ebusd_name="",
+                    path=path,
+                    tab="state",
+                    address=RegisterAddress(
+                        protocol="b524",
+                        group_key=None,
+                        namespace_key=view.opcode_hex,
+                        namespace_label=view.title,
+                        instance_key=None,
+                        register_key=field_name,
+                        read_opcode=view.opcode_hex,
+                        selector_label=view.selector_label,
+                    ),
+                    value_text=field_value,
+                    raw_hex=view.response_raw_hex,
+                    unit="",
+                    access_flags="read-only",
+                    last_update_text=last_update_text,
+                    age_text=age_text,
+                    change_indicator="-",
+                    search_blob=" ".join(
+                        (
+                            path,
+                            field_value,
+                            view.qualification,
+                            view.response_state,
+                            view.selector_correlation,
+                        )
+                    ).lower(),
+                )
+                rows.append(row)
+                row_by_id[row.row_id] = row
         if b524_sections_present:
             tree_nodes = [
                 node

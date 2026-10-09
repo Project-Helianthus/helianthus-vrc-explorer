@@ -31,6 +31,35 @@ def test_parse_instances_spec_accepts_keywords_and_ranges() -> None:
     assert _parse_instances_spec("1-2", group=group) == (0x01, 0x02)
 
 
+def test_textual_operation_table_toggles_one_explicit_request(monkeypatch) -> None:
+    from dataclasses import dataclass
+
+    from textual.app import App
+
+    @dataclass(frozen=True)
+    class Request:
+        operation: str = "GetEvent"
+        opcode: int = 0x09
+        selector: dict[str, int] | None = None
+        payload: bytes = b"\x09\x00\x00\x01\x00"
+
+    selection = [True, True]
+
+    def fake_run(self: App[object], *_args: object, **_kwargs: object) -> None:
+        self._focused_operation = lambda: 1  # type: ignore[method-assign]
+        self._refresh_table = lambda: None  # type: ignore[method-assign]
+        self.action_toggle_enabled()
+
+    monkeypatch.setattr(App, "run", fake_run)
+    run_textual_scan_plan(
+        [],
+        request_rate_rps=None,
+        operation_requests=(Request(), Request()),
+        operation_selection=selection,
+    )
+    assert selection == [True, False]
+
+
 def test_parse_register_scope_distinguishes_ceiling_from_exact_selectors() -> None:
     assert _parse_register_scope("0x0015") == (0x0015, None)
     assert _parse_register_scope("0x0002,0x0010..0x0012") == (

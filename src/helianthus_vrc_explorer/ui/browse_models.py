@@ -23,9 +23,12 @@ class RegisterAddress:
     instance_key: str | None
     register_key: str
     read_opcode: str | None
+    selector_label: str | None = None
 
     @property
     def label(self) -> str:
+        if self.selector_label is not None:
+            return self.selector_label
         suffix = f" {self.read_opcode}" if self.read_opcode else ""
         if self.protocol == "b509":
             return f"B509 RR={self.register_key}{suffix}"
@@ -74,6 +77,8 @@ class RegisterRow:
     def display_label(self) -> str:
         """Compact user-facing register label while retaining native address metadata."""
 
+        if self.section_key and self.section_key.startswith("operation_"):
+            return self.name
         try:
             register = int(self.register_key, 0)
             rr_label = f"0x{register:04x}"

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from time import monotonic
 from typing import Any
 
@@ -23,10 +25,21 @@ from .emphasis import rich_star_bold_text
 try:
     from textual.app import App, ComposeResult
     from textual.binding import Binding
-    from textual.containers import Horizontal, Vertical
+    from textual.containers import Horizontal, Vertical, VerticalScroll
     from textual.events import Key
     from textual.screen import ModalScreen
-    from textual.widgets import DataTable, Footer, Header, Input, Label, Static, Tab, Tabs, Tree
+    from textual.widgets import (
+        Button,
+        DataTable,
+        Footer,
+        Header,
+        Input,
+        Label,
+        Static,
+        Tab,
+        Tabs,
+        Tree,
+    )
 except ModuleNotFoundError as exc:
     if exc.name is None or (exc.name != "textual" and not exc.name.startswith("textual.")):
         raise
@@ -285,6 +298,91 @@ if _TEXTUAL_IMPORT_ERROR is None:
                     "? help | q quit | E write (P2)."
                 ),
             )
+
+        def action_close(self) -> None:
+            self.dismiss(None)
+
+    class _OperationEditDialog(ModalScreen[None]):
+        BINDINGS = [Binding("escape", "close", "Close")]
+        CSS = """
+        _OperationEditDialog { align: center middle; }
+        _OperationEditDialog > Vertical {
+            width: 95%; height: 90%; padding: 1 2;
+            border: heavy $accent; background: $surface;
+        }
+        #operation-preview-scroll { height: 1fr; }
+        #operation-edit-buttons { height: 3; }
+        """
+
+        def __init__(self, *, document: dict[str, object], destination: int) -> None:
+            super().__init__()
+            self._document = document
+            self._destination = destination
+
+        def compose(self) -> ComposeResult:
+            yield Vertical(
+                Label(f"Offline {self._document['operation']} editor"),
+                Static(
+                    "Raw values as JSON: seven byte codes, or three timer [start, stop] pairs/null "
+                    "slots. Editing never sends to the bus."
+                ),
+                Input(value=json.dumps(self._document["values"]), id="operation-values"),
+                Input(
+                    value="b524-operation-edit.json",
+                    placeholder="Export file path",
+                    id="operation-export-path",
+                ),
+                Horizontal(
+                    Button("Preview", id="operation-preview-button"),
+                    Button("Export JSON", id="operation-export-button"),
+                    id="operation-edit-buttons",
+                ),
+                Static("", id="operation-edit-status"),
+                VerticalScroll(
+                    Static("", id="operation-preview-content"), id="operation-preview-scroll"
+                ),
+                Static("Offline only. Esc closes."),
+            )
+
+        def on_mount(self) -> None:
+            self._refresh_preview()
+
+        def _edited(self) -> tuple[dict[str, object], dict[str, object]]:
+            from ..scanner.b524_operation_edit import build_operation_edit_preview
+
+            document = dict(self._document)
+            document["values"] = json.loads(self.query_one("#operation-values", Input).value)
+            return document, build_operation_edit_preview(document, dst=self._destination)
+
+        def _refresh_preview(self) -> bool:
+            try:
+                document, preview = self._edited()
+            except (TypeError, ValueError) as exc:
+                self.query_one("#operation-edit-status", Static).update(f"Invalid edit: {exc}")
+                self.query_one("#operation-preview-content", Static).update("")
+                return False
+            self.query_one("#operation-edit-status", Static).update(
+                "Validated offline; no native write."
+            )
+            self.query_one("#operation-preview-content", Static).update(
+                json.dumps({"document": document, "preview": preview}, indent=2)
+            )
+            return True
+
+        def on_button_pressed(self, event: Button.Pressed) -> None:
+            if not self._refresh_preview() or event.button.id != "operation-export-button":
+                return
+            document, _preview = self._edited()
+            path = Path(self.query_one("#operation-export-path", Input).value).expanduser()
+            try:
+                with path.open("x", encoding="utf-8") as output:
+                    output.write(json.dumps(document, indent=2) + "\n")
+            except OSError as exc:
+                self.query_one("#operation-edit-status", Static).update(f"Could not export: {exc}")
+            else:
+                self.query_one("#operation-edit-status", Static).update(
+                    f"Exported {path}; no native write."
+                )
 
         def action_close(self) -> None:
             self.dismiss(None)
@@ -1222,6 +1320,10 @@ if _TEXTUAL_IMPORT_ERROR is None:
             )
 
         def action_edit_selected(self) -> None:
+            row = self._selected_table_row()
+            if row is not None and (row.section_key or "").startswith("operation_"):
+                self._preview_operation_export(row)
+                return
             if not self._write_enabled:
                 self._set_status("Write disabled: run with --allow-write")
                 return
@@ -1251,6 +1353,50 @@ if _TEXTUAL_IMPORT_ERROR is None:
                 ),
                 self._on_edit_value_entered,
             )
+
+        def _preview_operation_export(self, row: RegisterRow) -> None:
+            from ..scanner.b524_operation_edit import build_operation_edit_preview
+            from .b524_operation_reads import operation_edit_export
+
+            reads = self._artifact.get("b524_operation_reads")
+            if not isinstance(reads, list):
+                self._set_status("No operation reads available for offline export.")
+                return
+            records = [record for record in reads if isinstance(record, dict)]
+            operation = {
+                "operation_03": "WriteTimer",
+                "operation_09": "SetEvent",
+                "operation_0b": "SetEventSetPoint",
+            }.get(row.section_key or "")
+            if operation is None:
+                self._set_status("OP08 has no editable operation export.")
+                return
+            matching = next(
+                (
+                    record
+                    for record in records
+                    if isinstance(record.get("request_payload_hex"), str)
+                    and record["request_payload_hex"] in row.row_id
+                ),
+                None,
+            )
+            selector = matching.get("selector") if isinstance(matching, dict) else None
+            if not isinstance(selector, dict):
+                self._set_status("Selected operation selector is unavailable.")
+                return
+            try:
+                document = operation_edit_export(records, selector=selector, operation=operation)
+                meta = self._artifact.get("meta")
+                dst = meta.get("destination_address") if isinstance(meta, dict) else None
+                try:
+                    destination = int(dst, 0) if isinstance(dst, str) else 0x15
+                except ValueError:
+                    destination = 0x15
+                build_operation_edit_preview(document, dst=destination)
+            except ValueError as exc:
+                self._set_status(f"Offline export unavailable: {exc}")
+                return
+            self.push_screen(_OperationEditDialog(document=document, destination=destination))
 
         def action_close_dialog(self) -> None:
             if len(self.screen_stack) > 1:

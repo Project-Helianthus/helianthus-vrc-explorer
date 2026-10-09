@@ -37,7 +37,15 @@ def _has_navigation_children(node: TreeNodeRef, tree_nodes: list[TreeNodeRef]) -
     B509 ranges and B555 programs as leaves.
     """
 
+    if (
+        node.protocol == "b524"
+        and node.level == "section"
+        and (node.section_key or "").startswith("operation_")
+    ):
+        return True
     if node.protocol == "b524" and node.level == "group" and node.group_key:
+        if (node.section_key or "").startswith("operation_"):
+            return False
         if node.section_key == "device_slots":
             return True
         if node.section_key == "controller_registers":

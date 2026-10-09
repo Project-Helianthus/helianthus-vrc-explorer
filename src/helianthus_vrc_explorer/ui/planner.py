@@ -603,6 +603,59 @@ def _custom_plan_with_required_rr(console: Console, group: PlannerGroup) -> Grou
         )
 
 
+def _operation_request_label(request: object) -> str:
+    operation = str(getattr(request, "operation", "operation"))
+    opcode = getattr(request, "opcode", None)
+    opcode_text = f"0x{opcode:02X}" if isinstance(opcode, int) else "?"
+    selector = getattr(request, "selector", {})
+    selector_text = (
+        ", ".join(f"{key}={value}" for key, value in selector.items())
+        if isinstance(selector, Mapping)
+        else ""
+    )
+    return " ".join(part for part in (opcode_text, operation, selector_text) if part)
+
+
+def _prompt_operation_selection(
+    console: Console,
+    operation_requests: Sequence[object],
+    operation_selection: list[bool],
+) -> None:
+    """Edit explicit operation reads; scalar presets never synthesize them."""
+    if not operation_requests:
+        return
+    if len(operation_selection) != len(operation_requests):
+        raise ValueError("operation_selection must match operation_requests")
+    table = Table(title="Explicit B524 Operation Reads")
+    table.add_column("On")
+    table.add_column("Request")
+    for index, request in enumerate(operation_requests, start=1):
+        table.add_row(
+            "✓" if operation_selection[index - 1] else " ",
+            f"{index}. {_operation_request_label(request)}",
+        )
+    console.print(table)
+    raw = (
+        Prompt.ask(
+            "Operation reads: all, none, or comma-separated indexes",
+            default="keep",
+            console=console,
+        )
+        .strip()
+        .lower()
+    )
+    if raw in {"", "keep", "k"}:
+        return
+    if raw in {"all", "*"}:
+        operation_selection[:] = [True] * len(operation_requests)
+        return
+    if raw in {"none", "off"}:
+        operation_selection[:] = [False] * len(operation_requests)
+        return
+    selected = parse_int_set(raw, min_value=1, max_value=len(operation_requests))
+    operation_selection[:] = [index in selected for index in range(1, len(operation_requests) + 1)]
+
+
 def prompt_scan_plan(
     console: Console,
     groups: list[PlannerGroup],
@@ -611,12 +664,17 @@ def prompt_scan_plan(
     default_plan: dict[PlanKey, GroupScanPlan] | None = None,
     default_preset: PlannerPreset = "recommended",
     system_information: Sequence[Mapping[str, object]] | None = None,
+    operation_requests: Sequence[object] | None = None,
+    operation_selection: list[bool] | None = None,
 ) -> dict[PlanKey, GroupScanPlan]:
     """Prompt for a scan plan in interactive TTY mode.
 
     Returns a dict mapping (GG, opcode) -> GroupScanPlan.
     """
 
+    requests = operation_requests or ()
+    if operation_selection is not None:
+        _prompt_operation_selection(console, requests, operation_selection)
     eligible = {g.key: g for g in groups}
     if not eligible:
         return {}

@@ -10,7 +10,13 @@ from typing import Any, Literal, cast
 
 from .artifact_schema import CURRENT_ARTIFACT_SCHEMA_VERSION
 from .protocol.b524_metadata import SYSTEM_INFORMATION_NAMES, decode_parameter_description
+from .protocol.b524_schedules import EVENT_PROFILES, TIMER_CHANNELS
 from .protocol.parser import ValueParseError, parse_typed_value
+from .scanner.b524_operation_reads import (
+    B524OperationReadRequest,
+    decode_operation_read_observation,
+    record_operation_read_observation,
+)
 from .scanner.director import (
     GROUP_CONFIG,
     NamespaceProfile,
@@ -381,6 +387,136 @@ def _decode_register_read_entry(
     return entry
 
 
+def _operation_read_request(payload: bytes) -> B524OperationReadRequest | None:
+    opcode = _opcode_from_payload(payload)
+    if opcode == 0x08 and len(payload) == 1:
+        return B524OperationReadRequest("ReadVR91", opcode, {}, payload, True)
+    if opcode not in {0x03, 0x09, 0x0B} or len(payload) != 5:
+        return None
+    if opcode == 0x03:
+        channel_by_selector = {
+            (system_type, address): channel
+            for channel, (system_type, address) in TIMER_CHANNELS.items()
+        }
+        channel = channel_by_selector.get((payload[1], payload[3]))
+        selector: dict[str, str | int] = (
+            {"channel": channel, "instance": payload[2], "weekday": payload[4]}
+            if channel is not None
+            else {}
+        )
+        return B524OperationReadRequest("ReadTimer", opcode, selector, payload, True)
+    profile_by_system_type = {profile.system_type: name for name, profile in EVENT_PROFILES.items()}
+    profile = profile_by_system_type.get(payload[1])
+    selector = (
+        {
+            "profile": profile,
+            "instance": payload[2],
+            "address": payload[3],
+            "weekday_code": payload[4],
+        }
+        if profile is not None
+        else {}
+    )
+    operation: Literal["GetEvent", "GetEventSetPoint"] = (
+        "GetEvent" if opcode == 0x09 else "GetEventSetPoint"
+    )
+    return B524OperationReadRequest(operation, opcode, selector, payload, False)
+
+
+def _unknown_operation_raw_selector(payload: bytes) -> dict[str, int] | None:
+    opcode = _opcode_from_payload(payload)
+    if opcode not in {0x03, 0x09, 0x0B} or len(payload) != 5:
+        return None
+    return {
+        "system_type": payload[1],
+        "instance": payload[2],
+        "address": payload[3],
+        "weekday_code" if opcode in {0x09, 0x0B} else "weekday": payload[4],
+    }
+
+
+def _replay_operation_read(exchange: _TraceExchange) -> dict[str, Any] | None:
+    """Translate one trace exchange without assuming a selector echo."""
+
+    request = _operation_read_request(exchange.payload)
+    if request is None:
+        return None
+    record = record_operation_read_observation(request)
+    record["trace_seq"] = exchange.seq
+    record["request_attempts"] = 1
+    if not request.selector:
+        raw_selector = _unknown_operation_raw_selector(exchange.payload)
+        if raw_selector is not None:
+            record["raw_selector"] = raw_selector
+    response = exchange.response
+    record["response_raw_hex"] = response.hex() if isinstance(response, bytes) else None
+    if response is None:
+        if exchange.retry_kind == "nack":
+            record["response_state"] = "nack"
+            record["error"] = "nack"
+        elif exchange.retry_kind == "nack_or_crc":
+            record["response_state"] = "transport_error"
+            record["error"] = "nack_or_crc"
+        elif exchange.retry_kind not in {None, "timeout"}:
+            record["response_state"] = "transport_error"
+            record["error"] = exchange.retry_kind
+        else:
+            record["response_state"] = "timeout"
+            record["error"] = "timeout"
+        return record
+    unknown_timer_channel = request.operation == "ReadTimer" and "channel" not in request.selector
+    unknown_event_profile = (
+        request.operation in {"GetEvent", "GetEventSetPoint"} and "profile" not in request.selector
+    )
+    if unknown_timer_channel or unknown_event_profile:
+        record["response_state"] = "empty" if not response else "value"
+        if response:
+            record["error"] = (
+                "unknown_timer_channel" if unknown_timer_channel else "unknown_event_profile"
+            )
+        return record
+    decoded, _qualification, state = decode_operation_read_observation(request, response)
+    record["response_state"] = state
+    record["decoded"] = decoded
+    record["decode_qualification"] = "schema_unqualified"
+    if state == "malformed":
+        record["error"] = "malformed_response"
+    return record
+
+
+def _raw_operation_history(exchange: _TraceExchange) -> dict[str, Any]:
+    payload = exchange.payload
+    opcode = payload[0]
+    selector: dict[str, int] = {}
+    if opcode in {0x04, 0x0A, 0x0C} and len(payload) >= 5:
+        selector = {
+            "system_type": payload[1],
+            "instance": payload[2],
+            "address": payload[3],
+            "weekday_code" if opcode in {0x0A, 0x0C} else "weekday": payload[4],
+        }
+    if exchange.response is None:
+        response_state = "transport_error" if exchange.retry_kind else "timeout"
+    elif exchange.response:
+        response_state = "value"
+    else:
+        response_state = "empty"
+    return {
+        "trace_seq": exchange.seq,
+        "operation": operation_label(opcode=opcode, optype=0x00),
+        "opcode_hex": _hex_u8(opcode),
+        "selector": selector,
+        "selector_correlation": "request_context",
+        "request_payload_hex": payload.hex(),
+        "response_raw_hex": (
+            exchange.response.hex() if isinstance(exchange.response, bytes) else None
+        ),
+        "response_state": response_state,
+        "feedback_interpretation": "unknown",
+        "mutative": opcode in {0x04, 0x0A, 0x0C},
+    }
+
+
 def replay_trace_to_artifact(trace_path: Path) -> dict[str, Any]:
     """Replay an ENH/ENS trace into a deterministic scan artifact (schema 2.2).
 
@@ -447,8 +583,12 @@ def replay_trace_to_artifact(trace_path: Path) -> dict[str, Any]:
         "register_constraints": [],
         "parameter_descriptions": [],
         "timer_programs": [],
+        "events": [],
+        "event_setpoints": [],
+        "raw_write_history": [],
         "register_tables": [],
     }
+    operation_reads: list[dict[str, Any]] = []
 
     for exchange in b524_exchanges:
         opcode = _opcode_from_payload(exchange.payload)
@@ -544,17 +684,40 @@ def replay_trace_to_artifact(trace_path: Path) -> dict[str, Any]:
                     "reply_hex": response.hex() if isinstance(response, bytes) else None,
                 }
             )
+            if opcode == 0x03:
+                operation_read = _replay_operation_read(exchange)
+                if operation_read is not None:
+                    operation_reads.append(operation_read)
+            else:
+                b524_operations["raw_write_history"].append(_raw_operation_history(exchange))
             continue
 
-        if opcode == 0x0B:
-            b524_operations["register_tables"].append(
-                {
-                    "trace_seq": exchange.seq,
-                    "operation": operation_label(opcode=opcode, optype=0x00),
-                    "payload_hex": payload.hex(),
-                    "reply_hex": response.hex() if isinstance(response, bytes) else None,
-                }
-            )
+        if opcode == 0x08:
+            operation_read = _replay_operation_read(exchange)
+            if operation_read is not None:
+                operation_reads.append(operation_read)
+            continue
+
+        if opcode in {0x09, 0x0A, 0x0B, 0x0C} and len(payload) >= 5:
+            bucket = "events" if opcode in {0x09, 0x0A} else "event_setpoints"
+            history = _raw_operation_history(exchange)
+            b524_operations[bucket].append(history)
+            if opcode in {0x0A, 0x0C}:
+                b524_operations["raw_write_history"].append(history)
+            else:
+                operation_read = _replay_operation_read(exchange)
+                if operation_read is not None:
+                    operation_reads.append(operation_read)
+            if opcode == 0x0B:
+                b524_operations["register_tables"].append(
+                    {
+                        "trace_seq": exchange.seq,
+                        "operation": operation_label(opcode=opcode, optype=0x00),
+                        "payload_hex": payload.hex(),
+                        "reply_hex": response.hex() if isinstance(response, bytes) else None,
+                    }
+                )
+            continue
 
     artifact["meta"]["system_information"] = [
         system_information[identifier] for identifier in sorted(system_information)
@@ -627,6 +790,9 @@ def replay_trace_to_artifact(trace_path: Path) -> dict[str, Any]:
         key=lambda e: e["request_hex"],
     )
     artifact["b524_operations"] = b524_operations
+    if operation_reads:
+        artifact["b524_operation_reads_schema_version"] = 1
+        artifact["b524_operation_reads"] = operation_reads
 
     # Enrich register entries with myvaillant register names.
     _enrich_register_names(artifact["operations"])

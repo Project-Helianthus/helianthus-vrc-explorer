@@ -55,6 +55,8 @@ Key scan UX flags:
 - `--description-budget` (optional limit; all eligible parameters in the selected scope by default)
 - `--request-budget` (optional B524 send limit including transport retries; no implicit send cap)
 - `--scan-plan` (version 1 JSON file for exact custom read selectors)
+- `--b524-read-plan` (version 1 JSON file for explicit OP03/08/09/0B reads)
+- `--preview-read-plan` (validate and display that operation plan without device I/O)
 - `--b509-dump` (B509 is opt-in; `--b509-range` requires this flag)
 - `--no-tips`
 - `--redact` (redact identity fields like serial number from console output)
@@ -110,7 +112,7 @@ Coverage and parameter-description note:
 - OP06 group-family labels GG01..GG0F are supplied by the packaged `b524_remote_group_names.json` display map, consistently across the planner, scan output, summary, browser, HTML and classic viewer, including previously saved artifacts. These labels do not change scan targets, bounds, remote-header predicates or OP02 names. `unused` is a display designation; it does not suppress a probe or establish universal absence.
 - Browser parent selections show navigation without aggregating descendant registers. Select a leaf to inspect its registers. HTML uses compact descriptions and access/visibility tags, and shows transport failures without duplicate exception text.
 - Config/State tabs apply to OP02/OP06 registers; OP00 system information is displayed directly. The recommended profile uses supported capacities for circuits and zones, and qualified population counts for solar circuits, cylinders and DeltaT. Empty replies and hidden default solar temperatures do not establish instance presence.
-- The `b524` command group provides read-only Event/EventSetPoint requests (OP09/0B), VRC700 timer and VR91 reads (OP03/08), and offline payload previews for OP04/0A/0C. Timer/VR91 reads require controller identity `70000` or `B7S00`; Event support remains target-qualified. Previews open no transport and perform no writes. See the [CLI reference](docs/cli-reference.md) and [public operation specification](https://github.com/Project-Helianthus/helianthus-docs-ebus/blob/main/protocols/vaillant/ebus-vaillant-B524.md).
+- The `b524` command group provides Event/EventSetPoint reads (OP09/0B), VRC700 timer and VR91 reads (OP03/08), and offline payload previews for OP04/0A/0C. Timer/VR91 reads require manufacturer B5 and controller identity `70000` or `B7S00`. Event decoding remains experimental (`schema_unqualified`); an expected-length response does not establish native support. Event commands require an explicit `--weekday-code`. See the [CLI reference](docs/cli-reference.md) and [public operation specification](https://github.com/Project-Helianthus/helianthus-docs-ebus/blob/main/protocols/vaillant/ebus-vaillant-B524.md).
 - Bundled descriptions remain prior observations. Every entry keeps the native read opcode, GG, II and RR selector, so OP02 and OP06 never share same-numbered group limits. Compatible qualified live descriptions are compared by codec, width, min, max and step; missing optional identity data is marked partial rather than mismatched. Missing required remote identity remains unqualified. Known profile contradictions and actual description differences remain distinct from unavailable evidence. Sanitized baseline updates can be merged with `scripts/import_b524_descriptions.py ARTIFACT OUTPUT --merge` without erasing other observations or copying raw request/reply captures.
 - OP00 API version/revision and other count classes remain profile context. Ventilation hints can annotate known candidates; they do not establish a same-numbered GG route or prove absence.
 
@@ -185,6 +187,39 @@ device writes are planned.
   - Legacy unqualified group-directory and constraint views, when present
 - Tabbed register views: `Config`, `State`. Writable OP02 and OP06 parameters and their limit records belong in Config.
 - Watch/pin/rate controls and safe write workflow (`--allow-write` + confirmation).
+
+## Timer and Event operation plans
+
+`scan --b524-read-plan FILE` adds only the explicitly listed OP03/08/09/0B
+requests after scalar reads and descriptions. Both planners can select those
+requests. They share scan progress and optional request budgets, including
+transport retries. Scalar presets do not generate Event selectors. Separate
+examples are available for [experimental Events](fixtures/b524_event_read_plan.json)
+and [VRC700 timers](fixtures/b524_vrc700_read_plan.json).
+
+```bash
+python -m helianthus_vrc_explorer scan --b524-read-plan fixtures/b524_event_read_plan.json --preview-read-plan
+```
+
+Artifacts and replay preserve each operation's selector, raw response, decoded
+candidate fields, qualification and attempts. Browser and HTML show a leaf for
+each selector, independently of scalar Config/State tabs. Missing paired Event
+or setpoint data remains incomplete; it is not synthesized from the other half.
+
+The operation editors export local edit plans and show payload diffs. They do
+not send native writes. Preview an exported edit without connecting:
+
+```bash
+python -m helianthus_vrc_explorer b524 apply-operation --plan edit.json
+```
+
+OP04 execution requires an external selector-specific native qualification and
+the exact confirmation text from the preview. It verifies live EID/SW and the
+baseline, sends once, and reads back. OP0A/0C native execution remains disabled
+until a native Event contract is qualified. Neither a preview nor a successful
+synthetic test establishes live behavior. The
+[operation contract](https://github.com/Project-Helianthus/helianthus-docs-ebus/blob/main/protocols/vaillant/b524-operation-reads.md)
+defines the plan and qualification schemas.
 
 ## Canonical B524 Register Names
 

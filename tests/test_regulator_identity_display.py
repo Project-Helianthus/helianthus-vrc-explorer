@@ -63,6 +63,7 @@ def test_native_sw_selects_exact_model_before_optional_serial_enrichment() -> No
     assert identity["sw"] == "0403"
     assert identity["spn"] == "0193"
     assert identity["assigned_model"] == "VRT380"
+    assert identity["model_assignment_qualification"] == "project_catalog"
     assert identity["protocol_family"] == "VRC720"
     assert identity["model"] == "VRT380"
     assert identity["serial"] == "n/a"

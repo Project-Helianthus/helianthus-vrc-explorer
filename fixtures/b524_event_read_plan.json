@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "requests": [
+    {"operation": "GetEvent", "profile": "zone", "instance": 1, "address": 1, "weekday_code": 0},
+    {"operation": "GetEventSetPoint", "profile": "zone", "instance": 1, "address": 1, "weekday_code": 0}
+  ]
+}

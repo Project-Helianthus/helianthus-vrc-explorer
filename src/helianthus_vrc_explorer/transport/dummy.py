@@ -20,6 +20,7 @@ class DummyTransport(TransportInterface):
     - System information (opcode 0x00): returns a fixture-provided float32le value
     - Register read (opcode 0x02 / 0x06, optype 0x00): returns `header(4 bytes) + value_bytes`
     - Parameter description (opcode 0x01 / 0x07): returns `GG + RR16 + min/max/step`
+    - Explicit B524 operation reads: replays only an exact recorded request payload
     """
 
     def __init__(self, fixture_path: Path) -> None:
@@ -33,6 +34,8 @@ class DummyTransport(TransportInterface):
         self._register_nacks: set[tuple[int, int, int, int]] = set()
         self._register_empty_replies: set[tuple[int, int, int, int]] = set()
         self._parameter_descriptions: dict[tuple[int, int, int, int], bytes] = {}
+        self._operation_read_replies: dict[bytes, bytes] = {}
+        self._operation_read_states: dict[bytes, str] = {}
         self._load_fixture()
 
     def send(self, dst: int, payload: bytes) -> bytes:  # noqa: ARG002
@@ -40,6 +43,9 @@ class DummyTransport(TransportInterface):
             raise TransportError("Empty payload")
 
         opcode = payload[0]
+
+        if opcode in {0x03, 0x08, 0x09, 0x0B}:
+            return self._handle_operation_read(payload)
 
         if opcode == 0x00:
             return self._handle_system_information(payload)
@@ -51,6 +57,36 @@ class DummyTransport(TransportInterface):
             return self._handle_register_read(payload)
 
         raise TransportError(f"Unsupported opcode 0x{opcode:02X} for DummyTransport")
+
+    def _handle_operation_read(self, payload: bytes) -> bytes:
+        state = self._operation_read_states.get(payload)
+        if state is None:
+            raise TransportError(
+                f"Fixture has no exact B524 operation-read observation for payload={payload.hex()}"
+            )
+        if state == "nack":
+            raise TransportNack(f"Fixture marks B524 operation payload={payload.hex()} as nack")
+        if state == "timeout":
+            raise TransportTimeout(
+                f"Fixture marks B524 operation payload={payload.hex()} as timeout"
+            )
+        if state == "transport_error":
+            raise TransportError(
+                f"Fixture marks B524 operation payload={payload.hex()} as transport_error"
+            )
+        if state in {"unknown", "unattempted"}:
+            raise TransportError(
+                f"Fixture has no attempted B524 operation response for payload={payload.hex()}"
+            )
+        if state == "empty":
+            return b""
+        response = self._operation_read_replies.get(payload)
+        if response is None:
+            raise TransportError(
+                "Fixture operation observation has no replayable raw response for "
+                f"payload={payload.hex()} state={state}"
+            )
+        return response
 
     def _handle_system_information(self, payload: bytes) -> bytes:
         if len(payload) != 3:
@@ -407,6 +443,62 @@ class DummyTransport(TransportInterface):
         if not isinstance(data, dict):
             raise ValueError("Fixture root must be a JSON object")
         data, _migration = migrate_artifact_schema(data)
+
+        operation_reads = data.get("b524_operation_reads")
+        if operation_reads is not None:
+            if not isinstance(operation_reads, list):
+                raise ValueError('Fixture top-level key "b524_operation_reads" must be a list')
+            for index, item in enumerate(operation_reads):
+                if not isinstance(item, dict):
+                    raise ValueError(f"B524 operation observation {index} must be an object")
+                request_hex = item.get("request_payload_hex")
+                if not isinstance(request_hex, str):
+                    raise ValueError(
+                        f"B524 operation observation {index} requires request_payload_hex"
+                    )
+                try:
+                    request = bytes.fromhex(request_hex)
+                except ValueError as exc:
+                    raise ValueError(
+                        f"B524 operation observation {index} has invalid request_payload_hex"
+                    ) from exc
+                if not request or request[0] not in {0x03, 0x08, 0x09, 0x0B}:
+                    raise ValueError(
+                        f"B524 operation observation {index} has unsupported request payload"
+                    )
+                state = item.get("response_state")
+                if state not in {
+                    "value",
+                    "empty",
+                    "nack",
+                    "timeout",
+                    "transport_error",
+                    "malformed",
+                    "unknown",
+                    "unattempted",
+                }:
+                    raise ValueError(
+                        f"B524 operation observation {index} has invalid response_state"
+                    )
+                if request in self._operation_read_states:
+                    raise ValueError(
+                        "Fixture has duplicate B524 operation observations for "
+                        f"payload={request.hex()}"
+                    )
+                self._operation_read_states[request] = state
+                response_hex = item.get("response_raw_hex")
+                if response_hex is not None:
+                    if not isinstance(response_hex, str):
+                        raise ValueError(
+                            f"B524 operation observation {index} response_raw_hex "
+                            "must be text or null"
+                        )
+                    try:
+                        self._operation_read_replies[request] = bytes.fromhex(response_hex)
+                    except ValueError as exc:
+                        raise ValueError(
+                            f"B524 operation observation {index} has invalid response_raw_hex"
+                        ) from exc
 
         meta = data.get("meta", {})
         if not isinstance(meta, dict):
