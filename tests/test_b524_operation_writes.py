@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from helianthus_vrc_explorer.scanner.b524_operation_writes import (
@@ -116,6 +119,18 @@ def test_qualification_document_is_strict_evidence_not_confirmation() -> None:
                 "native_qualified": 1,
             }
         )
+
+
+def test_bundled_synthetic_qualification_is_rejected_before_transport() -> None:
+    fixture = (
+        Path(__file__).resolve().parents[1]
+        / "fixtures"
+        / "b524-native-write-qualification-synthetic-v1.json"
+    )
+    document = json.loads(fixture.read_text())
+    assert document["evidence_reference"] == "synthetic-contract-fixture"
+    with pytest.raises(ValueError, match="native_qualified must be boolean true"):
+        parse_native_write_qualification(document)
 
 
 @pytest.mark.parametrize("schema_version", [True, 1.0, "1", None])
