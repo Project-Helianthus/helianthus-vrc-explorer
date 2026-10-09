@@ -136,3 +136,39 @@ def test_qualified_timer_cli_verifies_identity_baseline_single_send_and_readback
     assert evidence["write_feedback_interpretation"] == "unknown"
     assert transport.identifications == 1
     assert [payload[0] for payload in transport.sent] == [3, 4, 3]
+
+
+def test_unchanged_timer_cli_can_preview_but_cannot_open_transport(tmp_path, monkeypatch):
+    import helianthus_vrc_explorer.commands.b524 as command
+
+    monkeypatch.setattr(command, "_make_transport", lambda **kwargs: 1 / 0)
+    document = timer_edit()
+    document["values"] = [[0, 36], None, None]
+    plan = tmp_path / "unchanged.json"
+    plan.write_text(json.dumps(document))
+    qualification = tmp_path / "qualification.json"
+    qualification.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "scope": "timer_write_op04",
+                "manufacturer": 181,
+                "device_id": "70000",
+                "profile": "synthetic_timer",
+                "model": "synthetic",
+                "software_raw_hex": "0102",
+                "selector": document["selector"],
+                "evidence_reference": "synthetic_test_fixture",
+                "native_qualified": True,
+            }
+        )
+    )
+    args = ["b524", "apply-operation", "--plan", str(plan)]
+    preview = CliRunner().invoke(app, args)
+    assert preview.exit_code == 0, preview.output
+    confirmation = json.loads(preview.stdout)["required_confirmation"]
+    result = CliRunner().invoke(
+        app, [*args, "--execute", "--qualification", str(qualification), "--confirm", confirmation]
+    )
+    assert result.exit_code == 2, (result.output, result.exception)
+    assert "unchanged" in result.output

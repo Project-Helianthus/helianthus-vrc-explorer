@@ -362,6 +362,8 @@ def validate_operation_write_qualification(
 
     if request.operation in _EVENT_OPERATIONS:
         raise ValueError(operation_write_availability(request.operation).reason)
+    if request.expected_before == request.expected_after:
+        raise ValueError("unchanged operation edit cannot be executed")
     if not qualification.native_qualified:
         raise ValueError("native write qualification is required")
     if qualification.scope != _qualification_scope(request.operation):

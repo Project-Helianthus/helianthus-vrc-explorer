@@ -312,6 +312,35 @@ def test_timeout_after_single_send_is_ambiguous_and_never_retries_write() -> Non
     assert result["readback"][0]["error"] == "TransportTimeout"
 
 
+def test_unchanged_timer_edit_is_rejected_before_send_or_readback() -> None:
+    request = prepare_timer_write(
+        channel="dhw",
+        instance=0,
+        weekday=0,
+        slots=((0, 36), (48, 72), None),
+        expected_before_raw_hex="00002430489090",
+    )
+    assert request.expected_before == request.expected_after
+    transport = _ScriptedTransport(
+        {
+            request.read_requests[0].payload: [
+                request.expected_before[0],
+                request.expected_before[0],
+            ],
+            request.write_payload: [TransportTimeout("write feedback")],
+        }
+    )
+    with pytest.raises(ValueError, match="unchanged"):
+        execute_controlled_write(
+            transport,
+            dst=0x15,
+            request=request,
+            qualification=_qualification(request),
+            concrete_confirmation=concrete_confirmation_text(request, dst=0x15),
+        )
+    assert transport.admitted_payloads == []
+
+
 def test_event_pair_classification_reports_partial_without_rollback() -> None:
     request = prepare_event_write(
         setpoint=False,
