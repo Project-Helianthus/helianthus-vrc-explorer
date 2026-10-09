@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import pytest
-from tests.scan_ui_helpers import invoke_scan
 from typer.testing import CliRunner
 
 from helianthus_vrc_explorer.scanner.plan import make_plan_key
 from helianthus_vrc_explorer.scanner.scan_policy import parse_scan_plan
 from helianthus_vrc_explorer.ui.scan_setup import ScanSetup
+from tests.scan_ui_helpers import invoke_scan
 
 
 def test_internal_custom_selector_parser_rejects_non_read_opcode() -> None:

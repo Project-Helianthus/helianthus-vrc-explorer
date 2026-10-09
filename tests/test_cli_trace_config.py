@@ -4,10 +4,10 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
-from tests.scan_ui_helpers import invoke_scan
 from typer.testing import CliRunner
 
 from helianthus_vrc_explorer.ui.scan_setup import ScanSetup
+from tests.scan_ui_helpers import invoke_scan
 
 
 @pytest.mark.parametrize("configuration", ["argument", "environment", "absent"])

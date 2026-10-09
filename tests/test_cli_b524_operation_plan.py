@@ -3,13 +3,13 @@ from __future__ import annotations
 from contextlib import contextmanager
 
 import pytest
-from tests.scan_ui_helpers import invoke_scan
 from typer.testing import CliRunner
 
 from helianthus_vrc_explorer.scanner.b524_operation_reads import (
     parse_operation_read_plan,
 )
 from helianthus_vrc_explorer.ui.scan_setup import ScanSetup
+from tests.scan_ui_helpers import invoke_scan
 
 
 def test_normal_scan_passes_resolved_identity_for_automatic_event_policy(
