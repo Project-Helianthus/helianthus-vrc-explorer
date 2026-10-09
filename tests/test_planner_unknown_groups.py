@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from rich.console import Console
 
 from helianthus_vrc_explorer.scanner.plan import GroupScanPlan, make_plan_key
@@ -89,6 +90,46 @@ def test_prompt_scan_plan_preserves_exact_default_registers_without_changes(monk
     )
 
     assert plan == {group.key: default}
+
+
+@pytest.mark.parametrize(
+    ("valid_selection", "expected_selection"),
+    [
+        ("keep", [False, True]),
+        ("all", [True, True]),
+        ("none", [False, False]),
+        ("2", [False, True]),
+    ],
+)
+def test_prompt_operation_selection_reprompts_after_invalid_index(
+    monkeypatch,
+    valid_selection: str,
+    expected_selection: list[bool],
+) -> None:
+    import helianthus_vrc_explorer.ui.planner as planner
+
+    class Request:
+        operation = "GetEvent"
+        opcode = 0x09
+        selector: dict[str, int] = {}
+
+    answers = iter(["3", valid_selection])
+    monkeypatch.setattr(planner.Prompt, "ask", lambda *_args, **_kwargs: next(answers))
+    selection = [False, True]
+    console = Console(record=True)
+
+    assert (
+        prompt_scan_plan(
+            console,
+            [],
+            request_rate_rps=None,
+            operation_requests=(Request(), Request()),
+            operation_selection=selection,
+        )
+        == {}
+    )
+    assert selection == expected_selection
+    assert "Invalid operation selection:" in console.export_text()
 
 
 def test_classic_custom_preserves_explicit_unqualified_route(

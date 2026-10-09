@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+from dataclasses import dataclass
+
 from helianthus_vrc_explorer.scanner.plan import GroupScanPlan
 from helianthus_vrc_explorer.ui.planner import PlannerGroup, split_planner_groups_by_namespace
 from helianthus_vrc_explorer.ui.planner_textual import (
@@ -58,6 +61,44 @@ def test_textual_operation_table_toggles_one_explicit_request(monkeypatch) -> No
         operation_selection=selection,
     )
     assert selection == [True, False]
+
+
+def test_textual_operation_toggle_refreshes_rendered_request_estimate(monkeypatch) -> None:
+    from textual.app import App
+    from textual.widgets import Static
+
+    @dataclass(frozen=True)
+    class Request:
+        operation: str = "GetEvent"
+        opcode: int = 0x09
+        selector: dict[str, int] | None = None
+        payload: bytes = b"\x09\x00\x00\x01\x00"
+
+    selection = [True]
+    captured: dict[str, str] = {}
+
+    def fake_run(self: App[object], *_args: object, **_kwargs: object) -> None:
+        async def exercise() -> None:
+            async with self.run_test() as pilot:
+                await pilot.pause()
+                captured["before"] = str(self.query_one("#status", Static).render())
+                await pilot.press("space")
+                await pilot.pause()
+                captured["after"] = str(self.query_one("#status", Static).render())
+
+        asyncio.run(exercise())
+
+    monkeypatch.setattr(App, "run", fake_run)
+    run_textual_scan_plan(
+        [],
+        request_rate_rps=2.0,
+        operation_requests=(Request(),),
+        operation_selection=selection,
+    )
+
+    assert captured["before"].startswith("Plan: 1 requests | ETA: 0s @ 2.00 req/s")
+    assert captured["after"].startswith("Plan: 0 requests | ETA: 0s @ 2.00 req/s")
+    assert selection == [False]
 
 
 def test_parse_register_scope_distinguishes_ceiling_from_exact_selectors() -> None:

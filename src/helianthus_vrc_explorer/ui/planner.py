@@ -635,25 +635,33 @@ def _prompt_operation_selection(
             f"{index}. {_operation_request_label(request)}",
         )
     console.print(table)
-    raw = (
-        Prompt.ask(
-            "Operation reads: all, none, or comma-separated indexes",
-            default="keep",
-            console=console,
+    while True:
+        raw = (
+            Prompt.ask(
+                "Operation reads: all, none, or comma-separated indexes",
+                default="keep",
+                console=console,
+            )
+            .strip()
+            .lower()
         )
-        .strip()
-        .lower()
-    )
-    if raw in {"", "keep", "k"}:
+        if raw in {"", "keep", "k"}:
+            return
+        if raw in {"all", "*"}:
+            operation_selection[:] = [True] * len(operation_requests)
+            return
+        if raw in {"none", "off"}:
+            operation_selection[:] = [False] * len(operation_requests)
+            return
+        try:
+            selected = parse_int_set(raw, min_value=1, max_value=len(operation_requests))
+        except ValueError as exc:
+            console.print(f"[red]Invalid operation selection:[/red] {exc}")
+            continue
+        operation_selection[:] = [
+            index in selected for index in range(1, len(operation_requests) + 1)
+        ]
         return
-    if raw in {"all", "*"}:
-        operation_selection[:] = [True] * len(operation_requests)
-        return
-    if raw in {"none", "off"}:
-        operation_selection[:] = [False] * len(operation_requests)
-        return
-    selected = parse_int_set(raw, min_value=1, max_value=len(operation_requests))
-    operation_selection[:] = [index in selected for index in range(1, len(operation_requests) + 1)]
 
 
 def prompt_scan_plan(

@@ -137,6 +137,7 @@ def _estimate_footer(
     states: dict[PlanKey, _EditableGroup],
     *,
     request_rate_rps: float | None,
+    operation_selection: Sequence[bool] = (),
 ) -> str:
     plan = {
         key: GroupScanPlan(
@@ -149,7 +150,7 @@ def _estimate_footer(
         for (key, state) in states.items()
         if state.enabled and state.rr_max is not None
     }
-    requests = estimate_register_requests(plan)
+    requests = estimate_register_requests(plan) + sum(operation_selection)
     eta_s = estimate_eta_seconds(requests=requests, request_rate_rps=request_rate_rps)
     eta_txt = _format_seconds(eta_s) if eta_s is not None else "n/a"
     rate_txt = f"{request_rate_rps:.2f}" if request_rate_rps is not None else "n/a"
@@ -394,7 +395,11 @@ def run_textual_scan_plan(
 
         def _set_status(self) -> None:
             self.query_one("#status", Static).update(
-                _estimate_footer(self._states, request_rate_rps=request_rate_rps)
+                _estimate_footer(
+                    self._states,
+                    request_rate_rps=request_rate_rps,
+                    operation_selection=operation_selection or (),
+                )
             )
 
         def _focused_group(self) -> PlanKey | None:
