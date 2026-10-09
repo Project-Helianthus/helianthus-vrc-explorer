@@ -552,4 +552,7 @@ def effective_parameter_description(
     result = deepcopy(bundled)
     result["source"] = "profile"
     result["qualification"] = "profile_qualified"
+    # Native compatibility above qualifies this target. Preserve the original
+    # observation's profile, while binding validation to the current identity.
+    result["target_profile"] = deepcopy(profile)
     return result

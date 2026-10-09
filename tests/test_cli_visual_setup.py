@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from typer.testing import CliRunner
 
 from helianthus_vrc_explorer import cli
@@ -65,8 +66,9 @@ def test_cancel_does_not_execute_scan(monkeypatch) -> None:
     assert result.exit_code == 0
 
 
+@pytest.mark.parametrize("protocol,expected", [("ens", "ens"), ("enhanced", "ens"), ("tcp", "tcp")])
 def test_postscan_browser_keeps_trace_after_scan_session_closes(
-    monkeypatch, tmp_path: Path
+    monkeypatch, tmp_path: Path, protocol: str, expected: str
 ) -> None:
     from contextlib import contextmanager
 
@@ -105,6 +107,7 @@ def test_postscan_browser_keeps_trace_after_scan_session_closes(
     monkeypatch.setattr(cli, "run_browse_from_artifact", browse)
     trace = tmp_path / "scan.trace"
     cli._scan_configured(
-        transport_protocol="ens", dst="0x15", output_dir=tmp_path, trace_file=trace
+        transport_protocol=protocol, dst="0x15", output_dir=tmp_path, trace_file=trace
     )
     assert captured["connection_settings"]["trace_path"] == trace
+    assert captured["connection_settings"]["protocol"] == expected

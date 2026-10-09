@@ -150,11 +150,10 @@ python -m helianthus_vrc_explorer browse
 ### Write Safety
 By default the tool is **read-only**.
 
-The scan phase is read-only. Its Browser can connect after the scan connection
-has closed; every device change then requires a separate concrete confirmation.
-
-The Browser enables a live write only after explicit connection and a
-per-change confirmation (old value -> new value -> confirm).
+The scan phase is read-only. After the scan connection closes, its Browser
+automatically reconnects to the same adapter and verifies native identity.
+The connection banner shows connecting, live or offline state. Every device
+change requires a separate concrete confirmation (old value -> new value -> confirm).
 
 Opening JSON starts offline. Local edits are saved separately from observations.
 Select **Connect** to verify native identity, then edit a writable Config row.
@@ -163,6 +162,8 @@ target and old → new value, sends at most one native write after confirmation,
 and reports success only on desired-value readback. An uncertain result offers
 read-only **Recheck**, never automatic write retransmission. ENUMs use labelled
 numeric dropdowns; disabled gates/range choices retain their reason.
+Press `e` or Enter on a Config row to open its editor. Submitting a numeric
+value opens the confirmation; it does not itself send a device write.
 
 See the AGPL [Browser write contract](https://github.com/Project-Helianthus/helianthus-docs-ebus/blob/main/development/ebus-vaillant-b524-browser-writes.md)
 for validation, missing-limit exceptions and evidence boundaries.

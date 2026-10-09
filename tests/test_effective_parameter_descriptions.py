@@ -3,6 +3,7 @@ from copy import deepcopy
 from helianthus_vrc_explorer.schema.parameter_descriptions import (
     attach_bundled_descriptions,
     description_catalog_status,
+    description_profile,
     effective_parameter_description,
     export_description_baseline,
 )
@@ -175,4 +176,31 @@ def test_unknown_catalog_controller_accepts_fresh_live_but_rejects_cached_limits
     ]
     del entry["parameter_description"]
     attach_bundled_descriptions(artifact, bundle=known_bundle)
+    assert effective_parameter_description(artifact, SELECTOR) is None
+
+
+def test_bundled_description_binds_current_native_profile_without_rewriting_evidence() -> None:
+    artifact = _artifact()
+    bundle = export_description_baseline(artifact)
+    baseline_profile = deepcopy(bundle["descriptions"][0]["profile"])
+    baseline_profile.update(
+        model="Historic presentation",
+        firmware="Historic presentation",
+        controller_class_raw="15",
+        controller_firmware_raw="080500",
+    )
+    bundle["descriptions"][0]["profile"] = baseline_profile
+    entry = artifact["operations"]["0x02"]["groups"]["0x02"]["instances"]["0x00"]["registers"][
+        "0x0009"
+    ]
+    del entry["parameter_description"]
+    attach_bundled_descriptions(artifact, bundle=bundle)
+    effective = effective_parameter_description(artifact, SELECTOR)
+    assert effective is not None
+    assert effective["target_profile"] == description_profile(artifact, SELECTOR)
+    assert effective["profile"] == baseline_profile
+    assert effective["qualification"] == "profile_qualified"
+    assert effective["verification"] == "not_verified"
+    assert "target_profile" not in entry["bundled_parameter_description"]
+    artifact["meta"]["identity"]["sw"] = "0508"
     assert effective_parameter_description(artifact, SELECTOR) is None

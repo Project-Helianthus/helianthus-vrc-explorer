@@ -972,7 +972,7 @@ def _scan_configured(
             browse_options: dict[str, Any] = {"artifact_path": output_path}
             if not dry_run:
                 browse_options["connection_settings"] = {
-                    "protocol": transport_settings.protocol,
+                    "protocol": "ens" if transport_settings.protocol == "enhanced" else "tcp",
                     "host": transport_settings.host,
                     "port": transport_settings.port,
                     "src": transport_settings.src,

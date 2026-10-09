@@ -32,7 +32,7 @@ class BrowserTransportConfig:
     kind: BrowserTransportKind
     host: str
     port: int
-    source: int
+    source: int | None
     destination: int
     timeout_s: float = 5.0
     trace_path: Path | None = None
@@ -48,7 +48,11 @@ class BrowserTransportConfig:
             or not 1 <= self.port <= 65535
         ):
             raise ValueError("port must be an integer in range 1..65535")
-        _u8("source", self.source)
+        if self.source is None:
+            if self.kind != "tcp":
+                raise ValueError("source must be an integer for ens")
+        else:
+            _u8("source", self.source)
         _u8("destination", self.destination, destination=True)
         if (
             isinstance(self.timeout_s, bool)
@@ -79,7 +83,7 @@ def create_browser_transport(config: BrowserTransportConfig) -> TransportInterfa
             host=config.host,
             port=config.port,
             timeout_s=float(config.timeout_s),
-            src=config.source,
+            src=cast(int, config.source),
             trace_path=config.trace_path,
         )
     )

@@ -87,6 +87,19 @@ def test_transport_factory_maps_browser_fields_to_existing_transports(tmp_path: 
     assert ens._config.src == 0xF7
 
 
+def test_tcp_keeps_daemon_source_and_ens_requires_explicit_source() -> None:
+    config = BrowserTransportConfig(
+        kind="tcp", host="127.0.0.1", port=8888, source=None, destination=0x15
+    )
+    transport = create_browser_transport(config)
+    assert isinstance(transport, EbusdTcpTransport)
+    assert transport._config.src is None
+    with pytest.raises(ValueError, match="source"):
+        BrowserTransportConfig(
+            kind="ens", host="127.0.0.1", port=9999, source=None, destination=0x15
+        )
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     (("port", 0), ("source", 0x100), ("destination", 0xA9), ("timeout_s", 0.0)),

@@ -297,7 +297,6 @@ if _TEXTUAL_IMPORT_ERROR is None:
     class _InputDialog(ModalScreen[str | None]):
         BINDINGS = [
             Binding("escape", "cancel", "Cancel"),
-            Binding("enter", "submit", "Search"),
         ]
         CSS = """
         _InputDialog {
@@ -332,10 +331,8 @@ if _TEXTUAL_IMPORT_ERROR is None:
         def action_cancel(self) -> None:
             self.dismiss(None)
 
-        def action_submit(self) -> None:
-            self.dismiss(self.query_one(Input).value.strip())
-
         def on_input_submitted(self, event: Input.Submitted) -> None:
+            event.stop()
             self.dismiss(event.value.strip())
 
     class _HelpDialog(ModalScreen[None]):
@@ -603,7 +600,12 @@ if _TEXTUAL_IMPORT_ERROR is None:
 
         def compose(self) -> ComposeResult:
             yield Header(show_clock=False)
-            yield Static("OFFLINE — edits are local previews", id="connection-state")
+            yield Static(
+                "CONNECTING — verifying scan target"
+                if self._connection_settings is not None
+                else "OFFLINE — edits are local previews",
+                id="connection-state",
+            )
             if self._identity_header is not None:
                 yield Static(self._identity_header, id="identity-header")
             with Horizontal(id="main"):
@@ -652,6 +654,9 @@ if _TEXTUAL_IMPORT_ERROR is None:
                 return
             if isinstance(self.focused, DataTable) and self.focused.id == "browse-table":
                 event.stop()
+                # Stop App._on_key from resolving the same key against the
+                # newly opened modal before its Input has mounted.
+                event.prevent_default()
                 self.action_edit_selected()
 
         def _set_status(self, text: str) -> None:
@@ -1271,8 +1276,10 @@ if _TEXTUAL_IMPORT_ERROR is None:
                     raise ValueError("host must be text")
                 if not isinstance(port, int) or isinstance(port, bool):
                     raise ValueError("port must be an integer")
-                if not isinstance(source, int) or isinstance(source, bool):
-                    raise ValueError("source must be an integer")
+                if not (source is None and kind_raw == "tcp") and (
+                    not isinstance(source, int) or isinstance(source, bool)
+                ):
+                    raise ValueError("source must be an integer, or unset for tcp")
                 if not isinstance(destination, int) or isinstance(destination, bool):
                     raise ValueError("destination must be an integer")
                 if trace_path is not None and not isinstance(trace_path, Path):
@@ -1287,11 +1294,18 @@ if _TEXTUAL_IMPORT_ERROR is None:
                     trace_path=trace_path,
                 )
             except (TypeError, ValueError) as exc:
+                self.query_one("#connection-state", Static).update(
+                    f"OFFLINE — connection rejected: {exc}; edits are local previews"
+                )
                 self._set_status(f"Connection rejected: {exc}")
                 return
             session = BrowserSession.from_config(config)
             self._browser_session = session
             self._session_dst = config.destination
+            self.query_one("#connection-state", Static).update(
+                f"CONNECTING {config.kind.upper()} — dst=0x{config.destination:02X} "
+                "— verifying native identity"
+            )
 
             def connected(_transport: Any) -> None:
                 assert self._browser_session is session
@@ -2021,6 +2035,8 @@ if _TEXTUAL_IMPORT_ERROR is None:
             self._open_parameter_editor(row, context.entry)
 
         def action_edit_selected(self) -> None:
+            if len(self.screen_stack) > 1:
+                return
             row = self._selected_table_row()
             if row is not None and (row.section_key or "").startswith("operation_"):
                 self._preview_operation_export(row)
