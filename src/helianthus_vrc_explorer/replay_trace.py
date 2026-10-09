@@ -60,7 +60,8 @@ _REQUEST_FAILED_RE = re.compile(
     r"^#(?P<seq>\d+)\s+REQUEST_FAILED\s+"
     r"(?:(?:read protocol recovery exhausted|transport recovery exhausted):\s+)?"
     r"cause=(?P<cause>[a-zA-Z0-9_]+)\s+phase=(?P<phase>[a-zA-Z0-9_]+)\s+"
-    r"request_attempts=(?P<request_attempts>\d+)\s+retry_count=(?P<retry_count>\d+)\s+"
+    r"request_attempts=(?P<request_attempts>\d+)\s+"
+    r"(?:retry_count=(?P<retry_count>\d+)\s+)?"
     r"reconnect_attempts=(?P<reconnect_attempts>\d+)"
     r"(?:\s+unexpected_symbol=(?P<unexpected_symbol>\S+))?$"
 )
@@ -149,9 +150,10 @@ def _parse_enhanced_trace_lines(
     lines: list[str], *, source_path: str
 ) -> tuple[list[_TraceExchange], TraceReplayMetadata]:
     exchange_by_seq: dict[int, _TraceExchange] = {}
-    sequence_order: list[int] = []
+    exchanges_in_order: list[_TraceExchange] = []
     pending_labels: list[str] = []
     saw_enh_marker = False
+    session_recovery_pending = False
     truncated_hex_frames = 0
     # Offset to make seq numbers unique across multiple INIT sessions
     # in concatenated traces.
@@ -177,8 +179,13 @@ def _parse_enhanced_trace_lines(
 
         if body.startswith(_SUPPORTED_ENH_MARKERS):
             saw_enh_marker = True
-            # Detect session restart: bump seq offset so seqs stay unique
-            _seq_offset = _prev_seq + _seq_offset
+            if session_recovery_pending:
+                # EnhancedTcpTransport keeps its logical request sequence when
+                # reconnecting. Keep the next SEND attached to that request.
+                session_recovery_pending = False
+            else:
+                # An independent concatenated trace restarts its sequence.
+                _seq_offset = _prev_seq + _seq_offset
             continue
 
         op_match = _OP_LABEL_RE.match(body)
@@ -200,19 +207,40 @@ def _parse_enhanced_trace_lines(
             )
             if payload_truncated:
                 truncated_hex_frames += 1
+            src = int(send_match.group("src"), 16)
+            dst = int(send_match.group("dst"), 16)
+            primary = int(send_match.group("primary"), 16)
+            secondary = int(send_match.group("secondary"), 16)
+            existing = exchange_by_seq.get(seq)
+            if (
+                existing is not None
+                and existing.response is None
+                and (
+                    existing.src,
+                    existing.dst,
+                    existing.primary,
+                    existing.secondary,
+                    existing.payload,
+                )
+                == (src, dst, primary, secondary, payload)
+            ):
+                existing.request_attempts += 1
+                existing.retry_count = max(existing.retry_count, existing.request_attempts - 1)
+                if existing.op_label is None and pending_labels:
+                    existing.op_label = pending_labels.pop(0)
+                continue
             exchange = _TraceExchange(
                 seq=seq,
                 timestamp=timestamp,
-                src=int(send_match.group("src"), 16),
-                dst=int(send_match.group("dst"), 16),
-                primary=int(send_match.group("primary"), 16),
-                secondary=int(send_match.group("secondary"), 16),
+                src=src,
+                dst=dst,
+                primary=primary,
+                secondary=secondary,
                 payload=payload,
                 op_label=pending_labels.pop(0) if pending_labels else None,
             )
             exchange_by_seq[seq] = exchange
-            if seq not in sequence_order:
-                sequence_order.append(seq)
+            exchanges_in_order.append(exchange)
             continue
 
         parsed_match = _PARSED_PROTO_RE.match(body)
@@ -264,6 +292,7 @@ def _parse_enhanced_trace_lines(
 
         recovery_match = _RECOVERY_RE.match(body)
         if recovery_match is not None:
+            session_recovery_pending = True
             seq = int(recovery_match.group("seq"), 10) + _seq_offset
             matched_exchange = exchange_by_seq.get(seq)
             if matched_exchange is not None:
@@ -289,11 +318,17 @@ def _parse_enhanced_trace_lines(
                 matched_exchange.request_attempts = int(
                     request_failed_match.group("request_attempts"), 10
                 )
-                matched_exchange.retry_count = int(request_failed_match.group("retry_count"), 10)
+                raw_retry_count = request_failed_match.group("retry_count")
+                matched_exchange.retry_count = (
+                    int(raw_retry_count, 10)
+                    if raw_retry_count is not None
+                    else max(0, matched_exchange.request_attempts - 1)
+                )
                 matched_exchange.reconnect_attempts = int(
                     request_failed_match.group("reconnect_attempts"), 10
                 )
                 matched_exchange.unexpected_symbol = request_failed_match.group("unexpected_symbol")
+            session_recovery_pending = False
             continue
 
         if body.startswith("#") and ("SEND " in body or "PARSED " in body):
@@ -308,7 +343,7 @@ def _parse_enhanced_trace_lines(
     if first_ts is None or last_ts is None:
         raise UnsupportedTraceFormatError("Trace file does not contain timestamped entries.")
 
-    exchanges = [exchange_by_seq[seq] for seq in sequence_order if seq in exchange_by_seq]
+    exchanges = exchanges_in_order
     if not exchanges:
         raise UnsupportedTraceFormatError("No ENH/ENS SEND_PROTO exchanges found in trace.")
 

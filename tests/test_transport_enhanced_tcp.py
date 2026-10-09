@@ -13,7 +13,9 @@ import pytest
 
 from helianthus_vrc_explorer.scanner.register import read_register
 from helianthus_vrc_explorer.transport.base import (
+    TransportDisconnected,
     TransportError,
+    TransportHostError,
     TransportNack,
     TransportProtocolFailure,
     TransportRecoveryExhausted,
@@ -35,6 +37,9 @@ from helianthus_vrc_explorer.transport.enhanced_tcp import (
     _crc,
     _crc_update,
     _encode_enh,
+    _EnhancedCollision,
+    _EnhancedCrcMismatch,
+    _EnhancedNack,
     _EnhancedSessionError,
     _is_retry_safe_b524_read,
 )
@@ -2246,6 +2251,67 @@ def test_exhausted_read_recovery_raises_terminal_outage_with_sanitized_diagnosti
     assert error.reconnect_attempts == 2
     assert "192.0.2.44" not in str(error)
     assert attempts == 3
+
+
+@pytest.mark.parametrize(
+    ("failure_factory", "expected_exception", "cause", "phase"),
+    [
+        (lambda: TransportTimeout("timeout"), TransportTimeout, "timeout", "transaction"),
+        (
+            lambda: TransportDisconnected("disconnected"),
+            TransportDisconnected,
+            "disconnected",
+            "receive",
+        ),
+        (
+            lambda: _EnhancedSessionError("malformed", cause="malformed_escape", phase="response"),
+            _EnhancedSessionError,
+            "malformed_escape",
+            "response",
+        ),
+        (lambda: TransportHostError("host"), TransportHostError, "host_error", "transaction"),
+        (lambda: _EnhancedCollision("collision"), TransportError, "collision", "arbitration"),
+        (lambda: _EnhancedNack("nack"), TransportNack, "nack", "response"),
+        (lambda: _EnhancedCrcMismatch("crc"), TransportError, "crc_mismatch", "response"),
+        (
+            lambda: TransportError("transport"),
+            TransportError,
+            "transport_error",
+            "transaction",
+        ),
+    ],
+)
+def test_terminal_read_exit_matrix_emits_complete_request_failed_trace(
+    tmp_path: Path,
+    failure_factory: Callable[[], TransportError],
+    expected_exception: type[TransportError],
+    cause: str,
+    phase: str,
+) -> None:
+    trace_path = tmp_path / f"terminal-{cause}.trace"
+    transport = EnhancedTcpTransport(
+        EnhancedTcpConfig(
+            trace_path=trace_path,
+            timeout_max_retries=0,
+            reconnect_max_retries=0,
+            collision_max_retries=0,
+            nack_max_retries=0,
+        )
+    )
+
+    def fail_once(attempt_admitted_hook: Callable[[], None]) -> bytes:
+        attempt_admitted_hook()
+        raise failure_factory()
+
+    with pytest.raises(expected_exception):
+        transport._send_with_policy(1, fail_once, retry_safe=True)
+    transport.close()
+
+    trace = trace_path.read_text(encoding="utf-8")
+    assert (
+        f"#1 REQUEST_FAILED cause={cause} phase={phase} "
+        "request_attempts=1 retry_count=0 reconnect_attempts=0"
+    ) in trace
 
 
 @pytest.mark.parametrize(

@@ -1216,24 +1216,28 @@ class EnhancedTcpTransport(TransportInterface):
                 return (exc.cause, exc.phase)
             return ("transport_error", "transaction")
 
-        def _terminal(exc: TransportError, *, cause: str, phase: str) -> TransportRecoveryExhausted:
-            self.close()
-            return TransportRecoveryExhausted(
-                cause=cause,
-                phase=phase,
-                request_attempts=request_attempts,
-                reconnect_attempts=reconnect_retries,
-            )
-
-        def _trace_terminal_nack() -> None:
+        def _trace_terminal_failure(
+            *,
+            cause: str,
+            phase: str,
+            attempts: int | None = None,
+            retries: int | None = None,
+            reconnects: int | None = None,
+            unexpected_symbol: str | None = None,
+        ) -> None:
+            terminal_attempts = request_attempts if attempts is None else attempts
+            terminal_retries = max(0, terminal_attempts - 1) if retries is None else retries
+            terminal_reconnects = reconnect_retries if reconnects is None else reconnects
             trace_was_open = self._trace_handle is not None
             self._ensure_trace_handle()
-            self._trace(
-                f"#{seq} REQUEST_FAILED cause=nack phase=command_ack "
-                f"request_attempts={request_attempts} "
-                f"retry_count={max(0, request_attempts - 1)} "
-                f"reconnect_attempts={reconnect_retries}"
+            message = (
+                f"#{seq} REQUEST_FAILED cause={cause} phase={phase} "
+                f"request_attempts={terminal_attempts} retry_count={terminal_retries} "
+                f"reconnect_attempts={terminal_reconnects}"
             )
+            if unexpected_symbol is not None:
+                message += f" unexpected_symbol={unexpected_symbol}"
+            self._trace(message)
             if not trace_was_open and self._session is None:
                 trace_handle = self._trace_handle
                 self._trace_handle = None
@@ -1241,10 +1245,29 @@ class EnhancedTcpTransport(TransportInterface):
                     with contextlib.suppress(OSError):
                         trace_handle.close()
 
+        def _terminal(exc: TransportError, *, cause: str, phase: str) -> TransportRecoveryExhausted:
+            failure = TransportRecoveryExhausted(
+                cause=cause,
+                phase=phase,
+                request_attempts=request_attempts,
+                reconnect_attempts=reconnect_retries,
+            )
+            _trace_terminal_failure(
+                cause=failure.cause,
+                phase=failure.phase,
+                attempts=failure.request_attempts,
+                retries=failure.retry_count,
+                reconnects=failure.reconnect_attempts,
+            )
+            self.close()
+            return failure
+
         def _recover_session(exc: TransportError) -> None:
             nonlocal reconnect_retries, successful_reconnects
             nonlocal timeout_retries, collision_retries, nack_retries
             if self._config.reconnect_max_retries == 0:
+                cause, phase = _failure_details(exc)
+                _trace_terminal_failure(cause=cause, phase=phase)
                 raise exc
             cause, phase = _failure_details(exc)
             self._ensure_trace_handle()
@@ -1288,7 +1311,14 @@ class EnhancedTcpTransport(TransportInterface):
                     reconnect_attempts=reconnect_retries,
                     unexpected_symbol=getattr(exc, "unexpected_symbol", None),
                 )
-                self._trace(f"#{seq} REQUEST_FAILED {failure}")
+                _trace_terminal_failure(
+                    cause=failure.cause,
+                    phase=failure.phase,
+                    attempts=failure.request_attempts,
+                    retries=failure.retry_count,
+                    reconnects=failure.reconnect_attempts,
+                    unexpected_symbol=failure.unexpected_symbol,
+                )
                 self.close()
                 raise failure from exc
             raise _terminal(exc, cause=terminal_cause, phase=terminal_phase) from exc
@@ -1298,6 +1328,7 @@ class EnhancedTcpTransport(TransportInterface):
                 return send_once(_attempt_admitted)
             except TransportTimeout as exc:
                 if not retry_safe:
+                    _trace_terminal_failure(cause="timeout", phase="transaction")
                     raise
                 timeout_retries += 1
                 if timeout_retries > self._config.timeout_max_retries:
@@ -1311,14 +1342,17 @@ class EnhancedTcpTransport(TransportInterface):
                 )
             except TransportHostError:
                 # Host errors are non-retryable — the request is malformed.
+                _trace_terminal_failure(cause="host_error", phase="transaction")
                 raise
             except TransportDisconnected as exc:
                 if not retry_safe:
+                    _trace_terminal_failure(cause="disconnected", phase="receive")
                     raise
                 _recover_session(exc)
                 continue
             except _EnhancedCollision as exc:
                 if not retry_safe:
+                    _trace_terminal_failure(cause="collision", phase="arbitration")
                     raise
                 # Collision is normal on a shared bus.  Per eBUS spec
                 # section 6.2.2.2 the adapter waits for the winner's
@@ -1326,6 +1360,7 @@ class EnhancedTcpTransport(TransportInterface):
                 # We just re-issue START — no software backoff needed.
                 collision_retries += 1
                 if collision_retries > self._config.collision_max_retries:
+                    _trace_terminal_failure(cause="collision", phase="arbitration")
                     self.close()
                     raise TransportError(
                         f"{exc} (collision retries exhausted "
@@ -1348,8 +1383,10 @@ class EnhancedTcpTransport(TransportInterface):
                 )
             except (_EnhancedNack, _EnhancedCrcMismatch) as exc:
                 if not retry_safe:
-                    if isinstance(exc, _EnhancedNack):
-                        _trace_terminal_nack()
+                    _trace_terminal_failure(
+                        cause="nack" if isinstance(exc, _EnhancedNack) else "crc_mismatch",
+                        phase="response",
+                    )
                     raise
                 # NACK/CRC are retryable on the same session — the bus
                 # protocol already handled ACK/NACK exchange.
@@ -1358,8 +1395,10 @@ class EnhancedTcpTransport(TransportInterface):
                     message = (
                         f"{exc} (nack/crc retries exhausted ({self._config.nack_max_retries}))"
                     )
-                    if isinstance(exc, _EnhancedNack):
-                        _trace_terminal_nack()
+                    _trace_terminal_failure(
+                        cause="nack" if isinstance(exc, _EnhancedNack) else "crc_mismatch",
+                        phase="response",
+                    )
                     self.close()
                     if isinstance(exc, _EnhancedNack):
                         raise TransportNack(message) from exc
@@ -1371,7 +1410,7 @@ class EnhancedTcpTransport(TransportInterface):
                 )
             except TransportNack:
                 # A definitive target rejection is not a broken TCP/ENH session.
-                _trace_terminal_nack()
+                _trace_terminal_failure(cause="nack", phase="command_ack")
                 raise
             except _EnhancedCommandNotAcknowledgedBeforeSyn as exc:
                 # A bare RECEIVED(0xAA) at command-ACK is the raw-wire SYN
@@ -1393,18 +1432,25 @@ class EnhancedTcpTransport(TransportInterface):
                     reconnect_attempts=reconnect_retries,
                     unexpected_symbol=_EBUS_SYN,
                 )
-                self._trace(
-                    f"#{seq} REQUEST_FAILED cause={failure.cause} "
-                    f"phase={failure.phase} request_attempts={failure.request_attempts} "
-                    f"reconnect_attempts={failure.reconnect_attempts} "
-                    f"unexpected_symbol={failure.unexpected_symbol}"
+                _trace_terminal_failure(
+                    cause=failure.cause,
+                    phase=failure.phase,
+                    attempts=failure.request_attempts,
+                    retries=failure.retry_count,
+                    reconnects=failure.reconnect_attempts,
+                    unexpected_symbol=failure.unexpected_symbol,
                 )
                 self._reset_parser()
                 raise failure from exc
             except _EnhancedSessionError as exc:
                 if not retry_safe:
+                    _trace_terminal_failure(cause=exc.cause, phase=exc.phase)
                     raise
                 _recover_session(exc)
+            except TransportError as exc:
+                cause, phase = _failure_details(exc)
+                _trace_terminal_failure(cause=cause, phase=phase)
+                raise
 
     def _send_proto_once(
         self,
