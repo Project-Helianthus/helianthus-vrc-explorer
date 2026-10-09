@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 from rich.console import Console
 
-from conftest import artifact_groups, artifact_op_group
 from helianthus_vrc_explorer.artifact_schema import CURRENT_ARTIFACT_SCHEMA_VERSION
 from helianthus_vrc_explorer.scanner.observer import ScanObserver
 from helianthus_vrc_explorer.scanner.plan import GroupScanPlan, make_plan_key
@@ -20,6 +19,7 @@ from helianthus_vrc_explorer.scanner.scan import (
 )
 from helianthus_vrc_explorer.transport.base import TransportInterface
 from helianthus_vrc_explorer.transport.dummy import DummyTransport
+from tests.conftest import artifact_groups, artifact_op_group
 
 
 class RecordingTransport(TransportInterface):

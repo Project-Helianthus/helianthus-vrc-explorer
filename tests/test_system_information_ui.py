@@ -254,6 +254,7 @@ def test_live_header_uses_system_information_label_and_hides_trace_tip_when_conf
 
     rendered = output.getvalue()
     assert "System Information" in str(observer._progress.tasks[0].description)
+    assert "choose a trace file in scan setup" not in rendered
     assert "--trace-file" not in rendered
 
 
@@ -275,3 +276,13 @@ def test_textual_planner_includes_compact_system_information(monkeypatch) -> Non
     assert "Generators: unavailable" in str(system_information.render())
     assert "Circuits: 3" not in str(system_information.render())
     assert "0x0000" not in str(system_information.render())
+
+
+def test_trace_tip_refers_to_visual_setup_only_when_unconfigured() -> None:
+    output = StringIO()
+    observer = RichScanObserver(console=Console(file=output, width=160), title="Scan")
+    with observer:
+        observer.phase_start("group_discovery", total=1)
+    rendered = output.getvalue()
+    assert "choose a trace file in scan setup" in rendered
+    assert "--trace-file" not in rendered

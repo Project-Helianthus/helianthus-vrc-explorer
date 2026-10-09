@@ -3,7 +3,7 @@ from helianthus_vrc_explorer.scanner.b524_orchestration import (
 )
 from helianthus_vrc_explorer.scanner.description_scheduler import DescriptionCandidate
 from helianthus_vrc_explorer.ui.planner_selection import default_description_policy
-from test_effective_parameter_descriptions import _artifact
+from tests.test_effective_parameter_descriptions import _artifact
 
 
 def _with_known_remote(artifact: dict) -> dict:

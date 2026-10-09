@@ -1817,7 +1817,8 @@ def run_b524_scan(
                 observer.log(
                     "Observed register values outside the scoped bundled static "
                     "constraint catalog. Review meta.constraint_mismatches and rerun "
-                    "with --probe-constraints if you want live confirmation.",
+                    "with a live description override in the planner "
+                    "for current-target confirmation.",
                     level="warn",
                 )
 

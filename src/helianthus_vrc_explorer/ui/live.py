@@ -155,7 +155,7 @@ class RichScanObserver(AbstractContextManager["RichScanObserver"], ScanObserver)
             if self._trace_file is None:
                 header_parts.append(
                     Text(
-                        "Tip: set `--trace-file` to capture ebusd request/response exchanges.",
+                        "Tip: choose a trace file in scan setup to capture transport exchanges.",
                         style="dim",
                     )
                 )
