@@ -319,7 +319,12 @@ def operation_edit_export(
     if operation == "WriteTimer":
         if len(payload) != 7:
             raise ValueError("timer baseline must be seven bytes")
-        values: list[object] = [[payload[index], payload[index + 1]] for index in range(1, 7, 2)]
+        values: list[object] = [
+            None
+            if payload[index : index + 2] == b"\x90\x90"
+            else [payload[index], payload[index + 1]]
+            for index in range(1, 7, 2)
+        ]
     else:
         if len(payload) != 8:
             raise ValueError("event baseline must be eight bytes")

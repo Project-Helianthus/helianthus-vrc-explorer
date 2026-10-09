@@ -353,7 +353,11 @@ def _probe_present_instances(
         probes[ii] = probe
         if on_probe is not None:
             on_probe(ii, probe)
-        if stop_at_first_absence and probe.connection_state == "not_connected":
+        if (
+            stop_at_first_absence
+            and not (expected_count is not None and expected_count > 0)
+            and probe.connection_state == "not_connected"
+        ):
             if observer is not None:
                 observer.phase_advance("instance_discovery", advance=1)
             break

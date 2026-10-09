@@ -136,3 +136,57 @@ def test_browser_edits_previews_and_exports_without_native_write(tmp_path, desti
             assert json.loads(output.read_text())["values"][0] == 40
 
     asyncio.run(exercise())
+
+
+def test_browser_timer_with_unused_slots_opens_editor_and_exports_null(tmp_path):
+    from dataclasses import asdict
+
+    from helianthus_vrc_explorer.protocol.b524_schedules import parse_timer_response
+
+    raw = "00002490909090"
+    artifact = {
+        "schema_version": "2.3",
+        "meta": {"destination_address": "0x15"},
+        "operations": {},
+        "b524_operation_reads": [
+            {
+                "operation": "ReadTimer",
+                "opcode_hex": "0x03",
+                "selector": {"channel": "dhw", "instance": 0, "weekday": 0},
+                "request_payload_hex": "0301000100",
+                "response_raw_hex": raw,
+                "response_state": "value",
+                "decode_qualification": "profile_vrc700",
+                "decoded": asdict(parse_timer_response(bytes.fromhex(raw))),
+            }
+        ],
+    }
+    output = tmp_path / "timer.json"
+
+    async def exercise():
+        app = browse_textual._BrowseApp(artifact, allow_write=False)
+        async with app.run_test(size=(140, 45)) as pilot:
+            leaf = next(
+                node
+                for node in app._store.tree_nodes
+                if node.section_key == "operation_03" and node.level == "group"
+            )
+            app.query_one("#browse-tree", Tree).select_node(app._tree_node_by_ref[leaf.node_id])
+            await pilot.pause()
+            app.query_one("#browse-table", DataTable).focus()
+            await pilot.press("e")
+            await pilot.pause()
+            dialog = app.screen
+            assert isinstance(dialog, browse_textual._OperationEditDialog)
+            assert json.loads(dialog.query_one("#operation-values", Input).value) == [
+                [0, 36],
+                None,
+                None,
+            ]
+            dialog.query_one("#operation-export-path", Input).value = str(output)
+            await pilot.click("#operation-export-button")
+            document = json.loads(output.read_text())
+            assert document["values"] == [[0, 36], None, None]
+            assert document["expected_before_raw_hex"] == [raw]
+
+    asyncio.run(exercise())

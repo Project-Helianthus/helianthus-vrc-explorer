@@ -177,3 +177,30 @@ def test_remote_op00_count_hints_do_not_reuse_aggregate_device_count() -> None:
     assert 4 not in COUNT_GROUP_IDS.values()
     assert (6, 8) not in COUNT_GROUP_IDS
     assert COUNT_GROUP_IDS[(2, 9)] == 16
+
+
+@pytest.mark.parametrize(
+    "count,present,expected_probes",
+    [(1, {2}, [1, 2]), (2, {2, 4}, [1, 2, 3, 4]), (2, {2}, list(range(1, 9))), (None, {2}, [1])],
+)
+def test_remote_positive_count_keeps_sparse_slots_eligible(count, present, expected_probes):
+    class SparseRemoteTransport(_ReplyTransport):
+        def send(self, dst, payload):
+            self.requests.append(payload)
+            return bytes((1, payload[2], 1, 0, int(payload[3] in present)))
+
+    transport = SparseRemoteTransport(b"")
+    probes = _probe_present_instances(
+        transport,
+        dst=0x15,
+        group=0x0B,
+        opcode=0x06,
+        ii_max=8,
+        observer=None,
+        expected_count=count,
+        stop_at_first_absence=True,
+    )
+    assert list(probes) == expected_probes
+    assert {ii for ii, probe in probes.items() if probe.present} == present.intersection(
+        expected_probes
+    )
