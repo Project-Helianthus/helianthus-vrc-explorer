@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from helianthus_vrc_explorer.scanner import b524_operation_writes as writes
+from helianthus_vrc_explorer.scanner.b524_operation_edit import parse_operation_edit
 from helianthus_vrc_explorer.scanner.b524_operation_writes import (
     B524NativeWriteQualification,
     B524WriteRetryBlocked,
@@ -81,6 +83,17 @@ def _timer_request():
     )
 
 
+def _timer_edit_document(destination_address: object = 0x26) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "destination_address": destination_address,
+        "operation": "WriteTimer",
+        "selector": {"channel": "dhw", "instance": 0, "weekday": 0},
+        "values": [[0, 36], [48, 72], None],
+        "expected_before_raw_hex": ["00000612909090"],
+    }
+
+
 def _qualification(request):
     return B524NativeWriteQualification(
         scope="timer_write_op04",
@@ -130,6 +143,20 @@ def test_qualification_document_is_strict_evidence_not_confirmation() -> None:
                 "native_qualified": 1,
             }
         )
+
+
+def test_canonical_edit_request_requires_and_retains_integer_destination() -> None:
+    request = parse_operation_edit(_timer_edit_document())
+    assert request.destination_address == 0x26
+
+    for invalid in (True, -1, 256, "0x26"):
+        with pytest.raises(ValueError, match="destination_address must be an integer"):
+            parse_operation_edit(_timer_edit_document(invalid))
+
+    missing = _timer_edit_document()
+    del missing["destination_address"]
+    with pytest.raises(ValueError, match="destination_address"):
+        parse_operation_edit(missing)
 
 
 def test_bundled_synthetic_qualification_is_rejected_before_transport() -> None:
@@ -307,6 +334,8 @@ def test_write_retry_is_blocked_after_exactly_one_admitted_send_then_read_back()
     )
 
     assert result["outcome"] == "verified"
+    assert result["destination_address"] == 0x15
+    assert result["verified_confirmation"] == concrete_confirmation_text(request, dst=0x15)
     assert result["write_attempts"] == 1
     assert result["write_error"] == B524WriteRetryBlocked.__name__
     assert transport.admitted_payloads.count(request.write_payload) == 1
@@ -440,6 +469,69 @@ def test_interrupt_during_readback_retains_write_and_partial_read_evidence() -> 
     assert result["readback"][0]["request_attempts"] == 1
     assert result["readback"][0]["error"] == "KeyboardInterrupt"
     assert result["observed_after_raw_hex"] == [None]
+    assert transport.admitted_payloads == [read_payload, request.write_payload, read_payload]
+
+
+def test_interrupt_before_readback_helper_preserves_admitted_write(monkeypatch) -> None:
+    request = _timer_request()
+    read_payload = request.read_requests[0].payload
+    transport = _ScriptedTransport(
+        {
+            read_payload: [request.expected_before[0]],
+            request.write_payload: [b"\x00"],
+        }
+    )
+    original_read_snapshot = writes._read_snapshot
+    calls = 0
+
+    def interrupt_before_second_snapshot(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise KeyboardInterrupt
+        return original_read_snapshot(*args, **kwargs)
+
+    monkeypatch.setattr(writes, "_read_snapshot", interrupt_before_second_snapshot)
+
+    result = _execute_without_interrupt_escape(transport, request)
+
+    assert result["outcome"] == "interrupted"
+    assert result["application_state"] == "ambiguous"
+    assert result["interrupted_phase"] == "readback"
+    assert result["destination_address"] == 0x15
+    assert result["verified_confirmation"] == concrete_confirmation_text(request, dst=0x15)
+    assert result["write_attempts"] == 1
+    assert result["write_feedback_raw_hex"] == "00"
+    assert result["readback"] == []
+    assert transport.admitted_payloads == [read_payload, request.write_payload]
+
+
+def test_interrupt_during_classification_preserves_completed_readback(monkeypatch) -> None:
+    request = _timer_request()
+    read_payload = request.read_requests[0].payload
+    transport = _ScriptedTransport(
+        {
+            read_payload: [request.expected_before[0], request.expected_after[0]],
+            request.write_payload: [b"\x00"],
+        }
+    )
+
+    def interrupt_classification(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(writes, "_classify_readback", interrupt_classification)
+
+    result = _execute_without_interrupt_escape(transport, request)
+
+    assert result["outcome"] == "interrupted"
+    assert result["application_state"] == "ambiguous"
+    assert result["interrupted_phase"] == "classification"
+    assert result["destination_address"] == 0x15
+    assert result["verified_confirmation"] == concrete_confirmation_text(request, dst=0x15)
+    assert result["write_attempts"] == 1
+    assert result["write_feedback_raw_hex"] == "00"
+    assert result["observed_after_raw_hex"] == [request.expected_after[0].hex()]
+    assert result["readback"][0]["response_state"] == "value"
     assert transport.admitted_payloads == [read_payload, request.write_payload, read_payload]
 
 

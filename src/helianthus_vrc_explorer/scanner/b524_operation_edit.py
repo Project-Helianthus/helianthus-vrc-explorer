@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from typing import Any, cast
 
 from ..protocol.b524_schedules import EventProfileName, TimerChannelName
@@ -38,11 +38,19 @@ def parse_operation_edit(document: object) -> B524OperationWriteRequest:
     """Rebuild a write from validated selectors, values and complete raw baselines."""
     row = _object(
         document,
-        {"schema_version", "operation", "selector", "values", "expected_before_raw_hex"},
+        {
+            "schema_version",
+            "destination_address",
+            "operation",
+            "selector",
+            "values",
+            "expected_before_raw_hex",
+        },
         "edit document",
     )
     if type(row["schema_version"]) is not int or row["schema_version"] != 1:
         raise ValueError("edit schema_version must be integer 1")
+    destination_address = _byte(row["destination_address"], "destination_address")
     baseline = row["expected_before_raw_hex"]
     values = row["values"]
     if not isinstance(baseline, list) or not all(isinstance(item, str) for item in baseline):
@@ -63,15 +71,22 @@ def parse_operation_edit(document: object) -> B524OperationWriteRequest:
                 )
             else:
                 raise ValueError("each timer slot must be null or a pair of raw codes")
-        return prepare_timer_write(
-            channel=cast(TimerChannelName, _text(selector["channel"], "channel")),
-            instance=_byte(selector["instance"], "instance"),
-            weekday=_byte(selector["weekday"], "weekday"),
-            slots=cast(
-                tuple[tuple[int, int] | None, tuple[int, int] | None, tuple[int, int] | None],
-                tuple(slots),
+        return replace(
+            prepare_timer_write(
+                channel=cast(TimerChannelName, _text(selector["channel"], "channel")),
+                instance=_byte(selector["instance"], "instance"),
+                weekday=_byte(selector["weekday"], "weekday"),
+                slots=cast(
+                    tuple[
+                        tuple[int, int] | None,
+                        tuple[int, int] | None,
+                        tuple[int, int] | None,
+                    ],
+                    tuple(slots),
+                ),
+                expected_before_raw_hex=baseline[0],
             ),
-            expected_before_raw_hex=baseline[0],
+            destination_address=destination_address,
         )
     if row["operation"] in {"SetEvent", "SetEventSetPoint"}:
         selector = _object(
@@ -80,29 +95,38 @@ def parse_operation_edit(document: object) -> B524OperationWriteRequest:
         if len(baseline) != 2 or len(values) != 7:
             raise ValueError("Events require both OP09/OP0B baselines and seven raw values")
         raw_values = tuple(_byte(value, f"value {index}") for index, value in enumerate(values))
-        return prepare_event_write(
-            setpoint=row["operation"] == "SetEventSetPoint",
-            profile=cast(EventProfileName, _text(selector["profile"], "profile")),
-            instance=_byte(selector["instance"], "instance"),
-            address=_byte(selector["address"], "address"),
-            weekday_code=_byte(selector["weekday_code"], "weekday_code"),
-            values=cast(tuple[int, int, int, int, int, int, int], raw_values),
-            expected_event_raw_hex=baseline[0],
-            expected_setpoint_raw_hex=baseline[1],
+        return replace(
+            prepare_event_write(
+                setpoint=row["operation"] == "SetEventSetPoint",
+                profile=cast(EventProfileName, _text(selector["profile"], "profile")),
+                instance=_byte(selector["instance"], "instance"),
+                address=_byte(selector["address"], "address"),
+                weekday_code=_byte(selector["weekday_code"], "weekday_code"),
+                values=cast(tuple[int, int, int, int, int, int, int], raw_values),
+                expected_event_raw_hex=baseline[0],
+                expected_setpoint_raw_hex=baseline[1],
+            ),
+            destination_address=destination_address,
         )
     raise ValueError("unsupported edit operation; choose WriteTimer, SetEvent or SetEventSetPoint")
 
 
-def build_operation_edit_preview(document: object, *, dst: int = 0x15) -> dict[str, Any]:
+def build_operation_edit_preview(document: object, *, dst: int | None = None) -> dict[str, Any]:
     """Return a complete offline diff and exact action-time confirmation text."""
     request = parse_operation_edit(document)
+    destination_address = cast(int, request.destination_address)
+    if dst is not None:
+        supplied_destination = _byte(dst, "dst")
+        if supplied_destination != destination_address:
+            raise ValueError("dst does not match the operation edit destination_address")
     before = [value.hex() for value in request.expected_before]
     after = [value.hex() for value in request.expected_after]
     return {
         "schema_version": 1,
         "operation": request.operation,
         "opcode_hex": f"0x{request.opcode:02X}",
-        "destination": f"0x{dst:02X}",
+        "destination_address": destination_address,
+        "destination": f"0x{destination_address:02X}",
         "selector": request.selector,
         "payload_hex": request.write_payload.hex(),
         "expected_before_raw_hex": before,
@@ -113,5 +137,5 @@ def build_operation_edit_preview(document: object, *, dst: int = 0x15) -> dict[s
         ],
         "live_send": False,
         "availability": asdict(operation_write_availability(request.operation)),
-        "required_confirmation": concrete_confirmation_text(request, dst=dst),
+        "required_confirmation": concrete_confirmation_text(request, dst=destination_address),
     }

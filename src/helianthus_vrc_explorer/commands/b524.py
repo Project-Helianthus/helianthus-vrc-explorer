@@ -218,7 +218,7 @@ def apply_operation(
     confirm: str | None = typer.Option(
         None, "--confirm", help="Exact confirmation from the offline preview."
     ),  # noqa: B008
-    dst: str = typer.Option("0x15", "--dst"),  # noqa: B008
+    dst: str | None = typer.Option(None, "--dst"),  # noqa: B008
     transport_protocol: str = typer.Option("tcp", "--transport"),  # noqa: B008
     source_address: str = typer.Option("0xF7", "--source-address"),  # noqa: B008
     host: str = typer.Option("127.0.0.1", "--host"),  # noqa: B008
@@ -236,11 +236,15 @@ def apply_operation(
         validate_operation_write_qualification,
     )
 
-    dst_value = _parse_u8(dst, "dst")
     source_value = _parse_u8(source_address, "source-address")
     try:
         document = json.loads(plan_path.read_text(encoding="utf-8"))
         request = parse_operation_edit(document)
+        dst_value = cast(int, request.destination_address)
+        if dst is not None:
+            explicit_dst = _parse_u8(dst, "dst")
+            if explicit_dst != dst_value:
+                raise ValueError("--dst does not match plan destination_address")
         result = build_operation_edit_preview(document, dst=dst_value)
         if execute:
             if result["availability"]["state"] == "schema_unqualified":

@@ -10,6 +10,7 @@ from helianthus_vrc_explorer.cli import app
 def timer_edit():
     return {
         "schema_version": 1,
+        "destination_address": 0x15,
         "operation": "WriteTimer",
         "selector": {"channel": "dhw", "instance": 0, "weekday": 0},
         "values": [[1, 36], None, None],
@@ -56,6 +57,7 @@ def test_events_preview_pairs_tables_and_execute_rejects_unqualified_schema(tmp_
         json.dumps(
             {
                 "schema_version": 1,
+                "destination_address": 0x15,
                 "operation": "SetEventSetPoint",
                 "selector": {"profile": "zone", "instance": 2, "address": 1, "weekday_code": 255},
                 "values": [40, 41, 42, 43, 44, 45, 46],
@@ -133,6 +135,8 @@ def test_qualified_timer_cli_verifies_identity_baseline_single_send_and_readback
     assert result.exit_code == 0, result.output
     evidence = json.loads(result.stdout)
     assert evidence["outcome"] == "verified"
+    assert evidence["destination_address"] == 0x15
+    assert evidence["verified_confirmation"] == confirmation
     assert evidence["write_feedback_interpretation"] == "unknown"
     assert transport.identifications == 1
     assert [payload[0] for payload in transport.sent] == [3, 4, 3]
@@ -253,8 +257,114 @@ def test_interrupted_timer_cli_emits_and_saves_ambiguous_evidence(
     evidence = json.loads(result.stdout)
     assert json.loads(evidence_path.read_text()) == evidence
     assert evidence["outcome"] == "interrupted"
+    assert evidence["destination_address"] == 0x15
+    assert evidence["verified_confirmation"] == confirmation
     assert evidence["application_state"] == "ambiguous"
     assert evidence["interrupted_phase"] == interrupt_phase
     assert evidence["write_attempts"] == 1
     assert evidence["automatic_rollback"] is False
     assert [payload[0] for payload in transport.sent] == expected_sends
+
+
+def test_nondefault_plan_target_round_trips_without_explicit_dst(tmp_path, monkeypatch):
+    import helianthus_vrc_explorer.commands.b524 as command
+
+    class FakeTimer:
+        def __init__(self):
+            self.sent = []
+            self.changed = False
+
+        @contextmanager
+        def session(self):
+            yield self
+
+        def send_proto(self, dst, primary, secondary, payload):
+            assert (dst, primary, secondary, payload) == (0x26, 7, 4, b"")
+            return b"\xb570000\x01\x02\x00\x01"
+
+        def send_with_attempt_hook(self, dst, payload, hook):
+            assert dst == 0x26
+            hook()
+            self.sent.append(payload)
+            if payload[0] == 4:
+                self.changed = True
+                return b"\x00"
+            return bytes.fromhex("00012490909090" if self.changed else "00002490909090")
+
+    transport = FakeTimer()
+    monkeypatch.setattr(command, "_make_transport", lambda **kwargs: transport)
+    document = timer_edit()
+    document["destination_address"] = 0x26
+    plan = tmp_path / "edit.json"
+    plan.write_text(json.dumps(document))
+    qualification = tmp_path / "qualification.json"
+    qualification.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "scope": "timer_write_op04",
+                "manufacturer": 181,
+                "device_id": "70000",
+                "profile": "synthetic_timer",
+                "model": "synthetic",
+                "software_raw_hex": "0102",
+                "selector": document["selector"],
+                "evidence_reference": "synthetic_test_fixture",
+                "native_qualified": True,
+            }
+        )
+    )
+    args = ["b524", "apply-operation", "--plan", str(plan)]
+
+    preview = CliRunner().invoke(app, args)
+    assert preview.exit_code == 0, preview.output
+    preview_data = json.loads(preview.stdout)
+    assert preview_data["destination_address"] == 0x26
+    assert "dst=0x26" in preview_data["required_confirmation"]
+
+    confirmation = preview_data["required_confirmation"]
+    result = CliRunner().invoke(
+        app, [*args, "--execute", "--qualification", str(qualification), "--confirm", confirmation]
+    )
+    assert result.exit_code == 0, result.output
+    evidence = json.loads(result.stdout)
+    assert evidence["outcome"] == "verified"
+    assert evidence["destination_address"] == 0x26
+    assert evidence["verified_confirmation"] == confirmation
+
+
+@pytest.mark.parametrize(
+    ("target", "extra", "message"),
+    [
+        (None, [], "destination_address"),
+        (True, [], "integer in range"),
+        (256, [], "integer in range"),
+        (0x26, ["--dst", "0x15"], "does not match"),
+    ],
+)
+def test_plan_target_missing_invalid_or_mismatched_fails_before_transport(
+    tmp_path, monkeypatch, target, extra, message
+):
+    import helianthus_vrc_explorer.commands.b524 as command
+
+    constructed = False
+
+    def fail_transport(**kwargs):
+        nonlocal constructed
+        constructed = True
+        raise AssertionError("transport must not be constructed")
+
+    monkeypatch.setattr(command, "_make_transport", fail_transport)
+    document = timer_edit()
+    if target is None:
+        del document["destination_address"]
+    else:
+        document["destination_address"] = target
+    plan = tmp_path / "edit.json"
+    plan.write_text(json.dumps(document))
+
+    result = CliRunner().invoke(app, ["b524", "apply-operation", "--plan", str(plan), *extra])
+
+    assert result.exit_code == 2, result.output
+    assert message in result.output
+    assert constructed is False

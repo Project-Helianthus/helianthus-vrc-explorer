@@ -78,6 +78,7 @@ class B524OperationWriteRequest:
     read_requests: tuple[B524OperationReadRequest, ...]
     expected_before: tuple[bytes, ...]
     expected_after: tuple[bytes, ...]
+    destination_address: int | None = None
 
 
 class B524WriteRetryBlocked(RuntimeError):
@@ -508,6 +509,8 @@ def execute_controlled_write(
 
     if isinstance(dst, bool) or not isinstance(dst, int) or not 0 <= dst <= 0xFF:
         raise ValueError("dst must be an integer in range 0-255")
+    if request.destination_address is not None and request.destination_address != dst:
+        raise ValueError("dst does not match the operation edit destination_address")
     validate_operation_write_qualification(request, qualification)
     expected_confirmation = concrete_confirmation_text(request, dst=dst)
     if concrete_confirmation != expected_confirmation:
@@ -516,6 +519,8 @@ def execute_controlled_write(
     result: dict[str, Any] = {
         "operation": request.operation,
         "opcode_hex": f"0x{request.opcode:02X}",
+        "destination_address": dst,
+        "verified_confirmation": concrete_confirmation,
         "selector": dict(request.selector),
         "request_payload_hex": request.write_payload.hex(),
         "qualification": {
@@ -569,6 +574,10 @@ def execute_controlled_write(
         return result
 
     write_attempts = 0
+    feedback: bytes | None = None
+    readback: tuple[bytes | None, ...] = ()
+    readback_evidence: list[dict[str, Any]] = []
+    phase = "write"
 
     def admit_one_write() -> None:
         nonlocal write_attempts
@@ -579,31 +588,44 @@ def execute_controlled_write(
         write_attempts += 1
 
     try:
-        feedback = transport.send_with_attempt_hook(dst, request.write_payload, admit_one_write)
+        try:
+            feedback = transport.send_with_attempt_hook(dst, request.write_payload, admit_one_write)
+        except (B524WriteRetryBlocked, TransportError) as exc:
+            result["write_error"] = type(exc).__name__
+        else:
+            result["write_feedback_raw_hex"] = feedback.hex()
+        result["write_attempts"] = write_attempts
+
+        phase = "readback"
+        readback, readback_evidence, readback_interrupted = _read_snapshot(
+            transport, dst=dst, requests=request.read_requests
+        )
+        result["readback"] = readback_evidence
+        result["observed_after_raw_hex"] = [
+            value.hex() if isinstance(value, bytes) else None for value in readback
+        ]
+        if readback_interrupted:
+            result["outcome"] = "interrupted"
+            result["application_state"] = "ambiguous"
+            result["interrupted_phase"] = "readback"
+            return result
+        phase = "classification"
+        result["outcome"] = _classify_readback(request, readback)
+        return result
     except KeyboardInterrupt:
         result["write_attempts"] = write_attempts
-        result["write_error"] = "KeyboardInterrupt"
+        if phase == "write":
+            result["write_error"] = "KeyboardInterrupt"
+        else:
+            result["interruption_error"] = "KeyboardInterrupt"
+        if feedback is not None:
+            result["write_feedback_raw_hex"] = feedback.hex()
+        if readback_evidence:
+            result["readback"] = readback_evidence
+            result["observed_after_raw_hex"] = [
+                value.hex() if isinstance(value, bytes) else None for value in readback
+            ]
         result["outcome"] = "interrupted"
         result["application_state"] = "ambiguous" if write_attempts else "not_attempted"
-        result["interrupted_phase"] = "write"
+        result["interrupted_phase"] = phase
         return result
-    except (B524WriteRetryBlocked, TransportError) as exc:
-        result["write_error"] = type(exc).__name__
-    else:
-        result["write_feedback_raw_hex"] = feedback.hex()
-    result["write_attempts"] = write_attempts
-
-    readback, readback_evidence, readback_interrupted = _read_snapshot(
-        transport, dst=dst, requests=request.read_requests
-    )
-    result["readback"] = readback_evidence
-    result["observed_after_raw_hex"] = [
-        value.hex() if isinstance(value, bytes) else None for value in readback
-    ]
-    if readback_interrupted:
-        result["outcome"] = "interrupted"
-        result["application_state"] = "ambiguous"
-        result["interrupted_phase"] = "readback"
-        return result
-    result["outcome"] = _classify_readback(request, readback)
-    return result
