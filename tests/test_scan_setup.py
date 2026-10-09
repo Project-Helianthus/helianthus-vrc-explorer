@@ -4,7 +4,7 @@ import asyncio
 from pathlib import Path
 
 from textual.app import App
-from textual.widgets import Button, Checkbox, Input, Select, Static
+from textual.widgets import Button, Checkbox, DirectoryTree, Input, Select, Static
 
 from helianthus_vrc_explorer.ui.scan_setup import (
     ArtifactOpenApp,
@@ -244,3 +244,69 @@ def test_artifact_open_validates_json_file_and_cancel(monkeypatch, tmp_path) -> 
         await pilot.pause()
 
     assert _run_public(monkeypatch, cancel, run_artifact_open_modal) is None
+
+
+def test_artifact_tree_parent_navigation_and_nested_json_selection(tmp_path) -> None:
+    start = tmp_path / "start"
+    start.mkdir()
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    json_path = artifacts / "scan.json"
+    json_path.write_text("{}", encoding="utf-8")
+    (artifacts / "ignore.txt").write_text("not an artifact", encoding="utf-8")
+
+    async def exercise() -> None:
+        app = ArtifactOpenApp(initial_directory=start)
+        async with app.run_test(size=(110, 52)) as pilot:
+            tree = app.query_one("#artifact-tree", DirectoryTree)
+            assert tree.path == start.resolve()
+
+            await pilot.click("#artifact-parent")
+            for _ in range(20):
+                await pilot.pause()
+                if tree.path == tmp_path.resolve() and tree.root.children:
+                    break
+            assert tree.path == tmp_path.resolve()
+
+            tree.root.expand()
+            for _ in range(20):
+                await pilot.pause()
+                artifact_node = next(
+                    (
+                        node
+                        for node in tree.root.children
+                        if node.data is not None and node.data.path == artifacts
+                    ),
+                    None,
+                )
+                if artifact_node is not None:
+                    break
+            assert artifact_node is not None
+            artifact_node.expand()
+            for _ in range(20):
+                await pilot.pause()
+                file_node = next(
+                    (
+                        node
+                        for node in artifact_node.children
+                        if node.data is not None and node.data.path == json_path
+                    ),
+                    None,
+                )
+                if file_node is not None:
+                    break
+            assert file_node is not None
+            assert all(
+                node.data is None or node.data.path.suffix.lower() != ".txt"
+                for node in artifact_node.children
+            )
+
+            tree.post_message(DirectoryTree.FileSelected(file_node, json_path))
+            await pilot.pause()
+            assert app.query_one("#artifact-path", Input).value == str(json_path)
+            await pilot.click("#artifact-open")
+            await pilot.pause()
+
+        assert app.return_value == json_path
+
+    asyncio.run(exercise())

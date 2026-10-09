@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar
@@ -10,7 +11,16 @@ from typing import ClassVar
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.widgets import Button, Checkbox, Collapsible, Input, Label, Select, Static
+from textual.widgets import (
+    Button,
+    Checkbox,
+    Collapsible,
+    DirectoryTree,
+    Input,
+    Label,
+    Select,
+    Static,
+)
 
 from ..scanner.b509 import parse_b509_range
 
@@ -248,6 +258,17 @@ class ScanSetupApp(App[ScanSetup | None]):
         self.exit(None)
 
 
+class _JsonDirectoryTree(DirectoryTree):
+    """Directory browser that shows navigation entries and JSON files only."""
+
+    def filter_paths(self, paths: Iterable[Path]) -> Iterable[Path]:
+        return (
+            path
+            for path in paths
+            if path.is_dir() or (path.is_file() and path.suffix.lower() == ".json")
+        )
+
+
 class ArtifactOpenApp(App[Path | None]):
     """Visual JSON artifact selector with local path validation only."""
 
@@ -255,19 +276,31 @@ class ArtifactOpenApp(App[Path | None]):
     CSS = """
     Screen { align: center middle; }
     #artifact-open-panel {
-        width: 80; height: auto; padding: 1 2;
+        width: 88; height: 92%; padding: 1 2;
         border: heavy $accent; background: $surface;
     }
+    #artifact-tree { height: 1fr; min-height: 12; margin-top: 1; }
+    #artifact-root { height: 1; color: $text-muted; }
     #artifact-open-actions { height: 3; margin-top: 1; }
     #artifact-open-status { min-height: 2; color: $error; }
     """
+
+    def __init__(self, *, initial_directory: Path | None = None) -> None:
+        super().__init__()
+        root = (initial_directory or Path.cwd()).expanduser()
+        if not root.exists() or not root.is_dir():
+            raise ValueError("initial artifact directory must be an existing directory")
+        self._initial_directory = root.resolve()
 
     def compose(self) -> ComposeResult:
         yield Vertical(
             Label("Open scan artifact"),
             Static("Choose an existing JSON scan artifact."),
             Input(placeholder="/path/to/scan.json", id="artifact-path"),
+            Static(str(self._initial_directory), id="artifact-root"),
+            _JsonDirectoryTree(self._initial_directory, id="artifact-tree"),
             Horizontal(
+                Button("Parent folder", id="artifact-parent"),
                 Button("Open", id="artifact-open", variant="primary"),
                 Button("Cancel", id="artifact-cancel"),
                 id="artifact-open-actions",
@@ -277,11 +310,33 @@ class ArtifactOpenApp(App[Path | None]):
         )
 
     def on_mount(self) -> None:
-        self.query_one("#artifact-path", Input).focus()
+        self.query_one("#artifact-tree", _JsonDirectoryTree).focus()
+
+    def on_directory_tree_file_selected(self, event: DirectoryTree.FileSelected) -> None:
+        path = Path(event.path)
+        if path.is_file() and path.suffix.lower() == ".json":
+            self.query_one("#artifact-path", Input).value = str(path)
+            self.query_one("#artifact-open-status", Static).update("")
+
+    def _show_tree_root(self, path: Path) -> None:
+        tree = self.query_one("#artifact-tree", _JsonDirectoryTree)
+        tree.path = path
+        self.query_one("#artifact-root", Static).update(str(path))
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "artifact-cancel":
             self.action_cancel()
+            return
+        if event.button.id == "artifact-parent":
+            tree = self.query_one("#artifact-tree", _JsonDirectoryTree)
+            current = Path(tree.path)
+            parent = current.parent
+            if parent == current:
+                self.query_one("#artifact-open-status", Static).update(
+                    "Already at the filesystem root"
+                )
+            else:
+                self._show_tree_root(parent)
             return
         if event.button.id != "artifact-open":
             return

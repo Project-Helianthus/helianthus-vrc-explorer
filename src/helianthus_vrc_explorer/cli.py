@@ -977,7 +977,7 @@ def _scan_configured(
                     "port": transport_settings.port,
                     "src": transport_settings.src,
                     "dst": dst_u8,
-                    "trace_file": trace_file,
+                    "trace_path": trace_file,
                 }
             run_browse_from_artifact(artifact, allow_write=False, **browse_options)
         except ModuleNotFoundError as exc:

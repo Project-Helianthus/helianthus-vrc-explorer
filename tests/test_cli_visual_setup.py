@@ -63,3 +63,48 @@ def test_cancel_does_not_execute_scan(monkeypatch) -> None:
     )
     result = CliRunner().invoke(cli.app, ["scan"])
     assert result.exit_code == 0
+
+
+def test_postscan_browser_keeps_trace_after_scan_session_closes(
+    monkeypatch, tmp_path: Path
+) -> None:
+    from contextlib import contextmanager
+
+    class Transport:
+        closed = False
+
+        @contextmanager
+        def session(self):
+            yield self
+            self.closed = True
+
+    transport = Transport()
+    captured: dict = {}
+
+    @contextmanager
+    def observer(**kwargs):
+        yield None
+
+    def browse(artifact, **kwargs):
+        assert transport.closed
+        captured.update(kwargs)
+
+    monkeypatch.setattr(cli, "_build_transport", lambda *a, **kw: transport)
+    monkeypatch.setattr(cli, "_probe_scan_identity", lambda *a, **kw: {})
+    monkeypatch.setattr(cli, "make_scan_observer", observer)
+    monkeypatch.setattr(
+        cli,
+        "scan_vrc",
+        lambda *a, **kw: {
+            "schema_version": "2.3",
+            "meta": {"destination_address": "0x15", "scan_timestamp": "2026-10-09T18:00:00Z"},
+            "operations": {},
+        },
+    )
+    monkeypatch.setattr(cli, "_can_launch_interactive_browse", lambda console: True)
+    monkeypatch.setattr(cli, "run_browse_from_artifact", browse)
+    trace = tmp_path / "scan.trace"
+    cli._scan_configured(
+        transport_protocol="ens", dst="0x15", output_dir=tmp_path, trace_file=trace
+    )
+    assert captured["connection_settings"]["trace_path"] == trace
