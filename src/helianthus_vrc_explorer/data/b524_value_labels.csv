@@ -1,0 +1,8 @@
+opcode,group,register,value,label,qualification
+0x02,0x09,0x0002,1,TIME_CONTROLLED,candidate_unqualified
+0x02,0x09,0x0002,2,NORMAL,candidate_unqualified
+0x02,0x09,0x0002,3,REDUCED,candidate_unqualified
+0x02,0x09,0x0004,0,REGULAR,candidate_unqualified
+0x02,0x09,0x0004,1,BOOST,candidate_unqualified
+0x02,0x09,0x0004,7,HOLIDAY,candidate_unqualified
+0x02,0x09,0x0004,10,SYSTEM_OFF,candidate_unqualified

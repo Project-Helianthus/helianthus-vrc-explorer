@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 from rich.console import Console
 
 from ..protocol.b524 import RegisterOpcode
+from ..schema.b524_value_labels import apply_b524_value_labels
 from ..schema.ebusd_csv import EbusdCsvSchema
 from ..schema.myvaillant_map import MyvaillantRegisterMap
 from ..transport.base import (
@@ -169,6 +170,8 @@ def _resolve_room_influence_type_name(raw_value: int) -> tuple[str, str]:
 
 
 def _apply_contextual_enum_annotations(artifact: dict[str, Any]) -> None:
+    apply_b524_value_labels(artifact)
+
     # v2.3: look up GG=0x02 under OP=0x02
     op_02 = artifact.get("operations", {}).get(_hex_u8(_LOCAL_REGISTER_OPCODE))
     if not isinstance(op_02, dict):

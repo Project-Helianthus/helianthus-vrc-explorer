@@ -72,6 +72,7 @@ class RegisterRow:
     bundled_parameter_description: dict[str, object] | None = None
     candidate_name: str = ""
     candidate_evidence: str = ""
+    value_label_qualification: str = ""
 
     @property
     def display_label(self) -> str:
@@ -93,6 +94,8 @@ class RegisterRow:
     @property
     def description_text(self) -> str:
         parts: list[str] = []
+        if self.value_label_qualification:
+            parts.append("Value label (candidate, unqualified presentation; no write authority)")
         for label, desc in (
             ("Verified", self.parameter_description),
             ("Bundled", self.bundled_parameter_description),

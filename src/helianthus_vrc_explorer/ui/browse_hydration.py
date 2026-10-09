@@ -8,6 +8,7 @@ from ..artifact_schema import migrate_artifact_schema
 from ..scanner.director import GROUP_CONFIG, group_name_for_opcode, group_namespace_profiles
 from ..scanner.identity import operation_label
 from ..schema.b524_register_names import b524_register_name
+from ..schema.b524_value_labels import apply_b524_value_labels
 from ..schema.parameter_descriptions import attach_bundled_descriptions
 from .b524_operation_reads import operation_read_views
 from .browse_models import BrowseTab, RegisterAddress, RegisterRow, TreeNodeRef
@@ -636,6 +637,7 @@ class _HydratedBrowseStore:
     @classmethod
     def from_artifact(cls, artifact: dict[str, Any]) -> _HydratedBrowseStore:
         artifact, _migration = migrate_artifact_schema(artifact)
+        apply_b524_value_labels(artifact)
         attach_bundled_descriptions(artifact)
 
         meta = artifact.get("meta")
@@ -992,6 +994,9 @@ class _HydratedBrowseStore:
                         bundled_obj = entry.get("bundled_parameter_description")
                         candidate_name = str(entry.get("candidate_name") or "").strip()
                         candidate_evidence = str(entry.get("candidate_evidence") or "").strip()
+                        value_label_qualification = str(
+                            entry.get("value_label_qualification") or ""
+                        ).strip()
                         row = RegisterRow(
                             row_id=row_id,
                             protocol="b524",
@@ -1021,6 +1026,7 @@ class _HydratedBrowseStore:
                             ),
                             candidate_name=candidate_name,
                             candidate_evidence=candidate_evidence,
+                            value_label_qualification=value_label_qualification,
                             search_blob=" ".join(
                                 [
                                     path.lower(),
@@ -1036,6 +1042,7 @@ class _HydratedBrowseStore:
                                     tab.lower(),
                                     candidate_name.lower(),
                                     candidate_evidence.lower(),
+                                    value_label_qualification.lower(),
                                     str(parameter_description or "").lower(),
                                 ]
                             ),

@@ -10,6 +10,7 @@ from typing import Any
 from ..artifact_schema import migrate_artifact_schema
 from ..scanner.director import group_name_for_opcode
 from ..schema.b524_register_names import apply_b524_canonical_register_names
+from ..schema.b524_value_labels import apply_b524_value_labels
 from ..schema.parameter_descriptions import attach_bundled_descriptions
 from .emphasis import html_star_bold
 
@@ -2462,6 +2463,7 @@ __ARTIFACT_JSON__
               if (typeof entry.value !== "undefined") tipParts.push(`original_value=${formatValue(entry.value)}`);
               if (entry.enum_raw_name) tipParts.push(`enum_raw_name=${entry.enum_raw_name}`);
               if (entry.enum_resolved_name) tipParts.push(`enum_resolved_name=${entry.enum_resolved_name}`);
+              if (entry.value_label_qualification) tipParts.push(`value_label_qualification=${entry.value_label_qualification} (presentation only; no write authority)`);
               if (entry.constraint_type) tipParts.push(`constraint_type=${entry.constraint_type}`);
               if (typeof entry.constraint_min !== "undefined") tipParts.push(`constraint_min=${formatValue(entry.constraint_min)}`);
               if (typeof entry.constraint_max !== "undefined") tipParts.push(`constraint_max=${formatValue(entry.constraint_max)}`);
@@ -2660,6 +2662,7 @@ __ARTIFACT_JSON__
 def render_html_report(artifact: dict[str, Any], *, title: str | None = None) -> str:
     # Ensure operations-first structure for consistent JS traversal.
     artifact, _migration = migrate_artifact_schema(artifact)
+    apply_b524_value_labels(artifact)
     operations = artifact.get("operations")
     if isinstance(operations, dict):
         apply_b524_canonical_register_names(operations)

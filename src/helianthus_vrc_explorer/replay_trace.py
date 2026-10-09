@@ -33,6 +33,7 @@ from .scanner.register import (
     _strip_echo_header,
 )
 from .schema.b524_register_names import b524_register_name
+from .schema.b524_value_labels import apply_b524_value_labels
 from .schema.myvaillant_map import MyvaillantRegisterMap
 
 _TRACE_LINE_RE = re.compile(r"^(?P<timestamp>\S+)\s+(?P<body>.*)$")
@@ -990,6 +991,7 @@ def replay_trace_to_artifact(trace_path: Path) -> dict[str, Any]:
     # Derive rr_max / ii_max from observed trace data so that metadata
     # reflects the actual scan range, not the GROUP_CONFIG profile defaults.
     _update_namespace_bounds_from_observed(artifact["operations"])
+    apply_b524_value_labels(artifact)
 
     return artifact
 
