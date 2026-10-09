@@ -11,7 +11,7 @@ from ..artifact_schema import migrate_artifact_schema
 from ..scanner.director import group_name_for_opcode
 from ..schema.b524_register_names import apply_b524_canonical_register_names
 from ..schema.b524_value_labels import apply_b524_value_labels
-from ..schema.parameter_descriptions import attach_bundled_descriptions
+from ..schema.parameter_descriptions import attach_bundled_descriptions, description_profile
 from .emphasis import html_star_bold
 
 
@@ -534,6 +534,7 @@ __ARTIFACT_JSON__
       }
 
       const meta = artifact && typeof artifact === "object" ? artifact.meta || {} : {};
+      const B524_CIRCUIT_II_MIN = __B524_CIRCUIT_II_MIN__;
       metaDst.textContent = safeMetaString(meta.destination_address || meta.dest || meta.dst || "dst=?");
       metaTs.textContent = safeMetaString(meta.scan_timestamp || meta.ts || "ts=?");
       if (meta && meta.incomplete) {
@@ -2212,7 +2213,7 @@ __ARTIFACT_JSON__
           let instanceKeys = sortedHexKeys(Object.keys(instancesObj || {})).filter((iiKey) => {
             const ii = parseInt(iiKey, 16);
             if (namespaceKey === "0x06" || opKey === "0x06") return ii >= 1 && ii <= 8;
-            if (groupKey === "0x02") return ii >= 1 && ii <= 9;
+            if (groupKey === "0x02") return ii >= B524_CIRCUIT_II_MIN && ii <= 9;
             return true;
           });
           if (state.b524Filters.hideMissingInstances) {
@@ -2748,6 +2749,11 @@ def render_html_report(artifact: dict[str, Any], *, title: str | None = None) ->
                 "__IDENTITY_CARD__": identity_html,
                 "__ARTIFACT_JSON__": _json_for_html(artifact),
                 "__B524_GROUP_NAMES__": _json_for_html(group_name_map),
+                "__B524_CIRCUIT_II_MIN__": (
+                    "0"
+                    if description_profile(artifact).get("profile_id") == "basv2_sw0507_hw1704_api1"
+                    else "1"
+                ),
             },
         ).rstrip()
         + "\n"

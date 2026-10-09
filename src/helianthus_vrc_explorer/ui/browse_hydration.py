@@ -9,7 +9,7 @@ from ..scanner.director import GROUP_CONFIG, group_name_for_opcode, group_namesp
 from ..scanner.identity import operation_label
 from ..schema.b524_register_names import b524_register_name
 from ..schema.b524_value_labels import apply_b524_value_labels
-from ..schema.parameter_descriptions import attach_bundled_descriptions
+from ..schema.parameter_descriptions import attach_bundled_descriptions, description_profile
 from .b524_operation_reads import operation_read_views
 from .browse_models import BrowseTab, RegisterAddress, RegisterRow, TreeNodeRef
 from .register_semantics import entry_display_value_text, entry_status_kind, visible_rr_keys
@@ -252,6 +252,7 @@ def _visible_instance_keys(
     group_key: str,
     namespace_key: str | None,
     instances: dict[str, Any],
+    circuit_ii_min: int = 1,
 ) -> list[str]:
     opcode = _safe_int_hex(namespace_key or "0")
     group = _safe_int_hex(group_key)
@@ -262,7 +263,7 @@ def _visible_instance_keys(
         ii = _safe_int_hex(key)
         if opcode == 6 and not 1 <= ii <= 8:
             continue
-        if opcode == 2 and group == 2 and not 1 <= ii <= 9:
+        if opcode == 2 and group == 2 and not circuit_ii_min <= ii <= 9:
             continue
         if "present" in instance:
             if instance["present"] is not True:
@@ -639,6 +640,11 @@ class _HydratedBrowseStore:
         artifact, _migration = migrate_artifact_schema(artifact)
         apply_b524_value_labels(artifact)
         attach_bundled_descriptions(artifact)
+        circuit_ii_min = (
+            0
+            if description_profile(artifact).get("profile_id") == "basv2_sw0507_hw1704_api1"
+            else 1
+        )
 
         meta = artifact.get("meta")
         if not isinstance(meta, dict):
@@ -867,6 +873,7 @@ class _HydratedBrowseStore:
                         group_key=group_key,
                         namespace_key=effective_namespace_key,
                         instances=instances,
+                        circuit_ii_min=circuit_ii_min,
                     )
                 )
                 instance_keys = sorted(
