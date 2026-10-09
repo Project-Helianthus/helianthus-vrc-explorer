@@ -262,6 +262,22 @@ def run_b524_scan(
         },
         "operations": {},
     }
+
+    def store_operation_read_plan() -> None:
+        if operation_requests:
+            artifact["meta"]["b524_operation_read_plan"] = [
+                {
+                    "operation": request.operation,
+                    "selector": request.selector,
+                    "request_payload_hex": request.payload.hex(),
+                    "selected": operation_enabled,
+                }
+                for request, operation_enabled in zip(
+                    operation_requests, operation_selection, strict=True
+                )
+            ]
+
+    store_operation_read_plan()
     if ebusd_host is not None:
         artifact["meta"]["ebusd_host"] = ebusd_host
     if ebusd_port is not None:
@@ -1143,6 +1159,7 @@ def run_b524_scan(
                 if planner_preset != "custom":
                     plan = _normalize_profile_plan_instances(plan)
 
+        store_operation_read_plan()
         if (
             operation_requests
             and estimate_register_requests(plan) + sum(operation_selection)
@@ -1231,6 +1248,7 @@ def run_b524_scan(
                             )
                         if planner_preset != "custom":
                             plan = _normalize_profile_plan_instances(plan)
+                    store_operation_read_plan()
                     artifact["meta"]["scan_plan"]["groups"] = _scan_plan_meta_groups(plan)
                     if (
                         operation_requests
@@ -1493,17 +1511,6 @@ def run_b524_scan(
                 )
                 if operation_enabled
             )
-            artifact["meta"]["b524_operation_read_plan"] = [
-                {
-                    "operation": request.operation,
-                    "selector": request.selector,
-                    "request_payload_hex": request.payload.hex(),
-                    "selected": operation_enabled,
-                }
-                for request, operation_enabled in zip(
-                    operation_requests, operation_selection, strict=True
-                )
-            ]
             if selected_operations:
                 acquire_operation_reads(
                     transport,
@@ -1570,6 +1577,7 @@ def run_b524_scan(
             budget=description_budget,
             coverage=description_coverage,
         )
+    store_operation_read_plan()
     if operation_requests and "b524_operation_reads" not in artifact:
         artifact["b524_operation_reads_schema_version"] = 1
         artifact["b524_operation_reads"] = []

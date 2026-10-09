@@ -127,3 +127,43 @@ def test_planner_can_deselect_every_explicit_operation(monkeypatch):
     assert not any(payload[0] in {9, 11} for payload in transport.payloads)
     assert artifact["b524_operation_reads"] == []
     assert all(not row["selected"] for row in artifact["meta"]["b524_operation_read_plan"])
+
+
+@pytest.mark.parametrize("failure", ["budget", "interrupt"])
+def test_partial_scalar_scan_preserves_selected_and_deselected_operations(monkeypatch, failure):
+    import sys
+
+    import helianthus_vrc_explorer.scanner.scan as scan_module
+
+    def planner(groups, **kwargs):
+        kwargs["operation_selection"][:] = [False, True]
+        return kwargs["default_plan"]
+
+    class InterruptedTransport(OperationTransport):
+        def send(self, dst, payload):
+            if payload[0] == 2 and failure == "interrupt":
+                raise KeyboardInterrupt
+            return super().send(dst, payload)
+
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr("helianthus_vrc_explorer.ui.planner_textual.run_textual_scan_plan", planner)
+    monkeypatch.setattr(
+        scan_module,
+        "_PlannerHotkeyReader",
+        lambda **kwargs: nullcontext(SimpleNamespace(poll=lambda: False)),
+    )
+    observer = MagicMock(spec=ScanObserver)
+    observer.suspend.return_value = nullcontext()
+    artifact = scan(
+        InterruptedTransport(),
+        planner_ui="textual",
+        console=Console(force_terminal=True),
+        observer=observer,
+        request_budget=18 if failure == "budget" else None,
+    )
+    assert artifact["meta"]["incomplete"] is True
+    plan = artifact["meta"]["b524_operation_read_plan"]
+    assert [row["selected"] for row in plan] == [False, True]
+    assert [row["operation"] for row in plan] == ["GetEvent", "GetEventSetPoint"]
+    assert artifact["b524_operation_reads"][0]["operation"] == "GetEventSetPoint"
+    assert artifact["b524_operation_reads"][0]["response_state"] == "unattempted"

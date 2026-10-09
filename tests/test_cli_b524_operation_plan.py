@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 from typer.testing import CliRunner
 
@@ -55,3 +56,48 @@ def test_operation_preview_requires_explicit_plan_without_transport(monkeypatch)
     result = CliRunner().invoke(app, ["scan", "--preview-read-plan"])
     assert result.exit_code == 2
     assert "requires --b524-read-plan" in result.output
+
+
+def test_bundled_dry_run_operation_plan_keeps_missing_responses_explicit(tmp_path, monkeypatch):
+    import helianthus_vrc_explorer.cli as cli
+
+    monkeypatch.setattr(cli, "_build_transport", lambda *args, **kwargs: 1 / 0)
+    path = tmp_path / "reads.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "requests": [
+                    {
+                        "operation": "GetEvent",
+                        "profile": "zone",
+                        "instance": 1,
+                        "address": 1,
+                        "weekday_code": 0,
+                    }
+                ],
+            }
+        )
+    )
+    result = CliRunner().invoke(
+        app,
+        [
+            "scan",
+            "--dry-run",
+            "--b524-read-plan",
+            str(path),
+            "--planner-ui",
+            "disabled",
+            "--output-dir",
+            str(tmp_path),
+        ],
+    )
+    assert result.exit_code == 0, (result.output, result.exception)
+    artifact = json.loads(Path(result.stdout.strip()).read_text())
+    assert artifact["meta"]["dry_run_mode"] == "deterministic_scan"
+    record = artifact["b524_operation_reads"][0]
+    assert record["response_state"] == "transport_error"
+    assert record["error"] == "transport_error"
+    assert record["response_raw_hex"] is None
+    assert record["decoded"] is None
+    assert record["decode_qualification"] == "schema_unqualified"
