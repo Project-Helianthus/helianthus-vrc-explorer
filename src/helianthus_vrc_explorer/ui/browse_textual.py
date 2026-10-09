@@ -116,6 +116,11 @@ def _build_identity_header_renderable(artifact: dict[str, object]) -> Group | No
         return None
 
     rows: list[tuple[str, str]] = []
+    from .regulator_identity import regulator_profile_label
+
+    profile = regulator_profile_label(identity)
+    if profile:
+        rows.append(("Profile", profile))
     for label, key in (
         ("Device", "device"),
         ("Model", "model"),

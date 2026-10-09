@@ -38,6 +38,11 @@ and public documentation linked below.
 - `src/helianthus_vrc_explorer/data/models.csv` is its packaged copy. Refresh
   it with `python3 scripts/generate_models_csv.py` after changing the canonical
   file.
+- `data/regulator_eid_spn.csv` assigns regulator models and protocol families by
+  exact EID/SPN pairs. Refresh its packaged copy with
+  `python3 scripts/generate_regulator_eid_spn_csv.py`. SPN is the decoded software
+  PIN value, not raw SW bytes or the hardware version. Unknown pairs remain
+  unknown and do not establish protocol support.
 - `docs/cli-reference.md` is the generated CLI help reference. Refresh it with
   `python3 scripts/docs_sync_help.py`; do not hand-edit command help blocks.
 - `fixtures/` contains offline inputs. Keep replay compatibility when evolving

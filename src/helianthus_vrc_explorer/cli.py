@@ -290,8 +290,29 @@ def _probe_scan_identity(
         _format_device_identity(device_id=ident.device_id, model_name_map=device_name_map)
     )
     identity["firmware"] = _format_fw(ident.sw, ident.hw)
+    identity["device_id"] = ident.device_id
+    identity["eid"] = ident.device_id
+    identity["sw"] = ident.sw
+    identity["hw"] = ident.hw
+    identity["manufacturer"] = f"0x{ident.manufacturer:02X}"
     if ident.manufacturer != 0xB5:
         return identity
+
+    from .schema.regulator_identity import lookup_regulator_identity, spn_from_sw
+
+    spn = spn_from_sw(ident.sw)
+    if spn is not None:
+        identity["spn"] = f"{spn:04X}"
+        identity["spn_source"] = "sw"
+        try:
+            matched = lookup_regulator_identity(ident.device_id, spn)
+        except ValueError:
+            # Preserve non-catalog identity tokens without blocking the scan.
+            matched = None
+        if matched is not None:
+            identity["assigned_model"] = matched.model_name
+            identity["protocol_family"] = matched.protocol_family
+            identity["model"] = matched.model_name
 
     try:
         chunks = [
@@ -323,12 +344,16 @@ def _build_scan_session_preface(
     identity: dict[str, str] | None = None,
 ) -> ScanSessionPreface:
     data = identity or {}
+    from .ui.regulator_identity import regulator_profile_label
+
+    profile = regulator_profile_label(data)
     return ScanSessionPreface(
         app_line=f"helianthus-vrc-explorer v{__version__}",
         scan_line=f"Scanning VRC Regulator (B524) at address 0x{dst:02X}",
         rows=(
             ("Device", _na(data.get("device"))),
             ("Model", _na(data.get("model"))),
+            *((("Profile", profile),) if profile else ()),
             ("Serial", _na(data.get("serial"))),
             ("Firmware", _na(data.get("firmware"))),
             ("ebusd", endpoint),

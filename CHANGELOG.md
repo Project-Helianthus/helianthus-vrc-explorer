@@ -2,6 +2,7 @@
 
 ## 0.6.0
 
+- Classify 38 exact regulator EID/SPN pairs, deriving SPN from the software PIN and displaying matched model/family profiles in scan, Browser and HTML identity headers. Preserve raw identity and unknown pairs.
 - Correct B524 OP00 `ReadSystemInformation` discovery: circuit and zone fields are supported capacities, while configured instances require independent presence evidence.
 - Acquire scoped OP01 and OP07 descriptions for observed writable parameters and validate supported formats during offline browse edits.
 - Preserve raw descriptions, incomplete scans and namespace-aware identities; keep semantic register names in `snake_case`.

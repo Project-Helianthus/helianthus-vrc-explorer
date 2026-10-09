@@ -188,6 +188,20 @@ device writes are planned.
 
 ## Canonical B524 Register Names
 
+### Regulator identity
+
+The packaged [EID/SPN catalog](data/regulator_eid_spn.csv) assigns a model and
+the `VRC720` or `VRC700` protocol family by an exact pair. The same EID can belong
+to different models, so EID-only names do not select this catalog profile.
+SPN comes from the `07/04` software PIN: BCD `0417` decodes to decimal 417,
+represented as hexadecimal `01A1` in the catalog. Raw SW/HW and product-number
+identity remain available. Missing, invalid or unlisted pairs remain unknown.
+
+Scan, Browser and HTML identity headers show a matched catalog profile. A model
+assignment does not prove support for an opcode or permit a device write. See
+the [regulator introduction](https://github.com/Project-Helianthus/helianthus-docs-ebus/blob/main/protocols/vaillant/ebus-vaillant-regulators.md)
+for the identity catalog and the B524/B555 protocol entry points.
+
 Bundled OP02 semantic names are keyed by `(opcode, group, register)` in
 `data/b524_register_names.csv`. They take precedence over historical leaf-name
 annotations in scan, replay, Browser and HTML output. OP06 uses the common names
@@ -283,7 +297,7 @@ GPL-3.0-or-later. See `LICENSE`.
 - Numeric descriptions retain decoded min/max/step. Date/time limits can be interpreted while STEP remains unknown; edits outside known ranges are rejected, and unknown stepping leaves edits incompletely validated. Unsupported formats retain raw description evidence.
 - FLAGS provide profile-scoped visibility/writability hints. They establish no user/installer role, volatility, persistence or physical connected-device state. Old artifact labels remain historical, unqualified interpretations.
 
-See the [public discovery and description contract](https://github.com/Project-Helianthus/helianthus-docs-ebus/blob/main/protocols/vaillant/b524-profile-discovery-and-descriptions.md).
+See the [public discovery and description contract](https://github.com/Project-Helianthus/helianthus-docs-ebus/blob/main/protocols/vaillant/ebus-vaillant-b524-profile-discovery-and-descriptions.md).
 
 Description acquisition displays a Describe progress bar with scheduled requests
 and adds actual retries to the count. Only active writable parameters generate
