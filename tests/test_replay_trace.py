@@ -13,12 +13,34 @@ from helianthus_vrc_explorer.replay_trace import (
     _enrich_register_names,
     replay_trace_to_artifact,
 )
+from helianthus_vrc_explorer.transport.base import (
+    TransportError,
+    TransportNack,
+    TransportProtocolFailure,
+)
+from helianthus_vrc_explorer.transport.enhanced_tcp import (
+    EnhancedTcpConfig,
+    EnhancedTcpTransport,
+    _crc,
+)
 
 
 def _write_trace(tmp_path: Path, name: str, content: str) -> Path:
     trace_path = tmp_path / name
     trace_path.write_text(content, encoding="utf-8")
     return trace_path
+
+
+def _offline_enhanced_transport(trace_path: Path) -> EnhancedTcpTransport:
+    transport = EnhancedTcpTransport(EnhancedTcpConfig(trace_path=trace_path, reconnect_delay_s=0))
+    transport._ensure_trace_handle()
+    transport._trace("INIT features=0x01")
+    transport._start_arbitration = lambda _src: None
+    transport._send_telegram_symbol_with_echo = lambda _symbol: None
+    transport._send_symbol_with_echo = lambda _symbol: None
+    transport._send_end_of_message = lambda: None
+    transport._reset_parser = lambda: None
+    return transport
 
 
 def test_replay_trace_to_artifact_reconstructs_b524_register_reads(tmp_path: Path) -> None:
@@ -551,11 +573,112 @@ def test_replay_recognizes_local_nack_retry_without_overriding_later_outcome(
     reads = replay_trace_to_artifact(trace_path)["b524_operation_reads"]
 
     assert [item["response_state"] for item in reads] == [
-        "nack",
+        "transport_error",
         "value",
         "transport_error",
     ]
-    assert [item.get("error") for item in reads] == ["nack", None, "protocol_sync_error"]
+    assert [item.get("error") for item in reads] == [
+        "local_nack_retry",
+        None,
+        "protocol_sync_error",
+    ]
+    assert [item["request_attempts"] for item in reads] == [2, 2, 2]
+
+
+@pytest.mark.parametrize("release_failure", [False, True])
+def test_replay_actual_enhanced_terminal_nack_preserves_scalar_state_and_counts(
+    tmp_path: Path, release_failure: bool
+) -> None:
+    trace_path = tmp_path / "actual_scalar_nack.trace"
+    transport = _offline_enhanced_transport(trace_path)
+    symbols = iter((0xFF, 0xFF))
+    transport._recv_bus_symbol = lambda **_kwargs: next(symbols)
+    if release_failure:
+
+        def fail_bus_release() -> None:
+            raise TransportError("release failed")
+
+        transport._send_end_of_message = fail_bus_release
+
+    with pytest.raises(TransportNack, match="local retry exhausted"):
+        transport.send(0x15, bytes.fromhex("020002000100"))
+    transport.close()
+
+    entry = replay_trace_to_artifact(trace_path)["operations"]["0x02"]["groups"]["0x02"][
+        "instances"
+    ]["0x00"]["registers"]["0x0001"]
+    assert (entry["response_state"], entry["error"]) == ("nack", "nack")
+    assert entry["transport_diagnostic"] == {
+        "cause": "nack",
+        "phase": "command_ack",
+        "request_attempts": 2,
+        "retry_count": 1,
+        "reconnect_attempts": 0,
+    }
+
+
+def test_replay_actual_enhanced_recovery_preserves_terminal_failure_and_counts(
+    tmp_path: Path,
+) -> None:
+    trace_path = tmp_path / "actual_operation_sync_failure.trace"
+    transport = _offline_enhanced_transport(trace_path)
+    symbols = iter((0xFF, 0x42, 0x42, 0x42, 0x42))
+    transport._recv_bus_symbol = lambda **_kwargs: next(symbols)
+
+    def reconnect(_seq: int, _attempt: int) -> None:
+        transport.close()
+        transport._ensure_trace_handle()
+        transport._trace("INIT features=0x01")
+
+    transport._reconnect = reconnect
+    with pytest.raises(TransportProtocolFailure) as raised:
+        transport.send(0x15, bytes.fromhex("0900000100"))
+    transport.close()
+    assert (
+        raised.value.cause,
+        raised.value.request_attempts,
+        raised.value.retry_count,
+        raised.value.reconnect_attempts,
+    ) == ("protocol_sync_error", 5, 4, 3)
+
+    reads = replay_trace_to_artifact(trace_path)["b524_operation_reads"]
+    assert [item["response_state"] for item in reads] == ["transport_error"] * 4
+    assert [item.get("error") for item in reads] == ["protocol_sync_error"] * 4
+    assert [item["request_attempts"] for item in reads] == [2, 3, 4, 5]
+    expected_diagnostics = [
+        {
+            "cause": "protocol_sync_error",
+            "phase": "command_ack",
+            "request_attempts": attempts,
+            "retry_count": attempts - 1,
+            "reconnect_attempts": reconnects,
+        }
+        for attempts, reconnects in ((2, 0), (3, 1), (4, 2), (5, 3))
+    ]
+    expected_diagnostics[-1]["unexpected_symbol"] = "0x42"
+    assert [item["transport_diagnostic"] for item in reads] == expected_diagnostics
+
+
+def test_replay_actual_enhanced_local_nack_then_success_keeps_success(
+    tmp_path: Path,
+) -> None:
+    trace_path = tmp_path / "actual_operation_retry_success.trace"
+    transport = _offline_enhanced_transport(trace_path)
+    transport._recv_bus_symbol = lambda **_kwargs: next(iterated_acks)
+    response = bytes.fromhex("0001020304050607")
+    response_symbols = iter((len(response), *response, _crc(bytes((len(response),)) + response)))
+    transport._recv_telegram_symbol = lambda **_kwargs: next(response_symbols)
+    iterated_acks = iter((0xFF, 0x00))
+
+    assert transport.send(0x15, bytes.fromhex("0900000100")) == response
+    transport.close()
+
+    record = replay_trace_to_artifact(trace_path)["b524_operation_reads"][0]
+    assert record["response_state"] == "value"
+    assert record.get("error") is None
+    assert record["response_raw_hex"] == response.hex()
+    assert record["request_attempts"] == 2
+    assert "transport_diagnostic" not in record
 
 
 def test_replay_trace_marks_nack_when_retry_evidence_is_nack_or_crc(tmp_path: Path) -> None:

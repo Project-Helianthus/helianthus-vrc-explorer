@@ -51,6 +51,19 @@ _RETRY_RE = re.compile(r"^#(?P<seq>\d+)\s+RETRY\s+type=(?P<kind>[a-zA-Z0-9_]+)(?
 _LOCAL_NACK_RETRY_RE = re.compile(
     r"^#(?P<seq>\d+)\s+LOCAL_NACK_RETRY\s+attempt=(?P<attempt>\d+)(?:\s+|$)"
 )
+_RECOVERY_RE = re.compile(
+    r"^#(?P<seq>\d+)\s+RECOVERY\s+cause=(?P<cause>[a-zA-Z0-9_]+)\s+"
+    r"phase=(?P<phase>[a-zA-Z0-9_]+)\s+request_attempt=(?P<request_attempts>\d+)\s+"
+    r"reconnects_used=(?P<reconnect_attempts>\d+)/(?P<reconnect_max>\d+)$"
+)
+_REQUEST_FAILED_RE = re.compile(
+    r"^#(?P<seq>\d+)\s+REQUEST_FAILED\s+"
+    r"(?:(?:read protocol recovery exhausted|transport recovery exhausted):\s+)?"
+    r"cause=(?P<cause>[a-zA-Z0-9_]+)\s+phase=(?P<phase>[a-zA-Z0-9_]+)\s+"
+    r"request_attempts=(?P<request_attempts>\d+)\s+retry_count=(?P<retry_count>\d+)\s+"
+    r"reconnect_attempts=(?P<reconnect_attempts>\d+)"
+    r"(?:\s+unexpected_symbol=(?P<unexpected_symbol>\S+))?$"
+)
 _OP_LABEL_RE = re.compile(r"^OP\s+(?P<label>.+)$")
 _SUPPORTED_ENH_MARKERS: tuple[str, ...] = ("INIT ",)
 
@@ -75,6 +88,12 @@ class _TraceExchange:
     response: bytes | None = None
     op_label: str | None = None
     retry_kind: str | None = None
+    failure_cause: str | None = None
+    failure_phase: str | None = None
+    request_attempts: int = 1
+    retry_count: int = 0
+    reconnect_attempts: int = 0
+    unexpected_symbol: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -232,11 +251,49 @@ def _parse_enhanced_trace_lines(
             seq = int(local_nack_retry_match.group("seq"), 10) + _seq_offset
             matched_exchange = exchange_by_seq.get(seq)
             if matched_exchange is not None:
-                # EnhancedTcpTransport emits this marker before retrying a
-                # locally NACKed telegram.  A later response or RETRY marker
-                # remains authoritative; absent either, the completed trace
-                # records that the local retry also ended without a response.
-                matched_exchange.retry_kind = "nack"
+                # This marker starts another local attempt; it is not terminal
+                # NACK evidence. A later response, recovery, or REQUEST_FAILED
+                # marker remains authoritative.
+                matched_exchange.retry_kind = "local_nack_retry"
+                local_attempts = int(local_nack_retry_match.group("attempt"), 10) + 1
+                matched_exchange.request_attempts = max(
+                    matched_exchange.request_attempts, local_attempts
+                )
+                matched_exchange.retry_count = max(matched_exchange.retry_count, local_attempts - 1)
+            continue
+
+        recovery_match = _RECOVERY_RE.match(body)
+        if recovery_match is not None:
+            seq = int(recovery_match.group("seq"), 10) + _seq_offset
+            matched_exchange = exchange_by_seq.get(seq)
+            if matched_exchange is not None:
+                request_attempts = int(recovery_match.group("request_attempts"), 10)
+                matched_exchange.retry_kind = recovery_match.group("cause").strip().lower()
+                matched_exchange.failure_cause = matched_exchange.retry_kind
+                matched_exchange.failure_phase = recovery_match.group("phase").strip().lower()
+                matched_exchange.request_attempts = request_attempts
+                matched_exchange.retry_count = max(0, request_attempts - 1)
+                matched_exchange.reconnect_attempts = int(
+                    recovery_match.group("reconnect_attempts"), 10
+                )
+            continue
+
+        request_failed_match = _REQUEST_FAILED_RE.match(body)
+        if request_failed_match is not None:
+            seq = int(request_failed_match.group("seq"), 10) + _seq_offset
+            matched_exchange = exchange_by_seq.get(seq)
+            if matched_exchange is not None:
+                matched_exchange.retry_kind = request_failed_match.group("cause").strip().lower()
+                matched_exchange.failure_cause = matched_exchange.retry_kind
+                matched_exchange.failure_phase = request_failed_match.group("phase").strip().lower()
+                matched_exchange.request_attempts = int(
+                    request_failed_match.group("request_attempts"), 10
+                )
+                matched_exchange.retry_count = int(request_failed_match.group("retry_count"), 10)
+                matched_exchange.reconnect_attempts = int(
+                    request_failed_match.group("reconnect_attempts"), 10
+                )
+                matched_exchange.unexpected_symbol = request_failed_match.group("unexpected_symbol")
             continue
 
         if body.startswith("#") and ("SEND " in body or "PARSED " in body):
@@ -268,6 +325,21 @@ def _parse_enhanced_trace_lines(
 
 def _response_state_implies_present(response_state: object) -> bool:
     return isinstance(response_state, str) and response_state in {"active", "empty_reply"}
+
+
+def _transport_diagnostic(exchange: _TraceExchange) -> dict[str, str | int] | None:
+    if exchange.failure_cause is None or exchange.failure_phase is None:
+        return None
+    diagnostic: dict[str, str | int] = {
+        "cause": exchange.failure_cause,
+        "phase": exchange.failure_phase,
+        "request_attempts": exchange.request_attempts,
+        "retry_count": exchange.retry_count,
+        "reconnect_attempts": exchange.reconnect_attempts,
+    }
+    if exchange.unexpected_symbol is not None:
+        diagnostic["unexpected_symbol"] = exchange.unexpected_symbol
+    return diagnostic
 
 
 def _opcode_from_payload(payload: bytes) -> int | None:
@@ -338,6 +410,7 @@ def _decode_register_read_entry(
     payload: bytes,
     response: bytes | None,
     retry_kind: str | None = None,
+    transport_diagnostic: dict[str, str | int] | None = None,
 ) -> dict[str, Any]:
     read_opcode = _hex_u8(opcode)
     entry: dict[str, Any] = {
@@ -357,14 +430,22 @@ def _decode_register_read_entry(
     }
 
     if response is None:
-        if retry_kind == "nack_or_crc":
+        if retry_kind == "nack":
+            entry["response_state"] = "nack"
+            entry["error"] = "nack"
+        elif retry_kind == "nack_or_crc":
             # Transport traces emit "nack_or_crc" for both NACK and CRC errors;
             # preserve the ambiguity instead of misclassifying as pure NACK.
             entry["response_state"] = "nack_or_crc"
             entry["error"] = "nack_or_crc"
-        else:
+        elif retry_kind in {None, "timeout"}:
             entry["response_state"] = "timeout"
             entry["error"] = "timeout"
+        else:
+            entry["response_state"] = "transport_error"
+            entry["error"] = retry_kind
+        if transport_diagnostic is not None:
+            entry["transport_diagnostic"] = transport_diagnostic
         return entry
     if len(response) == 0:
         entry["response_state"] = "empty_reply"
@@ -473,7 +554,7 @@ def _replay_operation_read(exchange: _TraceExchange) -> dict[str, Any] | None:
             request = canonical
     record = record_operation_read_observation(request)
     record["trace_seq"] = exchange.seq
-    record["request_attempts"] = 1
+    record["request_attempts"] = exchange.request_attempts
     if not request.selector:
         raw_selector = _unknown_operation_raw_selector(exchange.payload)
         if raw_selector is not None:
@@ -493,6 +574,9 @@ def _replay_operation_read(exchange: _TraceExchange) -> dict[str, Any] | None:
         else:
             record["response_state"] = "timeout"
             record["error"] = "timeout"
+        transport_diagnostic = _transport_diagnostic(exchange)
+        if transport_diagnostic is not None:
+            record["transport_diagnostic"] = transport_diagnostic
         return record
     unknown_timer_channel = request.operation == "ReadTimer" and "channel" not in request.selector
     unknown_event_profile = (
@@ -653,6 +737,7 @@ def replay_trace_to_artifact(trace_path: Path) -> dict[str, Any]:
                 payload=payload,
                 response=response,
                 retry_kind=exchange.retry_kind,
+                transport_diagnostic=_transport_diagnostic(exchange),
             )
             entry["trace_seq"] = exchange.seq
             if exchange.op_label:

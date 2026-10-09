@@ -1225,6 +1225,22 @@ class EnhancedTcpTransport(TransportInterface):
                 reconnect_attempts=reconnect_retries,
             )
 
+        def _trace_terminal_nack() -> None:
+            trace_was_open = self._trace_handle is not None
+            self._ensure_trace_handle()
+            self._trace(
+                f"#{seq} REQUEST_FAILED cause=nack phase=command_ack "
+                f"request_attempts={request_attempts} "
+                f"retry_count={max(0, request_attempts - 1)} "
+                f"reconnect_attempts={reconnect_retries}"
+            )
+            if not trace_was_open and self._session is None:
+                trace_handle = self._trace_handle
+                self._trace_handle = None
+                if trace_handle is not None:
+                    with contextlib.suppress(OSError):
+                        trace_handle.close()
+
         def _recover_session(exc: TransportError) -> None:
             nonlocal reconnect_retries, successful_reconnects
             nonlocal timeout_retries, collision_retries, nack_retries
@@ -1332,15 +1348,19 @@ class EnhancedTcpTransport(TransportInterface):
                 )
             except (_EnhancedNack, _EnhancedCrcMismatch) as exc:
                 if not retry_safe:
+                    if isinstance(exc, _EnhancedNack):
+                        _trace_terminal_nack()
                     raise
                 # NACK/CRC are retryable on the same session — the bus
                 # protocol already handled ACK/NACK exchange.
                 nack_retries += 1
                 if nack_retries > self._config.nack_max_retries:
-                    self.close()
                     message = (
                         f"{exc} (nack/crc retries exhausted ({self._config.nack_max_retries}))"
                     )
+                    if isinstance(exc, _EnhancedNack):
+                        _trace_terminal_nack()
+                    self.close()
                     if isinstance(exc, _EnhancedNack):
                         raise TransportNack(message) from exc
                     raise TransportError(message) from exc
@@ -1351,6 +1371,7 @@ class EnhancedTcpTransport(TransportInterface):
                 )
             except TransportNack:
                 # A definitive target rejection is not a broken TCP/ENH session.
+                _trace_terminal_nack()
                 raise
             except _EnhancedCommandNotAcknowledgedBeforeSyn as exc:
                 # A bare RECEIVED(0xAA) at command-ACK is the raw-wire SYN
