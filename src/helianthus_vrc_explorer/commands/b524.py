@@ -113,7 +113,7 @@ def _request(
     dst: str,
     trace_file: Path | None,
     require_vrc700: bool,
-) -> tuple[bytes, int, str | None, int]:
+) -> tuple[bytes, int, dict[str, str] | None, int]:
     dst_value = _parse_u8(dst, "dst")
     source_value = _parse_u8(source_address, "source-address")
     transport = _make_transport(
@@ -131,7 +131,7 @@ def _request(
 
     try:
         with transport.session():
-            device_id: str | None = None
+            target_qualification: dict[str, str] | None = None
             if require_vrc700:
                 identity_payload = transport.send_proto(dst_value, 0x07, 0x04, b"")
                 try:
@@ -146,6 +146,16 @@ def _request(
                         "this operation requires device identity 70000 or B7S00; "
                         f"target reported {identity.device_id or 'unknown'}"
                     )
+                target_qualification = {
+                    "service": "07/04",
+                    "destination_address": f"0x{dst_value:02X}",
+                    "manufacturer": f"0x{identity.manufacturer:02X}",
+                    "device_id": device_id,
+                    "eid": device_id,
+                    "software_raw_hex": identity.sw,
+                    "hardware_raw_hex": identity.hw,
+                    "raw_identity_payload_hex": identity_payload.hex(),
+                }
             reply = transport.send_with_attempt_hook(dst_value, payload, _attempt)
     except typer.BadParameter:
         raise
@@ -158,7 +168,7 @@ def _request(
     except TransportError as exc:
         typer.echo(f"B524 request failed: {exc}", err=True)
         raise typer.Exit(1) from exc
-    return reply, dst_value, device_id, attempts
+    return reply, dst_value, target_qualification, attempts
 
 
 def _read_output(
@@ -170,7 +180,7 @@ def _read_output(
     reply: bytes,
     decoded: Any,
     dst: int,
-    device_id: str | None,
+    target_qualification: dict[str, str] | None,
     attempts: int,
 ) -> None:
     output: dict[str, Any] = {
@@ -178,7 +188,7 @@ def _read_output(
         "opcode": f"0x{opcode:02X}",
         "destination": f"0x{dst:02X}",
         "decode_qualification": (
-            "schema_unqualified" if opcode in {0x09, 0x0B} else "profile_vrc700"
+            "profile_vrc700" if target_qualification is not None else "schema_unqualified"
         ),
         "selector_correlation": "request_context",
         "request": {
@@ -192,8 +202,9 @@ def _read_output(
             "decoded": asdict(decoded),
         },
     }
-    if device_id is not None:
-        output["device_id"] = device_id
+    if target_qualification is not None:
+        output["device_id"] = target_qualification["device_id"]
+        output["target_qualification"] = target_qualification
     typer.echo(json.dumps(output, indent=2, sort_keys=True))
 
 
@@ -304,7 +315,7 @@ def _read_options_request(
     dst: str,
     trace_file: Path | None,
     require_vrc700: bool,
-) -> tuple[bytes, int, str | None, int]:
+) -> tuple[bytes, int, dict[str, str] | None, int]:
     return _request(
         payload,
         transport_protocol=transport_protocol,
@@ -341,7 +352,7 @@ def read_timer(
         )
     except (TypeError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
-    reply, dst_value, device_id, attempts = _read_options_request(
+    reply, dst_value, target_qualification, attempts = _read_options_request(
         payload,
         transport_protocol=transport_protocol,
         host=host,
@@ -364,7 +375,7 @@ def read_timer(
         reply=reply,
         decoded=decoded,
         dst=dst_value,
-        device_id=device_id,
+        target_qualification=target_qualification,
         attempts=attempts,
     )
 
@@ -403,7 +414,7 @@ def _event_read(
             )
     except (TypeError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
-    reply, dst_value, _device_id, attempts = _read_options_request(
+    reply, dst_value, _target_qualification, attempts = _read_options_request(
         payload,
         transport_protocol=transport_protocol,
         host=host,
@@ -436,7 +447,7 @@ def _event_read(
         reply=reply,
         decoded=decoded,
         dst=dst_value,
-        device_id=None,
+        target_qualification=None,
         attempts=attempts,
     )
 
@@ -517,7 +528,7 @@ def read_vr91(
     """Read the VRC700 remote-controller status block with OP08 ReadVR91."""
 
     payload = build_vr91_read_payload()
-    reply, dst_value, device_id, attempts = _read_options_request(
+    reply, dst_value, target_qualification, attempts = _read_options_request(
         payload,
         transport_protocol=transport_protocol,
         host=host,
@@ -540,7 +551,7 @@ def read_vr91(
         reply=reply,
         decoded=decoded,
         dst=dst_value,
-        device_id=device_id,
+        target_qualification=target_qualification,
         attempts=attempts,
     )
 

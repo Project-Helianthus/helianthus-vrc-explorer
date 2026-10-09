@@ -80,6 +80,8 @@ def test_event_read_uses_profile_guard_without_vrc700_identity_gate(monkeypatch)
     assert result.exit_code == 0, result.output
     output = json.loads(result.stdout)
     assert output["operation"] == "GetEvent"
+    assert output["decode_qualification"] == "schema_unqualified"
+    assert "target_qualification" not in output
     assert output["request"]["payload_hex"] == "09030201ff"
     assert output["reply"]["raw_hex"] == "03ff000648908fff"
     assert output["reply"]["decoded"]["start1_raw"] == 255
@@ -115,6 +117,18 @@ def test_timer_read_returns_raw_and_decoded_schedule(monkeypatch) -> None:
     output = json.loads(result.stdout)
     assert output["operation"] == "ReadTimer"
     assert output["device_id"] == "70000"
+    assert output["decode_qualification"] == "profile_vrc700"
+    assert output["destination"] == "0x15"
+    assert output["target_qualification"] == {
+        "service": "07/04",
+        "destination_address": "0x15",
+        "manufacturer": "0xB5",
+        "device_id": "70000",
+        "eid": "70000",
+        "software_raw_hex": "0102",
+        "hardware_raw_hex": "0304",
+        "raw_identity_payload_hex": "b5373030303001020304",
+    }
     assert output["request"]["payload_hex"] == "0301000100"
     assert output["reply"]["decoded"]["slots"][0]["stop_minutes"] == 360
 
@@ -165,6 +179,17 @@ def test_read_vr91_accepts_b7s00_identity_and_keeps_temperatures_raw(monkeypatch
     assert result.exit_code == 0, result.output
     output = json.loads(result.stdout)
     assert output["device_id"] == "B7S00"
+    assert output["decode_qualification"] == "profile_vrc700"
+    assert output["target_qualification"] == {
+        "service": "07/04",
+        "destination_address": "0x15",
+        "manufacturer": "0xB5",
+        "device_id": "B7S00",
+        "eid": "B7S00",
+        "software_raw_hex": "0102",
+        "hardware_raw_hex": "0304",
+        "raw_identity_payload_hex": "b5423753303001020304",
+    }
     assert output["request"]["payload_hex"] == "08"
     assert output["reply"]["decoded"]["heating_temperature_raw"] == 7
     assert output["reply"]["decoded"]["cooling_temperature_raw"] == 8
