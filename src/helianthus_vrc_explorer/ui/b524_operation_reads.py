@@ -225,12 +225,19 @@ def operation_edit_document(
     *,
     operation: str,
     values: list[object],
+    destination_address: int,
 ) -> dict[str, object]:
     """Create an offline edit document from complete recorded raw baselines.
 
     Callers provide raw codes.  In particular this preserves Event value one
     unchanged unless a separately qualified UI explicitly changes it.
     """
+    if (
+        isinstance(destination_address, bool)
+        or not isinstance(destination_address, int)
+        or not 0 <= destination_address <= 0xFF
+    ):
+        raise ValueError("destination_address must be an integer in range 0..255")
     if operation == "WriteTimer":
         candidates = [record for record in records if _opcode(record) == 0x03]
         if len(candidates) != 1:
@@ -248,6 +255,7 @@ def operation_edit_document(
             raise ValueError("timer baseline must contain a raw response")
         return {
             "schema_version": 1,
+            "destination_address": destination_address,
             "operation": operation,
             "selector": dict(selector),
             "values": list(values),
@@ -293,6 +301,7 @@ def operation_edit_document(
         raise ValueError("both operation baselines must contain raw responses")
     return {
         "schema_version": 1,
+        "destination_address": destination_address,
         "operation": operation,
         "selector": dict(selector),
         "values": list(values),
@@ -301,7 +310,11 @@ def operation_edit_document(
 
 
 def operation_edit_export(
-    records: Sequence[Mapping[str, object]], *, selector: Mapping[str, object], operation: str
+    records: Sequence[Mapping[str, object]],
+    *,
+    selector: Mapping[str, object],
+    operation: str,
+    destination_address: int,
 ) -> dict[str, object]:
     """Build a no-op, offline-editable document for one recorded selector."""
     selected = [record for record in records if record.get("selector") == selector]
@@ -329,4 +342,9 @@ def operation_edit_export(
         if len(payload) != 8:
             raise ValueError("event baseline must be eight bytes")
         values = list(payload[1:])
-    return operation_edit_document(selected, operation=operation, values=values)
+    return operation_edit_document(
+        selected,
+        operation=operation,
+        values=values,
+        destination_address=destination_address,
+    )

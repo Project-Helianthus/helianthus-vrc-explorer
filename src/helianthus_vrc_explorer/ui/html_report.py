@@ -1641,9 +1641,10 @@ __ARTIFACT_JSON__
         return {available: true, reason: "complete decoded OP09/OP0B pair"};
       }
 
-      function b524EditDocumentForRow(row, operation, reads) {
+      function b524EditDocumentForRow(row, operation, reads, metaObj) {
         const availability = b524EditAvailability(row, operation, reads);
         if (!availability.available) throw new Error(availability.reason);
+        const destinationAddress = b524DestinationAddress(metaObj);
         const selector = b524CanonicalSelector(row.selector, operation);
         if (operation === "WriteTimer") {
           const raw = b524HexBytes(row.response_raw_hex, 7);
@@ -1651,7 +1652,7 @@ __ARTIFACT_JSON__
           for (const offset of [1, 3, 5]) {
             values.push(raw[offset] === 0x90 && raw[offset + 1] === 0x90 ? null : [raw[offset], raw[offset + 1]]);
           }
-          return {schema_version: 1, operation, selector, values, expected_before_raw_hex: [row.response_raw_hex.toLowerCase()]};
+          return {schema_version: 1, destination_address: destinationAddress, operation, selector, values, expected_before_raw_hex: [row.response_raw_hex.toLowerCase()]};
         }
         const key = b524SelectorKey(row.selector);
         const event = reads.find((candidate) => normalizeOpcodeKey(candidate && (candidate.opcode_hex || candidate.opcode)) === "0x09"
@@ -1663,6 +1664,7 @@ __ARTIFACT_JSON__
         const values = (operation === "SetEvent" ? eventRaw : setpointRaw).slice(1);
         return {
           schema_version: 1,
+          destination_address: destinationAddress,
           operation,
           selector,
           values,
@@ -1677,16 +1679,22 @@ __ARTIFACT_JSON__
         return value;
       }
 
-      function b524Destination(metaObj) {
+      function b524DestinationAddress(metaObj) {
         const raw = metaObj && (metaObj.destination_address ?? metaObj.dest ?? metaObj.dst);
         const parsed = typeof raw === "number" ? raw : typeof raw === "string" && raw.trim() ? Number(raw) : NaN;
-        return Number.isInteger(parsed) && parsed >= 0 && parsed <= 0xff
-          ? `0x${parsed.toString(16).padStart(2, "0")}` : "unknown";
+        return Number.isInteger(parsed) && parsed >= 0 && parsed <= 0xff ? parsed : null;
+      }
+
+      function b524Destination(metaObj) {
+        const parsed = b524DestinationAddress(metaObj);
+        return parsed === null ? "unknown" : `0x${parsed.toString(16).padStart(2, "0")}`;
       }
 
       function b524BuildPreview(documentValue, metaObj) {
         const destination = b524Destination(metaObj);
         if (destination === "unknown") throw new Error("artifact destination is missing or invalid");
+        const destinationAddress = b524DestinationAddress(metaObj);
+        if (documentValue.destination_address !== destinationAddress) throw new Error("edit document destination does not match artifact target");
         const operation = documentValue.operation;
         const selector = b524CanonicalSelector(documentValue.selector, operation);
         if (!selector) throw new Error("selector is not canonical for this operation");
@@ -1778,7 +1786,7 @@ __ARTIFACT_JSON__
 
         const openEditor = (row) => {
           editorHost.innerHTML = "";
-          const documentValue = b524EditDocumentForRow(row, operation, reads);
+          const documentValue = b524EditDocumentForRow(row, operation, reads, metaObj);
           const editor = document.createElement("div"); editor.className = "operation-editor";
           const heading = document.createElement("div"); heading.className = "table-title";
           heading.textContent = `${operation} offline editor — ${Object.entries(documentValue.selector).map(([key, value]) => `${key}=${String(value)}`).join(", ")}`;

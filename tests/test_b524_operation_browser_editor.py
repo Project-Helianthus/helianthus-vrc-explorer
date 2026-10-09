@@ -49,15 +49,22 @@ def _records(instance=2):
 def test_export_uses_selected_setpoint_values_and_exact_pair():
     records = _records(1) + _records(2)
     document = operation_edit_export(
-        records, selector=records[-1]["selector"], operation="SetEventSetPoint"
+        records,
+        selector=records[-1]["selector"],
+        operation="SetEventSetPoint",
+        destination_address=0x26,
     )
+    assert document["destination_address"] == 0x26
     assert document["values"] == [32, 33, 34, 35, 36, 37, 38]
     assert document["selector"]["instance"] == 2
     assert document["expected_before_raw_hex"] == ["03ff000648908fff", "0020212223242526"]
     records.append(copy.deepcopy(records[-1]))
     with pytest.raises(ValueError, match="exactly one"):
         operation_edit_export(
-            records, selector=records[-1]["selector"], operation="SetEventSetPoint"
+            records,
+            selector=records[-1]["selector"],
+            operation="SetEventSetPoint",
+            destination_address=0x26,
         )
 
 
@@ -126,6 +133,7 @@ def test_browser_edits_previews_and_exports_without_native_write(tmp_path, desti
             assert f"0x{target:02X}" in preview
             await pilot.click("#operation-export-button")
             document = json.loads(output.read_text())
+            assert document["destination_address"] == target
             assert document["values"][0] == 40
             assert document["expected_before_raw_hex"] == ["03ff000648908fff", "0020212223242526"]
             values.value = "[256,33,34,35,36,37,38]"
@@ -186,6 +194,7 @@ def test_browser_timer_with_unused_slots_opens_editor_and_exports_null(tmp_path)
             dialog.query_one("#operation-export-path", Input).value = str(output)
             await pilot.click("#operation-export-button")
             document = json.loads(output.read_text())
+            assert document["destination_address"] == 0x15
             assert document["values"] == [[0, 36], None, None]
             assert document["expected_before_raw_hex"] == [raw]
 

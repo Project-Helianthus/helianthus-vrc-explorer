@@ -80,7 +80,10 @@ def test_event_preview_document_preserves_both_raw_baselines() -> None:
     records[1]["response_raw_hex"] = "0300010203040506"
     records[1]["decoded"] = {"parameter_config": 3, "values": [{"raw": 1}]}
     records[1]["response_state"] = "value"
-    document = operation_edit_document(records, operation="SetEvent", values=[255] * 7)
+    document = operation_edit_document(
+        records, operation="SetEvent", values=[255] * 7, destination_address=0x26
+    )
+    assert document["destination_address"] == 0x26
     assert document["expected_before_raw_hex"] == [
         "03ff242a30363c42",
         "0300010203040506",
@@ -93,7 +96,10 @@ def test_setpoint_preview_baselines_are_always_event_then_setpoint() -> None:
     records[1]["response_raw_hex"] = "0300010203040506"
     records[1]["decoded"] = {"parameter_config": 3, "values": [{"raw": 1}]}
     records[1]["response_state"] = "value"
-    document = operation_edit_document(records, operation="SetEventSetPoint", values=[1] * 7)
+    document = operation_edit_document(
+        records, operation="SetEventSetPoint", values=[1] * 7, destination_address=0x26
+    )
+    assert document["destination_address"] == 0x26
     assert document["expected_before_raw_hex"] == [
         "03ff242a30363c42",
         "0300010203040506",
@@ -104,7 +110,9 @@ def test_pairing_rejects_a_baseline_from_another_selector() -> None:
     records = _artifact()["b524_operation_reads"]
     records[1]["selector"] = {"profile": "zone", "instance": 1, "address": 1, "weekday_code": 129}
     try:
-        operation_edit_document(records, operation="SetEvent", values=[255] * 7)
+        operation_edit_document(
+            records, operation="SetEvent", values=[255] * 7, destination_address=0x26
+        )
     except ValueError as exc:
         assert "both OP09 and OP0B" in str(exc)
     else:  # pragma: no cover - explicit failure message for the selector invariant

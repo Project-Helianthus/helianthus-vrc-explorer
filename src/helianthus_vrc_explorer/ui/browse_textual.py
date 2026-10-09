@@ -1389,7 +1389,6 @@ if _TEXTUAL_IMPORT_ERROR is None:
                 self._set_status("Selected operation selector is unavailable.")
                 return
             try:
-                document = operation_edit_export(records, selector=selector, operation=operation)
                 meta = self._artifact.get("meta")
                 dst = meta.get("destination_address") if isinstance(meta, dict) else None
                 if isinstance(dst, bool) or not isinstance(dst, (str, int)):
@@ -1397,6 +1396,12 @@ if _TEXTUAL_IMPORT_ERROR is None:
                 destination = int(dst, 0) if isinstance(dst, str) else dst
                 if not 0 <= destination <= 0xFF:
                     raise ValueError("artifact destination must be in range 0..255")
+                document = operation_edit_export(
+                    records,
+                    selector=selector,
+                    operation=operation,
+                    destination_address=destination,
+                )
                 build_operation_edit_preview(document, dst=destination)
             except ValueError as exc:
                 self._set_status(f"Offline export unavailable: {exc}")

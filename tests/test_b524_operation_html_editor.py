@@ -110,7 +110,7 @@ function byRole(root, role) { return descendants(root).filter((node) => node.dat
 
 
 def _assert_preview_matches_python(preview: dict, document: dict) -> None:
-    expected = build_operation_edit_preview(document, dst=0x15)
+    expected = build_operation_edit_preview(document, dst=document["destination_address"])
     for key in (
         "schema_version",
         "operation",
@@ -158,6 +158,7 @@ console.log(JSON.stringify({preview, exported, selectors: selectors.length}));
     assert result["preview"]["diff"][0]["changed"] is True
     assert result["exported"] == {
         "schema_version": 1,
+        "destination_address": 0x15,
         "operation": "SetEvent",
         "selector": {"profile": "zone", "instance": 1, "address": 1, "weekday_code": 129},
         "values": [255, 37, 42, 48, 54, 60, 66],
@@ -287,7 +288,9 @@ def test_numeric_nondefault_target_is_retained_in_preview() -> None:
         r"""
 byRole(container, "operation-edit-select")[0].click();
 byRole(container, "operation-preview-button")[0].click();
-console.log(byRole(container, "operation-preview")[0].textContent);
+byRole(container, "operation-export-button")[0].click();
+console.log(JSON.stringify({preview: JSON.parse(byRole(container, "operation-preview")[0].textContent), exported: JSON.parse(capturedBlob.parts.join(""))}));
 """,
     )
-    assert result["destination"] == "0x26"
+    assert result["preview"]["destination"] == "0x26"
+    assert result["exported"]["destination_address"] == 0x26
