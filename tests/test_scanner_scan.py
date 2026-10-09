@@ -1451,7 +1451,12 @@ def test_scan_b524_normalizes_legacy_aggressive_preset_to_full_for_textual_defau
         default_plan,
         default_preset,
         system_information,
+        operation_requests,
+        operation_selection,
     ):
+        assert isinstance(operation_requests, list)
+        assert isinstance(operation_selection, list)
+        assert len(operation_requests) == len(operation_selection)
         captured["default_preset"] = default_preset
         captured["default_plan"] = default_plan
         captured["request_rate_rps"] = request_rate_rps
@@ -1497,7 +1502,12 @@ def test_scan_b524_normalizes_exhaustive_preset_to_research_for_textual_default_
         default_plan,
         default_preset,
         system_information,
+        operation_requests,
+        operation_selection,
     ):
+        assert isinstance(operation_requests, list)
+        assert isinstance(operation_selection, list)
+        assert len(operation_requests) == len(operation_selection)
         captured["default_preset"] = default_preset
         captured["default_plan"] = default_plan
         captured["request_rate_rps"] = request_rate_rps
@@ -1542,7 +1552,12 @@ def test_scan_b524_normalizes_conservative_preset_to_recommended_for_textual_def
         default_plan,
         default_preset,
         system_information,
+        operation_requests,
+        operation_selection,
     ):
+        assert isinstance(operation_requests, list)
+        assert isinstance(operation_selection, list)
+        assert len(operation_requests) == len(operation_selection)
         captured["default_preset"] = default_preset
         captured["default_plan"] = default_plan
         captured["request_rate_rps"] = request_rate_rps
