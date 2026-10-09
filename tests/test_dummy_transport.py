@@ -147,6 +147,44 @@ def test_dummy_transport_does_not_invent_unrecorded_operation_response(tmp_path:
         transport.send(0x15, bytes.fromhex("0900000200"))
 
 
+def test_dummy_transport_replays_duplicate_operation_observations_in_recorded_order(
+    tmp_path: Path,
+) -> None:
+    payload = bytes.fromhex("0900000100")
+    fixture = {
+        "meta": {},
+        "operations": {},
+        "b524_operation_reads_schema_version": 1,
+        "b524_operation_reads": [
+            {
+                "request_payload_hex": payload.hex(),
+                "response_raw_hex": "0001020304050607",
+                "response_state": "value",
+            },
+            {
+                "request_payload_hex": payload.hex(),
+                "response_raw_hex": "08090a0b0c0d0e0f",
+                "response_state": "value",
+            },
+            {
+                "request_payload_hex": payload.hex(),
+                "response_raw_hex": None,
+                "response_state": "nack",
+            },
+        ],
+    }
+    fixture_path = tmp_path / "duplicate_operation_reads.json"
+    fixture_path.write_text(json.dumps(fixture), encoding="utf-8")
+    transport = DummyTransport(fixture_path)
+
+    assert transport.send(0x15, payload) == bytes.fromhex("0001020304050607")
+    assert transport.send(0x15, payload) == bytes.fromhex("08090a0b0c0d0e0f")
+    with pytest.raises(TransportNack):
+        transport.send(0x15, payload)
+    with pytest.raises(TransportError, match="no exact"):
+        transport.send(0x15, payload)
+
+
 def test_dummy_transport_parameter_description_supports_qualified_nested_fixture(
     tmp_path: Path,
 ) -> None:

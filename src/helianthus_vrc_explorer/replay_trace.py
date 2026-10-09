@@ -48,6 +48,9 @@ _RECV_NO_RESPONSE_RE = re.compile(
     r"^#(?P<seq>\d+)\s+RECV_PROTO\s+(broadcast_or_no_response|initiator_initiator=no_response)$"
 )
 _RETRY_RE = re.compile(r"^#(?P<seq>\d+)\s+RETRY\s+type=(?P<kind>[a-zA-Z0-9_]+)(?:\s+|$)")
+_LOCAL_NACK_RETRY_RE = re.compile(
+    r"^#(?P<seq>\d+)\s+LOCAL_NACK_RETRY\s+attempt=(?P<attempt>\d+)(?:\s+|$)"
+)
 _OP_LABEL_RE = re.compile(r"^OP\s+(?P<label>.+)$")
 _SUPPORTED_ENH_MARKERS: tuple[str, ...] = ("INIT ",)
 
@@ -222,6 +225,18 @@ def _parse_enhanced_trace_lines(
             matched_exchange = exchange_by_seq.get(seq)
             if matched_exchange is not None:
                 matched_exchange.retry_kind = retry_match.group("kind").strip().lower()
+            continue
+
+        local_nack_retry_match = _LOCAL_NACK_RETRY_RE.match(body)
+        if local_nack_retry_match is not None:
+            seq = int(local_nack_retry_match.group("seq"), 10) + _seq_offset
+            matched_exchange = exchange_by_seq.get(seq)
+            if matched_exchange is not None:
+                # EnhancedTcpTransport emits this marker before retrying a
+                # locally NACKed telegram.  A later response or RETRY marker
+                # remains authoritative; absent either, the completed trace
+                # records that the local retry also ended without a response.
+                matched_exchange.retry_kind = "nack"
             continue
 
         if body.startswith("#") and ("SEND " in body or "PARSED " in body):

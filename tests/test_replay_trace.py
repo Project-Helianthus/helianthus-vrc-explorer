@@ -516,6 +516,48 @@ def test_replay_keeps_operation_empty_nack_timeout_and_malformed_distinct(tmp_pa
     assert artifact["b524_operation_reads"][4]["error"] == "protocol_sync_error"
 
 
+def test_replay_recognizes_local_nack_retry_without_overriding_later_outcome(
+    tmp_path: Path,
+) -> None:
+    trace_path = _write_trace(
+        tmp_path,
+        "local_nack_retry.trace",
+        "\n".join(
+            [
+                "2026-04-06T10:00:00.000000Z INIT features=0x01",
+                "2026-04-06T10:00:00.050000Z START initiator=0xF7",
+                (
+                    "2026-04-06T10:00:01.000000Z #1 SEND_PROTO src=0xF7 dst=0x15 "
+                    "primary=0xB5 secondary=0x24 payload=0900000100"
+                ),
+                "2026-04-06T10:00:01.100000Z #1 LOCAL_NACK_RETRY attempt=1",
+                (
+                    "2026-04-06T10:00:02.000000Z #2 SEND_PROTO src=0xF7 dst=0x15 "
+                    "primary=0xB5 secondary=0x24 payload=0b01000100"
+                ),
+                "2026-04-06T10:00:02.100000Z #2 LOCAL_NACK_RETRY attempt=1",
+                "2026-04-06T10:00:02.200000Z #2 PARSED_PROTO len=8 hex=0001020304050607",
+                (
+                    "2026-04-06T10:00:03.000000Z #3 SEND_PROTO src=0xF7 dst=0x15 "
+                    "primary=0xB5 secondary=0x24 payload=0301000100"
+                ),
+                "2026-04-06T10:00:03.100000Z #3 LOCAL_NACK_RETRY attempt=1",
+                "2026-04-06T10:00:03.200000Z #3 RETRY type=protocol_sync_error n=1/1",
+            ]
+        )
+        + "\n",
+    )
+
+    reads = replay_trace_to_artifact(trace_path)["b524_operation_reads"]
+
+    assert [item["response_state"] for item in reads] == [
+        "nack",
+        "value",
+        "transport_error",
+    ]
+    assert [item.get("error") for item in reads] == ["nack", None, "protocol_sync_error"]
+
+
 def test_replay_trace_marks_nack_when_retry_evidence_is_nack_or_crc(tmp_path: Path) -> None:
     trace_path = _write_trace(
         tmp_path,
