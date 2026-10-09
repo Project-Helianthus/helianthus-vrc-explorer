@@ -36,6 +36,7 @@ from .schema.b524_register_names import b524_register_name
 from .schema.myvaillant_map import MyvaillantRegisterMap
 
 _TRACE_LINE_RE = re.compile(r"^(?P<timestamp>\S+)\s+(?P<body>.*)$")
+_START_RE = re.compile(r"^START\s+initiator=0x(?P<initiator>[0-9a-fA-F]{2})$")
 _SEND_PROTO_RE = re.compile(
     r"^#(?P<seq>\d+)\s+SEND_PROTO\s+src=0x(?P<src>[0-9a-fA-F]{2})\s+"
     r"dst=0x(?P<dst>[0-9a-fA-F]{2})\s+primary=0x(?P<primary>[0-9a-fA-F]{2})\s+"
@@ -154,6 +155,9 @@ def _parse_enhanced_trace_lines(
     pending_labels: list[str] = []
     saw_enh_marker = False
     session_recovery_pending = False
+    session_init_pending = False
+    active_exchange: _TraceExchange | None = None
+    attempt_precounted = False
     truncated_hex_frames = 0
     # Offset to make seq numbers unique across multiple INIT sessions
     # in concatenated traces.
@@ -183,9 +187,24 @@ def _parse_enhanced_trace_lines(
                 # EnhancedTcpTransport keeps its logical request sequence when
                 # reconnecting. Keep the next SEND attached to that request.
                 session_recovery_pending = False
+                session_init_pending = False
             else:
-                # An independent concatenated trace restarts its sequence.
-                _seq_offset = _prev_seq + _seq_offset
+                # RESETTED also opens a session before the retry marker is
+                # emitted. Defer classification until the next sequenced line.
+                session_init_pending = True
+            continue
+
+        if _START_RE.match(body) is not None:
+            if (
+                not session_init_pending
+                and active_exchange is not None
+                and active_exchange.response is None
+            ):
+                active_exchange.request_attempts += 1
+                active_exchange.retry_count = max(
+                    active_exchange.retry_count, active_exchange.request_attempts - 1
+                )
+                attempt_precounted = True
             continue
 
         op_match = _OP_LABEL_RE.match(body)
@@ -197,6 +216,11 @@ def _parse_enhanced_trace_lines(
 
         send_match = _SEND_PROTO_RE.match(body)
         if send_match is not None:
+            if session_init_pending:
+                # No retry/recovery marker followed INIT, so this is an
+                # independent concatenated session rather than RESET recovery.
+                _seq_offset = _prev_seq + _seq_offset
+                session_init_pending = False
             raw_seq = int(send_match.group("seq"), 10)
             seq = raw_seq + _seq_offset
             _prev_seq = raw_seq
@@ -224,10 +248,13 @@ def _parse_enhanced_trace_lines(
                 )
                 == (src, dst, primary, secondary, payload)
             ):
-                existing.request_attempts += 1
-                existing.retry_count = max(existing.retry_count, existing.request_attempts - 1)
+                if not attempt_precounted:
+                    existing.request_attempts += 1
+                    existing.retry_count = max(existing.retry_count, existing.request_attempts - 1)
                 if existing.op_label is None and pending_labels:
                     existing.op_label = pending_labels.pop(0)
+                active_exchange = existing
+                attempt_precounted = False
                 continue
             exchange = _TraceExchange(
                 seq=seq,
@@ -241,10 +268,13 @@ def _parse_enhanced_trace_lines(
             )
             exchange_by_seq[seq] = exchange
             exchanges_in_order.append(exchange)
+            active_exchange = exchange
+            attempt_precounted = False
             continue
 
         parsed_match = _PARSED_PROTO_RE.match(body)
         if parsed_match is not None:
+            session_init_pending = False
             seq = int(parsed_match.group("seq"), 10) + _seq_offset
             parsed, parsed_truncated = _parse_hex(
                 parsed_match.group("hex"),
@@ -260,6 +290,7 @@ def _parse_enhanced_trace_lines(
 
         recv_match = _RECV_NO_RESPONSE_RE.match(body)
         if recv_match is not None:
+            session_init_pending = False
             seq = int(recv_match.group("seq"), 10) + _seq_offset
             matched_exchange = exchange_by_seq.get(seq)
             if matched_exchange is not None and matched_exchange.response is None:
@@ -268,6 +299,7 @@ def _parse_enhanced_trace_lines(
 
         retry_match = _RETRY_RE.match(body)
         if retry_match is not None:
+            session_init_pending = False
             seq = int(retry_match.group("seq"), 10) + _seq_offset
             matched_exchange = exchange_by_seq.get(seq)
             if matched_exchange is not None:
@@ -276,6 +308,7 @@ def _parse_enhanced_trace_lines(
 
         local_nack_retry_match = _LOCAL_NACK_RETRY_RE.match(body)
         if local_nack_retry_match is not None:
+            session_init_pending = False
             seq = int(local_nack_retry_match.group("seq"), 10) + _seq_offset
             matched_exchange = exchange_by_seq.get(seq)
             if matched_exchange is not None:
@@ -283,15 +316,15 @@ def _parse_enhanced_trace_lines(
                 # NACK evidence. A later response, recovery, or REQUEST_FAILED
                 # marker remains authoritative.
                 matched_exchange.retry_kind = "local_nack_retry"
-                local_attempts = int(local_nack_retry_match.group("attempt"), 10) + 1
-                matched_exchange.request_attempts = max(
-                    matched_exchange.request_attempts, local_attempts
+                matched_exchange.request_attempts += 1
+                matched_exchange.retry_count = max(
+                    matched_exchange.retry_count, matched_exchange.request_attempts - 1
                 )
-                matched_exchange.retry_count = max(matched_exchange.retry_count, local_attempts - 1)
             continue
 
         recovery_match = _RECOVERY_RE.match(body)
         if recovery_match is not None:
+            session_init_pending = False
             session_recovery_pending = True
             seq = int(recovery_match.group("seq"), 10) + _seq_offset
             matched_exchange = exchange_by_seq.get(seq)
@@ -309,6 +342,7 @@ def _parse_enhanced_trace_lines(
 
         request_failed_match = _REQUEST_FAILED_RE.match(body)
         if request_failed_match is not None:
+            session_init_pending = False
             seq = int(request_failed_match.group("seq"), 10) + _seq_offset
             matched_exchange = exchange_by_seq.get(seq)
             if matched_exchange is not None:

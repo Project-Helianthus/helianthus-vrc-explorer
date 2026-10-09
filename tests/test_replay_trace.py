@@ -21,6 +21,8 @@ from helianthus_vrc_explorer.transport.base import (
     TransportTimeout,
 )
 from helianthus_vrc_explorer.transport.enhanced_tcp import (
+    _ENH_RES_RESETTED,
+    _ENH_RES_STARTED,
     EnhancedTcpConfig,
     EnhancedTcpTransport,
     _crc,
@@ -821,6 +823,145 @@ def test_replay_actual_enhanced_independent_repeated_selector_stays_separate(
 
     records = replay_trace_to_artifact(trace_path)["b524_operation_reads"]
     assert [record["response_raw_hex"] for record in records] == [first.hex(), second.hex()]
+    assert [record["request_attempts"] for record in records] == [1, 1]
+
+
+@pytest.mark.parametrize("terminal_failure", [False, True])
+def test_replay_actual_bus_read_reset_stays_in_logical_exchange(
+    tmp_path: Path, terminal_failure: bool
+) -> None:
+    trace_path = tmp_path / f"actual_bus_read_reset_{terminal_failure}.trace"
+    transport = _offline_enhanced_transport(trace_path)
+
+    def reopen_after_reset() -> None:
+        transport._ensure_trace_handle()
+        transport._trace("INIT features=0x01")
+
+    transport._open_session = reopen_after_reset
+    transport._recv_bus_symbol = lambda **kwargs: EnhancedTcpTransport._recv_bus_symbol(
+        transport, **kwargs
+    )
+    bus_messages = iter(
+        [
+            ("frame", _ENH_RES_RESETTED, 0x01),
+            ("data", 0xAA if terminal_failure else 0x00, 0),
+            *(([("data", 0xAA, 0)]) if terminal_failure else []),
+        ]
+    )
+    transport._read_message = lambda: next(bus_messages)
+    response = bytes.fromhex("0001020304050607")
+    response_symbols = iter((len(response), *response, _crc(bytes((len(response),)) + response)))
+    transport._recv_telegram_symbol = lambda **_kwargs: next(response_symbols)
+    payload = bytes.fromhex("0900000100")
+
+    if terminal_failure:
+        with pytest.raises(TransportProtocolFailure) as raised:
+            transport.send(0x15, payload)
+        assert (
+            raised.value.cause,
+            raised.value.request_attempts,
+            raised.value.retry_count,
+        ) == ("command_not_acknowledged_before_syn", 3, 2)
+    else:
+        assert transport.send(0x15, payload) == response
+    transport.close()
+
+    records = replay_trace_to_artifact(trace_path)["b524_operation_reads"]
+    assert len(records) == 1
+    assert records[0]["request_attempts"] == (3 if terminal_failure else 2)
+    assert records[0]["response_state"] == ("transport_error" if terminal_failure else "value")
+    if terminal_failure:
+        assert records[0]["transport_diagnostic"] == {
+            "cause": "command_not_acknowledged_before_syn",
+            "phase": "command_ack",
+            "request_attempts": 3,
+            "retry_count": 2,
+            "reconnect_attempts": 0,
+            "unexpected_symbol": "0xaa",
+        }
+
+
+@pytest.mark.parametrize("terminal_failure", [False, True])
+def test_replay_actual_arbitration_reset_stays_in_logical_exchange(
+    tmp_path: Path, terminal_failure: bool
+) -> None:
+    trace_path = tmp_path / f"actual_arbitration_reset_{terminal_failure}.trace"
+    transport = _offline_enhanced_transport(trace_path)
+    start_calls = 0
+
+    def reopen_after_reset() -> None:
+        transport._ensure_trace_handle()
+        transport._trace("INIT features=0x01")
+
+    def start_with_reset(initiator: int) -> None:
+        nonlocal start_calls
+        start_calls += 1
+        if start_calls == 1:
+            return
+        EnhancedTcpTransport._start_arbitration(transport, initiator)
+
+    transport._open_session = reopen_after_reset
+    transport._start_arbitration = start_with_reset
+    transport._send_enh_frame = lambda _command, _data: None
+    arbitration_messages = iter(
+        [
+            ("frame", _ENH_RES_RESETTED, 0x01),
+            ("frame", _ENH_RES_STARTED, transport._config.src),
+        ]
+    )
+    transport._read_message = lambda: next(arbitration_messages)
+    acknowledgements = iter((0xAA, 0xFF, 0xFF) if terminal_failure else (0xAA, 0x00))
+    transport._recv_bus_symbol = lambda **_kwargs: next(acknowledgements)
+    response = bytes.fromhex("0001020304050607")
+    response_symbols = iter((len(response), *response, _crc(bytes((len(response),)) + response)))
+    transport._recv_telegram_symbol = lambda **_kwargs: next(response_symbols)
+    payload = bytes.fromhex("0900000100")
+
+    if terminal_failure:
+        with pytest.raises(TransportNack):
+            transport.send(0x15, payload)
+    else:
+        assert transport.send(0x15, payload) == response
+    transport.close()
+
+    records = replay_trace_to_artifact(trace_path)["b524_operation_reads"]
+    assert len(records) == 1
+    assert records[0]["request_attempts"] == (4 if terminal_failure else 3)
+    assert records[0]["response_state"] == ("nack" if terminal_failure else "value")
+    if terminal_failure:
+        assert records[0]["transport_diagnostic"] == {
+            "cause": "nack",
+            "phase": "command_ack",
+            "request_attempts": 4,
+            "retry_count": 3,
+            "reconnect_attempts": 0,
+        }
+
+
+def test_replay_actual_independent_transport_sessions_stay_separate(tmp_path: Path) -> None:
+    trace_path = tmp_path / "actual_independent_sessions.trace"
+    payload = bytes.fromhex("0900000100")
+    responses = (
+        bytes.fromhex("0001020304050607"),
+        bytes.fromhex("08090a0b0c0d0e0f"),
+    )
+
+    for response in responses:
+        transport = _offline_enhanced_transport(trace_path)
+        transport._recv_bus_symbol = lambda **_kwargs: 0x00
+        response_symbols = iter(
+            (len(response), *response, _crc(bytes((len(response),)) + response))
+        )
+        transport._recv_telegram_symbol = lambda response_symbols=response_symbols, **_kwargs: next(
+            response_symbols
+        )
+        assert transport.send(0x15, payload) == response
+        transport.close()
+
+    records = replay_trace_to_artifact(trace_path)["b524_operation_reads"]
+    assert [record["response_raw_hex"] for record in records] == [
+        response.hex() for response in responses
+    ]
     assert [record["request_attempts"] for record in records] == [1, 1]
 
 
