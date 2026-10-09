@@ -103,11 +103,9 @@
         ]
       },
       "expected_requests": 100000
-    }
-  ],
-  "rejected": [
+    },
     {
-      "name": "request_limit_exceeded",
+      "name": "no_arbitrary_global_request_cap",
       "input": {
         "schema_version": 1,
         "groups": [
@@ -123,8 +121,10 @@
           }
         ]
       },
-      "error": "100000"
-    },
+      "expected_requests": 100002
+    }
+  ],
+  "rejected": [
     {
       "name": "write_operation",
       "input": {

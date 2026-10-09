@@ -20,8 +20,84 @@ from helianthus_vrc_explorer.cli import (
     app,
 )
 from helianthus_vrc_explorer.transport.base import TransportNack, TransportTimeout
+from helianthus_vrc_explorer.ui.scan_setup import ScanSetup
 
 _ROLE_TARGET_TOKEN = bytes.fromhex("736c617665").decode("ascii")
+
+
+@pytest.fixture(autouse=True)
+def _ui_owned_scan_and_browse_setup(monkeypatch: pytest.MonkeyPatch):
+    """Translate legacy test inputs into the visual setup seam.
+
+    Tests retain their scenario values while public command invocation exercises
+    only its adapter arguments and optional preset.
+    """
+    import helianthus_vrc_explorer.cli as cli
+
+    original_invoke = CliRunner.invoke
+
+    def wrapped(runner, cli_app, args=None, *extra, **kwargs):  # noqa: ANN001
+        argv = list(args or [])
+        if cli_app is not app or not argv or argv[0] not in {"scan", "browse"}:
+            return original_invoke(runner, cli_app, argv, *extra, **kwargs)
+        if "--help" in argv or "-h" in argv:
+            return original_invoke(runner, cli_app, argv, *extra, **kwargs)
+        if argv[0] == "browse":
+            selected = None
+            if "--file" in argv:
+                selected = Path(argv[argv.index("--file") + 1])
+            monkeypatch.setattr(cli, "run_artifact_open_modal", lambda: selected)
+            return original_invoke(runner, cli_app, ["browse"], *extra, **kwargs)
+
+        setup_values: dict[str, object] = {"preset": "recommended", "planner_ui": "disabled"}
+        public = ["scan"]
+        index = 1
+        value_options = {
+            "--dst": "dst",
+            "--output-dir": "output_dir",
+            "--ebusd-csv-path": "ebusd_csv_path",
+            "--myvaillant-map-path": "myvaillant_map_path",
+            "--trace-file": "trace_file",
+            "--planner-ui": "planner_ui",
+            "--b509-range": "b509_range",
+        }
+        adapter_options = {"--transport", "--host", "--port", "--source-address", "--preset"}
+        while index < len(argv):
+            option = argv[index]
+            if option in adapter_options:
+                public.extend((option, argv[index + 1]))
+                if option == "--preset":
+                    setup_values["preset"] = argv[index + 1]
+                index += 2
+            elif option in value_options:
+                field = value_options[option]
+                value = argv[index + 1]
+                if field in {"output_dir", "ebusd_csv_path", "myvaillant_map_path", "trace_file"}:
+                    value = Path(value)
+                if field == "b509_range":
+                    value = [value]
+                setup_values[field] = value
+                index += 2
+            elif option in {
+                "--dry-run",
+                "--b509-dump",
+                "--b555-dump",
+                "--b516-dump",
+                "--no-tips",
+                "--redact",
+            }:
+                setup_values[option[2:].replace("-", "_")] = True
+                index += 1
+            elif option.startswith("--no-"):
+                setup_values[option[5:].replace("-", "_")] = False
+                index += 1
+            else:
+                index += 1
+        selected = ScanSetup(**setup_values)
+        monkeypatch.setattr(cli, "_collect_scan_setup", lambda _preset, _transport: selected)
+        return original_invoke(runner, cli_app, public, *extra, **kwargs)
+
+    monkeypatch.setattr(CliRunner, "invoke", wrapped)
 
 
 def test_version_prints_version() -> None:
@@ -36,11 +112,10 @@ def test_scan_command_is_present() -> None:
     result = runner.invoke(app, ["scan", "--help"])
     assert result.exit_code == 0
     plain = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", result.stdout)
-    assert "planner-ui" in plain
-    assert "preset" in plain
-    assert "no-tips" in plain
-    assert "disabled" in plain
-    assert "auto" in plain
+    for option in ("--transport", "--host", "--port", "--source-address", "--preset"):
+        assert option in plain
+    for removed in ("planner-ui", "no-tips", "--dst", "--dry-run", "--output-dir"):
+        assert removed not in plain
 
 
 def test_scan_invalid_dst_fails_before_transport_setup(monkeypatch) -> None:
@@ -608,7 +683,7 @@ def test_scan_cli_b509_range_requires_b509_dump(tmp_path: Path) -> None:
     )
 
     assert result.exit_code == 2
-    assert "--b509-range requires --b509-dump." in result.stderr
+    assert "B509 ranges require enabling the B509 dump in scan setup." in result.stderr
 
 
 def test_scan_cli_b509_range_requires_b509_dump_in_dry_run(tmp_path: Path) -> None:
@@ -626,7 +701,7 @@ def test_scan_cli_b509_range_requires_b509_dump_in_dry_run(tmp_path: Path) -> No
     )
 
     assert result.exit_code == 2
-    assert "--b509-range requires --b509-dump." in result.stderr
+    assert "B509 ranges require enabling the B509 dump in scan setup." in result.stderr
 
 
 def test_scan_cli_passes_b509_dump_and_ranges(monkeypatch, tmp_path: Path) -> None:
@@ -856,19 +931,19 @@ def test_browse_command_is_present() -> None:
     result = runner.invoke(app, ["browse", "--help"])
     assert result.exit_code == 0
     plain = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", result.stdout)
-    assert "--file" in plain
-    assert "--live" in plain
-    assert "--allow-write" in plain
+    assert "--file" not in plain
+    assert "--live" not in plain
+    assert "--allow-write" not in plain
 
 
 def test_browse_requires_file_when_not_live() -> None:
     runner = CliRunner()
     result = runner.invoke(app, ["browse"])
     assert result.exit_code == 2
-    assert "Missing required option: --file <artifact.json>." in result.stderr
+    assert "Browse requires a TTY for the visual file-open dialog." in result.stderr
 
 
-def test_browse_non_tty_falls_back_to_summary(tmp_path: Path) -> None:
+def test_browse_non_tty_requires_visual_file_open_dialog(tmp_path: Path) -> None:
     artifact_path = tmp_path / "artifact.json"
     artifact_path.write_text(
         json.dumps(
@@ -884,9 +959,9 @@ def test_browse_non_tty_falls_back_to_summary(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["browse", "--file", str(artifact_path)])
-    assert result.exit_code == 0
-    assert "Browse UI requires a TTY terminal." in result.stderr
+    result = runner.invoke(app, ["browse"])
+    assert result.exit_code == 2
+    assert "Browse requires a TTY for the visual file-open dialog." in result.stderr
 
 
 def test_scan_dry_run_writes_scan_artifact(tmp_path: Path) -> None:

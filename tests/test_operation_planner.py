@@ -1,6 +1,11 @@
+import pytest
+
 from helianthus_vrc_explorer.scanner.b524_operation_reads import parse_operation_read_plan
 from helianthus_vrc_explorer.ui.operation_planner import (
+    append_exact_operation_request,
     operation_planner_rows,
+    operation_request_preview,
+    parse_operation_request_spec,
     replace_event_day_codes,
 )
 
@@ -106,3 +111,22 @@ def test_code_edit_preserves_disabled_program_and_exact_other_selectors() -> Non
     assert len(requests) == 6
     assert requests[2:] == other
     assert selection == [False, False, True, True, True, True]
+
+
+def test_planner_adds_exact_read_rows_without_argv_and_preserves_vrc700_guards() -> None:
+    timer = parse_operation_request_spec(
+        "ReadTimer channel=zone-heating instance=0x01 weekday=0x02"
+    )
+    assert timer.requires_vrc700 is True
+    assert timer.selector == {"channel": "zone-heating", "instance": 1, "weekday": 2}
+    assert "OP03 ReadTimer" in operation_request_preview(timer)
+    assert f"payload={timer.payload.hex()}" in operation_request_preview(timer)
+
+    requests: list[object] = []
+    selection: list[bool] = []
+    request = append_exact_operation_request(requests, selection, "ReadVR91")
+    assert request.requires_vrc700 is True
+    assert requests == [request]
+    assert selection == [True]
+    with pytest.raises(ValueError, match="duplicates"):
+        append_exact_operation_request(requests, selection, "ReadVR91")

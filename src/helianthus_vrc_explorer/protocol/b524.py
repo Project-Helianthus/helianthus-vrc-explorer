@@ -282,3 +282,34 @@ def build_register_read_payload(
     return bytes((opcode, 0x00, group, instance)) + register.to_bytes(
         2, byteorder="little", signed=False
     )
+
+
+def build_register_write_payload(
+    opcode: RegisterOpcode,
+    group: int,
+    instance: int,
+    register: int,
+    value_payload: bytes,
+) -> bytes:
+    """Build one scalar B524 register write using native OT=0x01.
+
+    The value is already encoded by the caller's qualified type codec.  This
+    function owns only the exact native selector and never guesses an alternate
+    OP, group, instance, or register.
+    """
+
+    if opcode not in (0x02, 0x06):
+        raise ValueError(f"opcode must be 0x02 or 0x06, got 0x{opcode:02X}")
+    _validate_u8("group", group)
+    _validate_u8("instance", instance)
+    _validate_u16("register", register)
+    if not isinstance(value_payload, (bytes, bytearray, memoryview)):
+        raise TypeError(f"value_payload must be bytes-like, got {type(value_payload).__name__}")
+    value = bytes(value_payload)
+    if not value:
+        raise ValueError("value_payload must not be empty")
+    return (
+        bytes((opcode, 0x01, group, instance))
+        + register.to_bytes(2, byteorder="little", signed=False)
+        + value
+    )

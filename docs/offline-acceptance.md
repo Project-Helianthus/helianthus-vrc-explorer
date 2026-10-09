@@ -98,32 +98,20 @@ mkdir -p "$OUTPUT_DIR"
   cd "$VRC_ACCEPTANCE_DIR"
   "$RUNNER" -m helianthus_vrc_explorer --version \
     > "$OUTPUT_DIR/version.stdout" 2> "$OUTPUT_DIR/version.stderr"
-  "$RUNNER" -m helianthus_vrc_explorer scan --dry-run --dst 0x15 --output-dir "$OUTPUT_DIR" \
-    > "$OUTPUT_DIR/scan.stdout" 2> "$OUTPUT_DIR/scan.stderr"
 )
 
 test "$(wc -l < "$OUTPUT_DIR/version.stdout")" -eq 1
 test ! -s "$OUTPUT_DIR/version.stderr"
 EXPECTED_VERSION="$("$RUNNER" -c 'from helianthus_vrc_explorer import __version__; print(f"helianthus-vrc-explorer {__version__}")')"
 test "$(< "$OUTPUT_DIR/version.stdout")" = "$EXPECTED_VERSION"
-test "$(wc -l < "$OUTPUT_DIR/scan.stdout")" -eq 1
-ARTIFACT="$(< "$OUTPUT_DIR/scan.stdout")"
-test -s "$ARTIFACT"
-test -s "${ARTIFACT%.json}.html"
-"$RUNNER" - "$ARTIFACT" <<'PY'
-import json
-import sys
-
-artifact = json.loads(open(sys.argv[1], encoding="utf-8").read())
-assert artifact["schema_version"] == "2.3"
-assert isinstance(artifact.get("operations", {}).get("0x02"), dict)
-PY
 ```
 
-Pass when `--version` emits one `helianthus-vrc-explorer <version>` line and exits zero, `scan` exits
-zero, and `scan.stdout` contains exactly one line: the absolute JSON artifact path. Progress and the
-scan summary belong on stderr. The JSON and matching HTML report must exist, and the artifact must
-retain its schema version and opcode-keyed operation.
+Pass the version check above, then run `scan` in an interactive terminal. In
+the startup modal, select the bundled offline fixture, choose an output
+directory, review the preset description, and continue. Confirm that the UI
+creates a JSON artifact and matching HTML report, and that the artifact retains
+schema version `2.3` with an opcode-keyed `operations.0x02` object. The modal
+owns this scan configuration; a non-interactive command does not replace it.
 
 The deterministic evidence checker first verifies the original synthetic JSON fixture. It requires its
 root schema version, separate operation/group/instance/register paths, retained known-good raw
@@ -134,39 +122,24 @@ copy to confirm compatibility without a register-count change. It rejects field 
 `0x02`/`0x06` collapse. The fixture is explicitly synthetic and offline; it is not a capture or
 hardware proof.
 
-Replay that checked-in fixture through the same installed CLI as additional scriptability evidence.
-In a non-TTY environment, `browse` prints its summary to stderr and exits zero after reporting that
-the fullscreen UI needs a TTY.
+Replay that checked-in fixture through the same installed CLI as additional
+scriptability evidence. Browse artifacts in an interactive terminal through
+the visual artifact picker; browse no longer accepts an artifact path as an
+argument.
 
-```bash
-set -euo pipefail
-"$RUNNER" -m helianthus_vrc_explorer browse --file fixtures/offline_acceptance_evidence.json \
-  > "$OUTPUT_DIR/evidence.stdout" 2> "$OUTPUT_DIR/evidence.stderr"
-"$RUNNER" -m helianthus_vrc_explorer browse --file fixtures/demo_browse.json \
-  > "$OUTPUT_DIR/demo.stdout" 2> "$OUTPUT_DIR/demo.stderr"
-
-test ! -s "$OUTPUT_DIR/evidence.stdout"
-test ! -s "$OUTPUT_DIR/demo.stdout"
-rg -F 'Local Devices (0x02)' "$OUTPUT_DIR/evidence.stderr"
-rg -F 'Remote Devices (0x06)' "$OUTPUT_DIR/evidence.stderr"
-rg -F 'Unknown 0x69' "$OUTPUT_DIR/evidence.stderr"
-rg -F 'groups: 0x69' "$OUTPUT_DIR/evidence.stderr"
-rg -F 'Browse UI requires a TTY terminal.' "$OUTPUT_DIR/evidence.stderr"
-rg -F 'Local Devices (0x02)' "$OUTPUT_DIR/demo.stderr"
-```
-
-Pass when both commands exit zero. The JSON-level checker is the required evidence for the separate
+In the picker, open `fixtures/offline_acceptance_evidence.json` and
+`fixtures/demo_browse.json`. Confirm the local and remote operation labels and
+the `Unknown 0x69` evidence in the Browser. The JSON-level checker is the
+required evidence for the separate
 `0x02` and `0x06` paths, raw payloads, response states, errors, incomplete metadata, and unknown
-group provenance; the browse summary is additional evidence that the installed non-TTY CLI retains
-the unknown-group label and remains scriptable. `demo_browse.json` must remain readable as a
-local-operation artifact.
+group provenance. `demo_browse.json` must remain readable as a local-operation artifact.
 
 ## Failure and hardware boundary
 
-Any nonzero exit, missing JSON or HTML output, more than one stdout line from the dry run, changed
-generated model CSV, absent packaged resource, failed JSON-level evidence check, or missing
-local/remote operation labels is a failure. Investigate it with a focused regression test before
-changing behavior.
+Any nonzero exit, missing JSON or HTML output, changed generated model CSV,
+absent packaged resource, failed JSON-level evidence check, or missing
+local/remote operation labels is a failure. Investigate it with a focused
+regression test before changing behavior.
 
 This acceptance card does not validate live discovery, transport timing, controller behavior, or
 device writes. Those require an explicit operator-approved hardware procedure; do not use these

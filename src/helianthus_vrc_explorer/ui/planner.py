@@ -28,6 +28,12 @@ from ..scanner.scan_policy import (
     research_rr_max,
     validate_scalar_request_limit,
 )
+from .planner_selection import (
+    DescriptionPolicySelection,
+    PlannerSelection,
+    default_description_policy,
+    make_planner_selection,
+)
 from .system_information import format_system_information_rows
 
 
@@ -378,6 +384,7 @@ def _render_table(
     unknown: bool,
     console: Console,
     system_information: Sequence[Mapping[str, object]] | None = None,
+    description_policy: DescriptionPolicySelection | None = None,
 ) -> None:
     if not rows:
         return
@@ -390,6 +397,7 @@ def _render_table(
         table.add_column("II range", style="dim", justify="right", no_wrap=True)
         table.add_column("Instances", style="dim", justify="right", no_wrap=True)
         table.add_column("RR_max", style="magenta", justify="right", no_wrap=True)
+        table.add_column("Descriptions", style="dim", no_wrap=True)
         for g in namespace_rows:
             if g.ii_max is None:
                 instances = "singleton"
@@ -412,6 +420,12 @@ def _render_table(
                 format_planner_instance_bounds(g),
                 instances,
                 rr_max,
+                (
+                    f"{description_policy.for_opcode(g.opcode)}"
+                    + (" (override)" if description_policy.overridden_for_opcode(g.opcode) else "")
+                    if description_policy is not None
+                    else "profile"
+                ),
             )
         console.print(table)
 
@@ -623,14 +637,19 @@ def _prompt_operation_selection(
     operation_selection: list[bool],
 ) -> None:
     """Select complete Event programs, preserving every underlying selector."""
-    from .operation_planner import operation_planner_rows, replace_event_day_codes
+    from .operation_planner import (
+        append_exact_operation_request,
+        operation_planner_rows,
+        operation_request_preview,
+        replace_event_day_codes,
+    )
 
-    if not operation_requests:
-        return
     if len(operation_selection) != len(operation_requests):
         raise ValueError("operation_selection must match operation_requests")
+    if not operation_requests and not isinstance(operation_requests, list):
+        return
     rows = operation_planner_rows(operation_requests)
-    table = Table(title="Events and Schedules (B524)")
+    table = Table(title="Exact B524 operation reads")
     table.add_column("On")
     table.add_column("Request")
     for index, row in enumerate(rows, start=1):
@@ -642,7 +661,7 @@ def _prompt_operation_selection(
     while True:
         raw = (
             Prompt.ask(
-                "Programs: all, none, indexes, or codes N <raw range>",
+                "Operations: keep, all, none, indexes, codes N <range>, or add <exact read>",
                 default="keep",
                 console=console,
             )
@@ -657,6 +676,19 @@ def _prompt_operation_selection(
         if raw in {"none", "off"}:
             operation_selection[:] = [False] * len(operation_requests)
             return
+        if raw.startswith("add "):
+            try:
+                if not isinstance(operation_requests, list):
+                    raise ValueError("Operation list is not editable")
+                request = append_exact_operation_request(
+                    operation_requests, operation_selection, raw[4:]
+                )
+            except ValueError as exc:
+                console.print(f"[red]Invalid operation request:[/red] {exc}")
+            else:
+                rows = operation_planner_rows(operation_requests)
+                console.print(operation_request_preview(request))
+            continue
         if raw.startswith("codes "):
             try:
                 _command, index_text, code_text = raw.split(maxsplit=2)
@@ -701,18 +733,33 @@ def prompt_scan_plan(
     system_information: Sequence[Mapping[str, object]] | None = None,
     operation_requests: Sequence[object] | None = None,
     operation_selection: list[bool] | None = None,
-) -> dict[PlanKey, GroupScanPlan]:
+    description_policy: DescriptionPolicySelection | None = None,
+    description_profile_status: str = "exact",
+) -> PlannerSelection:
     """Prompt for a scan plan in interactive TTY mode.
 
     Returns a dict mapping (GG, opcode) -> GroupScanPlan.
     """
 
     requests = operation_requests or ()
+    mutable_operation_selection = (
+        operation_selection if operation_selection is not None else [True] * len(requests)
+    )
+    selected_preset = default_preset
+    policy = description_policy or default_description_policy(
+        default_preset, exact_profile_known=description_profile_status == "exact"
+    )
     if operation_selection is not None:
         _prompt_operation_selection(console, requests, operation_selection)
     eligible = {g.key: g for g in groups}
     if not eligible:
-        return {}
+        return make_planner_selection(
+            {},
+            selected_preset=selected_preset,
+            operation_requests=requests,
+            operation_selection=mutable_operation_selection,
+            description_policy=policy,
+        )
     eligible_groups: dict[int, list[PlannerGroup]] = {}
     for group in groups:
         eligible_groups.setdefault(group.group, []).append(group)
@@ -730,6 +777,12 @@ def prompt_scan_plan(
             style="dim",
         )
     )
+    if description_profile_status != "exact":
+        console.print(
+            "[yellow]Unknown description profile.[/yellow] Full scans live writable "
+            "descriptions within the shown scope. Save and share the JSON manually if useful; "
+            "nothing is uploaded automatically."
+        )
     _render_system_information(console, system_information)
 
     known_groups = sorted([g for g in groups if g.known], key=lambda x: (x.group, x.opcode))
@@ -743,6 +796,7 @@ def prompt_scan_plan(
         unknown=False,
         console=console,
         system_information=system_information,
+        description_policy=policy,
     )
     _render_table(
         "Unknown Groups (Disabled By Default)",
@@ -750,6 +804,7 @@ def prompt_scan_plan(
         unknown=True,
         console=console,
         system_information=system_information,
+        description_policy=policy,
     )
 
     _print_estimate(
@@ -762,9 +817,27 @@ def prompt_scan_plan(
     if not _ask_yes_no(console, "Customize scan plan?", default=False):
         if not _ask_yes_no(console, "Proceed with register scan?", default=True):
             raise KeyboardInterrupt
-        return default_selected_plan
+        return make_planner_selection(
+            default_selected_plan,
+            selected_preset=selected_preset,
+            operation_requests=requests,
+            operation_selection=mutable_operation_selection,
+            description_policy=policy,
+        )
 
     preset = _ask_preset(console, default_preset=default_preset)
+    selected_preset = preset
+    preset_policy = default_description_policy(
+        preset, exact_profile_known=description_profile_status == "exact"
+    )
+    policy = DescriptionPolicySelection(
+        local=policy.local if policy.local_override else preset_policy.local,
+        remote=policy.remote if policy.remote_override else preset_policy.remote,
+        local_override=policy.local_override,
+        remote_override=policy.remote_override,
+    )
+    if description_policy is not None:
+        policy = _prompt_description_policy(console, policy)
     if preset == "custom":
         # An explicit incoming plan is already operator-selected, including
         # unqualified native routes. Ask for an RR scope only when a new route
@@ -882,4 +955,44 @@ def prompt_scan_plan(
     if not _ask_yes_no(console, "Proceed with register scan?", default=True):
         raise KeyboardInterrupt
 
-    return selected_plan
+    return make_planner_selection(
+        selected_plan,
+        selected_preset=selected_preset,
+        operation_requests=requests,
+        operation_selection=mutable_operation_selection,
+        description_policy=policy,
+    )
+
+
+def _prompt_description_policy(
+    console: Console, policy: DescriptionPolicySelection
+) -> DescriptionPolicySelection:
+    """Allow independent local/remote source overrides in the classic planner."""
+
+    console.print(f"[dim]Description sources:[/dim] local={policy.local}, remote={policy.remote}")
+    while True:
+        raw = (
+            Prompt.ask(
+                "Description override (keep, local=profile|live, remote=profile|live)",
+                default="keep",
+                console=console,
+            )
+            .strip()
+            .lower()
+        )
+        if raw in {"", "keep", "k"}:
+            return policy
+        updated = policy
+        try:
+            for token in raw.replace(",", " ").split():
+                device_class, source = token.split("=", 1)
+                if device_class not in {"local", "remote"} or source not in {
+                    "profile",
+                    "live",
+                }:
+                    raise ValueError
+                updated = updated.with_override(device_class, source)  # type: ignore[arg-type]
+        except ValueError:
+            console.print("[red]Use keep or local/remote=profile/live.[/red]")
+            continue
+        return updated

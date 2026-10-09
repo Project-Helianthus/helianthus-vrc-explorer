@@ -54,6 +54,7 @@ class RegisterEntry(TypedDict):
     availability_qualification: NotRequired[str]
     candidate_name: NotRequired[str]
     candidate_evidence: NotRequired[str]
+    codec_evidence: NotRequired[dict[str, object]]
     flags: int | None
     # Profile-scoped attribute hints; never role or persistence semantics.
     reply_kind: str | None
@@ -157,6 +158,7 @@ def namespace_availability_contract(
     *,
     group: int,
     opcode: RegisterOpcode,
+    presence_profile: str | None = None,
 ) -> NamespaceAvailabilityContract:
     """Return the explicit availability contract for a namespace.
 
@@ -181,14 +183,23 @@ def namespace_availability_contract(
         )
 
     if group == 0x02 and opcode == 0x02:
+        basv2_native = presence_profile == "basv2_sw0507_hw1704_api1"
         return NamespaceAvailabilityContract(
             source="heuristic_probe",
             namespace_relationship=relationship,
             probe_register=0x0002,
             probe_type_hint="UIN",
-            positive_when=("decoded RR=0x0002 is non-sentinel and either nonzero or FLAGS=0x03"),
+            positive_when=(
+                "decoded RR=0x0002 is non-sentinel and nonzero"
+                if basv2_native
+                else "decoded RR=0x0002 is non-sentinel and either nonzero or FLAGS=0x03"
+            ),
             description=(
-                "In the characterized controller profile, a non-sentinel nonzero "
+                "For BASV2/SW0507, native II00 and II01 are ordinary circuit slots; "
+                "a zero RR=0x0002 is inactive even when visible. II09 is qualified "
+                "separately as the virtual DHW slot."
+                if basv2_native
+                else "In the characterized controller profile, a non-sentinel nonzero "
                 "RR=0x0002 value or a zero value with active visible FLAGS=0x03 "
                 "retains the local circuit slot. FLAGS=0x02 with zero does not."
             ),
@@ -765,13 +776,16 @@ def probe_instance_availability(
     instance: int,
     *,
     opcode: RegisterOpcode | None = None,
+    presence_profile: str | None = None,
 ) -> InstanceAvailabilityProbe:
     """Probe one instance slot and retain the evidence used for presence."""
 
     if opcode is None:
         opcode = opcodes_for_group(group)[0]
 
-    contract = namespace_availability_contract(group=group, opcode=opcode)
+    contract = namespace_availability_contract(
+        group=group, opcode=opcode, presence_profile=presence_profile
+    )
     if contract.source == "always_present":
         return InstanceAvailabilityProbe(present=True, contract=contract, evidence=None)
 
@@ -844,7 +858,13 @@ def probe_instance_availability(
                 isinstance(value, int)
                 and not isinstance(value, bool)
                 and value != 0xFFFF
-                and (value != 0x0000 or entry.get("flags") == 0x03)
+                and (
+                    value != 0x0000
+                    or (
+                        presence_profile != "basv2_sw0507_hw1704_api1"
+                        and entry.get("flags") == 0x03
+                    )
+                )
             )
         return InstanceAvailabilityProbe(present=present, contract=contract, evidence=entry)
 

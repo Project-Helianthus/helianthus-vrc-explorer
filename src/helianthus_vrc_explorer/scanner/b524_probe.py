@@ -326,6 +326,7 @@ def _probe_present_instances(
     capacity: int | None = None,
     stop_at_first_absence: bool = False,
     on_probe: Any = None,
+    presence_profile: str | None = None,
 ) -> dict[int, InstanceAvailabilityProbe]:
     probes: dict[int, InstanceAvailabilityProbe] = {}
     present_count = 0
@@ -333,7 +334,13 @@ def _probe_present_instances(
         # A qualified zero count or capacity avoids ordinary default-slot probes.
         # The circuit's independent virtual DHW slot still needs a probe.
         return probes
-    first_ii = 1 if opcode == 6 or (opcode == 2 and group == 2) else 0
+    first_ii = (
+        0
+        if presence_profile == "basv2_sw0507_hw1704_api1" and (opcode, group) == (2, 2)
+        else 1
+        if opcode == 6 or (opcode == 2 and group == 2)
+        else 0
+    )
     ordinary_ii_max = ii_max
     if capacity == 0:
         if (opcode, group) != (0x02, 0x02):
@@ -343,13 +350,15 @@ def _probe_present_instances(
     for ii in range(first_ii, ordinary_ii_max + 1):
         if observer is not None:
             observer.status(f"Probe presence GG=0x{group:02X} OP={_hex_u8(opcode)} II=0x{ii:02X}")
-        probe = probe_instance_availability_fn(
-            transport,
-            dst=dst,
-            group=group,
-            instance=ii,
-            opcode=opcode,
-        )
+        probe_kwargs: dict[str, Any] = {
+            "dst": dst,
+            "group": group,
+            "instance": ii,
+            "opcode": opcode,
+        }
+        if presence_profile is not None:
+            probe_kwargs["presence_profile"] = presence_profile
+        probe = probe_instance_availability_fn(transport, **probe_kwargs)
         probes[ii] = probe
         if on_probe is not None:
             on_probe(ii, probe)
@@ -379,13 +388,15 @@ def _probe_present_instances(
         and virtual_instance <= ii_max
         and virtual_instance not in probes
     ):
-        probe = probe_instance_availability_fn(
-            transport,
-            dst=dst,
-            group=group,
-            instance=virtual_instance,
-            opcode=opcode,
-        )
+        probe_kwargs = {
+            "dst": dst,
+            "group": group,
+            "instance": virtual_instance,
+            "opcode": opcode,
+        }
+        if presence_profile is not None:
+            probe_kwargs["presence_profile"] = presence_profile
+        probe = probe_instance_availability_fn(transport, **probe_kwargs)
         probes[virtual_instance] = probe
         if on_probe is not None:
             on_probe(virtual_instance, probe)

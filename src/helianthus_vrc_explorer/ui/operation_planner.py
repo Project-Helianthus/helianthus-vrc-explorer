@@ -6,6 +6,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import cast
 
+from ..scanner.plan import parse_int_token
+
 
 def raw_code_range(codes: Sequence[int]) -> str:
     values = sorted(set(codes))
@@ -133,3 +135,57 @@ def replace_event_day_codes(
         *([enabled] * len(replacements)),
         *retained_selection[first:],
     ]
+
+
+def parse_operation_request_spec(spec: str) -> object:
+    """Build one exact typed read request from planner text, without argv state."""
+
+    from ..scanner.b524_operation_reads import parse_operation_read_plan
+
+    tokens = spec.strip().split()
+    if not tokens:
+        raise ValueError("Operation request is empty")
+    request: dict[str, object] = {"operation": tokens[0]}
+    for token in tokens[1:]:
+        if "=" not in token:
+            raise ValueError("Operation selectors must use key=value")
+        key, value = token.split("=", 1)
+        if not key or key in request:
+            raise ValueError(f"Duplicate or empty selector: {key or token}")
+        request[key] = value if key in {"channel", "profile"} else parse_int_token(value)
+    return parse_operation_read_plan({"schema_version": 1, "requests": [request]})[0]
+
+
+def operation_request_preview(request: object) -> str:
+    """Return exact operation, native selector and payload for planner review."""
+
+    operation = str(getattr(request, "operation", "operation"))
+    opcode = getattr(request, "opcode", None)
+    selector = getattr(request, "selector", {})
+    payload = getattr(request, "payload", b"")
+    opcode_text = f"OP{opcode:02X}" if isinstance(opcode, int) else "OP?"
+    selector_text = (
+        " ".join(f"{key}={value}" for key, value in selector.items())
+        if isinstance(selector, Mapping)
+        else ""
+    )
+    payload_text = payload.hex() if isinstance(payload, bytes) else "?"
+    return " ".join(
+        part for part in (opcode_text, operation, selector_text, f"payload={payload_text}") if part
+    )
+
+
+def append_exact_operation_request(
+    requests: list[object], selection: list[bool], spec: str
+) -> object:
+    """Append one finite exact request, retaining parser and VRC700 guards."""
+
+    if len(requests) != len(selection):
+        raise ValueError("operation_selection must match operation_requests")
+    request = parse_operation_request_spec(spec)
+    payload = getattr(request, "payload", None)
+    if any(getattr(existing, "payload", None) == payload for existing in requests):
+        raise ValueError("Operation request duplicates an existing native payload")
+    requests.append(request)
+    selection.append(True)
+    return request

@@ -106,7 +106,9 @@ def test_value_label_catalog_is_exact_and_operation_scoped() -> None:
 
     assert b524_value_label(opcode=0x02, group=0x09, register=0x0002, value=99) is None
     assert b524_value_label(opcode=0x06, group=0x09, register=0x0002, value=2) is None
-    assert b524_value_label(opcode=0x02, group=0x02, register=0x0002, value=2) is None
+    circuit = b524_value_label(opcode=0x02, group=0x02, register=0x0002, value=2)
+    assert circuit is not None and circuit.label == "FIXED_VALUE_OR_POOL"
+    assert b524_value_label(opcode=0x06, group=0x02, register=0x0002, value=2) is None
 
 
 def test_scan_annotations_are_scoped_and_preserve_raw_unknown_values() -> None:
@@ -135,7 +137,7 @@ def test_scan_annotations_are_scoped_and_preserve_raw_unknown_values() -> None:
     assert "value_display" not in remote["0x0002"]
     assert "value_display" not in remote["0x0004"]
     assert unrelated["0x0002"]["enum_resolved_name"] == "FIXED_VALUE"
-    assert "value_label_qualification" not in unrelated["0x0002"]
+    assert unrelated["0x0002"]["value_label_qualification"] == "candidate_unqualified"
 
 
 def test_replay_artifact_applies_only_the_local_ventilation_label(tmp_path: Path) -> None:
@@ -182,7 +184,7 @@ def test_browser_hydrates_ventilation_labels_without_namespace_bleed() -> None:
     assert rows[("0x02", "0x09", "0x00", "0x0004")].value_text == "10 (SYSTEM_OFF)"
     assert rows[("0x02", "0x09", "0x01", "0x0002")].value_text == "99"
     assert rows[("0x06", "0x09", "0x00", "0x0002")].value_text == "2"
-    assert rows[("0x02", "0x02", "0x00", "0x0002")].value_text == "2"
+    assert rows[("0x02", "0x02", "0x00", "0x0002")].value_text == "2 (FIXED_VALUE_OR_POOL)"
 
 
 def test_html_embeds_ventilation_labels_without_namespace_bleed() -> None:
@@ -200,7 +202,7 @@ def test_html_embeds_ventilation_labels_without_namespace_bleed() -> None:
     assert local["0x0004"]["value_display"] == "10 (SYSTEM_OFF)"
     assert "value_label_qualification=${entry.value_label_qualification}" in html
     assert "value_display" not in remote["0x0002"]
-    assert "value_display" not in unrelated["0x0002"]
+    assert unrelated["0x0002"]["value_display"] == "2 (FIXED_VALUE_OR_POOL)"
 
 
 def test_html_dom_prefers_label_until_user_explicitly_overrides_codec() -> None:

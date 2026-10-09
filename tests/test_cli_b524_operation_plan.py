@@ -1,11 +1,15 @@
-import json
-import re
-from contextlib import contextmanager
-from pathlib import Path
+from __future__ import annotations
 
+from contextlib import contextmanager
+
+import pytest
+from tests.scan_ui_helpers import invoke_scan
 from typer.testing import CliRunner
 
-from helianthus_vrc_explorer.cli import app
+from helianthus_vrc_explorer.scanner.b524_operation_reads import (
+    parse_operation_read_plan,
+)
+from helianthus_vrc_explorer.ui.scan_setup import ScanSetup
 
 
 def test_normal_scan_passes_resolved_identity_for_automatic_event_policy(
@@ -46,9 +50,11 @@ def test_normal_scan_passes_resolved_identity_for_automatic_event_policy(
     monkeypatch.setattr(cli, "make_scan_observer", observer)
     monkeypatch.setattr(cli, "scan_vrc", scan_vrc)
 
-    result = CliRunner().invoke(
-        app,
-        ["scan", "--dst", "0x15", "--output-dir", str(tmp_path)],
+    result = invoke_scan(
+        CliRunner(),
+        monkeypatch,
+        ["--preset", "recommended"],
+        setup=ScanSetup(dst="0x15", output_dir=tmp_path),
     )
 
     assert result.exit_code == 0, result.output
@@ -56,107 +62,35 @@ def test_normal_scan_passes_resolved_identity_for_automatic_event_policy(
     assert "operation_requests" not in captured
 
 
-def test_read_plan_help_describes_optional_override() -> None:
-    result = CliRunner().invoke(app, ["scan", "--help"], env={"COLUMNS": "120", "LINES": "60"})
-    assert result.exit_code == 0
-    help_text = re.sub(r"\x1B\[[0-?]*[ -/]*[@-~]", "", result.stdout)
-    assert "--b524-read-plan" in help_text
-    assert "Optional" in help_text and "explicit JSON" in help_text
-    assert "normal scans" in help_text and "bounded" in help_text
-
-
-def test_operation_plan_preview_validates_and_encodes_without_transport(tmp_path, monkeypatch):
-    import helianthus_vrc_explorer.cli as cli
-
-    def unexpected_transport(*args, **kwargs):
-        raise AssertionError("offline preview opened transport")
-
-    monkeypatch.setattr(cli, "_build_transport", unexpected_transport)
-    path = tmp_path / "reads.json"
-    path.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "requests": [
-                    {
-                        "operation": "GetEvent",
-                        "profile": "zone",
-                        "instance": 2,
-                        "address": 1,
-                        "weekday_code": 255,
-                    },
-                    {"operation": "ReadTimer", "channel": "dhw", "instance": 0, "weekday": 6},
-                ],
-            }
-        )
+def test_internal_operation_plan_parser_encodes_offline_requests() -> None:
+    requests = parse_operation_read_plan(
+        {
+            "schema_version": 1,
+            "requests": [
+                {
+                    "operation": "GetEvent",
+                    "profile": "zone",
+                    "instance": 2,
+                    "address": 1,
+                    "weekday_code": 255,
+                },
+                {"operation": "ReadTimer", "channel": "dhw", "instance": 0, "weekday": 6},
+            ],
+        }
     )
-    result = CliRunner().invoke(app, ["scan", "--b524-read-plan", str(path), "--preview-read-plan"])
-    assert result.exit_code == 0, result.output
-    preview = json.loads(result.stdout)
-    assert preview["live_send"] is False
-    assert [row["payload_hex"] for row in preview["requests"]] == ["09030201ff", "0301000106"]
+
+    assert [request.payload.hex() for request in requests] == [
+        "09030201ff",
+        "0301000106",
+    ]
+    assert [request.operation for request in requests] == ["GetEvent", "ReadTimer"]
 
 
-def test_operation_plan_rejects_writes_before_transport(tmp_path, monkeypatch):
-    import helianthus_vrc_explorer.cli as cli
-
-    monkeypatch.setattr(cli, "_build_transport", lambda *args, **kwargs: 1 / 0)
-    path = tmp_path / "writes.json"
-    path.write_text(json.dumps({"schema_version": 1, "requests": [{"operation": "SetEvent"}]}))
-    result = CliRunner().invoke(app, ["scan", "--b524-read-plan", str(path)])
-    assert result.exit_code == 2, result.output
-    assert "Invalid B524 operation read plan" in result.output
+def test_internal_operation_plan_parser_rejects_event_writes() -> None:
+    with pytest.raises(ValueError, match="unsupported"):
+        parse_operation_read_plan({"schema_version": 1, "requests": [{"operation": "SetEvent"}]})
 
 
-def test_operation_preview_requires_explicit_plan_without_transport(monkeypatch):
-    import helianthus_vrc_explorer.cli as cli
-
-    monkeypatch.setattr(cli, "_build_transport", lambda *args, **kwargs: 1 / 0)
-    result = CliRunner().invoke(app, ["scan", "--preview-read-plan"])
-    assert result.exit_code == 2
-    assert "requires --b524-read-plan" in result.output
-
-
-def test_bundled_dry_run_operation_plan_keeps_missing_responses_explicit(tmp_path, monkeypatch):
-    import helianthus_vrc_explorer.cli as cli
-
-    monkeypatch.setattr(cli, "_build_transport", lambda *args, **kwargs: 1 / 0)
-    path = tmp_path / "reads.json"
-    path.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "requests": [
-                    {
-                        "operation": "GetEvent",
-                        "profile": "zone",
-                        "instance": 1,
-                        "address": 1,
-                        "weekday_code": 0,
-                    }
-                ],
-            }
-        )
-    )
-    result = CliRunner().invoke(
-        app,
-        [
-            "scan",
-            "--dry-run",
-            "--b524-read-plan",
-            str(path),
-            "--planner-ui",
-            "disabled",
-            "--output-dir",
-            str(tmp_path),
-        ],
-    )
-    assert result.exit_code == 0, (result.output, result.exception)
-    artifact = json.loads(Path(result.stdout.strip()).read_text())
-    assert artifact["meta"]["dry_run_mode"] == "deterministic_scan"
-    record = artifact["b524_operation_reads"][0]
-    assert record["response_state"] == "transport_error"
-    assert record["error"] == "transport_error"
-    assert record["response_raw_hex"] is None
-    assert record["decoded"] is None
-    assert record["decode_qualification"] == "schema_unqualified"
+def test_internal_operation_plan_parser_requires_explicit_nonempty_scope() -> None:
+    with pytest.raises(ValueError, match="at least one"):
+        parse_operation_read_plan({"schema_version": 1, "requests": []})

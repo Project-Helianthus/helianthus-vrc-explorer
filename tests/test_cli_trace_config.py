@@ -4,9 +4,10 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
+from tests.scan_ui_helpers import invoke_scan
 from typer.testing import CliRunner
 
-from helianthus_vrc_explorer.cli import app
+from helianthus_vrc_explorer.ui.scan_setup import ScanSetup
 
 
 @pytest.mark.parametrize("configuration", ["argument", "environment", "absent"])
@@ -24,12 +25,13 @@ def test_cli_passes_resolved_trace_setting_to_scan_observer(
 
     monkeypatch.setattr(cli, "make_scan_observer", observer)
     monkeypatch.delenv("HELIA_EBUSD_TRACE_PATH", raising=False)
-    args = ["scan", "--dry-run", "--preset", "full", "--output-dir", str(tmp_path)]
     expected = tmp_path / "session.trace"
-    if configuration == "argument":
-        args.extend(["--trace-file", str(expected)])
-    elif configuration == "environment":
-        monkeypatch.setenv("HELIA_EBUSD_TRACE_PATH", str(expected))
-    result = CliRunner().invoke(app, args)
+    trace_file = expected if configuration != "absent" else None
+    result = invoke_scan(
+        CliRunner(),
+        monkeypatch,
+        ["--preset", "full"],
+        setup=ScanSetup(preset="full", dry_run=True, output_dir=tmp_path, trace_file=trace_file),
+    )
     assert result.exit_code == 0, result.output
     assert observed == [None if configuration == "absent" else expected]

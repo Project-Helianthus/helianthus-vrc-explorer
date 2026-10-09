@@ -281,6 +281,7 @@ def test_planner_table_columns_replace_namespace_and_type_with_op00_count() -> N
         "II range",
         "Instances",
         "RR_max",
+        "Descriptions",
     )
 
 
@@ -341,6 +342,7 @@ def test_table_row_values_show_qualified_op00_count_without_changing_instances()
         "0x01..0x08",
         "present 1/8",
         "0x0015",
+        "profile",
     )
     assert local_row == (
         " ",
@@ -350,6 +352,7 @@ def test_table_row_values_show_qualified_op00_count_without_changing_instances()
         "0x01..0x09",
         "present 1/9 (off)",
         "0x00FF",
+        "profile",
     )
 
 

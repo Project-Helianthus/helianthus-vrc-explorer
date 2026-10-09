@@ -33,7 +33,6 @@ from ..transport.base import (
 from ..transport.instrumented import ScanRequestBudgetExceeded
 from .observer import ScanObserver
 
-MAX_EXPLICIT_OPERATION_READS = 100_000
 _VRC700_DEVICE_IDS = frozenset({"70000", "B7S00"})
 _UNKNOWN_DEVICE_IDS = frozenset({"?", "UNKNOWN", "UNAVAILABLE", "NONE", "N/A"})
 type OperationName = Literal["ReadTimer", "ReadVR91", "GetEvent", "GetEventSetPoint"]
@@ -166,8 +165,6 @@ def parse_operation_read_plan(document: object) -> tuple[B524OperationReadReques
         raise ValueError("plan.requests must be an array")
     if not raw_requests:
         raise ValueError("plan.requests must contain at least one explicit request")
-    if len(raw_requests) > MAX_EXPLICIT_OPERATION_READS:
-        raise ValueError("operation read plan exceeds the 100000 request safety limit")
     requests: list[B524OperationReadRequest] = []
     payloads: set[bytes] = set()
     for index, value in enumerate(raw_requests):

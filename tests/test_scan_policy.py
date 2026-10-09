@@ -67,8 +67,7 @@ def test_parse_scan_plan_accepts_exact_instances_and_register_ranges() -> None:
     [
         (0x06, 0x00, 0x00, "0x01..0x08"),
         (0x06, 0x00, 0x09, "0x01..0x08"),
-        (0x02, 0x02, 0x00, "0x01..0x09"),
-        (0x02, 0x02, 0x0A, "0x01..0x09"),
+        (0x02, 0x02, 0x0A, "0x00..0x09"),
     ],
 )
 def test_parse_scan_plan_rejects_instances_outside_profile_domains(
@@ -237,7 +236,7 @@ def test_parse_scan_plan_accepts_exact_scalar_request_limit() -> None:
     assert len(plan[make_plan_key(0x03, 0x02)].registers or ()) == 50_000
 
 
-def test_parse_scan_plan_rejects_more_than_scalar_request_limit() -> None:
+def test_parse_scan_plan_has_no_arbitrary_global_request_cap() -> None:
     data = {
         "schema_version": "1",
         "groups": [
@@ -250,8 +249,8 @@ def test_parse_scan_plan_rejects_more_than_scalar_request_limit() -> None:
         ],
     }
 
-    with pytest.raises(ValueError, match="100000"):
-        parse_scan_plan(data)
+    plan = parse_scan_plan(data)
+    assert len(plan[make_plan_key(3, 2)].registers or ()) == 50_001
 
 
 def test_parse_scan_plan_rejects_comma_separated_element() -> None:
@@ -279,15 +278,3 @@ def test_system_profile_and_research_use_ff_register_ceiling() -> None:
     assert group_namespace_profiles(0)[2].rr_max == 0xFF
     assert _rr_max_full_for_opcode(group=0, opcode=2) == 0xFF
     assert research_rr_max(group=0, opcode=2, normal_rr_max=0xFF) == 0xFF
-
-
-def test_readme_custom_scan_example_passes_preflight() -> None:
-    import json
-    import re
-    from pathlib import Path
-
-    readme = (Path(__file__).resolve().parents[1] / "README.md").read_text()
-    example = re.search(r"Exact custom scans.*?```json\n(.*?)\n```", readme, re.S)
-    assert example is not None
-    plan = parse_scan_plan(json.loads(example[1]))
-    assert plan[make_plan_key(2, 2)].instances == (1, 3, 9)

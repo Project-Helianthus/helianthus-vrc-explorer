@@ -16,6 +16,7 @@ from helianthus_vrc_explorer.protocol.b524_metadata import (
     supported_capacity,
     validate_parameter_edit,
 )
+from helianthus_vrc_explorer.schema.parameter_descriptions import description_profile
 
 
 def test_complete_description_selectors_keep_instance_and_rr16() -> None:
@@ -475,7 +476,7 @@ def test_browse_local_edit_validates_system_and_device_float_parameters(
         "type": "EXP",
         "flags": 3,
         "writable": True,
-        "flags_access": "config_user",
+        "flags_access": "writable_visible",
         "value": 3.0,
         "raw_hex": struct.pack("<f", 3).hex(),
         "error": None,
@@ -491,7 +492,20 @@ def test_browse_local_edit_validates_system_and_device_float_parameters(
         )
     artifact = {
         "schema_version": "2.3",
-        "meta": {},
+        "meta": {
+            "destination_address": "0x15",
+            "identity": {
+                "manufacturer": "0xB5",
+                "eid": "BASV2",
+                "sw": "0507",
+                "hw": "1704",
+            },
+            "profile_context": {
+                "profile": "controller_b524",
+                "api_version": 1.0,
+                "api_revision": 1.0,
+            },
+        },
         "operations": {
             f"0x{read_opcode:02x}": {
                 "groups": {
@@ -503,21 +517,65 @@ def test_browse_local_edit_validates_system_and_device_float_parameters(
             }
         },
     }
+    op06 = artifact["operations"].setdefault("0x06", {"groups": {}})
+    op06["groups"].setdefault(
+        "0x09",
+        {
+            "instances": {
+                "0x01": {
+                    "registers": {
+                        "0x0002": {"type": "HEX:1", "value": "15", "raw_hex": "15"},
+                        "0x0004": {
+                            "type": "FW",
+                            "value": "08.05.00",
+                            "raw_hex": "080500",
+                        },
+                    }
+                }
+            }
+        },
+    )
+    selector = {
+        "read_opcode": f"0x{read_opcode:02x}",
+        "group": "0x01",
+        "instance": "0x00",
+        "register": "0x0027",
+    }
+    if read_opcode == 6:
+        registers = artifact["operations"]["0x06"]["groups"]["0x01"]["instances"]["0x00"][
+            "registers"
+        ]
+        registers.update(
+            {
+                "0x0002": {"type": "HEX:1", "value": "20", "raw_hex": "20"},
+                "0x0004": {"type": "FW", "value": "01.02.03", "raw_hex": "010203"},
+            }
+        )
+    if has_description:
+        entry["parameter_description"].update(
+            target_profile=description_profile(artifact, selector),
+            target_profile_match=True,
+        )
     store = BrowseStore.from_artifact(artifact)
     app = _compose_browse_app(artifact, allow_write=True, store=store)
-    row = store.rows[0]
+    row = next(
+        row
+        for row in store.rows
+        if row.address.read_opcode == selector["read_opcode"]
+        and row.register_key == selector["register"]
+    )
     statuses, dialogs = [], []
     monkeypatch.setattr(app, "_set_status", statuses.append)
     monkeypatch.setattr(app, "push_screen", lambda dialog, callback: dialogs.append(dialog))
     app._editing_row_id = row.row_id
     app._on_edit_value_entered(new_value)
-    assert bool(dialogs) is accepted
+    assert bool(dialogs) is accepted, statuses
     if not accepted:
         assert statuses[-1].startswith("Edit rejected:")
     else:
         assert app._pending_write is not None
         if not has_description:
-            assert "unvalidated" in str(dialogs[0]._lines).lower()
+            assert "incomplete limits" in str(dialogs[0]._lines).lower()
     assert entry["value"] == 3.0  # Confirmation has not mutated the artifact.
 
 
@@ -547,7 +605,7 @@ def test_remote_writable_capability_controls_edit_even_in_state_tab(
         "type": "UIN",
         "flags": 3 if writable else 1,
         "writable": writable,
-        "flags_access": "config_valid",
+        "flags_access": "writable_visible" if writable else "read_only_visible",
         "register_class": "state",
         "value": 1,
         "raw_hex": "0100",

@@ -73,3 +73,25 @@ def test_other_manufacturer_does_not_receive_the_regulator_profile() -> None:
     artifact = artifact_with_sw("0388")
     artifact["meta"]["identity"]["manufacturer"] = "0x50"
     assert 'class="identity-label">Profile' not in render_html_report(artifact)
+
+
+def test_ctlx0_sw0127_hw0404_is_vrc720_in_all_headers() -> None:
+    from helianthus_vrc_explorer.schema.regulator_identity import (
+        lookup_regulator_identity,
+        spn_from_sw,
+    )
+
+    identity = {"manufacturer": "0xB5", "device_id": "CTLX0", "sw": "0127", "hw": "0404"}
+    match = lookup_regulator_identity("CTLX0", spn_from_sw("0127"))
+    assert match is not None and match.model_name == "VRC720"
+    assert match.spn_hex == "007F"
+    assert lookup_regulator_identity("CTLX0", "0194").model_name == "VR940"
+    artifact = {"schema_version": "2.3", "meta": {"identity": identity}, "operations": {}}
+    baseline = deepcopy(artifact)
+    assert "VRC720" in render_html_report(artifact)
+    output = StringIO()
+    Console(file=output, width=140).print(_build_identity_header_renderable(artifact))
+    assert "VRC720" in output.getvalue()
+    preface = _build_scan_session_preface(dst=0x15, endpoint="offline", identity=identity)
+    assert any(label == "Profile" and "VRC720" in value for label, value in preface.rows)
+    assert artifact == baseline

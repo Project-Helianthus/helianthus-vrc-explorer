@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import math
 import sys
 import time
@@ -31,9 +32,16 @@ from ..schema.b524_constraints import (
 from ..schema.b524_register_names import b524_register_name
 from ..schema.ebusd_csv import EbusdCsvSchema
 from ..schema.myvaillant_map import MyvaillantRegisterMap
+from ..schema.parameter_descriptions import description_catalog_status
 from ..transport.base import TransportInterface, TransportRecoveryExhausted, emit_trace_label
 from ..transport.instrumented import CountingTransport, ScanRequestBudgetExceeded
 from ..ui.planner import PlannerGroup, PlannerPreset, build_plan_from_preset
+from ..ui.planner_selection import (
+    DescriptionPolicySelection,
+    PlannerSelection,
+    default_description_policy,
+    description_probe_required,
+)
 from .b524_artifact import (
     _artifact_contract_metadata,
     _ensure_group_artifact,
@@ -105,11 +113,26 @@ from .scan import (
     _apply_contextual_enum_annotations,
     _resolve_planner_mode,
 )
-from .scan_policy import MAX_EXPLICIT_SCALAR_REQUESTS, profile_opcodes
+from .scan_policy import profile_opcodes
+
+
+def _planner_kwargs(planner_fn: Any, options: dict[str, Any]) -> dict[str, Any]:
+    """Keep injected legacy planner fakes readable while passing typed UI state."""
+
+    try:
+        parameters = inspect.signature(planner_fn).parameters.values()
+    except (TypeError, ValueError):
+        return options
+    if any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters):
+        return options
+    accepted = {parameter.name for parameter in parameters}
+    return {name: value for name, value in options.items() if name in accepted}
 
 
 def _normalize_profile_plan_instances(
     plan: dict[PlanKey, GroupScanPlan],
+    *,
+    profile_id: str | None = None,
 ) -> dict[PlanKey, GroupScanPlan]:
     """Apply default-profile instance domains without changing custom plans."""
 
@@ -119,7 +142,8 @@ def _normalize_profile_plan_instances(
         if group_plan.opcode == 0x06:
             instances = tuple(ii for ii in instances if 0x01 <= ii <= 0x08)
         elif group_plan.opcode == 0x02 and group_plan.group == 0x02:
-            instances = tuple(ii for ii in instances if 0x01 <= ii <= 0x09)
+            first = 0x00 if profile_id == "basv2_sw0507_hw1704_api1" else 0x01
+            instances = tuple(ii for ii in instances if first <= ii <= 0x09)
         normalized[key] = GroupScanPlan(
             group=group_plan.group,
             opcode=group_plan.opcode,
@@ -130,13 +154,71 @@ def _normalize_profile_plan_instances(
     return normalized
 
 
-def _count_capacity(*, group: int, opcode: int, ii_max: int) -> int:
+def _select_live_description_candidates(
+    artifact: dict[str, Any],
+    candidates: list[DescriptionCandidate],
+    entries: dict[tuple[int, int, int, int], dict[str, Any]],
+    *,
+    policy: DescriptionPolicySelection,
+) -> tuple[
+    list[DescriptionCandidate],
+    dict[tuple[int, int, int, int], dict[str, Any]],
+    list[dict[str, Any]],
+]:
+    """Apply policy after scalar reads reveal each remote native identity."""
+
+    selected: list[DescriptionCandidate] = []
+    selected_entries: dict[tuple[int, int, int, int], dict[str, Any]] = {}
+    status_cache: dict[tuple[int, int, int], dict[str, Any]] = {}
+    for candidate in candidates:
+        device_key = (
+            candidate.read_opcode,
+            candidate.group if candidate.read_opcode == 0x06 else 0,
+            candidate.instance if candidate.read_opcode == 0x06 else 0,
+        )
+        status = status_cache.get(device_key)
+        if status is None:
+            selector = {
+                "read_opcode": f"0x{candidate.read_opcode:02x}",
+                "group": f"0x{candidate.group:02x}",
+                "instance": f"0x{candidate.instance:02x}",
+                "register": f"0x{candidate.register:04x}",
+            }
+            status = description_catalog_status(artifact, selector)
+            status_cache[device_key] = status
+        if not (
+            description_probe_required(policy, opcode=candidate.read_opcode)
+            or status.get("status") != "exact"
+        ):
+            continue
+        identity = (
+            candidate.read_opcode,
+            candidate.group,
+            candidate.instance,
+            candidate.register,
+        )
+        selected.append(candidate)
+        selected_entries[identity] = entries[identity]
+
+    remote_statuses = [
+        {
+            "group": f"0x{group:02x}",
+            "instance": f"0x{instance:02x}",
+            **status,
+        }
+        for (opcode, group, instance), status in sorted(status_cache.items())
+        if opcode == 0x06
+    ]
+    return selected, selected_entries, remote_statuses
+
+
+def _count_capacity(*, group: int, opcode: int, ii_max: int, profile_id: str | None = None) -> int:
     """Return the count-qualified slots for one OP00 family mapping."""
 
     if (opcode, group) == (0x02, 0x09):
         return 1
     if (opcode, group) == (0x02, 0x02):
-        return ii_max - 1
+        return ii_max if profile_id == "basv2_sw0507_hw1704_api1" else ii_max - 1
     return ii_max + (opcode != 0x06)
 
 
@@ -253,6 +335,7 @@ def run_b524_scan(
             "incomplete": False,
             "artifact_contract": _artifact_contract_metadata(),
             "system_information": [],
+            **({"identity": dict(read_identity)} if read_identity else {}),
             "scan_coverage": {
                 "preset": planner_preset,
                 "request_budget": request_budget,
@@ -295,8 +378,13 @@ def run_b524_scan(
     artifact["meta"]["constraint_scope"]["qualification"] = "legacy_unqualified"
 
     incomplete_reason: str | None = None
+    observed_description_candidates: list[DescriptionCandidate] = []
+    observed_description_entries: dict[tuple[int, int, int, int], dict[str, Any]] = {}
     description_candidates: list[DescriptionCandidate] = []
     description_entries: dict[tuple[int, int, int, int], dict[str, Any]] = {}
+    description_policy: DescriptionPolicySelection | None = None
+    description_candidates_prepared = False
+    description_reminder_logged = False
     description_coverage: dict[str, Any] = {}
     if explicit_plan is not None:
         artifact["meta"]["scan_plan"] = {
@@ -321,8 +409,8 @@ def run_b524_scan(
                 )
             if probe_constraints:
                 observer.log(
-                    "Parameter descriptions enabled for all observed writable parameters "
-                    "(OP01 system / OP07 device)"
+                    "Parameter description policy will be resolved from exact profile "
+                    "identity and planner selection (OP01 local / OP07 remote)"
                     + (
                         f", limited to {description_budget} candidates by request."
                         if description_budget is not None
@@ -390,6 +478,35 @@ def run_b524_scan(
             "feature_hints": {"ventilation": ventilation_hint},
             "other_count_routing": "unknown",
         }
+        profile_status = description_catalog_status(artifact)
+        profile_id = (
+            str(profile_status["profile_id"])
+            if profile_status.get("status") == "exact" and profile_status.get("profile_id")
+            else None
+        )
+        artifact["meta"]["description_profile_status"] = profile_status
+        if profile_status.get("status") != "exact":
+            artifact["meta"]["description_profile_reminder"] = {
+                "shown_once": True,
+                "recommendation": "full_within_known_scope",
+                "sharing": "save_and_share_json_manually",
+                "automatic_upload": False,
+            }
+            if observer is not None:
+                observer.log(
+                    "Unknown description profile: use Full for live writable descriptions "
+                    "within known bounds, then save/share JSON manually if useful.",
+                    level="warn",
+                )
+                description_reminder_logged = True
+        description_policy = default_description_policy(
+            planner_preset,
+            exact_profile_known=profile_status.get("status") == "exact",
+        )
+        operation_planner_options.update(
+            description_policy=description_policy,
+            description_profile_status=str(profile_status.get("status", "unknown")),
+        )
         # OP00 identifiers are not groups. Register candidates come from the
         # explicit profile; research explores GG 00..FF by separate register probes.
         candidate_groups = configured_groups
@@ -442,11 +559,16 @@ def run_b524_scan(
         artifact["meta"]["parameter_description_policy"] = {
             "enabled": probe_constraints,
             "request_budget": description_budget,
+            "legacy_request_budget": description_budget,
             "system_description_opcode": "0x01",
             "device_description_opcode": "0x07",
             "scope": "observed_writable_complete_identity",
             "scheduler": "family_reservation_then_instance_round_robin",
             "unknown_codec_raw_evidence": True,
+            "profile_status": profile_status.get("status"),
+            "profile_id": profile_status.get("profile_id"),
+            "local_source": description_policy.local,
+            "remote_source": description_policy.remote,
         }
 
         interactive = (
@@ -578,7 +700,9 @@ def run_b524_scan(
                     opcode=opcode,
                     name=artifact_group_name,
                     descriptor_observed=desc_for_artifact,
-                    ii_min=_ii_min_for_opcode(group=group.group, opcode=opcode),
+                    ii_min=_ii_min_for_opcode(
+                        group=group.group, opcode=opcode, profile_id=profile_id
+                    ),
                     ii_max=namespace_ii_max,
                     discovery_advisory=discovery_advisory,
                 )
@@ -607,7 +731,10 @@ def run_b524_scan(
             if _is_instanced_group(namespace_ii_max):
                 assert namespace_ii_max is not None
                 instance_total += (
-                    namespace_ii_max
+                    namespace_ii_max + 1
+                    if profile_id == "basv2_sw0507_hw1704_api1"
+                    and (opcode, group.group) == (0x02, 0x02)
+                    else namespace_ii_max
                     if opcode == 0x06 or group.group == 0x02
                     else namespace_ii_max + 1
                 )
@@ -634,7 +761,9 @@ def run_b524_scan(
                     artifact,
                     group=group.group,
                     opcode=opcode,
-                    ii_min=_ii_min_for_opcode(group=group.group, opcode=opcode),
+                    ii_min=_ii_min_for_opcode(
+                        group=group.group, opcode=opcode, profile_id=profile_id
+                    ),
                     ii_max=namespace_ii_max,
                 )
                 instances_obj = _instances_object(artifact, group=group.group, opcode=opcode)
@@ -668,10 +797,12 @@ def run_b524_scan(
                 artifact,
                 group=group.group,
                 opcode=opcode,
-                ii_min=_ii_min_for_opcode(group=group.group, opcode=opcode),
+                ii_min=_ii_min_for_opcode(group=group.group, opcode=opcode, profile_id=profile_id),
                 ii_max=namespace_ii_max,
             )
-            contract = namespace_availability_contract(group=group.group, opcode=opcode)
+            contract = namespace_availability_contract(
+                group=group.group, opcode=opcode, presence_profile=profile_id
+            )
             instances_obj = _instances_object(artifact, group=group.group, opcode=opcode)
             if _is_instanced_group(namespace_ii_max):
                 _record_availability_contract(
@@ -741,7 +872,10 @@ def run_b524_scan(
                 expected_instance_count(
                     information_values.get(count_id, float("nan")),
                     capacity=_count_capacity(
-                        group=group.group, opcode=opcode, ii_max=namespace_ii_max
+                        group=group.group,
+                        opcode=opcode,
+                        ii_max=namespace_ii_max,
+                        profile_id=profile_id,
                     ),
                 )
                 if count_id is not None and count_id not in CAPACITY_SYSTEM_INFORMATION_IDS
@@ -778,6 +912,7 @@ def run_b524_scan(
                 on_probe=retain_probe,
                 expected_count=expected_count if planner_preset == "recommended" else None,
                 capacity=capacity if planner_preset == "recommended" else None,
+                presence_profile=profile_id,
             )
             _record_availability_probes(
                 artifact,
@@ -854,7 +989,10 @@ def run_b524_scan(
                     else expected_instance_count(
                         information_values.get(count_id, float("nan")),
                         capacity=_count_capacity(
-                            group=group.group, opcode=opcode, ii_max=namespace_ii_max
+                            group=group.group,
+                            opcode=opcode,
+                            ii_max=namespace_ii_max,
+                            profile_id=profile_id,
                         ),
                     )
                 )
@@ -884,7 +1022,12 @@ def run_b524_scan(
                 }
             _mark_present_instances(instances_obj, instances=present_instances)
             slot_capacity = (
-                namespace_ii_max if opcode == 0x06 or group.group == 0x02 else namespace_ii_max + 1
+                namespace_ii_max + 1
+                if profile_id == "basv2_sw0507_hw1704_api1"
+                and (opcode, group.group) == (0x02, 0x02)
+                else namespace_ii_max
+                if opcode == 0x06 or group.group == 0x02
+                else namespace_ii_max + 1
             )
             known_namespace_probe_counts[(int(opcode), group.group)] = (
                 f"{len(present_instances)}/{slot_capacity}"
@@ -1134,7 +1277,9 @@ def run_b524_scan(
                             else None
                         ),
                         present_instances=present_instances,
-                        ii_min=_ii_min_for_opcode(group=group.group, opcode=opcode),
+                        ii_min=_ii_min_for_opcode(
+                            group=group.group, opcode=opcode, profile_id=profile_id
+                        ),
                         expected_count=(
                             expected_instance_count(
                                 information_values.get(
@@ -1146,6 +1291,7 @@ def run_b524_scan(
                                         group=group.group,
                                         opcode=opcode,
                                         ii_max=planner_ii_max,
+                                        profile_id=profile_id,
                                     )
                                 ),
                             )
@@ -1175,7 +1321,7 @@ def run_b524_scan(
                 planner_groups,
                 preset=planner_preset,
             )
-            plan = _normalize_profile_plan_instances(plan)
+            plan = _normalize_profile_plan_instances(plan, profile_id=profile_id)
         elif explicit_plan is not None:
             plan = dict(explicit_plan)
 
@@ -1203,7 +1349,7 @@ def run_b524_scan(
                                 default_plan=planner_default_plan,
                                 default_preset=planner_preset,
                                 system_information=artifact["meta"]["system_information"],
-                                **operation_planner_options,
+                                **_planner_kwargs(run_textual_scan_plan, operation_planner_options),
                             )
                         except Exception as exc:
                             if planner_ui == "textual":
@@ -1218,27 +1364,41 @@ def run_b524_scan(
                         else:
                             if selected is None:
                                 raise KeyboardInterrupt
-                            plan = selected
+                            if isinstance(selected, PlannerSelection):
+                                plan = selected.plan
+                                planner_preset = selected.selected_preset
+                                description_policy = selected.description_policy
+                            else:
+                                plan = dict(selected)
                 if planner_mode == "classic":
-                    plan = prompt_scan_plan_fn(
+                    selected = prompt_scan_plan_fn(
                         console,
                         planner_groups,
                         request_rate_rps=request_rate_rps,
                         default_plan=planner_default_plan,
                         default_preset=planner_preset,
                         system_information=artifact["meta"]["system_information"],
-                        **operation_planner_options,
+                        **_planner_kwargs(prompt_scan_plan_fn, operation_planner_options),
                     )
+                    if isinstance(selected, PlannerSelection):
+                        plan = selected.plan
+                        planner_preset = selected.selected_preset
+                        description_policy = selected.description_policy
+                    else:
+                        plan = dict(selected)
                 if planner_preset != "custom":
-                    plan = _normalize_profile_plan_instances(plan)
+                    plan = _normalize_profile_plan_instances(plan, profile_id=profile_id)
+
+        artifact["meta"]["parameter_description_policy"].update(
+            local_source=description_policy.local,
+            remote_source=description_policy.remote,
+            local_override=description_policy.local_override,
+            remote_override=description_policy.remote_override,
+            selected_preset=planner_preset,
+        )
+        artifact["meta"]["scan_coverage"]["preset"] = planner_preset
 
         store_operation_read_plan()
-        if (
-            operation_request_list
-            and estimate_register_requests(plan) + sum(operation_selection)
-            > MAX_EXPLICIT_SCALAR_REQUESTS
-        ):
-            raise ValueError("Combined scalar/operation plan exceeds 100000 explicit requests")
         artifact["meta"]["scan_plan"] = {
             "groups": _scan_plan_meta_groups(plan),
             "estimated_register_requests": estimate_register_requests(plan),
@@ -1275,6 +1435,7 @@ def run_b524_scan(
                     # Pause progress rendering and allow replanning without rewriting scanned data.
                     active_elapsed += time.perf_counter() - active_start
                     with hotkeys.suspend(), observer.suspend():
+                        operation_planner_options["description_policy"] = description_policy
                         if planner_mode == "textual":
                             try:
                                 from ..ui.planner_textual import run_textual_scan_plan
@@ -1296,7 +1457,9 @@ def run_b524_scan(
                                         default_plan=plan,
                                         default_preset=planner_preset,
                                         system_information=artifact["meta"]["system_information"],
-                                        **operation_planner_options,
+                                        **_planner_kwargs(
+                                            run_textual_scan_plan, operation_planner_options
+                                        ),
                                     )
                                 except Exception as exc:
                                     if planner_ui == "textual":
@@ -1312,29 +1475,40 @@ def run_b524_scan(
                                 else:
                                     if selected is None:
                                         raise KeyboardInterrupt
-                                    plan = selected
+                                    if isinstance(selected, PlannerSelection):
+                                        plan = selected.plan
+                                        planner_preset = selected.selected_preset
+                                        description_policy = selected.description_policy
+                                    else:
+                                        plan = dict(selected)
                         if planner_mode == "classic":
-                            plan = prompt_scan_plan_fn(
+                            selected = prompt_scan_plan_fn(
                                 console,
                                 planner_groups,
                                 request_rate_rps=request_rate_rps,
                                 default_plan=plan,
                                 default_preset=planner_preset,
                                 system_information=artifact["meta"]["system_information"],
-                                **operation_planner_options,
+                                **_planner_kwargs(prompt_scan_plan_fn, operation_planner_options),
                             )
+                            if isinstance(selected, PlannerSelection):
+                                plan = selected.plan
+                                planner_preset = selected.selected_preset
+                                description_policy = selected.description_policy
+                            else:
+                                plan = dict(selected)
                         if planner_preset != "custom":
-                            plan = _normalize_profile_plan_instances(plan)
+                            plan = _normalize_profile_plan_instances(plan, profile_id=profile_id)
+                    artifact["meta"]["parameter_description_policy"].update(
+                        local_source=description_policy.local,
+                        remote_source=description_policy.remote,
+                        local_override=description_policy.local_override,
+                        remote_override=description_policy.remote_override,
+                        selected_preset=planner_preset,
+                    )
+                    artifact["meta"]["scan_coverage"]["preset"] = planner_preset
                     store_operation_read_plan()
                     artifact["meta"]["scan_plan"]["groups"] = _scan_plan_meta_groups(plan)
-                    if (
-                        operation_request_list
-                        and estimate_register_requests(plan) + sum(operation_selection)
-                        > MAX_EXPLICIT_SCALAR_REQUESTS
-                    ):
-                        raise ValueError(
-                            "Combined scalar/operation plan exceeds 100000 explicit requests"
-                        )
                     artifact["meta"]["scan_plan"]["estimated_register_requests"] = (
                         estimate_register_requests(plan)
                     )
@@ -1448,6 +1622,29 @@ def run_b524_scan(
                 )
                 if canonical_name is not None:
                     entry["myvaillant_name"] = canonical_name
+                if (
+                    profile_id == "basv2_sw0507_hw1704_api1"
+                    and (task.opcode, task.group) == (0x02, 0x02)
+                    and task.register in {0x0007, 0x000E, 0x0014, 0x001E}
+                ):
+                    entry["candidate_name"] = {
+                        0x0007: "circuit_target_flow_temperature",
+                        0x000E: "circuit_setback_mode",
+                        0x0014: "circuit_outside_temperature_threshold",
+                        0x001E: "circuit_status",
+                    }[task.register]
+                    entry["candidate_evidence"] = "basv2_sw0507_profile_cross_source_candidate"
+                if (
+                    profile_id == "basv2_sw0507_hw1704_api1"
+                    and (task.opcode, task.group, task.register) == (0x02, 0x02, 0x0020)
+                    and entry.get("type") == "UCH"
+                ):
+                    entry["codec_evidence"] = {
+                        "observed": "UCH",
+                        "width": 1,
+                        "qualification": "profile_observed",
+                        "contradicts": "legacy_f32_prose",
+                    }
 
                 constraint = _constraint_for_register(
                     opcode=task.opcode,
@@ -1496,16 +1693,12 @@ def run_b524_scan(
                     type_spec = entry.get("type")
                     if isinstance(flags, int) and flags in {2, 3}:
                         identity = (int(task.opcode), task.group, task.instance, task.register)
-                        description_candidates.append(
+                        observed_description_candidates.append(
                             DescriptionCandidate(
                                 *identity, type_spec if isinstance(type_spec, str) else None
                             )
                         )
-                        description_entries[identity] = cast(dict[str, Any], entry)
-                        entry["parameter_description"] = {
-                            "qualification": "unavailable",
-                            "reason": "description acquisition pending",
-                        }
+                        observed_description_entries[identity] = cast(dict[str, Any], entry)
                 if task.opcode == 2 and task.group == 9 and ventilation_hint:
                     ventilation_names = {
                         2: "operating_mode_for_air_ventilation",
@@ -1537,7 +1730,9 @@ def run_b524_scan(
                         artifact,
                         group=task.group,
                         opcode=task.opcode,
-                        ii_min=_ii_min_for_opcode(group=task.group, opcode=task.opcode),
+                        ii_min=_ii_min_for_opcode(
+                            group=task.group, opcode=task.opcode, profile_id=profile_id
+                        ),
                         ii_max=_ii_max_for_opcode(
                             group=task.group,
                             default_ii_max=task_group_meta.ii_max,
@@ -1562,6 +1757,49 @@ def run_b524_scan(
                     registers[_hex_u16(task.register)] = entry
 
         if probe_constraints:
+            assert description_policy is not None
+            (
+                description_candidates,
+                description_entries,
+                remote_profile_statuses,
+            ) = _select_live_description_candidates(
+                artifact,
+                observed_description_candidates,
+                observed_description_entries,
+                policy=description_policy,
+            )
+            description_candidates_prepared = True
+            if remote_profile_statuses:
+                artifact["meta"]["description_remote_profile_statuses"] = remote_profile_statuses
+            if any(row.get("status") != "exact" for row in remote_profile_statuses):
+                artifact["meta"].setdefault(
+                    "description_profile_reminder",
+                    {
+                        "shown_once": True,
+                        "recommendation": "full_within_known_scope",
+                        "sharing": "save_and_share_json_manually",
+                        "automatic_upload": False,
+                    },
+                )
+                if observer is not None and not description_reminder_logged:
+                    observer.log(
+                        "Unknown remote description profile: use Full for live writable "
+                        "descriptions within known bounds, then save/share JSON manually "
+                        "if useful.",
+                        level="warn",
+                    )
+                    description_reminder_logged = True
+            for candidate in description_candidates:
+                identity = (
+                    candidate.read_opcode,
+                    candidate.group,
+                    candidate.instance,
+                    candidate.register,
+                )
+                description_entries[identity]["parameter_description"] = {
+                    "qualification": "unavailable",
+                    "reason": "description acquisition pending",
+                }
             acquire_descriptions(
                 transport,
                 dst=dst,
@@ -1654,6 +1892,17 @@ def run_b524_scan(
             observer.log(str(exc), level="warn")
 
     if probe_constraints:
+        if not description_candidates_prepared and description_policy is not None:
+            description_candidates, description_entries, remote_profile_statuses = (
+                _select_live_description_candidates(
+                    artifact,
+                    observed_description_candidates,
+                    observed_description_entries,
+                    policy=description_policy,
+                )
+            )
+            if remote_profile_statuses:
+                artifact["meta"]["description_remote_profile_statuses"] = remote_profile_statuses
         finish_description_coverage(
             description_candidates,
             description_entries,

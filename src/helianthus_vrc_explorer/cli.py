@@ -6,7 +6,7 @@ import json
 import math
 import struct
 import sys
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from importlib import resources
 from pathlib import Path
@@ -36,7 +36,6 @@ from .scanner.b509 import parse_b509_range
 from .scanner.director import GROUP_CONFIG, classify_groups, discover_groups
 from .scanner.register import is_instance_present
 from .scanner.scan import PlannerUiMode, default_output_filename, scan_vrc
-from .scanner.scan_policy import parse_scan_plan
 from .schema.ebusd_csv import EbusdCsvSchema
 from .schema.myvaillant_map import MyvaillantRegisterMap
 from .schema.parameter_descriptions import attach_bundled_descriptions
@@ -54,6 +53,7 @@ from .ui.emphasis import rich_star_bold_text
 from .ui.html_report import render_html_report
 from .ui.live import ScanSessionPreface, make_scan_observer
 from .ui.planner import PlannerPreset
+from .ui.scan_setup import ScanSetup, run_artifact_open_modal, run_scan_setup
 from .ui.summary import render_summary
 
 app = typer.Typer(
@@ -613,6 +613,29 @@ def main(
         raise typer.Exit(0)
 
 
+def _collect_scan_setup(preset: str | None, transport: str) -> ScanSetup:
+    """Collect visual choices before creating any transport."""
+    normalized = _normalize_planner_preset(preset) if preset is not None else "recommended"
+    if normalized not in {"recommended", "full", "research", "custom"}:
+        typer.echo("Invalid preset. Choose recommended, full, research, or custom.", err=True)
+        raise typer.Exit(2)
+    enhanced = transport.strip().lower() in {"ens", "enh", "enhanced"}
+    initial = ScanSetup(preset=normalized, dst="0x15" if enhanced else "auto")
+    if not Console().is_terminal:
+        if preset is None:
+            typer.echo(
+                "Scan setup requires a TTY; select a preset in the visual dialog, "
+                "or supply --preset for non-interactive scanning.",
+                err=True,
+            )
+            raise typer.Exit(2)
+        return ScanSetup(preset=normalized, dst=initial.dst, planner_ui="disabled")
+    selected = run_scan_setup(initial=initial, preset_from_argv=preset is not None)
+    if selected is None:
+        raise typer.Exit(0)
+    return selected
+
+
 @app.command()
 def scan(
     transport_protocol: str = typer.Option(  # noqa: B008
@@ -620,164 +643,61 @@ def scan(
         "--transport",
         help="Transport: tcp (ebusd hex) or ens/enh (enhanced eBUS adapter).",
     ),
-    dst: str = typer.Option(  # noqa: B008
-        "auto",
-        "--dst",
-        help="Destination eBUS address (e.g. 0x15) or auto (default).",
-    ),
-    source_address: str = typer.Option(  # noqa: B008
-        "0xF7",
-        "--source-address",
-        help="Source initiator address for enhanced transport. Ignored for tcp.",
-    ),
     host: str = typer.Option(  # noqa: B008
         _DEFAULT_EBUSD_HOST,
         "--host",
-        help="ebusd host (TCP).",
+        help="Adapter or ebusd host.",
     ),
     port: int = typer.Option(  # noqa: B008
         _DEFAULT_EBUSD_PORT,
         "--port",
-        help="ebusd port (TCP).",
+        help="Adapter or ebusd TCP port.",
     ),
-    dry_run: bool = typer.Option(  # noqa: B008
-        False,
-        "--dry-run",
-        help="Replay a scan fixture using DummyTransport (no device I/O).",
+    source_address: str = typer.Option(  # noqa: B008
+        "0xF7",
+        "--source-address",
+        help="Initiator address for enhanced transport.",
     ),
-    output_dir: Path = typer.Option(  # noqa: B008
-        Path("."),
-        "--output-dir",
-        help="Directory to write the scan JSON artifact to.",
-    ),
-    ebusd_csv_path: Path | None = typer.Option(  # noqa: B008
+    preset: str | None = typer.Option(  # noqa: B008
         None,
-        "--ebusd-csv-path",
-        envvar="HELIA_EBUSD_CSV_PATH",
-        help="Optional ebusd configuration CSV (e.g. 15.720.csv) used to annotate register names.",
-    ),
-    myvaillant_map_path: Path | None = typer.Option(  # noqa: B008
-        None,
-        "--myvaillant-map-path",
-        envvar="HELIA_MYVAILLANT_MAP_PATH",
-        help="Optional myVaillant-equivalence mapping CSV used to annotate register leaf names.",
-    ),
-    trace_file: Path | None = typer.Option(  # noqa: B008
-        None,
-        "--trace-file",
-        envvar="HELIA_EBUSD_TRACE_PATH",
-        help="Write an ebusd request/response trace log to this file.",
-    ),
-    b509_range: list[str] | None = typer.Option(  # noqa: B008
-        None,
-        "--b509-range",
-        help=(
-            "B509 register range to dump (repeatable), format: 0x0000..0x00FF. "
-            "Requires --b509-dump. If omitted, defaults to 0x0000..0x00FF."
-        ),
-    ),
-    b509_dump: bool = typer.Option(  # noqa: B008
-        False,
-        "--b509-dump/--no-b509-dump",
-        help=(
-            "Opt-in B509 register dump (disabled by default). "
-            "Use --b509-range to narrow/expand ranges."
-        ),
-    ),
-    b555_dump: bool = typer.Option(  # noqa: B008
-        False,
-        "--b555-dump/--no-b555-dump",
-        help=(
-            "Opt-in read-only B555 timer dump (A3/A4/A5). Disabled by default to keep "
-            "the standard B524/B509 scan path unchanged."
-        ),
-    ),
-    b516_dump: bool = typer.Option(  # noqa: B008
-        False,
-        "--b516-dump/--no-b516-dump",
-        help=(
-            "Opt-in read-only B516 energy dump (active request/response only). Disabled "
-            "by default to keep the standard B524/B555/B509 scan path unchanged."
-        ),
-    ),
-    planner_ui: str = typer.Option(  # noqa: B008
-        "disabled",
-        "--planner-ui",
-        help="Interactive planner mode: disabled, auto, textual, or classic.",
-    ),
-    preset: str = typer.Option(  # noqa: B008
-        "recommended",
         "--preset",
-        help=(
-            "Planner preset: recommended, full, research, or custom. "
-            "`full` audits declared profile slots independently of OP00 counts; "
-            "`research` performs bounded, non-exhaustive exploration. "
-            "Legacy aliases: aggressive->full, exhaustive->research, conservative->recommended."
-        ),
-    ),
-    no_tips: bool = typer.Option(  # noqa: B008
-        False,
-        "--no-tips",
-        help="Hide scan header tips in interactive terminal mode.",
-    ),
-    redact: bool = typer.Option(  # noqa: B008
-        False,
-        "--redact",
-        help="Redact device identity fields (e.g. serial number) in console output.",
-    ),
-    probe_constraints: bool = typer.Option(  # noqa: B008
-        True,
-        "--probe-constraints/--no-probe-constraints",
-        help=(
-            "Acquire complete OP01/OP07 descriptions for observed writable parameters. "
-            "Enabled by default for all eligible parameters; descriptions validate "
-            "later offline edits. Missing descriptions remain explicit warnings."
-        ),
-    ),
-    scan_plan_path: Path | None = typer.Option(  # noqa: B008
-        None,
-        "--scan-plan",
-        exists=True,
-        dir_okay=False,
-        readable=True,
-        help="Version 1 JSON plan file for custom OP02/OP06, GG, II and RR16 selectors.",
-    ),
-    b524_read_plan_path: Path | None = typer.Option(  # noqa: B008
-        None,
-        "--b524-read-plan",
-        exists=True,
-        dir_okay=False,
-        readable=True,
-        help=(
-            "Optional explicit JSON override for B524 Timer, VR91, Event and EventSetPoint "
-            "reads. Without it, normal scans propose bounded raw Event candidates."
-        ),
-    ),
-    preview_read_plan: bool = typer.Option(  # noqa: B008
-        False,
-        "--preview-read-plan",
-        help="Validate and encode --b524-read-plan offline, without opening a transport.",
-    ),
-    description_budget: int | None = typer.Option(  # noqa: B008
-        None,
-        "--description-budget",
-        min=0,
-        help=(
-            "Maximum description requests, shared fairly between OP01 and OP07 "
-            "(unused shares borrowed). Default: all eligible parameters in the selected scope."
-        ),
-    ),
-    request_budget: int | None = typer.Option(  # noqa: B008
-        None,
-        "--request-budget",
-        min=1,
-        help=(
-            "Optional maximum actual B524 sends including retries. No implicit send cap. "
-            "Exhaustion saves a partial artifact."
-        ),
+        help="Optional preset: recommended, full, research, or custom. "
+        "When omitted, choose it in the startup dialog.",
     ),
 ) -> None:
-    """Scan a VRC regulator using B524 (GetExtendedRegisters)."""
+    """Scan a regulator; configure coverage and output in the visual UI."""
+    setup = _collect_scan_setup(preset, transport_protocol)
+    _scan_configured(
+        transport_protocol=transport_protocol,
+        host=host,
+        port=port,
+        source_address=source_address,
+        **asdict(setup),
+    )
+
+
+def _scan_configured(
+    *,
+    transport_protocol: str = _DEFAULT_TRANSPORT_PROTOCOL,
+    dst: str = "auto",
+    source_address: str = "0xF7",
+    host: str = _DEFAULT_EBUSD_HOST,
+    port: int = _DEFAULT_EBUSD_PORT,
+    dry_run: bool = False,
+    output_dir: Path = Path("results"),
+    ebusd_csv_path: Path | None = None,
+    myvaillant_map_path: Path | None = None,
+    trace_file: Path | None = None,
+    b509_range: list[str] | None = None,
+    b509_dump: bool = False,
+    b555_dump: bool = False,
+    b516_dump: bool = False,
+    planner_ui: str = "disabled",
+    preset: str = "recommended",
+    no_tips: bool = False,
+    redact: bool = False,
+) -> None:
+    """Execute a validated visual setup; not a public CLI surface."""
     transport_proto = transport_protocol.strip().lower()
     # ens and enh are aliases — both use the enhanced eBUS adapter protocol.
     if transport_proto in ("ens", "enh", "enhanced"):
@@ -795,7 +715,7 @@ def scan(
         explicit_dst_u8 = _parse_u8_address(dst)
     if transport_proto != "tcp" and requested_dst == "auto" and not dry_run:
         typer.echo(
-            "Auto destination only supported on ebusd TCP. Use --dst 0x.. for enhanced transport.",
+            "Auto destination is supported only on ebusd TCP. Select a destination in scan setup.",
             err=True,
         )
         raise typer.Exit(2)
@@ -805,7 +725,7 @@ def scan(
     planner_ui_value = planner_ui.strip().lower()
     if planner_ui_value not in {"disabled", "auto", "textual", "classic"}:
         typer.echo(
-            "Invalid --planner-ui value. Expected one of: disabled, auto, textual, classic.",
+            "Invalid planner renderer. Expected disabled, auto, textual, or classic.",
             err=True,
         )
         raise typer.Exit(2)
@@ -821,66 +741,9 @@ def scan(
         raise typer.Exit(2)
 
     scan_options: dict[str, Any] = {}
-    if preview_read_plan and b524_read_plan_path is None:
-        typer.echo("--preview-read-plan requires --b524-read-plan.", err=True)
+    if preset_value == "custom" and (planner_ui_value == "disabled" or not console.is_terminal):
+        typer.echo("Custom scanning requires an interactive planner.", err=True)
         raise typer.Exit(2)
-    if b524_read_plan_path is not None:
-        from .scanner.b524_operation_reads import load_operation_read_plan
-
-        try:
-            operation_requests = load_operation_read_plan(b524_read_plan_path)
-        except ValueError as exc:
-            typer.echo(f"Invalid B524 operation read plan: {exc}", err=True)
-            raise typer.Exit(2) from exc
-        if preview_read_plan:
-            typer.echo(
-                json.dumps(
-                    {
-                        "schema_version": 1,
-                        "live_send": False,
-                        "target_support": "unverified",
-                        "requests": [
-                            {
-                                "operation": request.operation,
-                                "selector": request.selector,
-                                "payload_hex": request.payload.hex(),
-                            }
-                            for request in operation_requests
-                        ],
-                    },
-                    indent=2,
-                )
-            )
-            return
-        scan_options["operation_requests"] = operation_requests
-    if scan_plan_path is not None:
-        if preset_value != "custom":
-            typer.echo("--scan-plan requires --preset custom.", err=True)
-            raise typer.Exit(2)
-        try:
-            scan_options["explicit_plan"] = parse_scan_plan(
-                json.loads(scan_plan_path.read_text(encoding="utf-8"))
-            )
-        except (OSError, ValueError) as exc:
-            typer.echo(f"Invalid custom scan plan: {exc}", err=True)
-            raise typer.Exit(2) from exc
-        from .scanner.plan import estimate_register_requests
-        from .scanner.scan_policy import MAX_EXPLICIT_SCALAR_REQUESTS
-
-        if (
-            estimate_register_requests(scan_options["explicit_plan"])
-            + len(scan_options.get("operation_requests", ()))
-            > MAX_EXPLICIT_SCALAR_REQUESTS
-        ):
-            typer.echo("Combined scalar/operation plan exceeds 100000 explicit requests.", err=True)
-            raise typer.Exit(2)
-    elif preset_value == "custom" and (planner_ui_value == "disabled" or not console.is_terminal):
-        typer.echo("Custom scanning requires --scan-plan or an interactive planner.", err=True)
-        raise typer.Exit(2)
-    if description_budget is not None:
-        scan_options["description_budget"] = description_budget
-    if request_budget is not None:
-        scan_options["request_budget"] = request_budget
 
     ebusd_schema: EbusdCsvSchema | None = None
     ebusd_schema_source: str | None = None
@@ -905,7 +768,7 @@ def scan(
 
     if b509_range and not b509_dump:
         typer.echo(
-            "--b509-range requires --b509-dump.",
+            "B509 ranges require enabling the B509 dump in scan setup.",
             err=True,
         )
         raise typer.Exit(2)
@@ -963,7 +826,7 @@ def scan(
                         console=console,
                         planner_ui=cast(PlannerUiMode, planner_ui_value),
                         planner_preset=cast(PlannerPreset, preset_value),
-                        probe_constraints=probe_constraints,
+                        probe_constraints=True,
                         **scan_options,
                     )
                 artifact["meta"]["dry_run"] = True
@@ -987,7 +850,7 @@ def scan(
                     try:
                         b509_ranges.append(parse_b509_range(spec))
                     except ValueError as exc:
-                        typer.echo(f"Invalid --b509-range {spec!r}: {exc}", err=True)
+                        typer.echo(f"Invalid B509 range {spec!r}: {exc}", err=True)
                         raise typer.Exit(2) from exc
             else:
                 b509_ranges = [(0x0000, 0x00FF)]
@@ -1020,18 +883,6 @@ def scan(
                     if redact:
                         identity["serial"] = "<SERIAL_NUMBER_REDACTED>"
                     identity_for_artifact = dict(identity)
-                    if "operation_requests" in scan_options:
-                        from .scanner.b524_operation_reads import validate_operation_read_identity
-
-                        try:
-                            validate_operation_read_identity(
-                                scan_options["operation_requests"],
-                                device_id=identity.get("eid", identity.get("device_id")),
-                                manufacturer=int(identity.get("manufacturer", "-1"), 0),
-                            )
-                        except ValueError as exc:
-                            typer.echo(f"B524 operation target is not qualified: {exc}", err=True)
-                            raise typer.Exit(2) from exc
                     scan_options["operation_identity"] = dict(identity)
                     preface = _build_scan_session_preface(
                         dst=dst_u8,
@@ -1064,7 +915,7 @@ def scan(
                             console=console,
                             planner_ui=cast(PlannerUiMode, planner_ui_value),
                             planner_preset=cast(PlannerPreset, preset_value),
-                            probe_constraints=probe_constraints,
+                            probe_constraints=True,
                             **scan_options,
                         )
                 break
@@ -1118,7 +969,17 @@ def scan(
     if _can_launch_interactive_browse(console):
         # Post-scan default UX: enter the new fullscreen browse UI directly.
         try:
-            run_browse_from_artifact(artifact, allow_write=False)
+            browse_options: dict[str, Any] = {"artifact_path": output_path}
+            if not dry_run:
+                browse_options["connection_settings"] = {
+                    "protocol": transport_settings.protocol,
+                    "host": transport_settings.host,
+                    "port": transport_settings.port,
+                    "src": transport_settings.src,
+                    "dst": dst_u8,
+                    "trace_file": trace_file,
+                }
+            run_browse_from_artifact(artifact, allow_write=False, **browse_options)
         except ModuleNotFoundError as exc:
             if not _is_missing_textual_module(exc):
                 raise
@@ -1372,41 +1233,19 @@ def discover(
 
 
 @app.command()
-def browse(
-    file: Path | None = typer.Option(  # noqa: B008
-        None,
-        "--file",
-        help="Path to an existing scan JSON artifact (default browse mode).",
-    ),
-    live: bool = typer.Option(  # noqa: B008
-        False,
-        "--live",
-        help="Live mode (planned). In P0, only --file mode is implemented.",
-    ),
-    device: str | None = typer.Option(  # noqa: B008
-        None,
-        "--device",
-        help="Device identifier for --live mode (planned).",
-    ),
-    allow_write: bool = typer.Option(  # noqa: B008
-        False,
-        "--allow-write",
-        help=(
-            "Enable write/edit actions in browse UI (safe mode + confirmation). "
-            "Note: --file mode edits do not write to the device."
-        ),
-    ),
-) -> None:
-    """Browse scan results in fullscreen Textual UI (file mode)."""
-
-    _ = device
-    if live:
-        typer.echo("Live browse mode is not implemented yet; use --file <artifact.json>.", err=True)
+def browse() -> None:
+    """Open a scan JSON visually; connection and editing are Browser actions."""
+    if not Console().is_terminal:
+        typer.echo("Browse requires a TTY for the visual file-open dialog.", err=True)
         raise typer.Exit(2)
-
+    file = run_artifact_open_modal()
     if file is None:
-        typer.echo("Missing required option: --file <artifact.json>.", err=True)
-        raise typer.Exit(2)
+        raise typer.Exit(0)
+    _browse_configured(file)
+
+
+def _browse_configured(file: Path) -> None:
+    """Load an offline artifact selected by the visual file-open dialog."""
     if not file.exists():
         typer.echo(f"Artifact not found: {file}", err=True)
         raise typer.Exit(2)
@@ -1431,4 +1270,4 @@ def browse(
         typer.echo("Browse UI requires a TTY terminal.", err=True)
         raise typer.Exit(0)
 
-    run_browse_from_artifact(artifact, allow_write=allow_write)
+    run_browse_from_artifact(artifact, allow_write=False, artifact_path=file)

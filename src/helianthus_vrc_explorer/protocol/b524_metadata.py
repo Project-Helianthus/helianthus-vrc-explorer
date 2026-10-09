@@ -170,7 +170,10 @@ def validate_parameter_edit(
     encoded: bytes,
 ) -> str | None:
     """Return None for valid input, 'unvalidated' when absent, or a rejection reason."""
-    if not description or description.get("qualification") != "matched":
+    if not description or description.get("qualification") not in {
+        "matched",
+        "profile_qualified",
+    }:
         return "unvalidated"
     if description.get("type") != type_spec.strip().upper():
         return "Description format does not match the parameter codec"

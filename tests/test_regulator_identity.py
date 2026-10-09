@@ -19,7 +19,7 @@ def _repo_root() -> Path:
 def test_catalog_contains_all_exact_eid_spn_pairs() -> None:
     catalog = load_regulator_identity_catalog()
 
-    assert len(catalog) == 38
+    assert len(catalog) == 39
     assert {(entry.eid, entry.spn_hex) for entry in catalog} == {
         ("70000", "0141"),
         ("70000", "0155"),
@@ -57,6 +57,7 @@ def test_catalog_contains_all_exact_eid_spn_pairs() -> None:
         ("CTLV3", "01B5"),
         ("CTLV3", "01DC"),
         ("CTLV3", "01E0"),
+        ("CTLX0", "007F"),
         ("CTLX0", "0194"),
         ("EMM00", "0181"),
     }

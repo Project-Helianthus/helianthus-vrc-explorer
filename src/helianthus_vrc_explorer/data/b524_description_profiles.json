@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "profiles": [
+    {
+      "id": "basv2_sw0507_hw1704_api1",
+      "profile": "controller_b524",
+      "controller": {
+        "eid": "BASV2",
+        "software_raw_hex": "0507",
+        "hardware_raw_hex": "1704",
+        "api_version": 1.0,
+        "api_revision": 1.0
+      },
+      "bundle_signature": {
+        "model": "Vaillant sensoCOMFORT RF (VRC 720f/2) 0020262148",
+        "firmware": "SW 0507 / HW 1704"
+      },
+      "local_circuit_profile": {
+        "observed_active_instances": [0, 1],
+        "observed_inactive_instances": [2],
+        "observed_instance_qualification": "installation_observation_not_profile_limit",
+        "virtual_dhw_instance": 9,
+        "presence_register": 2,
+        "visible_zero_is_present": false
+      }
+    }
+  ]
+}

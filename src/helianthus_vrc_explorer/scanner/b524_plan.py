@@ -233,8 +233,10 @@ def _ii_max_for_opcode(*, group: int, default_ii_max: int | None, opcode: int) -
     return int(value)
 
 
-def _ii_min_for_opcode(*, group: int, opcode: int) -> int:
+def _ii_min_for_opcode(*, group: int, opcode: int, profile_id: str | None = None) -> int:
     """Return the first configured instance index for one operation namespace."""
+    if profile_id == "basv2_sw0507_hw1704_api1" and opcode == 0x02 and group == 0x02:
+        return 0x00
     if opcode == 0x06 or (opcode == 0x02 and group == 0x02):
         return 0x01
     return 0x00

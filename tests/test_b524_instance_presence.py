@@ -83,6 +83,47 @@ def test_zero_capacity_skips_ordinary_candidates_but_keeps_virtual_circuit_slot(
     assert list(probes) == [0x09]
 
 
+def test_basv2_sw0507_circuit_profile_admits_native_zero_and_rejects_visible_zero() -> None:
+    class CircuitTransport(_ReplyTransport):
+        def send(self, dst, payload):
+            self.requests.append(payload)
+            instance = payload[3]
+            value = 1 if instance in {0, 1, 9} else 0
+            flags = 3 if instance <= 2 else 2
+            return bytes((flags, 2, 2, 0)) + value.to_bytes(2, "little")
+
+    transport = CircuitTransport(b"")
+    probes = _probe_present_instances(
+        transport,
+        dst=0x15,
+        group=0x02,
+        opcode=0x02,
+        ii_max=0x09,
+        observer=None,
+        presence_profile="basv2_sw0507_hw1704_api1",
+    )
+    assert list(probes) == list(range(10))
+    assert probes[0].present is True
+    assert probes[1].present is True
+    assert probes[2].present is False
+    assert probes[9].present is True
+
+
+def test_basv2_sw0507_does_not_hardcode_observed_inactive_ii02() -> None:
+    transport = _ReplyTransport(bytes.fromhex("030202000100"))
+    probe = probe_instance_availability(
+        transport,
+        dst=0x15,
+        group=0x02,
+        instance=0x02,
+        opcode=0x02,
+        presence_profile="basv2_sw0507_hw1704_api1",
+    )
+    assert probe.present is True
+    assert probe.evidence is not None
+    assert probe.evidence["raw_hex"] == "0100"
+
+
 def test_recommended_solar_count_stops_after_the_configured_slot() -> None:
     transport = _ReplyTransport(bytes.fromhex("030404000000a041"))
     probes = _probe_present_instances(

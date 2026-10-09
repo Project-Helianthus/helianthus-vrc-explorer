@@ -34,12 +34,21 @@ Minimum setup:
 
 ## Quick start
 ```bash
-python -m helianthus_vrc_explorer scan \
-  --planner-ui auto \
-  --preset recommended
+python -m helianthus_vrc_explorer scan --preset recommended
 ```
 
-`scan` auto-discovers the destination (`--dst auto`) by default. Use `--dst 0x..` to force an address.
+`--preset` is optional. In an interactive terminal, omitting it opens the scan
+setup modal, where the user selects a preset and reviews destination, output,
+fixture, trace, dump, enrichment, planner, privacy, and other scan settings.
+In a non-interactive terminal, supply an explicit preset to use the default
+setup. The scan command keeps only adapter connection options
+(`--transport`, `--host`, `--port`, and `--source-address`) plus `--preset`.
+
+Key scan UX flags:
+- `--transport`: adapter protocol (`tcp`, `ens`, or `enh`).
+- `--host` and `--port`: connection endpoint.
+- `--source-address`: enhanced adapter initiator address.
+- `--preset`: optional startup preset; omitted values are selected visually.
 
 Contributors can verify the installed CLI, packaged data, and sanitized B524 replay inputs without
 hardware by following the [offline acceptance card](docs/offline-acceptance.md).
@@ -48,21 +57,11 @@ Namespace contract for implementers:
 - Stable B524 namespace invariants (identity, discovery authority, constraint scope, artifact keys, fixture compatibility): [public B524 namespace invariants](https://github.com/Project-Helianthus/helianthus-docs-ebus/blob/main/architecture/b524-namespace-invariants.md)
 - This README remains user-facing; invariant-level semantics are documented in the public eBUS documentation once implementation behavior is stable.
 
-Key scan UX flags:
-- `--planner-ui auto|textual|classic`
-- `--preset recommended|full|research|custom`
-- `--probe-constraints/--no-probe-constraints` (targeted OP01/OP07 descriptions for observed writable parameters; enabled by default)
-- `--description-budget` (optional limit; all eligible parameters in the selected scope by default)
-- `--request-budget` (optional B524 send limit including transport retries; no implicit send cap)
-- `--scan-plan` (version 1 JSON file for exact custom read selectors)
-- `--b524-read-plan` (optional version 1 JSON override for OP03/08/09/0B reads)
-- `--preview-read-plan` (validate and display that operation plan without device I/O)
-- `--b509-dump` (B509 is opt-in; `--b509-range` requires this flag)
-- `--no-tips`
-- `--redact` (redact identity fields like serial number from console output)
-- `--trace-file /path/to/trace.log`
-- `--ebusd-csv-path /path/to/15.720.csv` (optional enrichment: adds eBUSd register names)
-- `--myvaillant-map-path /path/to/myvaillant_register_map.csv` (optional enrichment: adds myVaillant-style leaf names)
+The scan setup modal owns movable scan and browse choices. It shows preset
+descriptions before starting, records the selected scope and actual requests,
+and keeps custom scope in the visual planner. `browse` has no public arguments:
+it opens a visual artifact picker, and a live connection remains an explicit
+Browser action.
 
 If transport setup fails, scan reports a concise error and exits nonzero without a traceback. In an interactive TTY, the retry dialog applies to explicit Enhanced/ENS and custom endpoints as well as the default endpoint; you can adjust protocol/host/port or cancel. Once scanning starts, transport failure does not reopen this setup dialog or restart the scan.
 
@@ -106,8 +105,8 @@ Coverage and parameter-description note:
 - Send accounting includes each ebusd command attempt and Enhanced request attempt, including internal retransmissions. Connection/arbitration failure may consume an attempt; these counters do not prove physical bus delivery. Description coverage counts candidates separately from `request_attempts` and `retries`.
 - `recommended` uses OP00 circuit/zone capacities as candidate context and selects instances confirmed by their presence predicates. Zero capacity skips ordinary candidates; virtual native hot water at II09 remains independent. Other OP00 count families retain their qualified population-count rules. Unavailable or invalid capacity retains bounded profile discovery. The characterized OP02 groups `00..05,08,09` and OP06 groups `01,02,08,09,0A,0C,0E,0F` use the same policy through CLI and interactive planners.
 - `full` audits every declared II slot in those characterized profile families independently of OP00 values, using normal RR bounds. For circuits and zones, fewer confirmed instances than capacity is normal; only an observed population above capacity sets `capacity_exceeded`. Other count families retain their population-mismatch reporting. Configured profile coverage is not universal wire-space completeness.
-- `research` expands groups and RR bounds with multiple bounded discovery selectors. A failed first `II=00/RR=0000` probe does not veto later probes. It is non-exhaustive; an explicit `--request-budget` saves an incomplete artifact at exhaustion. Legacy aliases remain `aggressive` -> `full`, `exhaustive` -> `research`, and `conservative` -> `recommended`.
-- Descriptions are acquired after scalar reads for every observed writable parameter in the selected scope by default. Explicit budgets reserve half for OP01 and half for OP07, borrow unused capacity, and rotate across group/instance queues. Any observed writable format is eligible, including unknown codecs whose description replies remain raw and unqualified. Artifacts report eligible, planned, attempted, received, interpreted, unavailable, unqualified and omitted coverage. Each matched record carries its scoped identity, opcode pair, codec, width, min, max, step, and raw reply.
+- `research` expands groups and RR bounds with multiple bounded discovery selectors. A failed first `II=00/RR=0000` probe does not veto later probes. It is non-exhaustive; an interrupted scan remains incomplete. Legacy aliases remain `aggressive` -> `full`, `exhaustive` -> `research`, and `conservative` -> `recommended`.
+- The selected description policy is visible in the planner. The known BASV2/SW0507 local profile starts with profile metadata and no implicit description acquisition; `full`, `research`, unknown profiles, and explicit class overrides acquire eligible writable descriptions. Any observed writable format is eligible, including unknown codecs whose description replies remain raw and unqualified. Artifacts report eligible, planned, attempted, received, interpreted, unavailable, unqualified and omitted coverage. Each matched record carries its scoped identity, opcode pair, codec, width, min, max, step, and raw reply.
 - System Information acquisition uses one progress row. Both planners show readable count and context labels. A configured trace file suppresses the trace-file tip; ordinary arbitration retries remain in diagnostics without warning scrollback.
 - OP06 group-family labels GG01..GG0F are supplied by the packaged `b524_remote_group_names.json` display map, consistently across the planner, scan output, summary, browser, HTML and classic viewer, including previously saved artifacts. These labels do not change scan targets, bounds, remote-header predicates or OP02 names. `unused` is a display designation; it does not suppress a probe or establish universal absence.
 - Browser parent selections show navigation without aggregating descendant registers. Select a leaf to inspect its registers. HTML uses compact descriptions and access/visibility tags, and shows transport failures without duplicate exception text.
@@ -116,19 +115,15 @@ Coverage and parameter-description note:
 - Bundled descriptions remain prior observations. Every entry keeps the native read opcode, GG, II and RR selector, so OP02 and OP06 never share same-numbered group limits. Compatible qualified live descriptions are compared by codec, width, min, max and step; missing optional identity data is marked partial rather than mismatched. Missing required remote identity remains unqualified. Known profile contradictions and actual description differences remain distinct from unavailable evidence. Sanitized baseline updates can be merged with `scripts/import_b524_descriptions.py ARTIFACT OUTPUT --merge` without erasing other observations or copying raw request/reply captures.
 - OP00 API version/revision and other count classes remain profile context. Ventilation hints can annotate known candidates; they do not establish a same-numbered GG route or prove absence.
 
-Exact custom scans use `--preset custom --scan-plan plan.json`. The file is validated before device I/O, permits only OP02/OP06, and preserves explicit RR selectors regardless of discovery, validates OP06 II01..08 and circuit II01..09 before I/O, adding mandatory OP02/GG02/II09 once when local circuits are selected. Plans exceeding 100000 scalar reads are rejected before queuing.
-
-With planning or budget options, `--dry-run` executes the selected policy against the bundled fixture through DummyTransport. The default `--dry-run` invocation displays that fixture directly. The artifact records `dry_run_mode` as `deterministic_scan` or `fixture_view`.
-
-```json
-{
-  "schema_version": 1,
-  "groups": [
-    {"opcode": "0x02", "group": "0x02", "instances": ["0x01", "0x03"], "registers": ["0x0002", "0x0010..0x0015"]}
-  ]
-}
-```
-- The browse edit confirmation validates every supported value format against that matched description. If no matched description is available, the UI warns that confirmation is unvalidated. Browse edits only alter the local artifact view; they never write to a live device.
+Custom scans use the visual planner. It validates OP02/OP06 selectors before
+transport I/O, preserves exact RR selections, validates OP06 II01..08 and the
+BASV2 OP02/GG02 II00..09 domain, and adds the independent II09 virtual-DHW
+probe where applicable. Planner configuration owns finite scope, retry limits,
+and incomplete-result accounting.
+- Browser editing uses a qualified live or exact-profile description for encoding,
+  width, min/max and step. Known limit violations are rejected. An absent or
+  incomplete limit requires an extra explicit exception for a live write.
+  Offline edits preserve the observed value and save a separate local preview.
 - `HTI` uses three numeric bytes in `HH MM SS` order, with ranges `0..23`, `0..59`, `0..59`. Python decoding, offline edit encoding and HTML type overrides use this same contract. The separate `BTI` datatype in the [ebusd type registry](https://github.com/john30/ebusd/blob/68f6336bad89607a4200ca9e86f9cd7860b31f86/src/lib/ebus/datatype.cpp) uses BCD. Existing artifact values are retained; replay a raw trace or apply an explicit type override to recompute an older decoded time.
 
 Output:
@@ -147,28 +142,30 @@ Replay limitations (v1):
 - Metadata requiring live probing (for example runtime identity enrichment) is not replayed.
 - A replay artifact represents the first B524 destination in the trace. Exchanges for other destinations are excluded and counted in its limitations.
 
-Browse a saved artifact in fullscreen Textual UI:
+Browse opens a visual artifact picker in fullscreen Textual UI:
 ```bash
-python -m helianthus_vrc_explorer browse --file b524_scan_0x15_<timestamp>.json
-```
-
-Enable safe write mode in browse UI:
-```bash
-python -m helianthus_vrc_explorer browse \
-  --file b524_scan_0x15_<timestamp>.json \
-  --allow-write
+python -m helianthus_vrc_explorer browse
 ```
 
 ### Write Safety
 By default the tool is **read-only**.
 
-`scan` is always read-only.
+The scan phase is read-only. Its Browser can connect after the scan connection
+has closed; every device change then requires a separate concrete confirmation.
 
-`browse --allow-write` enables edit actions in the fullscreen UI, and requires per-write confirmation
-(old value -> new value -> confirm).
+The Browser enables a live write only after explicit connection and a
+per-change confirmation (old value -> new value -> confirm).
 
-In `browse --file` mode, edits do **not** write to the device (they only update the UI view). Live
-device writes are planned.
+Opening JSON starts offline. Local edits are saved separately from observations.
+Select **Connect** to verify native identity, then edit a writable Config row.
+The application refreshes identity, profile, access and baseline, shows the exact
+target and old → new value, sends at most one native write after confirmation,
+and reports success only on desired-value readback. An uncertain result offers
+read-only **Recheck**, never automatic write retransmission. ENUMs use labelled
+numeric dropdowns; disabled gates/range choices retain their reason.
+
+See the AGPL [Browser write contract](https://github.com/Project-Helianthus/helianthus-docs-ebus/blob/main/development/ebus-vaillant-b524-browser-writes.md)
+for validation, missing-limit exceptions and evidence boundaries.
 
 ## Features
 - Session preface with regulator identity and transport endpoint.
@@ -186,7 +183,18 @@ device writes are planned.
   - OP0B GetEventSetPoint
   - Legacy unqualified group-directory and constraint views, when present
 - Tabbed register views: `Config`, `State`. Writable OP02 and OP06 parameters and their limit records belong in Config.
-- Watch/pin/rate controls and safe write workflow (`--allow-write` + confirmation).
+- Watch/pin/rate controls and safe write workflow: select **Connect** in the
+  Browser, then confirm each concrete value change.
+
+### Scan and browse configuration
+
+`scan` and `browse` keep user-facing configuration in their visual UI. Public
+`scan` arguments are limited to adapter connection (`--transport`, `--host`,
+`--port`, `--source-address`) and optional `--preset`; the startup modal owns
+the destination, output, fixture, trace, dump, enrichment, planner, privacy,
+and custom-scope choices. `browse` opens an artifact picker and connects only
+when the user selects **Connect**. Technical commands such as `replay-trace`
+and the `b524` command group remain scriptable.
 
 ## Events and schedules in the planner
 
@@ -205,14 +213,10 @@ maximum. The editor accepts raw codes up to FF. Empty replies do not stop later
 codes and do not establish that a family is absent. The classic planner also
 accepts `codes N <raw range>` for an automatic program.
 
-`scan --b524-read-plan FILE` remains an advanced override for exact OP03/08/09/0B
-selectors. Separate examples are available for
-[experimental Events](fixtures/b524_event_read_plan.json) and
+The visual planner configures exact OP03/08/09/0B selections. Historical JSON
+operation plans remain readable by internal/replay tooling. Separate examples
+are available for [experimental Events](fixtures/b524_event_read_plan.json) and
 [VRC700 timers](fixtures/b524_vrc700_read_plan.json).
-
-```bash
-python -m helianthus_vrc_explorer scan --b524-read-plan fixtures/b524_event_read_plan.json --preview-read-plan
-```
 
 Artifacts and replay preserve each operation's selector, raw response, decoded
 candidate fields, qualification and attempts. Browser and HTML show a leaf for
