@@ -2,19 +2,18 @@
 
 ## 0.6.0
 
-- Integrate explicit OP03/08/09/0B read plans into scan, planner, progress, artifacts and replay; preserve raw evidence and distinct failure outcomes.
-- Add timer and paired Event offline edit plans, payload diffs and export. Qualified OP04 execution checks identity/baseline, sends once and reads back; OP0A/0C native execution remains unavailable pending qualification.
-- Classify 38 exact regulator EID/SPN pairs, deriving SPN from the software PIN and displaying matched model/family profiles in scan, Browser and HTML identity headers. Preserve raw identity and unknown pairs.
-- Correct B524 OP00 `ReadSystemInformation` discovery: circuit and zone fields are supported capacities, while configured instances require independent presence evidence.
-- Acquire scoped OP01 and OP07 descriptions for observed writable parameters and validate supported formats during offline browse edits.
-- Preserve raw descriptions, incomplete scans and namespace-aware identities; keep semantic register names in `snake_case`.
-- Provide deterministic `recommended`, `full`, `research` and exact `custom` scan policies with bounded request accounting and fair description budgets.
-- Release Enhanced transport ownership after a rejected response and preserve first description attempts before spending capacity on retries.
-- Include local virtual-DHW selector II09 independently of circuit capacity, and discover additional OP06 device classes from II01.
-- Bundle profile/firmware/instance-scoped description baselines for offline HTML and browse, with matching/differing/unavailable rechecks.
-- Plan all eligible OP01/OP07 descriptions in full/research profiles, retaining explicit budget and qualification coverage.
-- Keep date/time STEP opaque when its encoding is unknown; correct legacy FLAGS role/persistence interpretations.
-- Correct `HTI` parsing, offline encoding and HTML type overrides to use numeric `HH MM SS` bytes.
-- Decode characterized OP06 remote-header firmware as numeric byte components (`FWU`), preserving the generic legacy `FW` codec.
+- Add live scalar Config editing in Browser, including the Browser opened after scan: refresh native identity, profile, access and baseline; validate qualified limits; confirm the concrete target and old/new value; send once and report success only on matching readback. Uncertain outcomes offer read-only recheck instead of automatic write retransmission.
+- Keep offline JSON edits separate from device writes. Decode ENUM values and offer labelled dropdowns with qualified disabled-choice reasons.
+- Move scan and browse configuration into the visual UI. Select an optional preset in the startup modal, keep adapter arguments scriptable, and remove public plan and global budget arguments.
+- Reuse exact native-profile descriptions without implicit Describe on known recommended profiles. Qualify remote class/firmware separately; request descriptions only for writable parameters under explicit planner override, acquisition presets or unknown profiles. Keep missing descriptions explicit.
+- Add automatic Event/EventSetPoint exploration for discovered topology, conditional paired SetPoint reads, planner navigation and shared progress. Preserve raw evidence and experimental schema status. Technical OP03/08/09/0B reads remain scriptable.
+- Add timer and paired Event offline edit plans, payload diffs and export. Qualified OP04 execution checks identity and baseline, sends once and reads back; native OP0A/0C execution remains unavailable pending qualification.
+- Classify 39 exact regulator EID/software-PIN pairs, including CTLX0/raw SW0127/HW0404 as VRC720. Preserve raw identity and unknown pairs; model identification does not transfer another profile's limits.
+- Separate OP02 controller registers from OP06 device slots throughout discovery, planner, Browser, HTML and summaries. Update group/register names in snake_case, universal remote headers, ventilation ENUMs and characterized register windows.
+- Treat OP00 circuit and zone fields as supported capacities, with independent presence evidence. Keep native BASV2 circuit indexing and virtual-DHW II09 distinct; recommended selection uses mapped counts, presence gates and mandatory System/native-DHW scope.
+- Hide deselected groups and absent instances in Browser/HTML. Parent nodes provide navigation without aggregating descendant registers; Config/State tabs apply only to OP02/OP06. Compact description/access displays and current access-category defaults reduce output noise.
+- Correct Enhanced transport escaping, including reserved command CRC bytes, and use shared read recovery for identity and register operations. Preserve incomplete artifacts and detailed transport evidence without duplicate retry warnings.
+- Restore automatic postscan Browser reconnection and distinct numeric edit confirmation. Resolve and check output directories before transport so an invalid destination fails before scanning.
+- Correct HTI numeric HH/MM/SS encoding and characterized OP06 FWU numeric-byte firmware decoding. Keep opaque date/time STEP and unsupported description codecs explicitly unvalidated.
 
-Artifacts remain schema 2.3. Older artifacts are readable, and their stored values are retained. Replay raw traces or apply explicit type overrides to recompute times decoded by earlier versions. Offline edits do not write to devices. Profile coverage is bounded and does not establish exhaustive wire-space discovery or live-write qualification.
+Artifacts remain schema 2.3. Older artifacts retain raw observations and historical values; replay raw traces or apply explicit type overrides when recomputation is needed. Profile windows are scheduling ceilings, not proof of exhaustive wire-space coverage. Generic IIFF descriptions cannot validate concrete devices. VRC700 paths and Event schemas retain their stated qualification limits; this release does not claim hardware validation across all models or native Event-write support.
