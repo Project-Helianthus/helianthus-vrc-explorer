@@ -33,6 +33,7 @@ type WriteOutcome = Literal[
     "not_applied",
     "partial",
     "ambiguous",
+    "interrupted",
     "unexpected",
     "baseline_mismatch",
     "pre_read_failed",
@@ -415,7 +416,7 @@ def _read_snapshot(
     *,
     dst: int,
     requests: tuple[B524OperationReadRequest, ...],
-) -> tuple[tuple[bytes | None, ...], list[dict[str, Any]]]:
+) -> tuple[tuple[bytes | None, ...], list[dict[str, Any]], bool]:
     values: list[bytes | None] = []
     evidence: list[dict[str, Any]] = []
     for request in requests:
@@ -436,6 +437,13 @@ def _read_snapshot(
         }
         try:
             response = transport.send_with_attempt_hook(dst, request.payload, count_attempt)
+        except KeyboardInterrupt:
+            item["response_state"] = "interrupted"
+            item["error"] = "KeyboardInterrupt"
+            values.append(None)
+            item["request_attempts"] = attempts
+            evidence.append(item)
+            return tuple(values), evidence, True
         except TransportError as exc:
             item["response_state"] = "transport_error"
             item["error"] = type(exc).__name__
@@ -462,7 +470,7 @@ def _read_snapshot(
                     values.append(response)
         item["request_attempts"] = attempts
         evidence.append(item)
-    return tuple(values), evidence
+    return tuple(values), evidence, False
 
 
 def _classify_readback(
@@ -525,20 +533,39 @@ def execute_controlled_write(
         "write_feedback_raw_hex": None,
         "write_feedback_interpretation": "unknown",
         "automatic_rollback": False,
+        "pre_read": [],
+        "observed_before_raw_hex": [],
+        "readback": [],
+        "observed_after_raw_hex": [],
     }
 
-    result["connected_identity"] = _verify_connected_identity(
-        transport, dst=dst, qualification=qualification
-    )
+    try:
+        result["connected_identity"] = _verify_connected_identity(
+            transport, dst=dst, qualification=qualification
+        )
+    except KeyboardInterrupt:
+        result["outcome"] = "interrupted"
+        result["application_state"] = "not_attempted"
+        result["interrupted_phase"] = "identity"
+        return result
 
-    before, before_evidence = _read_snapshot(transport, dst=dst, requests=request.read_requests)
+    before, before_evidence, before_interrupted = _read_snapshot(
+        transport, dst=dst, requests=request.read_requests
+    )
     result["pre_read"] = before_evidence
+    result["observed_before_raw_hex"] = [
+        value.hex() if isinstance(value, bytes) else None for value in before
+    ]
+    if before_interrupted:
+        result["outcome"] = "interrupted"
+        result["application_state"] = "not_attempted"
+        result["interrupted_phase"] = "pre_read"
+        return result
     if any(value is None for value in before):
         result["outcome"] = "pre_read_failed"
         return result
     if cast(tuple[bytes, ...], before) != request.expected_before:
         result["outcome"] = "baseline_mismatch"
-        result["observed_before_raw_hex"] = [cast(bytes, value).hex() for value in before]
         return result
 
     write_attempts = 0
@@ -553,16 +580,30 @@ def execute_controlled_write(
 
     try:
         feedback = transport.send_with_attempt_hook(dst, request.write_payload, admit_one_write)
+    except KeyboardInterrupt:
+        result["write_attempts"] = write_attempts
+        result["write_error"] = "KeyboardInterrupt"
+        result["outcome"] = "interrupted"
+        result["application_state"] = "ambiguous" if write_attempts else "not_attempted"
+        result["interrupted_phase"] = "write"
+        return result
     except (B524WriteRetryBlocked, TransportError) as exc:
         result["write_error"] = type(exc).__name__
     else:
         result["write_feedback_raw_hex"] = feedback.hex()
     result["write_attempts"] = write_attempts
 
-    readback, readback_evidence = _read_snapshot(transport, dst=dst, requests=request.read_requests)
+    readback, readback_evidence, readback_interrupted = _read_snapshot(
+        transport, dst=dst, requests=request.read_requests
+    )
     result["readback"] = readback_evidence
     result["observed_after_raw_hex"] = [
         value.hex() if isinstance(value, bytes) else None for value in readback
     ]
+    if readback_interrupted:
+        result["outcome"] = "interrupted"
+        result["application_state"] = "ambiguous"
+        result["interrupted_phase"] = "readback"
+        return result
     result["outcome"] = _classify_readback(request, readback)
     return result

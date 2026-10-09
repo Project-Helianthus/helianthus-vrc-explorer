@@ -25,7 +25,7 @@ from helianthus_vrc_explorer.transport.base import (
 class _ScriptedTransport(TransportInterface):
     def __init__(
         self,
-        replies: dict[bytes, list[bytes | Exception]],
+        replies: dict[bytes, list[bytes | BaseException]],
         *,
         retry_write: bool = False,
         identity_payload: bytes = b"\xb570000\x01\x41\x01\x00",
@@ -55,9 +55,20 @@ class _ScriptedTransport(TransportInterface):
         reply = self.replies[payload].pop(0)
         if self.retry_write and payload[0] in {0x04, 0x0A, 0x0C}:
             attempt_hook()
-        if isinstance(reply, Exception):
+        if isinstance(reply, BaseException):
             raise reply
         return reply
+
+
+class _PreAdmissionInterruptTransport(_ScriptedTransport):
+    def __init__(self, replies, *, interrupt_payload: bytes) -> None:
+        super().__init__(replies)
+        self.interrupt_payload = interrupt_payload
+
+    def send_with_attempt_hook(self, dst, payload, attempt_hook):
+        if payload == self.interrupt_payload:
+            raise KeyboardInterrupt
+        return super().send_with_attempt_hook(dst, payload, attempt_hook)
 
 
 def _timer_request():
@@ -325,6 +336,111 @@ def test_timeout_after_single_send_is_ambiguous_and_never_retries_write() -> Non
     assert result["write_error"] == "TransportTimeout"
     assert result["readback"][0]["response_state"] == "transport_error"
     assert result["readback"][0]["error"] == "TransportTimeout"
+
+
+def _execute_without_interrupt_escape(transport, request):
+    try:
+        return execute_controlled_write(
+            transport,
+            dst=0x15,
+            request=request,
+            qualification=_qualification(request),
+            concrete_confirmation=concrete_confirmation_text(request, dst=0x15),
+        )
+    except KeyboardInterrupt:
+        pytest.fail("controlled write lost its interruption evidence")
+
+
+def test_interrupt_during_pre_read_is_not_a_write_attempt() -> None:
+    request = _timer_request()
+    read_payload = request.read_requests[0].payload
+    transport = _ScriptedTransport({read_payload: [KeyboardInterrupt()]})
+
+    result = _execute_without_interrupt_escape(transport, request)
+
+    assert result["outcome"] == "interrupted"
+    assert result["application_state"] == "not_attempted"
+    assert result["interrupted_phase"] == "pre_read"
+    assert result["write_attempts"] == 0
+    assert result["pre_read"][0] == {
+        "operation": "ReadTimer",
+        "selector": request.selector,
+        "request_payload_hex": read_payload.hex(),
+        "selector_correlation": "request_context",
+        "request_attempts": 1,
+        "response_raw_hex": None,
+        "response_state": "interrupted",
+        "error": "KeyboardInterrupt",
+    }
+    assert result["observed_before_raw_hex"] == [None]
+    assert result["readback"] == []
+    assert transport.admitted_payloads == [read_payload]
+
+
+def test_interrupt_before_write_admission_is_not_ambiguous() -> None:
+    request = _timer_request()
+    read_payload = request.read_requests[0].payload
+    transport = _PreAdmissionInterruptTransport(
+        {read_payload: [request.expected_before[0]]},
+        interrupt_payload=request.write_payload,
+    )
+
+    result = _execute_without_interrupt_escape(transport, request)
+
+    assert result["outcome"] == "interrupted"
+    assert result["application_state"] == "not_attempted"
+    assert result["interrupted_phase"] == "write"
+    assert result["write_attempts"] == 0
+    assert result["write_error"] == "KeyboardInterrupt"
+    assert result["observed_before_raw_hex"] == [request.expected_before[0].hex()]
+    assert result["readback"] == []
+    assert request.write_payload not in transport.admitted_payloads
+
+
+def test_interrupt_after_write_admission_is_ambiguous_without_readback() -> None:
+    request = _timer_request()
+    read_payload = request.read_requests[0].payload
+    transport = _ScriptedTransport(
+        {
+            read_payload: [request.expected_before[0]],
+            request.write_payload: [KeyboardInterrupt()],
+        }
+    )
+
+    result = _execute_without_interrupt_escape(transport, request)
+
+    assert result["outcome"] == "interrupted"
+    assert result["application_state"] == "ambiguous"
+    assert result["interrupted_phase"] == "write"
+    assert result["write_attempts"] == 1
+    assert result["write_error"] == "KeyboardInterrupt"
+    assert result["write_feedback_raw_hex"] is None
+    assert result["readback"] == []
+    assert transport.admitted_payloads == [read_payload, request.write_payload]
+
+
+def test_interrupt_during_readback_retains_write_and_partial_read_evidence() -> None:
+    request = _timer_request()
+    read_payload = request.read_requests[0].payload
+    transport = _ScriptedTransport(
+        {
+            read_payload: [request.expected_before[0], KeyboardInterrupt()],
+            request.write_payload: [b"\x00"],
+        }
+    )
+
+    result = _execute_without_interrupt_escape(transport, request)
+
+    assert result["outcome"] == "interrupted"
+    assert result["application_state"] == "ambiguous"
+    assert result["interrupted_phase"] == "readback"
+    assert result["write_attempts"] == 1
+    assert result["write_feedback_raw_hex"] == "00"
+    assert result["readback"][0]["response_state"] == "interrupted"
+    assert result["readback"][0]["request_attempts"] == 1
+    assert result["readback"][0]["error"] == "KeyboardInterrupt"
+    assert result["observed_after_raw_hex"] == [None]
+    assert transport.admitted_payloads == [read_payload, request.write_payload, read_payload]
 
 
 def test_unchanged_timer_edit_is_rejected_before_send_or_readback() -> None:
