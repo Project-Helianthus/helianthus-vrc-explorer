@@ -1,9 +1,66 @@
 import json
+from contextlib import contextmanager
 from pathlib import Path
 
 from typer.testing import CliRunner
 
 from helianthus_vrc_explorer.cli import app
+
+
+def test_normal_scan_passes_resolved_identity_for_automatic_event_policy(
+    tmp_path, monkeypatch
+) -> None:
+    import helianthus_vrc_explorer.cli as cli
+
+    class _Transport:
+        @contextmanager
+        def session(self):
+            yield self
+
+    @contextmanager
+    def observer(*_args, **_kwargs):
+        yield None
+
+    identity = {
+        "manufacturer": "0xB5",
+        "device_id": "BASV2",
+        "eid": "BASV2",
+    }
+    captured: dict[str, object] = {}
+
+    def scan_vrc(*_args, **kwargs):
+        captured.update(kwargs)
+        return {
+            "meta": {
+                "scan_timestamp": "2026-10-09T00:00:00Z",
+                "destination_address": "0x15",
+                "incomplete": False,
+                "schema_sources": [],
+            },
+            "operations": {},
+        }
+
+    monkeypatch.setattr(cli, "_build_transport", lambda *_args, **_kwargs: _Transport())
+    monkeypatch.setattr(cli, "_probe_scan_identity", lambda *_args, **_kwargs: dict(identity))
+    monkeypatch.setattr(cli, "make_scan_observer", observer)
+    monkeypatch.setattr(cli, "scan_vrc", scan_vrc)
+
+    result = CliRunner().invoke(
+        app,
+        ["scan", "--dst", "0x15", "--output-dir", str(tmp_path)],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["operation_identity"] == identity
+    assert "operation_requests" not in captured
+
+
+def test_read_plan_help_describes_optional_override() -> None:
+    result = CliRunner().invoke(app, ["scan", "--help"])
+    assert result.exit_code == 0
+    assert "--b524-read-plan" in result.stdout
+    assert "Optional" in result.stdout and "explicit JSON" in result.stdout
+    assert "normal scans" in result.stdout and "bounded" in result.stdout
 
 
 def test_operation_plan_preview_validates_and_encodes_without_transport(tmp_path, monkeypatch):

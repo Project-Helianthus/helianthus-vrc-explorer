@@ -748,7 +748,10 @@ def scan(
         exists=True,
         dir_okay=False,
         readable=True,
-        help="Explicit JSON read plan for B524 Timer, VR91, Event and EventSetPoint operations.",
+        help=(
+            "Optional explicit JSON override for B524 Timer, VR91, Event and EventSetPoint "
+            "reads. Without it, normal scans propose bounded raw Event candidates."
+        ),
     ),
     preview_read_plan: bool = typer.Option(  # noqa: B008
         False,
@@ -932,11 +935,10 @@ def scan(
         )
         _emit_non_tty_session_preface(preface)
         if scan_options or preset_value != "recommended" or planner_ui_value != "disabled":
-            if "operation_requests" in scan_options:
-                fixture_meta = artifact.get("meta", {})
-                scan_options["operation_identity"] = fixture_meta.get(
-                    "identity", fixture_meta.get("resolved_identity", {})
-                )
+            fixture_meta = artifact.get("meta", {})
+            scan_options["operation_identity"] = fixture_meta.get(
+                "identity", fixture_meta.get("resolved_identity", {})
+            )
             with TemporaryDirectory(prefix="vrc-explorer-dry-run-") as fixture_dir:
                 fixture_path = Path(fixture_dir) / "fixture.json"
                 fixture_path.write_text(json.dumps(artifact), encoding="utf-8")
@@ -1030,7 +1032,7 @@ def scan(
                         except ValueError as exc:
                             typer.echo(f"B524 operation target is not qualified: {exc}", err=True)
                             raise typer.Exit(2) from exc
-                        scan_options["operation_identity"] = dict(identity)
+                    scan_options["operation_identity"] = dict(identity)
                     preface = _build_scan_session_preface(
                         dst=dst_u8,
                         endpoint=f"{transport_settings.host}:{transport_settings.port}",

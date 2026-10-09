@@ -4,7 +4,7 @@ import contextlib
 import math
 import os
 import sys
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -368,7 +368,7 @@ def scan_b524(
     explicit_plan: dict[PlanKey, GroupScanPlan] | None = None,
     description_budget: int | None = None,
     request_budget: int | None = None,
-    operation_requests: tuple[B524OperationReadRequest, ...] = (),
+    operation_requests: Sequence[B524OperationReadRequest] = (),
     operation_identity: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Scan a VRC regulator using B524 and return a JSON-serializable artifact.
@@ -427,7 +427,7 @@ def scan_vrc(
     explicit_plan: dict[PlanKey, GroupScanPlan] | None = None,
     description_budget: int | None = None,
     request_budget: int | None = None,
-    operation_requests: tuple[B524OperationReadRequest, ...] = (),
+    operation_requests: Sequence[B524OperationReadRequest] = (),
     operation_identity: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run VRC scan flow: B524 primary scan, optional B555/B516/B509 dumps."""

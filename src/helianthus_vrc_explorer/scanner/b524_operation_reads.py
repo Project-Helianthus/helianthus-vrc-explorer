@@ -48,6 +48,7 @@ class B524OperationReadRequest:
     selector: dict[str, str | int]
     payload: bytes
     requires_vrc700: bool
+    automatic_event: bool = False
 
 
 def _u8(value: object, *, name: str) -> int:
@@ -304,12 +305,34 @@ def acquire_operation_reads(
     result: list[dict[str, Any]] = []
     progress_total = len(requests)
     completed = False
+    automatic_op09_records: dict[tuple[tuple[str, str | int], ...], dict[str, Any]] = {}
     if observer is not None:
         observer.phase_start("b524_operation_reads", total=progress_total)
     try:
         for index, request in enumerate(requests):
             record = record_operation_read_observation(request)
             attempts = 0
+
+            pair_context = _pair_context(request)
+            pair_key = tuple(sorted(pair_context.items())) if pair_context is not None else ()
+            if request.automatic_event and request.operation == "GetEventSetPoint":
+                op09_record = automatic_op09_records.get(pair_key)
+                op09_state = (
+                    str(op09_record.get("response_state"))
+                    if op09_record is not None
+                    else "unattempted"
+                )
+                if op09_state != "value" or not isinstance(
+                    op09_record.get("decoded") if op09_record is not None else None, dict
+                ):
+                    record["response_state"] = "unattempted"
+                    record["error"] = "not_scheduled_op09_precondition"
+                    record["op09_response_state"] = op09_state
+                    records.append(record)
+                    result.append(record)
+                    if observer is not None:
+                        observer.phase_advance("b524_operation_reads", advance=1)
+                    continue
 
             def count_attempt() -> None:
                 nonlocal attempts, progress_total
@@ -402,6 +425,8 @@ def acquire_operation_reads(
             record["request_attempts"] = attempts
             records.append(record)
             result.append(record)
+            if request.automatic_event and request.operation == "GetEvent":
+                automatic_op09_records[pair_key] = record
             if observer is not None:
                 observer.phase_advance("b524_operation_reads", advance=max(1, attempts))
         completed = True

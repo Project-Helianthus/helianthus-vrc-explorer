@@ -6,7 +6,7 @@ import math
 import sys
 import time
 from collections import deque
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -22,6 +22,7 @@ from ..protocol.b524_metadata import (
     module_capacity_crosscheck,
     supported_capacity,
 )
+from ..protocol.b524_schedules import EventProfileName
 from ..schema.b524_constraints import (
     CONSTRAINT_SCOPE_PROTOCOL,
     constraint_scope_metadata,
@@ -45,6 +46,7 @@ from .b524_artifact import (
     _record_availability_probes,
     _record_namespace_topology,
 )
+from .b524_default_events import DEFAULT_EVENT_WEEKDAY_CODES, build_default_event_requests
 from .b524_operation_reads import (
     B524OperationReadRequest,
     acquire_operation_reads,
@@ -180,7 +182,7 @@ def run_b524_scan(
     explicit_plan: dict[PlanKey, GroupScanPlan] | None = None,
     description_budget: int | None = None,
     request_budget: int | None = None,
-    operation_requests: tuple[B524OperationReadRequest, ...] = (),
+    operation_requests: Sequence[B524OperationReadRequest] = (),
     operation_identity: Mapping[str, Any] | None = None,
     discover_groups_fn: Any,
     prompt_scan_plan_fn: Any,
@@ -207,16 +209,17 @@ def run_b524_scan(
             manufacturer = int(manufacturer, 0)
         except ValueError:
             manufacturer = None
-    if operation_requests:
+    explicit_operation_override = bool(operation_requests)
+    operation_request_list = list(operation_requests)
+    if operation_request_list:
         validate_operation_read_identity(
-            operation_requests, device_id=device_id, manufacturer=manufacturer
+            operation_request_list, device_id=device_id, manufacturer=manufacturer
         )
-    operation_selection = [True] * len(operation_requests)
-    operation_planner_options: dict[str, Any] = (
-        {"operation_requests": operation_requests, "operation_selection": operation_selection}
-        if operation_requests
-        else {}
-    )
+    operation_selection = [True] * len(operation_request_list)
+    operation_planner_options: dict[str, Any] = {
+        "operation_requests": operation_request_list,
+        "operation_selection": operation_selection,
+    }
     research_mode = planner_preset == "research"
     if explicit_plan is not None and planner_preset != "custom":
         raise ValueError("An explicit scan plan requires the custom preset")
@@ -264,16 +267,17 @@ def run_b524_scan(
     }
 
     def store_operation_read_plan() -> None:
-        if operation_requests:
+        if operation_request_list:
             artifact["meta"]["b524_operation_read_plan"] = [
                 {
                     "operation": request.operation,
                     "selector": request.selector,
                     "request_payload_hex": request.payload.hex(),
                     "selected": operation_enabled,
+                    "automatic_event": request.automatic_event,
                 }
                 for request, operation_enabled in zip(
-                    operation_requests, operation_selection, strict=True
+                    operation_request_list, operation_selection, strict=True
                 )
             ]
 
@@ -966,6 +970,75 @@ def run_b524_scan(
         )
         artifact["meta"]["scan_coverage"]["discovery_completed"] = True
 
+        if explicit_operation_override:
+            artifact["meta"]["b524_event_acquisition"] = {
+                "source": "explicit_read_plan_override",
+                "automatic_default_applied": False,
+            }
+        else:
+            system_in_scope = 0x02 in resolved_group_opcodes.get(0x00, ())
+            default_event_instances: dict[EventProfileName, tuple[int, ...]] = {
+                "system": (0x00,) if system_in_scope else (),
+                "dhw": (
+                    _present_instances_for_opcode(artifact, group=0x01, opcode=0x02)
+                    if native_dhw_admitted.get((0x02, 0x01), False)
+                    else ()
+                ),
+                "zone": _present_instances_for_opcode(artifact, group=0x03, opcode=0x02),
+            }
+            default_requests = build_default_event_requests(
+                instances=default_event_instances,
+                weekday_codes=DEFAULT_EVENT_WEEKDAY_CODES,
+            )
+            event_metadata: dict[str, Any] = {
+                "source": "automatic_scalar_topology_candidates",
+                "automatic_default_applied": False,
+                "selector_kind": "raw_u8",
+                "candidate_window": {
+                    "codes": [f"0x{code:02X}" for code in DEFAULT_EVENT_WEEKDAY_CODES],
+                    "range": "0x00..0x07",
+                    "exhaustive_wire_space": False,
+                },
+                "editable_in_planner": True,
+                "scalar_anchor": "OP02 present instances",
+                "profiles": {
+                    profile: {
+                        "instances": [f"0x{instance:02X}" for instance in instances],
+                        "status": (
+                            "candidate_from_scalar_anchor"
+                            if instances
+                            else "not_scheduled_no_scalar_anchor"
+                        ),
+                    }
+                    for profile, instances in default_event_instances.items()
+                },
+                "setpoint_policy": "conditional_exact_usable_op09_pair",
+            }
+            if default_requests:
+                try:
+                    validate_operation_read_identity(
+                        default_requests,
+                        device_id=device_id,
+                        manufacturer=manufacturer,
+                    )
+                except ValueError:
+                    event_metadata["status"] = "not_scheduled_unknown_identity"
+                    for profile_metadata in event_metadata["profiles"].values():
+                        if profile_metadata["instances"]:
+                            profile_metadata["status"] = "not_scheduled_unknown_identity"
+                else:
+                    operation_request_list.extend(default_requests)
+                    operation_selection.extend([True] * len(default_requests))
+                    event_metadata["automatic_default_applied"] = True
+                    event_metadata["status"] = "scheduled_candidates"
+                    event_metadata["worst_case_requests"] = len(default_requests)
+                    for profile_metadata in event_metadata["profiles"].values():
+                        if profile_metadata["instances"]:
+                            profile_metadata["status"] = "scheduled_candidate"
+            else:
+                event_metadata["status"] = "not_scheduled_no_scalar_anchor"
+            artifact["meta"]["b524_event_acquisition"] = event_metadata
+
         # Interactive scan planner (TTY only): allow users to trim the register scan scope.
         plan: dict[PlanKey, GroupScanPlan] = {}
         for group in classified:
@@ -1161,7 +1234,7 @@ def run_b524_scan(
 
         store_operation_read_plan()
         if (
-            operation_requests
+            operation_request_list
             and estimate_register_requests(plan) + sum(operation_selection)
             > MAX_EXPLICIT_SCALAR_REQUESTS
         ):
@@ -1169,6 +1242,10 @@ def run_b524_scan(
         artifact["meta"]["scan_plan"] = {
             "groups": _scan_plan_meta_groups(plan),
             "estimated_register_requests": estimate_register_requests(plan),
+            "estimated_operation_requests_worst_case": sum(operation_selection),
+            "estimated_total_requests_worst_case": (
+                estimate_register_requests(plan) + sum(operation_selection)
+            ),
             "measured_request_rate_rps": round(request_rate_rps, 4) if request_rate_rps else None,
         }
         artifact["meta"]["group_metadata_bounds"] = _metadata_map_to_dict(metadata_map)
@@ -1251,7 +1328,7 @@ def run_b524_scan(
                     store_operation_read_plan()
                     artifact["meta"]["scan_plan"]["groups"] = _scan_plan_meta_groups(plan)
                     if (
-                        operation_requests
+                        operation_request_list
                         and estimate_register_requests(plan) + sum(operation_selection)
                         > MAX_EXPLICIT_SCALAR_REQUESTS
                     ):
@@ -1260,6 +1337,12 @@ def run_b524_scan(
                         )
                     artifact["meta"]["scan_plan"]["estimated_register_requests"] = (
                         estimate_register_requests(plan)
+                    )
+                    artifact["meta"]["scan_plan"]["estimated_operation_requests_worst_case"] = sum(
+                        operation_selection
+                    )
+                    artifact["meta"]["scan_plan"]["estimated_total_requests_worst_case"] = (
+                        estimate_register_requests(plan) + sum(operation_selection)
                     )
                     work_queue = deque(build_work_queue(plan, done=done))
                     observer.phase_set_total(
@@ -1503,11 +1586,11 @@ def run_b524_scan(
         if observer is not None:
             observer.phase_finish("register_scan")
 
-        if operation_requests:
+        if operation_request_list:
             selected_operations = tuple(
                 request
                 for request, operation_enabled in zip(
-                    operation_requests, operation_selection, strict=True
+                    operation_request_list, operation_selection, strict=True
                 )
                 if operation_enabled
             )
@@ -1578,10 +1661,12 @@ def run_b524_scan(
             coverage=description_coverage,
         )
     store_operation_read_plan()
-    if operation_requests and "b524_operation_reads" not in artifact:
+    if operation_request_list and "b524_operation_reads" not in artifact:
         artifact["b524_operation_reads_schema_version"] = 1
         artifact["b524_operation_reads"] = []
-        for request, operation_enabled in zip(operation_requests, operation_selection, strict=True):
+        for request, operation_enabled in zip(
+            operation_request_list, operation_selection, strict=True
+        ):
             if operation_enabled:
                 record = record_operation_read_observation(request)
                 record["response_state"] = "unattempted"
@@ -1592,6 +1677,24 @@ def run_b524_scan(
         "request_attempts", 0
     )
     artifact["meta"]["scan_coverage"]["actual_requests"] = counting_transport.counters.send_calls
+    operation_records = artifact.get("b524_operation_reads")
+    if isinstance(operation_records, list):
+        operation_attempts = {
+            "OP09": sum(
+                int(record.get("request_attempts", 0))
+                for record in operation_records
+                if isinstance(record, dict) and record.get("operation") == "GetEvent"
+            ),
+            "OP0B": sum(
+                int(record.get("request_attempts", 0))
+                for record in operation_records
+                if isinstance(record, dict) and record.get("operation") == "GetEventSetPoint"
+            ),
+        }
+        artifact["meta"]["b524_operation_read_attempts"] = {
+            **operation_attempts,
+            "total": sum(operation_attempts.values()),
+        }
     artifact["meta"]["scan_coverage"]["completed"] = not artifact["meta"]["incomplete"]
     artifact["meta"]["scan_duration_seconds"] = round(time.perf_counter() - start_perf, 4)
     if incomplete_reason is not None:
