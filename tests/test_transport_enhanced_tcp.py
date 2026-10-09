@@ -2315,6 +2315,55 @@ def test_terminal_read_exit_matrix_emits_complete_request_failed_trace(
 
 
 @pytest.mark.parametrize(
+    ("failure_factory", "expected_exception", "cause", "phase"),
+    [
+        (lambda: TransportTimeout("timeout"), TransportTimeout, "timeout", "transaction"),
+        (
+            lambda: TransportDisconnected("disconnected"),
+            TransportDisconnected,
+            "disconnected",
+            "receive",
+        ),
+        (
+            lambda: _EnhancedSessionError("sync", cause="protocol_sync_error", phase="send"),
+            _EnhancedSessionError,
+            "protocol_sync_error",
+            "send",
+        ),
+        (lambda: _EnhancedCollision("collision"), _EnhancedCollision, "collision", "arbitration"),
+        (lambda: _EnhancedNack("nack"), _EnhancedNack, "nack", "response"),
+        (lambda: _EnhancedCrcMismatch("crc"), _EnhancedCrcMismatch, "crc_mismatch", "response"),
+    ],
+)
+def test_non_retry_safe_public_send_keeps_exception_and_emits_terminal_trace(
+    tmp_path: Path,
+    failure_factory: Callable[[], TransportError],
+    expected_exception: type[TransportError],
+    cause: str,
+    phase: str,
+) -> None:
+    trace_path = tmp_path / f"non-retry-safe-{cause}.trace"
+    transport = EnhancedTcpTransport(EnhancedTcpConfig(trace_path=trace_path))
+
+    def fail_once(_seq: int, **kwargs: object) -> bytes:
+        attempt_admitted_hook = kwargs["attempt_admitted_hook"]
+        assert callable(attempt_admitted_hook)
+        attempt_admitted_hook()
+        raise failure_factory()
+
+    transport._send_proto_once = fail_once
+    with pytest.raises(expected_exception):
+        transport.send(0x15, bytes.fromhex("0400000100"))
+    transport.close()
+
+    trace = trace_path.read_text(encoding="utf-8")
+    assert (
+        f"#1 REQUEST_FAILED cause={cause} phase={phase} "
+        "request_attempts=1 retry_count=0 reconnect_attempts=0"
+    ) in trace
+
+
+@pytest.mark.parametrize(
     "payload",
     [
         bytes.fromhex("020102000f0001"),  # SetParameter: mutative.
