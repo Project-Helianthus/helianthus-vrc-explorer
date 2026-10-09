@@ -4,13 +4,17 @@ import contextlib
 import math
 import os
 import sys
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:
+    from .b524_operation_reads import B524OperationReadRequest
 
 from rich.console import Console
 
 from ..protocol.b524 import RegisterOpcode
+from ..schema.b524_value_labels import apply_b524_value_labels
 from ..schema.ebusd_csv import EbusdCsvSchema
 from ..schema.myvaillant_map import MyvaillantRegisterMap
 from ..transport.base import (
@@ -166,6 +170,8 @@ def _resolve_room_influence_type_name(raw_value: int) -> tuple[str, str]:
 
 
 def _apply_contextual_enum_annotations(artifact: dict[str, Any]) -> None:
+    apply_b524_value_labels(artifact)
+
     # v2.3: look up GG=0x02 under OP=0x02
     op_02 = artifact.get("operations", {}).get(_hex_u8(_LOCAL_REGISTER_OPCODE))
     if not isinstance(op_02, dict):
@@ -362,6 +368,8 @@ def scan_b524(
     explicit_plan: dict[PlanKey, GroupScanPlan] | None = None,
     description_budget: int | None = None,
     request_budget: int | None = None,
+    operation_requests: Sequence[B524OperationReadRequest] = (),
+    operation_identity: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Scan a VRC regulator using B524 and return a JSON-serializable artifact.
 
@@ -390,6 +398,8 @@ def scan_b524(
         explicit_plan=explicit_plan,
         description_budget=description_budget,
         request_budget=request_budget,
+        operation_requests=operation_requests,
+        operation_identity=operation_identity,
         discover_groups_fn=discover_groups,
         prompt_scan_plan_fn=prompt_scan_plan,
         hotkey_reader_cls=_PlannerHotkeyReader,
@@ -417,6 +427,8 @@ def scan_vrc(
     explicit_plan: dict[PlanKey, GroupScanPlan] | None = None,
     description_budget: int | None = None,
     request_budget: int | None = None,
+    operation_requests: Sequence[B524OperationReadRequest] = (),
+    operation_identity: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run VRC scan flow: B524 primary scan, optional B555/B516/B509 dumps."""
 
@@ -435,6 +447,8 @@ def scan_vrc(
         explicit_plan=explicit_plan,
         description_budget=description_budget,
         request_budget=request_budget,
+        operation_requests=operation_requests,
+        operation_identity=operation_identity,
     )
     meta = artifact.get("meta")
     if isinstance(meta, dict) and bool(meta.get("incomplete", False)):

@@ -27,6 +27,16 @@ _UNKNOWN_GROUP_OPCODE_CANDIDATES: tuple[RegisterOpcode, ...] = (
     _LOCAL_REGISTER_OPCODE,
     _REMOTE_REGISTER_OPCODE,
 )
+_PLANNER_NATIVE_LOCAL_GROUPS = frozenset(range(0x00, 0x0B))
+_PLANNER_NATIVE_REMOTE_GROUPS = frozenset(range(0x01, 0x10))
+_UNQUALIFIED_PLANNER_RR_KEYS = frozenset(
+    {
+        (0x02, 0x06),
+        (0x02, 0x07),
+        (0x06, 0x04),
+        (0x06, 0x0D),
+    }
+)
 PlannerUiMode = Literal["disabled", "auto", "textual", "classic"]
 _KNOWN_DESCRIPTOR_TYPES = frozenset(
     float(desc) for config in GROUP_CONFIG.values() if (desc := config.get("desc")) is not None
@@ -92,6 +102,35 @@ def _planner_source_opcodes(group: int) -> tuple[RegisterOpcode, ...]:
     return _sorted_namespace_opcodes(tuple(candidate_opcodes))
 
 
+def planner_native_opcodes(group: int) -> tuple[RegisterOpcode, ...]:
+    """Return the named native namespaces visible to the interactive planner.
+
+    This inventory is display and custom-selection metadata only.  Presets
+    continue to use ``profile_opcodes`` for scan admission.
+    """
+
+    opcodes: list[RegisterOpcode] = []
+    if group in _PLANNER_NATIVE_LOCAL_GROUPS:
+        opcodes.append(_LOCAL_REGISTER_OPCODE)
+    if group in _PLANNER_NATIVE_REMOTE_GROUPS:
+        opcodes.append(_REMOTE_REGISTER_OPCODE)
+    return tuple(opcodes)
+
+
+def planner_rr_max(group: int, opcode: RegisterOpcode) -> int | None:
+    """Return an observed scheduling ceiling, or None when custom input is required."""
+
+    if (
+        opcode not in planner_native_opcodes(group)
+        or (int(opcode), group) in _UNQUALIFIED_PLANNER_RR_KEYS
+    ):
+        return None
+    config = GROUP_CONFIG.get(group)
+    if config is None:
+        return None
+    return _rr_max_for_opcode(group=group, default_rr_max=int(config["rr_max"]), opcode=opcode)
+
+
 def _planner_primary_opcode(
     *,
     group: int,
@@ -126,11 +165,11 @@ def _instance_discovery_targets(
 ) -> list[tuple[ClassifiedGroup, GroupMetadata, RegisterOpcode]]:
     targets: list[tuple[ClassifiedGroup, GroupMetadata, RegisterOpcode]] = []
     for opcode in (_LOCAL_REGISTER_OPCODE, _REMOTE_REGISTER_OPCODE):
-        for group in classified:
+        for group in sorted(classified, key=lambda item: item.group):
             if opcode not in resolved_group_opcodes.get(group.group, ()):
                 continue
             targets.append((group, metadata_map[group.group], opcode))
-    for group in classified:
+    for group in sorted(classified, key=lambda item: item.group):
         for opcode in resolved_group_opcodes.get(group.group, ()):
             if opcode in {_LOCAL_REGISTER_OPCODE, _REMOTE_REGISTER_OPCODE}:
                 continue
@@ -165,9 +204,7 @@ def _group_display_name_for_opcodes(
 
 
 def _rr_max_full_for_opcode(*, group: int, opcode: int) -> int:
-    """Research-mode RR ceiling: 0x01FF for OP=0x02/GG=0x00, 0xFF for everything else."""
-    if opcode == _LOCAL_REGISTER_OPCODE and group == 0x00:
-        return 0x01FF
+    """Research-mode RR ceiling for characterized scalar register discovery."""
     return 0xFF
 
 
@@ -182,6 +219,8 @@ def _rr_max_for_opcode(*, group: int, default_rr_max: int, opcode: int) -> int:
 
 
 def _ii_max_for_opcode(*, group: int, default_ii_max: int | None, opcode: int) -> int | None:
+    if opcode == 0x06:
+        return 0x08
     config = GROUP_CONFIG.get(group)
     if config is None:
         return default_ii_max
@@ -192,6 +231,15 @@ def _ii_max_for_opcode(*, group: int, default_ii_max: int | None, opcode: int) -
     if value is None:
         return default_ii_max
     return int(value)
+
+
+def _ii_min_for_opcode(*, group: int, opcode: int, profile_id: str | None = None) -> int:
+    """Return the first configured instance index for one operation namespace."""
+    if profile_id == "basv2_sw0507_hw1704_api1" and opcode == 0x02 and group == 0x02:
+        return 0x00
+    if opcode == 0x06 or (opcode == 0x02 and group == 0x02):
+        return 0x01
+    return 0x00
 
 
 def _plan_key(group: int, opcode: int) -> PlanKey:

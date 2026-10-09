@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from rich.console import Console
 
 from helianthus_vrc_explorer.scanner.plan import GroupScanPlan, make_plan_key
@@ -37,7 +38,7 @@ def test_prompt_scan_plan_disables_unknown_groups_by_default(monkeypatch) -> Non
             ii_max=0x0A,
             rr_max=0x21,
             rr_max_full=0x21,
-            present_instances=(0x00,),
+            present_instances=(0x01,),
         ),
         PlannerGroup(
             group=0x69,
@@ -71,15 +72,93 @@ def test_prompt_scan_plan_preserves_exact_default_registers_without_changes(monk
         ii_max=0x0A,
         rr_max=0x0100,
         rr_max_full=0x0100,
-        present_instances=(0x00, 0x03),
+        present_instances=(0x01, 0x03),
     )
     default = GroupScanPlan(
         group=0x02,
         opcode=0x02,
         rr_max=0x0100,
-        instances=(0x00, 0x03),
+        instances=(0x01, 0x03),
         registers=(0x0002, 0x0010, 0x0100),
     )
+
+    plan = prompt_scan_plan(
+        Console(force_terminal=True),
+        [group],
+        request_rate_rps=None,
+        default_plan={group.key: default},
+    )
+
+    assert plan == {group.key: default}
+
+
+@pytest.mark.parametrize(
+    ("valid_selection", "expected_selection"),
+    [
+        ("keep", [False, True]),
+        ("all", [True, True]),
+        ("none", [False, False]),
+        ("2", [False, True]),
+    ],
+)
+def test_prompt_operation_selection_reprompts_after_invalid_index(
+    monkeypatch,
+    valid_selection: str,
+    expected_selection: list[bool],
+) -> None:
+    import helianthus_vrc_explorer.ui.planner as planner
+
+    class Request:
+        operation = "GetEvent"
+        opcode = 0x09
+        selector: dict[str, int] = {}
+
+    answers = iter(["3", valid_selection])
+    monkeypatch.setattr(planner.Prompt, "ask", lambda *_args, **_kwargs: next(answers))
+    selection = [False, True]
+    console = Console(record=True)
+
+    assert (
+        prompt_scan_plan(
+            console,
+            [],
+            request_rate_rps=None,
+            operation_requests=(Request(), Request()),
+            operation_selection=selection,
+        )
+        == {}
+    )
+    assert selection == expected_selection
+    assert "Invalid operation selection:" in console.export_text()
+
+
+def test_classic_custom_preserves_explicit_unqualified_route(
+    monkeypatch,
+) -> None:
+    import helianthus_vrc_explorer.ui.planner as planner
+
+    group = PlannerGroup(
+        group=0x0D,
+        opcode=0x06,
+        name="Unknown remote",
+        descriptor=float("nan"),
+        known=False,
+        ii_max=0x08,
+        rr_max=None,
+        rr_max_full=None,
+        present_instances=(0x01,),
+    )
+    default = GroupScanPlan(
+        group=0x0D,
+        opcode=0x06,
+        rr_max=0x0003,
+        instances=(0x01,),
+        registers=(0x0001, 0x0003),
+    )
+    answers = iter([True, False, False, True])
+    monkeypatch.setattr(planner, "_ask_yes_no", lambda *_args, **_kwargs: next(answers))
+    monkeypatch.setattr(planner, "_ask_preset", lambda *_args, **_kwargs: "custom")
+    monkeypatch.setattr(planner, "_ask_groups_to_scan", lambda *_args, **_kwargs: [0x0D])
 
     plan = prompt_scan_plan(
         Console(force_terminal=True),
@@ -137,7 +216,7 @@ def test_build_plan_from_preset_recommended_skips_unknown_groups() -> None:
             ii_max=0x0A,
             rr_max=0x21,
             rr_max_full=0x21,
-            present_instances=(0x00, 0x01),
+            present_instances=(0x01, 0x02),
         ),
         PlannerGroup(
             group=0x69,
@@ -156,10 +235,10 @@ def test_build_plan_from_preset_recommended_skips_unknown_groups() -> None:
     plan = build_plan_from_preset(groups, preset="recommended")
     key = make_plan_key(0x02, 0x02)
     assert sorted(plan.keys()) == [key]
-    assert plan[key].instances == (0x00, 0x01, 0x0A)
+    assert plan[key].instances == (0x01, 0x02, 0x09)
 
 
-def test_build_plan_from_preset_research_keeps_ff_when_present() -> None:
+def test_build_plan_from_preset_research_caps_remote_slots() -> None:
     groups = [
         PlannerGroup(
             group=0x69,
@@ -170,12 +249,12 @@ def test_build_plan_from_preset_research_keeps_ff_when_present() -> None:
             ii_max=0x0A,
             rr_max=0x30,
             rr_max_full=0x30,
-            present_instances=(0x00, 0xFF),
+            present_instances=(0x01, 0xFF),
         )
     ]
 
     plan = build_plan_from_preset(groups, preset="research")
-    assert plan[make_plan_key(0x69, 0x06)].instances == tuple(range(0x0A + 1)) + (0xFF,)
+    assert plan[make_plan_key(0x69, 0x06)].instances == tuple(range(1, 9))
 
 
 def test_print_plan_breakdown_does_not_infer_singleton_from_selected_instance() -> None:
@@ -187,11 +266,11 @@ def test_print_plan_breakdown_does_not_infer_singleton_from_selected_instance() 
                 group=0x09,
                 opcode=0x06,
                 rr_max=0x0035,
-                instances=(0x00,),
+                instances=(0x01,),
             )
         },
     )
 
     text = console.export_text()
-    assert "instances=0" in text
+    assert "instances=1" in text
     assert "instances=singleton" not in text

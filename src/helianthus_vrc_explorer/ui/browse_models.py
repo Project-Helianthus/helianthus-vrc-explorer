@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-BrowseTab = Literal["config", "config_limits", "state"]
+BrowseTab = Literal["config", "state"]
 ProtocolKey = Literal["b524", "b555", "b516", "b509"]
 
 
@@ -23,9 +23,12 @@ class RegisterAddress:
     instance_key: str | None
     register_key: str
     read_opcode: str | None
+    selector_label: str | None = None
 
     @property
     def label(self) -> str:
+        if self.selector_label is not None:
+            return self.selector_label
         suffix = f" {self.read_opcode}" if self.read_opcode else ""
         if self.protocol == "b509":
             return f"B509 RR={self.register_key}{suffix}"
@@ -69,10 +72,30 @@ class RegisterRow:
     bundled_parameter_description: dict[str, object] | None = None
     candidate_name: str = ""
     candidate_evidence: str = ""
+    value_label_qualification: str = ""
+
+    @property
+    def display_label(self) -> str:
+        """Compact user-facing register label while retaining native address metadata."""
+
+        if self.section_key and self.section_key.startswith("operation_"):
+            return self.name
+        try:
+            register = int(self.register_key, 0)
+            rr_label = f"0x{register:04x}"
+        except ValueError:
+            rr_label = self.register_key
+        semantic_name = self.myvaillant_name or self.name
+        compact_register = f"0x{register:x}" if "register" in locals() else self.register_key
+        if not semantic_name or semantic_name in {self.register_key, compact_register}:
+            return rr_label
+        return f"{semantic_name} ({rr_label})"
 
     @property
     def description_text(self) -> str:
         parts: list[str] = []
+        if self.value_label_qualification:
+            parts.append("Value label (candidate, unqualified presentation; no write authority)")
         for label, desc in (
             ("Verified", self.parameter_description),
             ("Bundled", self.bundled_parameter_description),

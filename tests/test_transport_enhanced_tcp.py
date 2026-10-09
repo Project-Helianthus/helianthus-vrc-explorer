@@ -13,8 +13,11 @@ import pytest
 
 from helianthus_vrc_explorer.scanner.register import read_register
 from helianthus_vrc_explorer.transport.base import (
+    TransportDisconnected,
     TransportError,
+    TransportHostError,
     TransportNack,
+    TransportProtocolFailure,
     TransportRecoveryExhausted,
     TransportTimeout,
 )
@@ -34,9 +37,39 @@ from helianthus_vrc_explorer.transport.enhanced_tcp import (
     _crc,
     _crc_update,
     _encode_enh,
+    _EnhancedCollision,
+    _EnhancedCrcMismatch,
+    _EnhancedNack,
     _EnhancedSessionError,
+    _is_retry_safe_b524_read,
 )
 from helianthus_vrc_explorer.transport.instrumented import CountingTransport
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        bytes.fromhex("08"),
+        bytes.fromhex("0900000100"),
+        bytes.fromhex("0b01000206"),
+    ],
+)
+def test_event_family_exact_read_shapes_are_retry_safe(payload: bytes) -> None:
+    assert _is_retry_safe_b524_read(payload) is True
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        bytes.fromhex("0800"),
+        bytes.fromhex("09000001"),
+        bytes.fromhex("0b0100020600"),
+        bytes.fromhex("0a0000010000010203040506"),
+        bytes.fromhex("0c01000100fdfefffdfefffd"),
+    ],
+)
+def test_event_family_mutative_or_malformed_shapes_are_not_retry_safe(payload: bytes) -> None:
+    assert _is_retry_safe_b524_read(payload) is False
 
 
 def _read_exact(conn: socket.socket, size: int) -> bytes:
@@ -67,6 +100,23 @@ def _write_enh_frame(conn: socket.socket, command: int, data: int) -> None:
 
 def _write_bus_symbol(conn: socket.socket, symbol: int) -> None:
     _write_enh_frame(conn, _ENH_RES_RECEIVED, symbol)
+
+
+def _wire_symbols(logical: bytes) -> bytes:
+    wire = bytearray()
+    for value in logical:
+        if value == 0xA9:
+            wire.extend((0xA9, 0x00))
+        elif value == 0xAA:
+            wire.extend((0xA9, 0x01))
+        else:
+            wire.append(value)
+    return bytes(wire)
+
+
+def _write_telegram_bytes(conn: socket.socket, logical: bytes) -> None:
+    for symbol in _wire_symbols(logical):
+        _write_bus_symbol(conn, symbol)
 
 
 @contextmanager
@@ -180,6 +230,57 @@ def test_ens_transport_send_wraps_b524_request() -> None:
     assert result == response
 
 
+@pytest.mark.parametrize(
+    ("payload", "expected_crc"),
+    [
+        (bytes.fromhex("020006003300"), 0xA9),
+        (bytes.fromhex("020006010e00"), 0xAA),
+    ],
+)
+def test_ens_transport_escapes_b524_crc_as_raw_wire_symbols(
+    payload: bytes,
+    expected_crc: int,
+) -> None:
+    """ENH SEND carries raw eBUS symbols, including escaped telegram CRC."""
+    src = 0xF7
+    dst = 0x15
+    request_without_crc = bytes((src, dst, 0xB5, 0x24, len(payload))) + payload
+    request = request_without_crc + bytes((_crc(request_without_crc),))
+    assert request[-1] == expected_crc
+    response = b"\x01"
+    response_segment = bytes((len(response),)) + response
+    response_crc = _crc(response_segment)
+
+    def _handler(conn: socket.socket) -> None:
+        assert _read_enh_frame(conn) == (_ENH_REQ_INIT, 0x01)
+        _write_enh_frame(conn, _ENH_RES_RESETTED, 0x01)
+
+        assert _read_enh_frame(conn) == (_ENH_REQ_START, src)
+        _write_enh_frame(conn, _ENH_RES_STARTED, src)
+
+        expected_wire = _wire_symbols(request[1:])
+        for expected in expected_wire:
+            assert _read_enh_frame(conn) == (_ENH_REQ_SEND, expected)
+            _write_bus_symbol(conn, expected)
+
+        _write_bus_symbol(conn, 0x00)
+        _write_telegram_bytes(conn, response_segment + bytes((response_crc,)))
+
+        assert _read_enh_frame(conn) == (_ENH_REQ_SEND, 0x00)
+        _write_bus_symbol(conn, 0x00)
+        # End-of-message is one structural raw SYN, not escaped telegram data.
+        assert _read_enh_frame(conn) == (_ENH_REQ_SEND, 0xAA)
+        _write_bus_symbol(conn, 0xAA)
+
+    with _run_ens_test_server(_handler) as (host, port):
+        transport = EnhancedTcpTransport(
+            EnhancedTcpConfig(host=host, port=port, timeout_s=0.5, src=src)
+        )
+        result = transport.send(dst, payload)
+
+    assert result == response
+
+
 def test_ens_transport_broadcast_does_not_expect_response() -> None:
     src = 0xF1
     dst = 0xFE
@@ -216,11 +317,7 @@ def test_internal_enhanced_nack_maps_to_transport_nack() -> None:
 
 
 def test_ve1_send_payload_containing_escape_byte() -> None:
-    """VE1/VE20: Verify that 0xA9 (ESCAPE) in payload sends correctly via ENH.
-
-    The enhanced adapter firmware handles wire escape encoding.  The ENH
-    SEND command carries logical bytes -- the client must NOT pre-escape.
-    """
+    """VE1/VE20: ENH SEND expands 0xA9/0xAA payload bytes on the wire."""
     src = 0xF1
     dst = 0x15
     # Payload deliberately contains 0xA9 (eBUS escape) and 0xAA (eBUS SYN).
@@ -238,8 +335,7 @@ def test_ve1_send_payload_containing_escape_byte() -> None:
         assert _read_enh_frame(conn) == (_ENH_REQ_START, src)
         _write_enh_frame(conn, _ENH_RES_STARTED, src)
 
-        # Adapter receives logical bytes via ENH -- no wire escaping at this layer.
-        for expected in request[1:]:
+        for expected in _wire_symbols(request[1:]):
             assert _read_enh_frame(conn) == (_ENH_REQ_SEND, expected)
             _write_bus_symbol(conn, expected)
 
@@ -268,10 +364,8 @@ def test_ve21_response_crc_with_escape_bytes() -> None:
     The _crc() function correctly applies escape expansion to logical bytes
     before CRC computation, matching what the bus target does.
 
-    Note: 0xAA (SYN) cannot appear as a logical data byte in eBUS responses
-    because SYN is the bus frame delimiter.  The escape byte 0xA9 CAN appear
-    as logical data (wire-escaped to [0xA9, 0x00] and un-escaped by the
-    adapter firmware).
+    ENH RECEIVED carries raw wire symbols, so the client decodes A9 00/01 in
+    response length, body, and CRC fields.
     """
     src = 0xF1
     dst = 0x15
@@ -295,10 +389,7 @@ def test_ve21_response_crc_with_escape_bytes() -> None:
             _write_bus_symbol(conn, expected)
 
         _write_bus_symbol(conn, 0x00)  # ACK
-        # Adapter sends logical (un-escaped) response bytes via ENH RECEIVED.
-        for value in response_segment:
-            _write_bus_symbol(conn, value)
-        _write_bus_symbol(conn, response_crc)
+        _write_telegram_bytes(conn, response_segment + bytes((response_crc,)))
 
         assert _read_enh_frame(conn) == (_ENH_REQ_SEND, 0x00)  # ACK
         _write_bus_symbol(conn, 0x00)
@@ -312,6 +403,64 @@ def test_ve21_response_crc_with_escape_bytes() -> None:
         result = transport.send_proto(dst, 0x07, 0x04, b"")
 
     assert result == response
+
+
+@pytest.mark.parametrize(
+    ("wire", "logical"),
+    [
+        ((0xA9, 0x00), 0xA9),
+        ((0xA9, 0x01), 0xAA),
+    ],
+)
+def test_response_telegram_decoder_unescapes_raw_wire_pairs(
+    monkeypatch: pytest.MonkeyPatch,
+    wire: tuple[int, int],
+    logical: int,
+) -> None:
+    transport = EnhancedTcpTransport(EnhancedTcpConfig())
+    received = iter(wire)
+    monkeypatch.setattr(transport, "_recv_bus_symbol", lambda **_kwargs: next(received))
+
+    assert transport._recv_telegram_symbol(deadline=1.0) == logical
+
+
+def test_response_telegram_decoder_rejects_malformed_escape(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport = EnhancedTcpTransport(EnhancedTcpConfig())
+    received = iter((0xA9, 0x02))
+    monkeypatch.setattr(transport, "_recv_bus_symbol", lambda **_kwargs: next(received))
+
+    with pytest.raises(_EnhancedSessionError, match="invalid eBUS escape suffix 0x02"):
+        transport._recv_telegram_symbol(deadline=1.0)
+
+
+def test_response_telegram_decoder_rejects_truncated_escape(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport = EnhancedTcpTransport(EnhancedTcpConfig())
+    received = iter((0xA9,))
+
+    def _receive(**_kwargs: object) -> int:
+        try:
+            return next(received)
+        except StopIteration as exc:
+            raise TransportTimeout("truncated eBUS escape") from exc
+
+    monkeypatch.setattr(transport, "_recv_bus_symbol", _receive)
+
+    with pytest.raises(TransportTimeout, match="truncated eBUS escape"):
+        transport._recv_telegram_symbol(deadline=1.0)
+
+
+def test_response_telegram_decoder_treats_bare_syn_as_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport = EnhancedTcpTransport(EnhancedTcpConfig())
+    monkeypatch.setattr(transport, "_recv_bus_symbol", lambda **_kwargs: 0xAA)
+
+    with pytest.raises(_EnhancedSessionError, match="unexpected SYN"):
+        transport._recv_telegram_symbol(deadline=1.0)
 
 
 def test_ve25_crc_escape_expansion_is_correct() -> None:
@@ -665,7 +814,7 @@ def test_adv_all_escape_syn_payload() -> None:
         _write_enh_frame(conn, _ENH_RES_RESETTED, 0x01)
         assert _read_enh_frame(conn) == (_ENH_REQ_START, src)
         _write_enh_frame(conn, _ENH_RES_STARTED, src)
-        for expected in request[1:]:
+        for expected in _wire_symbols(request[1:]):
             assert _read_enh_frame(conn) == (_ENH_REQ_SEND, expected)
             _write_bus_symbol(conn, expected)
         _write_bus_symbol(conn, 0x00)
@@ -705,9 +854,7 @@ def test_adv_crc_value_is_escape_byte() -> None:
             assert _read_enh_frame(conn) == (_ENH_REQ_SEND, expected)
             _write_bus_symbol(conn, expected)
         _write_bus_symbol(conn, 0x00)
-        for value in response_segment:
-            _write_bus_symbol(conn, value)
-        _write_bus_symbol(conn, response_crc)
+        _write_telegram_bytes(conn, response_segment + bytes((response_crc,)))
         assert _read_enh_frame(conn) == (_ENH_REQ_SEND, 0x00)
         _write_bus_symbol(conn, 0x00)
         assert _read_enh_frame(conn) == (_ENH_REQ_SEND, 0xAA)
@@ -722,13 +869,7 @@ def test_adv_crc_value_is_escape_byte() -> None:
 
 
 def test_adv_crc_value_is_syn_byte_succeeds() -> None:
-    """ADV: Response CRC value 0xAA must succeed (not false-timeout).
-
-    In the ENH protocol, 0xAA from _recv_bus_symbol() is a legitimate
-    data byte — the adapter decoded wire-escaped [0xA9, 0x01] back to
-    logical 0xAA.  Bus SYN loss is reported via _ENH_RES_FAILED, not
-    as a RECEIVED frame with data=0xAA.
-    """
+    """ADV: Wire-escaped logical response CRC 0xAA must succeed."""
     src = 0xF1
     dst = 0x15
     request_without_crc = bytes((src, dst, 0x07, 0x04, 0x00))
@@ -747,9 +888,7 @@ def test_adv_crc_value_is_syn_byte_succeeds() -> None:
             assert _read_enh_frame(conn) == (_ENH_REQ_SEND, expected)
             _write_bus_symbol(conn, expected)
         _write_bus_symbol(conn, 0x00)  # ACK
-        for value in response_segment:
-            _write_bus_symbol(conn, value)
-        _write_bus_symbol(conn, response_crc)  # 0xAA — valid CRC byte
+        _write_telegram_bytes(conn, response_segment + bytes((response_crc,)))
 
         # Transport should send ACK + SYN (success, not timeout)
         assert _read_enh_frame(conn) == (_ENH_REQ_SEND, 0x00)  # ACK
@@ -767,7 +906,7 @@ def test_adv_crc_value_is_syn_byte_succeeds() -> None:
 
 
 def test_adv_response_data_containing_0xaa() -> None:
-    """ADV: Response data byte 0xAA must not trigger false SYN timeout."""
+    """ADV: Wire-escaped logical response byte 0xAA is decoded as data."""
     src = 0xF1
     dst = 0x15
     request_without_crc = bytes((src, dst, 0x07, 0x04, 0x00))
@@ -786,9 +925,7 @@ def test_adv_response_data_containing_0xaa() -> None:
             assert _read_enh_frame(conn) == (_ENH_REQ_SEND, expected)
             _write_bus_symbol(conn, expected)
         _write_bus_symbol(conn, 0x00)  # ACK
-        for value in response_segment:
-            _write_bus_symbol(conn, value)
-        _write_bus_symbol(conn, response_crc)
+        _write_telegram_bytes(conn, response_segment + bytes((response_crc,)))
         assert _read_enh_frame(conn) == (_ENH_REQ_SEND, 0x00)  # ACK
         _write_bus_symbol(conn, 0x00)
         assert _read_enh_frame(conn) == (_ENH_REQ_SEND, 0xAA)  # SYN
@@ -913,7 +1050,7 @@ def test_adv_stream_of_0xff_to_enh_parser() -> None:
 
 
 def test_adv_send_symbol_escape_byte_explicit() -> None:
-    """ADV: _send_symbol_with_echo with symbol=0xA9 (ESCAPE) explicitly."""
+    """ADV: Telegram payload 0xA9 emits raw A9 00 with both echoes checked."""
     src = 0xF1
     dst = 0x15
     payload = bytes((0xA9,))
@@ -929,7 +1066,7 @@ def test_adv_send_symbol_escape_byte_explicit() -> None:
         _write_enh_frame(conn, _ENH_RES_RESETTED, 0x01)
         assert _read_enh_frame(conn) == (_ENH_REQ_START, src)
         _write_enh_frame(conn, _ENH_RES_STARTED, src)
-        for expected in request[1:]:
+        for expected in _wire_symbols(request[1:]):
             cmd, data = _read_enh_frame(conn)
             assert cmd == _ENH_REQ_SEND
             assert data == expected
@@ -950,7 +1087,7 @@ def test_adv_send_symbol_escape_byte_explicit() -> None:
         )
         result = transport.send(dst, payload)
     assert result == response
-    assert 0xA9 in symbols_sent
+    assert bytes((0xA9, 0x00)) in bytes(symbols_sent)
 
 
 def test_ve_new_07_started_mismatch_aborts_early() -> None:
@@ -1049,8 +1186,7 @@ def test_send_symbol_with_echo_suppresses_post_grant_syn() -> None:
 
 
 def test_post_grant_syn_guard_clears_on_first_non_syn() -> None:
-    """XR-SYN-GUARD: Flag clears on first non-SYN byte, so SYN after echo
-    is treated as a real bus symbol, not suppressed."""
+    """XR-SYN-GUARD: Escaped response 0xAA remains data after first echo."""
     src = 0xF1
     dst = 0x15
     response = bytes((0xAA, 0x42))
@@ -1068,11 +1204,7 @@ def test_post_grant_syn_guard_clears_on_first_non_syn() -> None:
             assert _read_enh_frame(conn) == (_ENH_REQ_SEND, expected)
             _write_bus_symbol(conn, expected)
         _write_bus_symbol(conn, 0x00)  # ACK
-        # Response contains 0xAA as data; it must not be suppressed after
-        # the flag was cleared by the first echo.
-        for value in response_segment:
-            _write_bus_symbol(conn, value)
-        _write_bus_symbol(conn, response_crc)
+        _write_telegram_bytes(conn, response_segment + bytes((response_crc,)))
         assert _read_enh_frame(conn) == (_ENH_REQ_SEND, 0x00)
         _write_bus_symbol(conn, 0x00)
         assert _read_enh_frame(conn) == (_ENH_REQ_SEND, 0xAA)
@@ -1654,7 +1786,7 @@ def test_xr_init_timeout_fail_closed_bounded() -> None:
 
 
 def test_xr_enh_0xaa_data_not_syn() -> None:
-    """XR_ENH_0xAA_DataNotSYN: 0xAA in response data/CRC must not trigger false timeout."""
+    """XR_ENH_0xAA_DataNotSYN: Escaped logical 0xAA remains response data."""
     src = 0xF1
     dst = 0x15
     request_without_crc = bytes((src, dst, 0x07, 0x04, 0x00))
@@ -1673,9 +1805,7 @@ def test_xr_enh_0xaa_data_not_syn() -> None:
             assert _read_enh_frame(conn) == (_ENH_REQ_SEND, expected)
             _write_bus_symbol(conn, expected)
         _write_bus_symbol(conn, 0x00)  # ACK
-        for value in response_segment:
-            _write_bus_symbol(conn, value)
-        _write_bus_symbol(conn, response_crc)
+        _write_telegram_bytes(conn, response_segment + bytes((response_crc,)))
         assert _read_enh_frame(conn) == (_ENH_REQ_SEND, 0x00)  # ACK
         _write_bus_symbol(conn, 0x00)
         assert _read_enh_frame(conn) == (_ENH_REQ_SEND, 0xAA)  # SYN
@@ -1824,6 +1954,43 @@ def test_recovery_trace_keeps_sanitized_initial_cause_and_phase(
     assert "private-endpoint" not in trace
 
 
+@pytest.mark.parametrize("cause", ["malformed_escape", "response_ended_before_complete"])
+def test_response_recovery_exhaustion_keeps_specific_cause_and_phase(
+    monkeypatch: pytest.MonkeyPatch, cause: str
+) -> None:
+    from helianthus_vrc_explorer.transport.base import TransportRecoveryExhausted
+
+    transport = EnhancedTcpTransport(
+        EnhancedTcpConfig(reconnect_max_retries=3, reconnect_delay_s=0)
+    )
+    attempts = 0
+    reconnects: list[int] = []
+
+    def _send_once(_seq: int, **kwargs: object) -> bytes:
+        nonlocal attempts
+        hook = kwargs["attempt_admitted_hook"]
+        assert callable(hook)
+        hook()
+        attempts += 1
+        raise _EnhancedSessionError(
+            "private endpoint must not enter public diagnostics",
+            cause=cause,
+            phase="response",
+        )
+
+    monkeypatch.setattr(transport, "_send_proto_once", _send_once)
+    monkeypatch.setattr(transport, "_reconnect", lambda _seq, attempt: reconnects.append(attempt))
+    with pytest.raises(TransportRecoveryExhausted) as raised:
+        transport.send(0x15, bytes.fromhex("020000000200"))
+
+    assert raised.value.cause == cause
+    assert raised.value.phase == "response"
+    assert raised.value.request_attempts == attempts == 4
+    assert raised.value.reconnect_attempts == 3
+    assert reconnects == [1, 2, 3]
+    assert "private endpoint" not in str(raised.value)
+
+
 def test_unexpected_command_ack_reconnects_and_retries_read(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1920,6 +2087,135 @@ def test_unexpected_command_ack_reconnects_over_tcp_and_completes_same_read() ->
     assert observed_payloads == [request[1:], request[1:]]
 
 
+def test_syn_before_command_ack_rearbitrates_once_on_same_session() -> None:
+    src = 0xF1
+    dst = 0x15
+    payload = bytes.fromhex("020002000f00")
+    request_without_crc = bytes((src, dst, 0xB5, 0x24, len(payload))) + payload
+    request = request_without_crc + bytes((_crc(request_without_crc),))
+    response = b"\x03"
+    response_segment = bytes((len(response),)) + response
+    response_crc = _crc(response_segment)
+    connection_count = 0
+    request_attempts = 0
+
+    def _handler(conn: socket.socket) -> None:
+        nonlocal connection_count, request_attempts
+        connection_count += 1
+        assert _read_enh_frame(conn) == (_ENH_REQ_INIT, 0x01)
+        _write_enh_frame(conn, _ENH_RES_RESETTED, 0x01)
+
+        for attempt in range(2):
+            assert _read_enh_frame(conn) == (_ENH_REQ_START, src)
+            _write_enh_frame(conn, _ENH_RES_STARTED, src)
+            for expected in request[1:]:
+                assert _read_enh_frame(conn) == (_ENH_REQ_SEND, expected)
+                _write_bus_symbol(conn, expected)
+            request_attempts += 1
+            if attempt == 0:
+                _write_bus_symbol(conn, 0xAA)
+                continue
+
+            _write_bus_symbol(conn, 0x00)
+            for value in response_segment:
+                _write_bus_symbol(conn, value)
+            _write_bus_symbol(conn, response_crc)
+            assert _read_enh_frame(conn) == (_ENH_REQ_SEND, 0x00)
+            _write_bus_symbol(conn, 0x00)
+            assert _read_enh_frame(conn) == (_ENH_REQ_SEND, 0xAA)
+            _write_bus_symbol(conn, 0xAA)
+
+    with _run_ens_test_server(_handler) as (host, port):
+        transport = EnhancedTcpTransport(
+            EnhancedTcpConfig(
+                host=host,
+                port=port,
+                timeout_s=1,
+                src=src,
+                reconnect_max_retries=2,
+                reconnect_delay_s=0,
+            )
+        )
+        result = transport.send(dst, payload)
+
+    assert result == response
+    assert request_attempts == 2
+    assert connection_count == 1
+
+
+def test_syn_before_command_ack_exhaustion_preserves_session_and_diagnostics(
+    tmp_path: Path,
+) -> None:
+    src = 0xF1
+    dst = 0x15
+    payload = bytes.fromhex("020002000f00")
+    request_without_crc = bytes((src, dst, 0xB5, 0x24, len(payload))) + payload
+    request = request_without_crc + bytes((_crc(request_without_crc),))
+    response = b"\x04"
+    response_segment = bytes((len(response),)) + response
+    response_crc = _crc(response_segment)
+    connection_count = 0
+
+    def _read_request(conn: socket.socket) -> None:
+        assert _read_enh_frame(conn) == (_ENH_REQ_START, src)
+        _write_enh_frame(conn, _ENH_RES_STARTED, src)
+        for expected in request[1:]:
+            assert _read_enh_frame(conn) == (_ENH_REQ_SEND, expected)
+            _write_bus_symbol(conn, expected)
+
+    def _handler(conn: socket.socket) -> None:
+        nonlocal connection_count
+        connection_count += 1
+        assert _read_enh_frame(conn) == (_ENH_REQ_INIT, 0x01)
+        _write_enh_frame(conn, _ENH_RES_RESETTED, 0x01)
+
+        for _ in range(2):
+            _read_request(conn)
+            _write_bus_symbol(conn, 0xAA)
+
+        _read_request(conn)
+        _write_bus_symbol(conn, 0x00)
+        for value in response_segment:
+            _write_bus_symbol(conn, value)
+        _write_bus_symbol(conn, response_crc)
+        assert _read_enh_frame(conn) == (_ENH_REQ_SEND, 0x00)
+        _write_bus_symbol(conn, 0x00)
+        assert _read_enh_frame(conn) == (_ENH_REQ_SEND, 0xAA)
+        _write_bus_symbol(conn, 0xAA)
+
+    trace_path = tmp_path / "enhanced.trace"
+    with _run_ens_test_server(_handler) as (host, port):
+        transport = EnhancedTcpTransport(
+            EnhancedTcpConfig(
+                host=host,
+                port=port,
+                timeout_s=1,
+                src=src,
+                trace_path=trace_path,
+                reconnect_max_retries=2,
+                reconnect_delay_s=0,
+            )
+        )
+        with pytest.raises(TransportProtocolFailure) as raised:
+            transport.send(dst, payload)
+
+        failure = raised.value
+        assert failure.cause == "command_not_acknowledged_before_syn"
+        assert failure.phase == "command_ack"
+        assert failure.request_attempts == 2
+        assert failure.retry_count == 1
+        assert failure.reconnect_attempts == 0
+        assert failure.unexpected_symbol == "0xaa"
+
+        assert transport.send(dst, payload) == response
+
+    trace = trace_path.read_text(encoding="utf-8")
+    assert "RETRY type=command_not_acknowledged_before_syn n=1/1" in trace
+    assert "REQUEST_FAILED cause=command_not_acknowledged_before_syn" in trace
+    assert "RECONNECT" not in trace
+    assert connection_count == 1
+
+
 def test_exhausted_read_recovery_raises_terminal_outage_with_sanitized_diagnostics(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1955,6 +2251,116 @@ def test_exhausted_read_recovery_raises_terminal_outage_with_sanitized_diagnosti
     assert error.reconnect_attempts == 2
     assert "192.0.2.44" not in str(error)
     assert attempts == 3
+
+
+@pytest.mark.parametrize(
+    ("failure_factory", "expected_exception", "cause", "phase"),
+    [
+        (lambda: TransportTimeout("timeout"), TransportTimeout, "timeout", "transaction"),
+        (
+            lambda: TransportDisconnected("disconnected"),
+            TransportDisconnected,
+            "disconnected",
+            "receive",
+        ),
+        (
+            lambda: _EnhancedSessionError("malformed", cause="malformed_escape", phase="response"),
+            _EnhancedSessionError,
+            "malformed_escape",
+            "response",
+        ),
+        (lambda: TransportHostError("host"), TransportHostError, "host_error", "transaction"),
+        (lambda: _EnhancedCollision("collision"), TransportError, "collision", "arbitration"),
+        (lambda: _EnhancedNack("nack"), TransportNack, "nack", "response"),
+        (lambda: _EnhancedCrcMismatch("crc"), TransportError, "crc_mismatch", "response"),
+        (
+            lambda: TransportError("transport"),
+            TransportError,
+            "transport_error",
+            "transaction",
+        ),
+    ],
+)
+def test_terminal_read_exit_matrix_emits_complete_request_failed_trace(
+    tmp_path: Path,
+    failure_factory: Callable[[], TransportError],
+    expected_exception: type[TransportError],
+    cause: str,
+    phase: str,
+) -> None:
+    trace_path = tmp_path / f"terminal-{cause}.trace"
+    transport = EnhancedTcpTransport(
+        EnhancedTcpConfig(
+            trace_path=trace_path,
+            timeout_max_retries=0,
+            reconnect_max_retries=0,
+            collision_max_retries=0,
+            nack_max_retries=0,
+        )
+    )
+
+    def fail_once(attempt_admitted_hook: Callable[[], None]) -> bytes:
+        attempt_admitted_hook()
+        raise failure_factory()
+
+    with pytest.raises(expected_exception):
+        transport._send_with_policy(1, fail_once, retry_safe=True)
+    transport.close()
+
+    trace = trace_path.read_text(encoding="utf-8")
+    assert (
+        f"#1 REQUEST_FAILED cause={cause} phase={phase} "
+        "request_attempts=1 retry_count=0 reconnect_attempts=0"
+    ) in trace
+
+
+@pytest.mark.parametrize(
+    ("failure_factory", "expected_exception", "cause", "phase"),
+    [
+        (lambda: TransportTimeout("timeout"), TransportTimeout, "timeout", "transaction"),
+        (
+            lambda: TransportDisconnected("disconnected"),
+            TransportDisconnected,
+            "disconnected",
+            "receive",
+        ),
+        (
+            lambda: _EnhancedSessionError("sync", cause="protocol_sync_error", phase="send"),
+            _EnhancedSessionError,
+            "protocol_sync_error",
+            "send",
+        ),
+        (lambda: _EnhancedCollision("collision"), _EnhancedCollision, "collision", "arbitration"),
+        (lambda: _EnhancedNack("nack"), _EnhancedNack, "nack", "response"),
+        (lambda: _EnhancedCrcMismatch("crc"), _EnhancedCrcMismatch, "crc_mismatch", "response"),
+    ],
+)
+def test_non_retry_safe_public_send_keeps_exception_and_emits_terminal_trace(
+    tmp_path: Path,
+    failure_factory: Callable[[], TransportError],
+    expected_exception: type[TransportError],
+    cause: str,
+    phase: str,
+) -> None:
+    trace_path = tmp_path / f"non-retry-safe-{cause}.trace"
+    transport = EnhancedTcpTransport(EnhancedTcpConfig(trace_path=trace_path))
+
+    def fail_once(_seq: int, **kwargs: object) -> bytes:
+        attempt_admitted_hook = kwargs["attempt_admitted_hook"]
+        assert callable(attempt_admitted_hook)
+        attempt_admitted_hook()
+        raise failure_factory()
+
+    transport._send_proto_once = fail_once
+    with pytest.raises(expected_exception):
+        transport.send(0x15, bytes.fromhex("0400000100"))
+    transport.close()
+
+    trace = trace_path.read_text(encoding="utf-8")
+    assert (
+        f"#1 REQUEST_FAILED cause={cause} phase={phase} "
+        "request_attempts=1 retry_count=0 reconnect_attempts=0"
+    ) in trace
 
 
 @pytest.mark.parametrize(
@@ -1998,6 +2404,105 @@ def test_mutative_or_malformed_b524_request_is_not_retried(
 
     assert attempts == 1
     assert reconnects == 0
+
+
+@pytest.mark.parametrize("selector", range(0x24, 0x28))
+def test_b509_read_only_identity_selector_retries_after_collision(
+    monkeypatch: pytest.MonkeyPatch,
+    selector: int,
+) -> None:
+    """Only the recovered one-byte B5/09 read selectors may re-arbitrate."""
+    from helianthus_vrc_explorer.transport import enhanced_tcp
+
+    transport = EnhancedTcpTransport(EnhancedTcpConfig(collision_max_retries=1))
+    attempts: list[bytes] = []
+
+    def _send_once(_seq: int, **kwargs: object) -> bytes:
+        attempt_admitted_hook = kwargs["attempt_admitted_hook"]
+        assert callable(attempt_admitted_hook)
+        attempt_admitted_hook()
+        payload = kwargs["payload"]
+        assert isinstance(payload, bytes)
+        attempts.append(payload)
+        if len(attempts) == 1:
+            raise enhanced_tcp._EnhancedCollision("startup collision")
+        return b"\x01"
+
+    monkeypatch.setattr(transport, "_send_proto_once", _send_once)
+
+    assert transport.send_proto(0x15, 0xB5, 0x09, bytes((selector,))) == b"\x01"
+    assert attempts == [bytes((selector,)), bytes((selector,))]
+
+
+@pytest.mark.parametrize(
+    ("payload", "expect_response"),
+    [
+        (b"", True),
+        (b"\x24\x00", True),
+        (b"\x23", True),
+        (b"\x28", True),
+        (b"\x24", False),
+    ],
+)
+def test_b509_non_allowlisted_shape_is_not_retried_after_collision(
+    monkeypatch: pytest.MonkeyPatch,
+    payload: bytes,
+    expect_response: bool,
+) -> None:
+    """The B5/09 retry exception is an exact allowlist, never a family rule."""
+    from helianthus_vrc_explorer.transport import enhanced_tcp
+
+    transport = EnhancedTcpTransport(EnhancedTcpConfig(collision_max_retries=1))
+    attempts = 0
+
+    def _send_once(_seq: int, **kwargs: object) -> bytes:
+        nonlocal attempts
+        attempt_admitted_hook = kwargs["attempt_admitted_hook"]
+        assert callable(attempt_admitted_hook)
+        attempt_admitted_hook()
+        attempts += 1
+        raise enhanced_tcp._EnhancedCollision("startup collision")
+
+    monkeypatch.setattr(transport, "_send_proto_once", _send_once)
+
+    with pytest.raises(enhanced_tcp._EnhancedCollision, match="startup collision"):
+        transport.send_proto(0x15, 0xB5, 0x09, payload, expect_response=expect_response)
+
+    assert attempts == 1
+
+
+def test_b509_read_only_identity_selector_recovers_session_after_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from helianthus_vrc_explorer.transport import enhanced_tcp
+
+    transport = EnhancedTcpTransport(
+        EnhancedTcpConfig(timeout_max_retries=0, reconnect_max_retries=1, reconnect_delay_s=0)
+    )
+    attempts: list[bytes] = []
+    reconnects: list[tuple[int, int]] = []
+
+    def _send_once(_seq: int, **kwargs: object) -> bytes:
+        attempt_admitted_hook = kwargs["attempt_admitted_hook"]
+        assert callable(attempt_admitted_hook)
+        attempt_admitted_hook()
+        payload = kwargs["payload"]
+        assert isinstance(payload, bytes)
+        attempts.append(payload)
+        if len(attempts) == 1:
+            raise enhanced_tcp.TransportTimeout("adapter timeout")
+        return b"\x01"
+
+    monkeypatch.setattr(transport, "_send_proto_once", _send_once)
+    monkeypatch.setattr(
+        transport,
+        "_reconnect",
+        lambda seq, attempt: reconnects.append((seq, attempt)),
+    )
+
+    assert transport.send_proto(0x15, 0xB5, 0x09, b"\x24") == b"\x01"
+    assert attempts == [b"\x24", b"\x24"]
+    assert reconnects == [(1, 1)]
 
 
 def test_target_nack_is_not_treated_as_recoverable_session_failure(
@@ -2090,11 +2595,11 @@ def test_local_nack_then_protocol_failure_uses_admitted_attempt_count(
     assert entry["availability_qualification"] == "unknown"
 
 
-@pytest.mark.parametrize("unexpected_ack", [0xAA, 0x42])
-def test_persistent_ack_failure_on_responsive_session_allows_next_read(
-    monkeypatch: pytest.MonkeyPatch, unexpected_ack: int
+def test_persistent_malformed_ack_failure_on_responsive_session_allows_next_read(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     inner = EnhancedTcpTransport(EnhancedTcpConfig(reconnect_max_retries=2, reconnect_delay_s=0))
+    unexpected_ack = 0x42
     received = iter((unexpected_ack,) * 3)
     monkeypatch.setattr(inner, "_start_arbitration", lambda _src: None)
     monkeypatch.setattr(inner, "_send_symbol_with_echo", lambda _symbol: None)
@@ -2110,13 +2615,13 @@ def test_persistent_ack_failure_on_responsive_session_allows_next_read(
     assert inner.send(0x15, bytes.fromhex("020008080000")) == b"\x01"
 
 
-def test_ack_failure_followed_by_failed_reconnect_is_still_scan_terminal(
+def test_malformed_ack_followed_by_failed_reconnect_is_still_scan_terminal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     inner = EnhancedTcpTransport(EnhancedTcpConfig(reconnect_max_retries=2, reconnect_delay_s=0))
     monkeypatch.setattr(inner, "_start_arbitration", lambda _src: None)
     monkeypatch.setattr(inner, "_send_symbol_with_echo", lambda _symbol: None)
-    monkeypatch.setattr(inner, "_recv_bus_symbol", lambda **_kwargs: 0xAA)
+    monkeypatch.setattr(inner, "_recv_bus_symbol", lambda **_kwargs: 0x42)
 
     def failed_reconnect(_seq: int, _attempt: int) -> None:
         raise TransportError("synthetic INIT failure")

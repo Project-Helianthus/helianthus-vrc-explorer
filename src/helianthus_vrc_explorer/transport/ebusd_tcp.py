@@ -50,6 +50,23 @@ _RETRYABLE_TRANSPORT_ERROR_SUBSTRINGS: Final[tuple[str, ...]] = (
 )
 
 
+def _is_retry_safe_b524_read(payload: bytes | bytearray | memoryview) -> bool:
+    """Return false only for a request that is explicitly a native write.
+
+    Legacy callers sometimes pass partial payloads to exercise retry accounting.
+    Preserve their behavior while making complete OP02/OP06 OT01 and the other
+    recognized write families unambiguously non-resubmittable.
+    """
+
+    value = bytes(payload)
+    if not value:
+        return True
+    opcode = value[0]
+    if opcode in {0x04, 0x0A, 0x0C}:
+        return False
+    return not (opcode in {0x02, 0x06} and len(value) >= 2 and value[1] == 0x01)
+
+
 def _is_retryable_transport_error(exc: TransportError) -> bool:
     return any(token in str(exc).lower() for token in _RETRYABLE_TRANSPORT_ERROR_SUBSTRINGS)
 
@@ -363,12 +380,15 @@ class EbusdTcpTransport(TransportInterface):
         return self._send_with_policy(
             seq,
             _send_attempt,
+            retry_safe=_is_retry_safe_b524_read(payload),
         )
 
     def _send_with_policy(
         self,
         seq: int,
         send_once: Callable[[], bytes],
+        *,
+        retry_safe: bool = True,
     ) -> bytes:
         timeout_retries = 0
         collision_retries = 0
@@ -383,6 +403,8 @@ class EbusdTcpTransport(TransportInterface):
             try:
                 return send_once()
             except TransportTimeout as exc:
+                if not retry_safe:
+                    raise
                 if _is_connection_level_timeout(exc):
                     # Preserve previous behavior: one reconnect attempt in persistent-session mode.
                     if self._session_depth > 0:
@@ -408,6 +430,8 @@ class EbusdTcpTransport(TransportInterface):
                 time.sleep(_BUS_SETTLE_RETRY_S)
                 continue
             except TransportError as exc:
+                if not retry_safe:
+                    raise
                 if _is_connection_level_error(exc):
                     if self._session_depth > 0:
                         self.close()

@@ -155,11 +155,13 @@ class GroupScanPlan:
             raise ValueError("opcode must be 0x02 or 0x06")
         _validate_selector("rr_max", self.rr_max, max_value=0xFFFF)
         _validate_selector_tuple("instances", self.instances, max_value=0xFF, allow_empty=True)
-        # The virtual DHW slot is independent of ordinary circuit_count.
+        # The virtual water-circuit slot is independent of ordinary circuit_count.
         # This common plan type also covers CLI, both interactive planners and
         # replanning; adding it here keeps deduplication and estimates consistent.
-        if self.opcode == 0x02 and self.group == 0x02 and 0x0A not in self.instances:
-            object.__setattr__(self, "instances", tuple(sorted((*self.instances, 0x0A))))
+        if self.opcode == 0x02 and self.group == 0x02:
+            instances = set(self.instances)
+            instances.add(0x09)
+            object.__setattr__(self, "instances", tuple(sorted(instances)))
         if self.registers is not None:
             _validate_selector_tuple(
                 "registers", self.registers, max_value=0xFFFF, allow_empty=False
@@ -176,7 +178,7 @@ class GroupScanPlan:
         if self.registers is not None:
             payload["registers"] = [_hex_u16(rr) for rr in self.registers]
         if self.opcode == 0x02 and self.group == 0x02:
-            payload["mandatory_instances"] = ["0x0a"]
+            payload["mandatory_instances"] = ["0x09"]
         return payload
 
 

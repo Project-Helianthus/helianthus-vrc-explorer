@@ -46,7 +46,7 @@ class TransportDisconnected(TransportError):
 
 
 class TransportProtocolFailure(TransportError):
-    """One read still lacks a valid ACK after responsive-session recovery.
+    """One read still lacks a valid command ACK after bounded recovery.
 
     This does not establish selector absence, unsupported capability, or a
     global adapter outage. All details are sanitized categorical/numeric data.
@@ -58,8 +58,13 @@ class TransportProtocolFailure(TransportError):
         request_attempts: int,
         reconnect_attempts: int,
         unexpected_symbol: int | None = None,
+        cause: str = "protocol_sync_error",
     ) -> None:
-        self.cause = "protocol_sync_error"
+        self.cause = (
+            cause
+            if cause in {"command_not_acknowledged_before_syn", "protocol_sync_error"}
+            else "protocol_sync_error"
+        )
         self.phase = "command_ack"
         self.request_attempts = max(1, request_attempts)
         self.retry_count = self.request_attempts - 1
@@ -89,13 +94,17 @@ class TransportRecoveryExhausted(TransportError):
     _CAUSES = frozenset(
         {
             "disconnected",
+            "malformed_escape",
             "protocol_sync_error",
+            "response_ended_before_complete",
             "socket_error",
             "timeout",
             "transport_error",
         }
     )
-    _PHASES = frozenset({"command_ack", "connect", "receive", "reconnect", "send", "transaction"})
+    _PHASES = frozenset(
+        {"command_ack", "connect", "receive", "reconnect", "response", "send", "transaction"}
+    )
 
     def __init__(
         self,

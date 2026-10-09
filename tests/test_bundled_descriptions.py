@@ -5,17 +5,69 @@ from copy import deepcopy
 from helianthus_vrc_explorer.schema.parameter_descriptions import (
     attach_bundled_descriptions,
     export_description_baseline,
+    load_description_baseline,
+    load_generic_description_catalog,
 )
 from helianthus_vrc_explorer.ui.browse_store import BrowseStore
 from helianthus_vrc_explorer.ui.html_report import render_html_report
+
+
+def test_generic_class_catalog_never_qualifies_a_concrete_instance_or_edit() -> None:
+    from helianthus_vrc_explorer.protocol.b524_metadata import validate_parameter_edit
+
+    catalog = load_generic_description_catalog()
+    rows = catalog["generic_descriptions"]
+    assert len(rows) == 223
+    assert (
+        len({tuple(row[key] for key in ("read_opcode", "group", "register")) for row in rows})
+        == 223
+    )
+    for row in rows:
+        assert row["instance"] == "0xff"
+        assert row["scope"] == "generic_instance_class"
+        assert row["device_identity_verified"] is False
+        assert (
+            validate_parameter_edit(
+                row, type_spec=row["type"], value=0, encoded=bytes(row["width"])
+            )
+            == "unvalidated"
+        )
+    artifact = _artifact()
+    entry = artifact["operations"]["0x02"]["groups"]["0x02"]["instances"]["0x01"]["registers"][
+        "0x0009"
+    ]
+    del entry["parameter_description"]
+    attach_bundled_descriptions(artifact, bundle=catalog)
+    assert "bundled_parameter_description" not in entry
+    assert "parameter_description" not in entry
+    for forbidden in (
+        "reply_hex",
+        "request_hex",
+        "serial",
+        "endpoint",
+        "destination_address",
+        "device_class_raw",
+        "device_firmware_raw",
+    ):
+        assert forbidden not in str(catalog)
 
 
 def _artifact() -> dict:
     return {
         "schema_version": "2.3",
         "meta": {
-            "identity": {"model": "test_controller", "firmware": "SW 0100 / HW 0200"},
-            "profile_context": {"profile": "controller_b524", "api_version": 1.0},
+            "identity": {
+                "eid": "BASV2",
+                "sw": "0507",
+                "hw": "1704",
+                "model": "test_controller",
+                "firmware": "SW 0100 / HW 0200",
+            },
+            "profile_context": {
+                "profile": "controller_b524",
+                "api_version": 1.0,
+                "api_revision": 1.0,
+            },
         },
         "operations": {
             "0x02": {
@@ -95,7 +147,7 @@ def test_profile_firmware_and_namespace_instance_do_not_leak_constraints() -> No
     bundle = export_description_baseline(a)
     entry = a["operations"]["0x02"]["groups"]["0x02"]["instances"]["0x01"]["registers"]["0x0009"]
     attach_bundled_descriptions(a, bundle=bundle)
-    a["meta"]["identity"]["firmware"] = "SW 0200 / HW 0200"
+    a["meta"]["identity"]["sw"] = "0200"
     attach_bundled_descriptions(a, bundle=bundle)
     assert entry["bundled_parameter_description"]["verification"] == "profile_mismatch"
     assert entry["parameter_description"]["target_profile_match"] is False
@@ -182,7 +234,7 @@ def test_missing_optional_controller_reads_are_not_a_description_mismatch() -> N
     attach_bundled_descriptions(artifact, bundle=bundle)
     cached = entry["bundled_parameter_description"]
     assert cached["verification"] == "matches"
-    assert cached["profile_qualification"] == "partial"
+    assert cached["profile_qualification"] == "exact"
     assert entry["parameter_description"]["target_profile"]["controller_class_raw"] is None
 
 
@@ -200,7 +252,7 @@ def test_missing_required_remote_identity_remains_unqualified_not_mismatched() -
     assert regs["0x0009"]["parameter_description"]["target_profile_match"] is False
 
 
-def test_known_controller_identity_conflict_still_reports_profile_mismatch() -> None:
+def test_remote_class_observation_does_not_replace_controller_native_identity() -> None:
     artifact = _artifact()
     bundle = export_description_baseline(artifact)
     bundle["descriptions"][0]["profile"]["controller_class_raw"] = "15"
@@ -219,7 +271,7 @@ def test_known_controller_identity_conflict_still_reports_profile_mismatch() -> 
     entry = artifact["operations"]["0x02"]["groups"]["0x02"]["instances"]["0x01"]["registers"][
         "0x0009"
     ]
-    assert entry["bundled_parameter_description"]["verification"] == "profile_mismatch"
+    assert entry["bundled_parameter_description"]["verification"] == "matches"
 
 
 def test_unknown_optional_identity_does_not_choose_between_conflicting_baselines() -> None:
@@ -257,16 +309,78 @@ def test_partial_baseline_merge_updates_valid_rows_and_retains_other_observation
     assert merged["coverage"]["complete_scan"] is False
 
 
-def test_baseline_merge_keeps_incompatible_firmware_profiles_separate() -> None:
+def test_unknown_controller_firmware_cannot_create_a_reusable_profile() -> None:
     from helianthus_vrc_explorer.schema.parameter_descriptions import merge_description_baselines
 
     previous = export_description_baseline(_artifact())
     artifact = _artifact()
-    artifact["meta"]["identity"]["firmware"] = "SW 0200 / HW 0200"
-    merged = merge_description_baselines(previous, export_description_baseline(artifact))
-    assert len(merged["descriptions"]) == 2
+    artifact["meta"]["identity"]["sw"] = "0200"
+    current = export_description_baseline(artifact)
+    assert current["descriptions"] == []
+    merged = merge_description_baselines(previous, current)
+    assert len(merged["descriptions"]) == 1
     attach_bundled_descriptions(artifact, bundle=merged)
     entry = artifact["operations"]["0x02"]["groups"]["0x02"]["instances"]["0x01"]["registers"][
         "0x0009"
     ]
-    assert entry["bundled_parameter_description"]["verification"] == "matches"
+    assert entry["bundled_parameter_description"]["verification"] == "profile_mismatch"
+
+
+def test_packaged_baseline_keeps_op02_and_op06_gga_limits_separate() -> None:
+    bundle = load_description_baseline()
+    descriptions = bundle["descriptions"]
+
+    local = next(
+        row
+        for row in descriptions
+        if (row["read_opcode"], row["group"], row["instance"], row["register"])
+        == ("0x02", "0x0a", "0x00", "0x0001")
+    )
+    remote = next(
+        row
+        for row in descriptions
+        if (row["read_opcode"], row["group"], row["instance"], row["register"])
+        == ("0x06", "0x0a", "0x01", "0x000d")
+    )
+
+    assert local["description_opcode"] == "0x01"
+    assert (local["type"], local["min"], local["max"], local["step"]) == (
+        "UCH",
+        0,
+        3,
+        1,
+    )
+    assert remote["description_opcode"] == "0x07"
+    assert (remote["type"], remote["min"], remote["max"], remote["step"]) == ("UIN", 1, 4, 1)
+    assert remote["profile"]["device_identity_required"] is True
+
+
+def test_packaged_baseline_keeps_u32_solar_hours_per_instance() -> None:
+    descriptions = load_description_baseline()["descriptions"]
+    rows = [
+        row
+        for row in descriptions
+        if (row["read_opcode"], row["group"], row["register"]) == ("0x02", "0x04", "0x000b")
+    ]
+
+    assert {row["instance"] for row in rows} >= {"0x00", "0x01"}
+    for row in rows:
+        assert (row["type"], row["width"], row["min"], row["max"], row["step"]) == (
+            "U32",
+            4,
+            0,
+            200000,
+            1,
+        )
+
+
+def test_packaged_remote_baselines_require_device_identity() -> None:
+    descriptions = load_description_baseline()["descriptions"]
+    remote_rows = [row for row in descriptions if row["read_opcode"] == "0x06"]
+
+    assert remote_rows
+    for row in remote_rows:
+        profile = row["profile"]
+        assert profile["device_identity_required"] is True
+        assert profile["device_class_raw"]
+        assert profile["device_firmware_raw"]

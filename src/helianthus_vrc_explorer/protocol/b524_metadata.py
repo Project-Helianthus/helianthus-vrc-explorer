@@ -28,7 +28,34 @@ SYSTEM_INFORMATION_NAMES = (
     "recovair_count",
     "cooling_heat_pump_count",
 )
-COUNT_GROUP_IDS = {(0x02, 0x02): 0, (0x02, 0x03): 1}
+COUNT_GROUP_IDS = {
+    (0x02, 0x02): 0,
+    (0x02, 0x03): 1,
+    (0x02, 0x04): 2,
+    (0x02, 0x05): 3,
+    (0x02, 0x08): 11,
+    (0x02, 0x09): 16,
+    (0x06, 0x01): 12,
+    (0x06, 0x02): 13,
+    (0x06, 0x06): 15,
+    (0x06, 0x07): 14,
+    (0x06, 0x09): 10,
+    (0x06, 0x0B): 8,
+    (0x06, 0x0C): 9,
+}
+# OP00 keeps its wire-level ``*_count`` names.  For the two local topology
+# fields, however, the value describes supported capacity rather than a
+# configured-instance population.  The module tuple is only a cross-check: it
+# must never replace the value reported on the wire.
+CAPACITY_SYSTEM_INFORMATION_IDS = frozenset({0, 1})
+MODULE_CAPACITY_MATRIX = {
+    (0, 0): 1,
+    (1, 0): 2,
+    (0, 1): 3,
+    (1, 1): 5,
+    (2, 1): 7,
+    (3, 1): 8,
+}
 _WIDTHS = {
     "UCH": 1,
     "BOOL": 1,
@@ -47,6 +74,22 @@ def expected_instance_count(value: float, *, capacity: int) -> int | None:
     if not math.isfinite(value) or value < 0 or not float(value).is_integer() or value > capacity:
         return None
     return int(value)
+
+
+def supported_capacity(value: float) -> int | None:
+    """Return a finite non-negative OP00 capacity without inferring presence."""
+    if not math.isfinite(value) or value < 0 or not float(value).is_integer():
+        return None
+    return int(value)
+
+
+def module_capacity_crosscheck(vr70_count: float, vr71_count: float) -> int | None:
+    """Return the documented capacity for one known module-count tuple only."""
+    vr70 = supported_capacity(vr70_count)
+    vr71 = supported_capacity(vr71_count)
+    if vr70 is None or vr71 is None:
+        return None
+    return MODULE_CAPACITY_MATRIX.get((vr70, vr71))
 
 
 def decode_parameter_description(
@@ -127,7 +170,10 @@ def validate_parameter_edit(
     encoded: bytes,
 ) -> str | None:
     """Return None for valid input, 'unvalidated' when absent, or a rejection reason."""
-    if not description or description.get("qualification") != "matched":
+    if not description or description.get("qualification") not in {
+        "matched",
+        "profile_qualified",
+    }:
         return "unvalidated"
     if description.get("type") != type_spec.strip().upper():
         return "Description format does not match the parameter codec"

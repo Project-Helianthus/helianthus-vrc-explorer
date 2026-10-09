@@ -28,6 +28,8 @@ _PHASE_LABELS: dict[str, str] = {
     "constraint_probe": "Constraint Probe",
     "instance_discovery": "Instance Discovery",
     "register_scan": "Register Scan",
+    "b524_operation_reads": "B524 Operation Reads",
+    "describe": "Describe",
     "b555_dump": "B555 Dump",
     "b516_dump": "B516 Dump",
     "b509_dump": "B509 Dump",
@@ -153,7 +155,7 @@ class RichScanObserver(AbstractContextManager["RichScanObserver"], ScanObserver)
             if self._trace_file is None:
                 header_parts.append(
                     Text(
-                        "Tip: set `--trace-file` to capture ebusd request/response exchanges.",
+                        "Tip: choose a trace file in scan setup to capture transport exchanges.",
                         style="dim",
                     )
                 )

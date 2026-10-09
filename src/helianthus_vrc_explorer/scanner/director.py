@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import logging
 import math
 import struct
 from dataclasses import dataclass
+from importlib.resources import files
 from typing import Final, NotRequired, TypedDict, cast
 
 from ..protocol.b524 import build_directory_probe_payload
@@ -41,40 +43,42 @@ class GroupConfig(TypedDict):
     exhaustive_only: NotRequired[bool]
 
 
-# Known groups (hardcoded reference, validated against CSV).
+# Observed profile scan windows. RR ceilings schedule reads; they do not prove
+# terminal register maxima. Opcode-specific overrides never establish another
+# namespace with the same GG.
 GROUP_CONFIG: Final[dict[int, GroupConfig]] = {
     0x00: {
         "desc": 3.0,
-        "name": "Regulator Parameters",
+        "name": "System",
         "ii_max": 0x00,
-        "rr_max": 0x01FF,
+        "rr_max": 0x00FF,
         "opcodes": [0x02],
         "namespace_opcodes": [0x02],
-        "name_by_opcode": {0x02: "Regulator Parameters"},
-        "rr_max_by_opcode": {0x02: 0x01FF},
+        "name_by_opcode": {0x02: "System"},
+        "rr_max_by_opcode": {0x02: 0x00FF},
         "ii_max_by_opcode": {0x02: 0x00},
     },
     0x01: {
         "desc": 3.0,
-        "name": "Hot Water Circuit",
+        "name": "Native Domestic Hot Water",
         "ii_max": 0x00,
         "rr_max": 0x0013,
         "opcodes": [0x02],
-        "name_by_opcode": {0x02: "Hot Water Circuit", 0x06: "Primary Heating Source"},
+        "name_by_opcode": {0x02: "Native Domestic Hot Water", 0x06: "Primary Heating Source"},
         "namespace_opcodes": [0x02, 0x06],
-        "rr_max_by_opcode": {0x02: 0x0013, 0x06: 0x0015},
+        "rr_max_by_opcode": {0x02: 0x0013, 0x06: 0x002F},
         "ii_max_by_opcode": {0x02: 0x00, 0x06: 0x08},
     },
     0x02: {
         "desc": 1.0,
-        "name": "Heating Circuits",
-        "ii_max": 0x0A,
+        "name": "Circuits",
+        "ii_max": 0x09,
         "rr_max": 0x0025,
         "opcodes": [0x02],
-        "name_by_opcode": {0x02: "Heating Circuits", 0x06: "Secondary Heating Source"},
+        "name_by_opcode": {0x02: "Circuits", 0x06: "Secondary Heating Source"},
         "namespace_opcodes": [0x02, 0x06],
-        "rr_max_by_opcode": {0x02: 0x0025, 0x06: 0x0015},
-        "ii_max_by_opcode": {0x02: 0x0A, 0x06: 0x08},
+        "rr_max_by_opcode": {0x02: 0x0025, 0x06: 0x002F},
+        "ii_max_by_opcode": {0x02: 0x09, 0x06: 0x08},
     },
     0x03: {
         "desc": 1.0,
@@ -84,7 +88,7 @@ GROUP_CONFIG: Final[dict[int, GroupConfig]] = {
         "opcodes": [0x02],
         "name_by_opcode": {0x02: "Zones", 0x06: "Unknown"},
         "namespace_opcodes": [0x02, 0x06],
-        "rr_max_by_opcode": {0x02: 0x002E, 0x06: 0x002E},
+        "rr_max_by_opcode": {0x02: 0x002E, 0x06: 0x002F},
         "ii_max_by_opcode": {0x02: 0x0A, 0x06: 0x0A},
     },
     0x04: {
@@ -100,37 +104,37 @@ GROUP_CONFIG: Final[dict[int, GroupConfig]] = {
     },
     0x05: {
         "desc": 1.0,
-        "name": "Hot Water Cylinder",
+        "name": "Solar Loaded Cylinder",
         "ii_max": 0x01,
         "rr_max": 0x0004,
         "opcodes": [0x02],
-        "name_by_opcode": {0x02: "Hot Water Cylinder", 0x06: "Unknown"},
+        "name_by_opcode": {0x02: "Solar Loaded Cylinder", 0x06: "Unknown"},
         "namespace_opcodes": [0x02, 0x06],
-        "rr_max_by_opcode": {0x02: 0x0004, 0x06: 0x0004},
+        "rr_max_by_opcode": {0x02: 0x0004, 0x06: 0x002F},
         "ii_max_by_opcode": {0x02: 0x01, 0x06: 0x0A},
     },
     0x08: {
-        "name": "Unknown",
+        "name": "DeltaT",
         "ii_max": 0x0A,
         "rr_max": 0x0007,
         "opcodes": [0x02, 0x06],
-        "name_by_opcode": {0x02: "Unknown", 0x06: "Unknown"},
+        "name_by_opcode": {0x02: "DeltaT", 0x06: "Unknown"},
         "namespace_opcodes": [0x02, 0x06],
-        "rr_max_by_opcode": {0x02: 0x0007, 0x06: 0x0004},
+        "rr_max_by_opcode": {0x02: 0x0007, 0x06: 0x002F},
         "ii_max_by_opcode": {0x02: 0x0A, 0x06: 0x0A},
     },
     0x09: {
         "desc": 1.0,
-        "name": "Regulators",
+        "name": "Ventilation",
         "ii_max": 0x0A,
         "rr_max": 0x0035,
         "opcodes": [0x02, 0x06],
-        "name_by_opcode": {0x02: "System", 0x06: "Regulators"},
+        "name_by_opcode": {0x02: "Ventilation", 0x06: "Regulators"},
         "rr_max_by_opcode": {0x02: 0x000F, 0x06: 0x0035},
     },
     0x0A: {
         "desc": 1.0,
-        "name": "Thermostats",
+        "name": "Unknown",
         "ii_max": 0x0A,
         "rr_max": 0x004D,
         "opcodes": [0x02, 0x06],
@@ -149,23 +153,23 @@ GROUP_CONFIG: Final[dict[int, GroupConfig]] = {
         "ii_max_by_opcode": {0x02: 0x0A, 0x06: 0x0A},
     },
     0x06: {
-        "name": "Unknown",
+        "name": "Device",
         "ii_max": 0x0A,
         "rr_max": 0x0030,
         "opcodes": [0x06],
-        "name_by_opcode": {0x02: "Unknown", 0x06: "Unknown"},
+        "name_by_opcode": {0x02: "Device", 0x06: "Unknown"},
         "namespace_opcodes": [0x02, 0x06],
-        "rr_max_by_opcode": {0x02: 0x0030, 0x06: 0x0030},
+        "rr_max_by_opcode": {0x02: 0x0030, 0x06: 0x002F},
         "ii_max_by_opcode": {0x02: 0x0A, 0x06: 0x0A},
     },
     0x07: {
-        "name": "Unknown",
+        "name": "Generator",
         "ii_max": 0x0A,
         "rr_max": 0x0030,
         "opcodes": [0x06],
-        "name_by_opcode": {0x02: "Unknown", 0x06: "Unknown"},
+        "name_by_opcode": {0x02: "Generator", 0x06: "Unknown"},
         "namespace_opcodes": [0x02, 0x06],
-        "rr_max_by_opcode": {0x02: 0x0030, 0x06: 0x0030},
+        "rr_max_by_opcode": {0x02: 0x0030, 0x06: 0x002F},
         "ii_max_by_opcode": {0x02: 0x0A, 0x06: 0x0A},
     },
     0x0B: {
@@ -175,7 +179,7 @@ GROUP_CONFIG: Final[dict[int, GroupConfig]] = {
         "opcodes": [0x06],
         "name_by_opcode": {0x02: "Unknown", 0x06: "Functional Modules (VR70)"},
         "namespace_opcodes": [0x02, 0x06],
-        "rr_max_by_opcode": {0x02: 0x0010, 0x06: 0x0010},
+        "rr_max_by_opcode": {0x02: 0x0010, 0x06: 0x002F},
         "ii_max_by_opcode": {0x02: 0x0A, 0x06: 0x0A},
     },
     0x0D: {
@@ -190,6 +194,7 @@ GROUP_CONFIG: Final[dict[int, GroupConfig]] = {
         "rr_max": 0x0010,
         "opcodes": [0x02, 0x06],
         "name_by_opcode": {0x02: "Unknown", 0x06: "Clock"},
+        "rr_max_by_opcode": {0x06: 0x0033},
     },
     0x0F: {
         "name": "Base Stations",
@@ -197,6 +202,7 @@ GROUP_CONFIG: Final[dict[int, GroupConfig]] = {
         "rr_max": 0x0010,
         "opcodes": [0x02, 0x06],
         "name_by_opcode": {0x02: "Unknown", 0x06: "Base Stations"},
+        "rr_max_by_opcode": {0x06: 0x0033},
     },
     0x10: {
         "name": "Unknown",
@@ -213,11 +219,51 @@ GROUP_CONFIG: Final[dict[int, GroupConfig]] = {
 }
 KNOWN_CORE_GROUPS: Final[frozenset[int]] = frozenset({0x02, 0x03})
 
+# Presentation annotations only: no changes to bounds, admission, or presence predicates.
+_REMOTE_GROUP_NAMES: Final[dict[str, str]] = json.loads(
+    files("helianthus_vrc_explorer.data")
+    .joinpath("b524_remote_group_names.json")
+    .read_text(encoding="utf-8")
+)
+
+
+def remote_group_display_name(group: int | str) -> str | None:
+    try:
+        number = int(group, 0) if isinstance(group, str) else group
+    except ValueError:
+        return None
+    return _REMOTE_GROUP_NAMES.get(f"0x{number:02x}")
+
+
+def operation_group_display_name(group: int | str, opcode: int) -> str | None:
+    """Return curated operation-scoped names without overriding other saved labels."""
+    if opcode == 0x06:
+        return remote_group_display_name(group)
+    try:
+        number = int(group, 0) if isinstance(group, str) else group
+    except ValueError:
+        return None
+    if opcode != 0x02:
+        return None
+    return {
+        0x00: "System",
+        0x01: "Native Domestic Hot Water",
+        0x02: "Circuits",
+        0x03: "Zones",
+        0x04: "Solar Circuit",
+        0x05: "Solar Loaded Cylinder",
+        0x06: "Device",
+        0x07: "Generator",
+        0x08: "DeltaT",
+        0x09: "Ventilation",
+    }.get(number)
+
 
 @dataclass(frozen=True, slots=True)
 class NamespaceProfile:
     opcode: int
     name: str
+    ii_min: int
     ii_max: int
     rr_max: int
 
@@ -246,14 +292,21 @@ def group_namespace_profiles(group: int) -> dict[int, NamespaceProfile]:
         op = int(opcode)
         profiles[op] = NamespaceProfile(
             opcode=op,
-            name=str(name_overrides.get(op, default_name)),
-            ii_max=int(ii_overrides.get(op, default_ii)),
+            name=(remote_group_display_name(group) if op == 0x06 else None)
+            or operation_group_display_name(group, op)
+            or str(name_overrides.get(op, default_name)),
+            ii_min=0x01 if op == 0x06 or (op == 0x02 and group == 0x02) else 0x00,
+            ii_max=0x08 if op == 0x06 else int(ii_overrides.get(op, default_ii)),
             rr_max=int(rr_overrides.get(op, default_rr)),
         )
     return profiles
 
 
 def group_name_for_opcode(group: int, opcode: int) -> str:
+    if int(opcode) == 0x06 and (remote_name := remote_group_display_name(group)):
+        return remote_name
+    if int(opcode) == 0x02 and (local_name := operation_group_display_name(group, opcode)):
+        return local_name
     config = GROUP_CONFIG.get(group)
     if config is None:
         return f"Unknown 0x{group:02X}"

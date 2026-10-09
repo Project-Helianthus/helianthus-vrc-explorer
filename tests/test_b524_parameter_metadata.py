@@ -12,8 +12,11 @@ from helianthus_vrc_explorer.protocol.b524 import (
 from helianthus_vrc_explorer.protocol.b524_metadata import (
     decode_parameter_description,
     expected_instance_count,
+    module_capacity_crosscheck,
+    supported_capacity,
     validate_parameter_edit,
 )
+from helianthus_vrc_explorer.schema.parameter_descriptions import description_profile
 
 
 def test_complete_description_selectors_keep_instance_and_rr16() -> None:
@@ -99,6 +102,25 @@ def test_invalid_counts_do_not_limit_instance_discovery(value: float) -> None:
 def test_zero_and_sparse_count_targets_are_preserved() -> None:
     assert expected_instance_count(0.0, capacity=11) == 0
     assert expected_instance_count(3.0, capacity=11) == 3
+
+
+@pytest.mark.parametrize(
+    ("vr70", "vr71", "capacity"),
+    [(0, 0, 1), (1, 0, 2), (0, 1, 3), (1, 1, 5), (2, 1, 7), (3, 1, 8)],
+)
+def test_known_module_tuples_provide_capacity_crosschecks(
+    vr70: int, vr71: int, capacity: int
+) -> None:
+    assert module_capacity_crosscheck(float(vr70), float(vr71)) == capacity
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -1.0, 2.5])
+def test_invalid_capacity_is_unknown(value: float) -> None:
+    assert supported_capacity(value) is None
+
+
+def test_unsupported_module_tuple_does_not_extrapolate_capacity() -> None:
+    assert module_capacity_crosscheck(2.0, 0.0) is None
 
 
 def test_same_span_width_can_describe_unsigned32_or_float() -> None:
@@ -187,13 +209,14 @@ def test_sparse_instance_probe_stops_after_successful_count_not_slot_count() -> 
         dst=0x15,
         group=2,
         opcode=2,
-        ii_max=10,
+        ii_max=9,
         observer=None,
         probe_instance_availability_fn=availability,
         expected_count=2,
     )
-    assert set(probes) == set(range(7))
-    assert [ii for ii, result in probes.items() if result.present] == [2, 6]
+    assert set(probes) == {*range(1, 7), 9}
+    assert [ii for ii, result in probes.items() if result.present] == [2, 6, 9]
+    assert probes[9].present is True
 
 
 @pytest.mark.parametrize("count", [None, 0, 3])
@@ -216,12 +239,12 @@ def test_missing_zero_or_unmet_count_keeps_bounded_fallback(count: int | None) -
         dst=0x15,
         group=2,
         opcode=2,
-        ii_max=10,
+        ii_max=9,
         observer=None,
         probe_instance_availability_fn=availability,
         expected_count=count,
     )
-    assert len(probes) == 11
+    assert len(probes) == 9
     assert probes[9].present
 
 
@@ -234,15 +257,17 @@ def test_full_preset_audits_slots_while_recommended_uses_sparse_count() -> None:
         name="Heating Circuits",
         descriptor=float("nan"),
         known=True,
-        ii_max=10,
+        ii_max=9,
         rr_max=37,
         rr_max_full=255,
         present_instances=(3, 7),
         expected_count=2,
     )
-    assert build_plan_from_preset([group], preset="recommended")[(2, 2)].instances == (3, 7, 10)
-    assert build_plan_from_preset([group], preset="full")[(2, 2)].instances == tuple(range(11))
-    assert build_plan_from_preset([group], preset="research")[(2, 2)].instances == tuple(range(11))
+    assert build_plan_from_preset([group], preset="recommended")[(2, 2)].instances == (3, 7, 9)
+    assert build_plan_from_preset([group], preset="full")[(2, 2)].instances == tuple(range(1, 10))
+    assert build_plan_from_preset([group], preset="research")[(2, 2)].instances == tuple(
+        range(1, 10)
+    )
 
 
 def test_default_scan_keeps_system_information_separate_and_targets_writable_descriptions() -> None:
@@ -257,13 +282,13 @@ def test_default_scan_keeps_system_information_separate_and_targets_writable_des
             self.requests.append(payload)
             if payload[0] == 0:
                 identifier = int.from_bytes(payload[1:3], "little")
-                return struct.pack("<f", 1.0 if identifier == 0 else float("nan"))
+                return struct.pack("<f", 3.0 if identifier == 0 else float("nan"))
             if len(payload) == 5 and payload[0] == 1:
                 return bytes.fromhex("020200000004000100")
             if (
                 payload[0] == 2
                 and payload[2] == 2
-                and payload[3] == 3
+                and payload[3] in {2, 6, 9}
                 and int.from_bytes(payload[4:6], "little") == 2
             ):
                 return bytes.fromhex("030202000100")
@@ -274,21 +299,33 @@ def test_default_scan_keeps_system_information_separate_and_targets_writable_des
     info = artifact["meta"]["system_information"][0]
     assert info["identifier"] == "0x0000"
     assert info["name"] == "circuit_count"
-    assert info["raw_hex"] == "0000803f"
-    assert artifact["meta"]["instance_counts"]["0x02:0x02"]["observed"] == 1
-    assert artifact["meta"]["instance_counts"]["0x02:0x02"]["probed_instances"] == 4
+    assert info["raw_hex"] == "00004040"
+    assert artifact["meta"]["instance_counts"]["0x02:0x02"]["observed"] == 2
+    circuit_count = artifact["meta"]["instance_counts"]["0x02:0x02"]
+    assert circuit_count["probed_instances"] == 9
+    assert circuit_count["semantics"] == "capacity"
+    assert circuit_count["expected"] is None
+    assert circuit_count["capacity"] == 3
+    assert circuit_count["capacity_exceeded"] is False
     group = artifact["operations"]["0x02"]["groups"]["0x02"]
     assert group["descriptor_observed"] is None
     assert artifact["meta"]["scan_plan"]["groups"]["0x02"]["operations"]["0x02"]["instances"] == [
-        "0x03",
-        "0x0a",
+        "0x02",
+        "0x06",
+        "0x09",
     ]
-    entry = group["instances"]["0x03"]["registers"]["0x0002"]
+    entry = group["instances"]["0x02"]["registers"]["0x0002"]
     assert entry["parameter_description"]["qualification"] == "matched"
-    assert entry["parameter_description"]["instance"] == "0x03"
-    assert [p for p in bus.requests if p[0] in {1, 7}] == [bytes.fromhex("0102030200")]
+    assert entry["parameter_description"]["instance"] == "0x02"
+    assert [p for p in bus.requests if p[0] in {1, 7}] == [
+        bytes.fromhex("0102020200"),
+        bytes.fromhex("0102060200"),
+        bytes.fromhex("0102090200"),
+    ]
     # The circuit count never restricts the independent device namespace.
-    assert "0x06:0x02" not in artifact["meta"]["instance_counts"]
+    remote_count = artifact["meta"]["instance_counts"]["0x06:0x02"]
+    assert remote_count["identifier"] == "0x000d"
+    assert remote_count["expected"] is None
 
 
 def test_default_description_requests_cover_all_observed_writable_parameters() -> None:
@@ -305,18 +342,18 @@ def test_default_description_requests_cover_all_observed_writable_parameters() -
             if payload[0] == 1:
                 self.descriptions += 1
                 return payload[1:2] + payload[3:5] + bytes.fromhex("0000ffff0100")
-            if payload[0] == 2 and payload[2] == 0:
+            if payload[0] == 2 and payload[2] in {0, 1}:
                 return b"\x03" + payload[2:3] + payload[4:6] + b"\x01\x00"
             return b"\x00"
 
     bus = WritableBus()
     artifact = scan_b524(bus, dst=0x15)
-    assert bus.descriptions == 512
-    assert artifact["meta"]["parameter_description_requests"] == 512
+    assert bus.descriptions == 276
+    assert artifact["meta"]["parameter_description_requests"] == 276
     assert artifact["meta"]["parameter_description_coverage"]["request_budget"] is None
     regs = artifact["operations"]["0x02"]["groups"]["0x00"]["instances"]["0x00"]["registers"]
-    assert regs["0x0100"]["parameter_description"]["qualification"] == "matched"
-    assert regs["0x0100"]["value"] == 1
+    assert regs["0x00ff"]["parameter_description"]["qualification"] == "matched"
+    assert regs["0x00ff"]["value"] == 1
 
 
 def test_device_description_probe_uses_complete_op07_selector() -> None:
@@ -439,7 +476,7 @@ def test_browse_local_edit_validates_system_and_device_float_parameters(
         "type": "EXP",
         "flags": 3,
         "writable": True,
-        "flags_access": "config_user",
+        "flags_access": "writable_visible",
         "value": 3.0,
         "raw_hex": struct.pack("<f", 3).hex(),
         "error": None,
@@ -455,7 +492,20 @@ def test_browse_local_edit_validates_system_and_device_float_parameters(
         )
     artifact = {
         "schema_version": "2.3",
-        "meta": {},
+        "meta": {
+            "destination_address": "0x15",
+            "identity": {
+                "manufacturer": "0xB5",
+                "eid": "BASV2",
+                "sw": "0507",
+                "hw": "1704",
+            },
+            "profile_context": {
+                "profile": "controller_b524",
+                "api_version": 1.0,
+                "api_revision": 1.0,
+            },
+        },
         "operations": {
             f"0x{read_opcode:02x}": {
                 "groups": {
@@ -467,21 +517,65 @@ def test_browse_local_edit_validates_system_and_device_float_parameters(
             }
         },
     }
+    op06 = artifact["operations"].setdefault("0x06", {"groups": {}})
+    op06["groups"].setdefault(
+        "0x09",
+        {
+            "instances": {
+                "0x01": {
+                    "registers": {
+                        "0x0002": {"type": "HEX:1", "value": "15", "raw_hex": "15"},
+                        "0x0004": {
+                            "type": "FW",
+                            "value": "08.05.00",
+                            "raw_hex": "080500",
+                        },
+                    }
+                }
+            }
+        },
+    )
+    selector = {
+        "read_opcode": f"0x{read_opcode:02x}",
+        "group": "0x01",
+        "instance": "0x00",
+        "register": "0x0027",
+    }
+    if read_opcode == 6:
+        registers = artifact["operations"]["0x06"]["groups"]["0x01"]["instances"]["0x00"][
+            "registers"
+        ]
+        registers.update(
+            {
+                "0x0002": {"type": "HEX:1", "value": "20", "raw_hex": "20"},
+                "0x0004": {"type": "FW", "value": "01.02.03", "raw_hex": "010203"},
+            }
+        )
+    if has_description:
+        entry["parameter_description"].update(
+            target_profile=description_profile(artifact, selector),
+            target_profile_match=True,
+        )
     store = BrowseStore.from_artifact(artifact)
     app = _compose_browse_app(artifact, allow_write=True, store=store)
-    row = store.rows[0]
+    row = next(
+        row
+        for row in store.rows
+        if row.address.read_opcode == selector["read_opcode"]
+        and row.register_key == selector["register"]
+    )
     statuses, dialogs = [], []
     monkeypatch.setattr(app, "_set_status", statuses.append)
     monkeypatch.setattr(app, "push_screen", lambda dialog, callback: dialogs.append(dialog))
     app._editing_row_id = row.row_id
     app._on_edit_value_entered(new_value)
-    assert bool(dialogs) is accepted
+    assert bool(dialogs) is accepted, statuses
     if not accepted:
         assert statuses[-1].startswith("Edit rejected:")
     else:
         assert app._pending_write is not None
         if not has_description:
-            assert "unvalidated" in str(dialogs[0]._lines).lower()
+            assert "incomplete limits" in str(dialogs[0]._lines).lower()
     assert entry["value"] == 3.0  # Confirmation has not mutated the artifact.
 
 
@@ -511,7 +605,7 @@ def test_remote_writable_capability_controls_edit_even_in_state_tab(
         "type": "UIN",
         "flags": 3 if writable else 1,
         "writable": writable,
-        "flags_access": "config_valid",
+        "flags_access": "writable_visible" if writable else "read_only_visible",
         "register_class": "state",
         "value": 1,
         "raw_hex": "0100",

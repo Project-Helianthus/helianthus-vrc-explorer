@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 from rich.console import Console
 
-from conftest import artifact_groups, artifact_op_group
 from helianthus_vrc_explorer.artifact_schema import CURRENT_ARTIFACT_SCHEMA_VERSION
 from helianthus_vrc_explorer.scanner.observer import ScanObserver
 from helianthus_vrc_explorer.scanner.plan import GroupScanPlan, make_plan_key
@@ -20,6 +19,7 @@ from helianthus_vrc_explorer.scanner.scan import (
 )
 from helianthus_vrc_explorer.transport.base import TransportInterface
 from helianthus_vrc_explorer.transport.dummy import DummyTransport
+from tests.conftest import artifact_groups, artifact_op_group
 
 
 class RecordingTransport(TransportInterface):
@@ -118,7 +118,7 @@ def _write_fixture_group_02(
             "0x02": {
                 "descriptor_type": descriptor,
                 "instances": {
-                    "0x00": {
+                    "0x01": {
                         "registers": {
                             # Presence probe (UIN)
                             "0x0002": {"raw_hex": "0100"},
@@ -180,13 +180,14 @@ def _write_fixture_groups_00_and_01(tmp_path: Path) -> Path:
                             "0x00": {
                                 "registers": {
                                     "0x0000": {"raw_hex": "00"},
+                                    "0x0001": {"raw_hex": "0100"},
                                 }
                             }
                         }
                     },
                     "0x06": {
                         "instances": {
-                            "0x00": {
+                            "0x01": {
                                 "registers": {
                                     "0x0000": {"raw_hex": "00"},
                                 }
@@ -282,7 +283,7 @@ def _write_fixture_group_0c_remote(tmp_path: Path) -> Path:
                 "namespaces": {
                     "0x06": {
                         "instances": {
-                            "0x00": {
+                            "0x01": {
                                 "registers": {
                                     "0x0001": {"raw_hex": "01"},
                                 }
@@ -316,7 +317,7 @@ def _write_fixture_group_01_namespaces(tmp_path: Path) -> Path:
                     },
                     "0x06": {
                         "instances": {
-                            "0x00": {
+                            "0x01": {
                                 "registers": {
                                     "0x0000": {"raw_hex": "06"},
                                 }
@@ -351,7 +352,7 @@ def _write_fixture_unknown_group_69(tmp_path: Path) -> Path:
                     },
                     "0x06": {
                         "instances": {
-                            "0x00": {
+                            "0x01": {
                                 "registers": {
                                     "0x0000": {"raw_hex": "00"},
                                 }
@@ -376,12 +377,12 @@ def _write_fixture_unknown_group_69_with_ff(tmp_path: Path) -> Path:
                 "namespaces": {
                     "0x06": {
                         "instances": {
-                            "0x00": {
+                            "0x01": {
                                 "registers": {
                                     "0x0000": {"raw_hex": "00"},
                                 }
                             },
-                            "0xff": {
+                            "0x08": {
                                 "registers": {
                                     "0x0000": {"raw_hex": "7f"},
                                 }
@@ -437,7 +438,7 @@ def _write_fixture_group_09(tmp_path: Path) -> Path:
                     },
                     "0x06": {
                         "instances": {
-                            "0x00": {
+                            "0x01": {
                                 "registers": {
                                     "0x0000": {"raw_hex": "00"},
                                     "0x0001": {"raw_hex": "01"},
@@ -473,7 +474,7 @@ def _write_fixture_group_09_presence_divergence(tmp_path: Path) -> Path:
                     },
                     "0x06": {
                         "instances": {
-                            "0x00": {
+                            "0x01": {
                                 "registers": {
                                     "0x0001": {"raw_hex": "00"},
                                 }
@@ -647,11 +648,13 @@ def test_scan_b524_scans_all_instances_and_register_range(tmp_path: Path) -> Non
     group = artifact_op_group(artifact, op="0x02", group="0x02")
     # v2.3: dual_namespace removed from operations-first structure
     assert group["descriptor_observed"] is None
+    assert group["ii_min"] == "0x01"
+    assert group["ii_max"] == "0x09"
 
-    instance_00 = group["instances"]["0x00"]
-    assert instance_00["present"] is True
+    instance_01 = group["instances"]["0x01"]
+    assert instance_01["present"] is True
 
-    registers = instance_00["registers"]
+    registers = instance_01["registers"]
     assert registers["0x0002"]["type"] == "UIN"
     assert registers["0x0002"]["value"] == 1
     assert registers["0x0002"]["enum_raw_name"] == "HEATING_OR_COOLING"
@@ -666,15 +669,15 @@ def test_scan_b524_scans_all_instances_and_register_range(tmp_path: Path) -> Non
     assert registers["0x000f"]["type"] == "EXP"
     assert registers["0x000f"]["value"] == pytest.approx(1.7, abs=1e-6)
 
-    # Phase B/C: instance discovery must scan all II=0x00..ii_max (no early stop at gaps).
+    # Phase B/C: circuit discovery scans II=0x01..0x09 without stopping at gaps.
     probed_instances = sorted(
         {ii for (_opcode, gg, ii, rr) in transport.register_reads if gg == 0x02 and rr == 0x0002}
     )
-    assert probed_instances == list(range(0x0A + 1))
+    assert probed_instances == list(range(0x01, 0x0A))
 
     # Phase D: register scan must cover RR=0x0000..rr_max for present instances.
     scanned_registers = {
-        rr for (_opcode, gg, ii, rr) in transport.register_reads if gg == 0x02 and ii == 0x00
+        rr for (_opcode, gg, ii, rr) in transport.register_reads if gg == 0x02 and ii == 0x01
     }
     assert scanned_registers == set(range(0x25 + 1))
 
@@ -708,7 +711,7 @@ def test_scan_b524_continues_when_first_directory_probe_is_status_only(
     assert "b524_skip_reason" not in artifact["meta"]
     assert "0x02" in artifact_groups(artifact)
     grp = artifact_op_group(artifact, op="0x02", group="0x02")
-    assert grp["instances"]["0x00"]["present"] is True
+    assert grp["instances"]["0x01"]["present"] is True
     assert transport.calls[0] == bytes((0x00, 0x00, 0x00))
     assert bytes((0x00, 0x02, 0x00)) in transport.calls
 
@@ -752,7 +755,7 @@ def test_scan_b524_skips_constraint_dictionary_by_default(tmp_path: Path) -> Non
     assert artifact["meta"]["constraint_dictionary"] == {}
     assert artifact["meta"]["constraint_scope"]["decision"] == "opcode_0x02_default"
     assert artifact["meta"]["constraint_scope"]["protocol"] == "opcode_0x01"
-    regs = artifact_op_group(artifact, op="0x02", group="0x02")["instances"]["0x00"]["registers"]
+    regs = artifact_op_group(artifact, op="0x02", group="0x02")["instances"]["0x01"]["registers"]
     entry = regs["0x0002"]
     assert entry["constraint_source"] == "static_catalog"
     assert entry["constraint_scope"] == "opcode_0x02_default"
@@ -769,7 +772,7 @@ def test_scan_b524_does_not_use_unqualified_seeded_hints_for_validation(tmp_path
             "0x02": {
                 "descriptor_type": 1.0,
                 "instances": {
-                    "0x00": {
+                    "0x01": {
                         "registers": {
                             "0x0002": {"raw_hex": "0500"},
                         }
@@ -789,7 +792,7 @@ def test_scan_b524_does_not_use_unqualified_seeded_hints_for_validation(tmp_path
         planner_ui="classic",
     )
 
-    regs = artifact_op_group(artifact, op="0x02", group="0x02")["instances"]["0x00"]["registers"]
+    regs = artifact_op_group(artifact, op="0x02", group="0x02")["instances"]["0x01"]["registers"]
     entry = regs["0x0002"]
     assert entry["value"] == 5
     assert entry["constraint_source"] == "static_catalog"
@@ -884,7 +887,7 @@ def test_scan_b524_scans_enabled_unknown_group_via_planner(monkeypatch, tmp_path
                 group=0x69,
                 opcode=0x06,
                 rr_max=0x0000,
-                instances=(0x00,),
+                instances=(0x01,),
             ),
         }
 
@@ -904,7 +907,7 @@ def test_scan_b524_scans_enabled_unknown_group_via_planner(monkeypatch, tmp_path
     local_group = artifact_op_group(artifact, op="0x02", group="0x69")
     remote_group = artifact_op_group(artifact, op="0x06", group="0x69")
     local_registers = local_group["instances"]["0x00"]["registers"]
-    remote_registers = remote_group["instances"]["0x00"]["registers"]
+    remote_registers = remote_group["instances"]["0x01"]["registers"]
     assert local_registers["0x0000"]["raw_hex"] == "00"
     assert remote_registers["0x0000"]["raw_hex"] == "00"
     assert "0x69" in artifact["meta"]["scan_plan"]["groups"]
@@ -933,8 +936,8 @@ def test_scan_b524_scans_absent_instances_when_planner_overrides(
                 opcode=0x02,
                 rr_max=0x0002,
                 instances=(
-                    0x00,  # present (fixture)
-                    0x01,  # absent (forced by planner override)
+                    0x01,  # present (fixture)
+                    0x02,  # absent (forced by planner override)
                 ),
             )
         }
@@ -951,16 +954,16 @@ def test_scan_b524_scans_absent_instances_when_planner_overrides(
     )
 
     group = artifact_op_group(artifact, op="0x02", group="0x02")
-    assert group["instances"]["0x00"]["present"] is True
+    assert group["instances"]["0x01"]["present"] is True
 
-    absent = group["instances"]["0x01"]
+    absent = group["instances"]["0x02"]
     assert absent["present"] is False
     assert set(absent["registers"].keys()) == {"0x0000", "0x0001", "0x0002"}
 
     scanned_registers = {
         rr
         for (opcode, gg, ii, rr) in transport.register_reads
-        if opcode == 0x02 and gg == 0x02 and ii == 0x01
+        if opcode == 0x02 and gg == 0x02 and ii == 0x02
     }
     assert scanned_registers == set(range(0x0002 + 1))
 
@@ -978,13 +981,13 @@ def test_scan_instanced_group_zero_descriptor(tmp_path: Path) -> None:
     assert group["discovery_advisory"]["kind"] == "profile_register_candidate"
     assert group["discovery_advisory"]["semantic_authority"] is False
     assert group["discovery_advisory"]["proven_register_opcodes"] == ["0x02", "0x06"]
-    assert group["instances"]["0x00"]["present"] is True
-    assert group["instances"].get("0x01", {}).get("present") is not True
+    assert group["instances"]["0x01"]["present"] is True
+    assert group["instances"].get("0x02", {}).get("present") is not True
 
     probed_instances = sorted(
         {ii for (_opcode, gg, ii, rr) in transport.register_reads if gg == 0x02 and rr == 0x0002}
     )
-    assert probed_instances == list(range(0x0A + 1))
+    assert probed_instances == list(range(0x01, 0x09 + 1))
 
 
 def test_scan_singleton_group_nonzero_descriptor(tmp_path: Path) -> None:
@@ -1038,7 +1041,7 @@ def test_artifact_dual_namespace_structure(monkeypatch, tmp_path: Path) -> None:
                 group=0x09,
                 opcode=0x06,
                 rr_max=0x0000,
-                instances=(0x00,),
+                instances=(0x01,),
             ),
         }
 
@@ -1056,10 +1059,10 @@ def test_artifact_dual_namespace_structure(monkeypatch, tmp_path: Path) -> None:
     # v2.3: each OP has its own group entry
     local_group = artifact_op_group(artifact, op="0x02", group="0x09")
     remote_group = artifact_op_group(artifact, op="0x06", group="0x09")
-    assert local_group["name"] == "System"
-    assert remote_group["name"] == "Regulators"
+    assert local_group["name"] == "Ventilation"
+    assert remote_group["name"] == "Remote Control Regulators (VRC7xx, VRT38x)"
     assert local_group["ii_max"] == "0x0a"
-    assert remote_group["ii_max"] == "0x0a"
+    assert remote_group["ii_max"] == "0x08"
     assert (
         local_group["discovery_advisory"]["instance_discovery_decision"]["decision"]
         == "independent_per_operation"
@@ -1074,9 +1077,9 @@ def test_artifact_dual_namespace_structure(monkeypatch, tmp_path: Path) -> None:
         local_group["instances"]["0x00"]["registers"]["0x0000"]["read_opcode_label"]
         == "GetParameter"
     )
-    assert remote_group["instances"]["0x00"]["registers"]["0x0000"]["read_opcode"] == "0x06"
+    assert remote_group["instances"]["0x01"]["registers"]["0x0000"]["read_opcode"] == "0x06"
     assert (
-        remote_group["instances"]["0x00"]["registers"]["0x0000"]["read_opcode_label"]
+        remote_group["instances"]["0x01"]["registers"]["0x0000"]["read_opcode_label"]
         == "GetDeviceParameter"
     )
 
@@ -1086,7 +1089,7 @@ def test_artifact_dual_namespace_structure(monkeypatch, tmp_path: Path) -> None:
     scanned_opcodes = {
         opcode
         for (opcode, gg, ii, rr) in transport.register_reads
-        if gg == 0x09 and ii == 0x00 and rr in {0x0000, 0x0001}
+        if gg == 0x09 and rr in {0x0000, 0x0001}
     }
     assert scanned_opcodes == {0x02, 0x06}
 
@@ -1154,14 +1157,14 @@ def test_artifact_single_namespace_unchanged(tmp_path: Path) -> None:
     group = artifact_op_group(artifact, op="0x02", group="0x02")
     # v2.3: dual_namespace removed from operations-first structure
     assert "namespaces" not in group
-    assert group["ii_max"] == "0x0a"
-    assert set(group["instances"]) >= {"0x00"}
+    assert group["ii_max"] == "0x09"
+    assert set(group["instances"]) >= {"0x01", "0x09"}
 
 
 def test_artifact_register_flags_present(tmp_path: Path) -> None:
     artifact = scan_b524(DummyTransport(_write_fixture_group_02(tmp_path)), dst=0x15)
 
-    regs = artifact_op_group(artifact, op="0x02", group="0x02")["instances"]["0x00"]["registers"]
+    regs = artifact_op_group(artifact, op="0x02", group="0x02")["instances"]["0x01"]["registers"]
     entry = regs["0x0002"]
 
     assert entry["flags"] == 0x01
@@ -1217,7 +1220,7 @@ def test_group_08_remote_namespace_only_marks_present_instances(
                 group=0x08,
                 opcode=0x06,
                 rr_max=0x0000,
-                instances=(0x00,),
+                instances=(0x01,),
             ),
         }
 
@@ -1236,11 +1239,11 @@ def test_group_08_remote_namespace_only_marks_present_instances(
     local_group = artifact_op_group(artifact, op="0x02", group="0x08")
     remote_group = artifact_op_group(artifact, op="0x06", group="0x08")
     assert local_group["ii_max"] == "0x0a"
-    assert remote_group["ii_max"] == "0x0a"
+    assert remote_group["ii_max"] == "0x08"
     local_instances = set(local_group["instances"])
     remote_instances = set(remote_group["instances"])
     assert "0x00" in local_instances
-    assert "0x00" in remote_instances
+    assert "0x01" in remote_instances
     # Regression guard: group 0x08 stays instanced via ii_max, without forcing
     # all local slots into the artifact when only one local slot is evidenced.
     assert local_instances == {"0x00"}
@@ -1293,7 +1296,7 @@ def test_type_hint_propagation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
                 group=0x09,
                 opcode=0x06,
                 rr_max=0x0004,
-                instances=(0x00,),
+                instances=(0x01,),
             ),
         }
 
@@ -1309,12 +1312,13 @@ def test_type_hint_propagation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
         myvaillant_map=MyvaillantRegisterMap.from_path(map_path),
     )
 
-    entry = artifact_op_group(artifact, op="0x06", group="0x09")["instances"]["0x00"]["registers"][
+    entry = artifact_op_group(artifact, op="0x06", group="0x09")["instances"]["0x01"]["registers"][
         "0x0004"
     ]
-    assert entry["myvaillant_name"] == "radio_device_firmware"
+    assert entry["myvaillant_name"] == "device_firmware_version"
     assert entry["type"] == "FWU"
     assert entry["value"] == "02.23.03"
+    assert entry["register_class"] == "state"
 
 
 def test_scan_b524_replays_dual_namespace_fixture_end_to_end(
@@ -1352,13 +1356,13 @@ def test_scan_b524_replays_dual_namespace_fixture_end_to_end(
                 group=0x09,
                 opcode=0x06,
                 rr_max=0x0007,
-                instances=(0x00, 0x01),
+                instances=(0x01,),
             ),
             make_plan_key(0x0C, 0x06): GroupScanPlan(
                 group=0x0C,
                 opcode=0x06,
                 rr_max=0x0007,
-                instances=(0x00,),
+                instances=(0x01,),
             ),
         }
 
@@ -1379,7 +1383,7 @@ def test_scan_b524_replays_dual_namespace_fixture_end_to_end(
             present=(
                 kwargs["instance"] in {0x00, 0x01}
                 if kwargs["group"] == 0x09
-                else (kwargs["group"] == 0x0C and kwargs["instance"] == 0x00)
+                else (kwargs["group"] == 0x0C and kwargs["instance"] == 0x01)
             ),
             contract=namespace_availability_contract(
                 group=kwargs["group"],
@@ -1416,27 +1420,19 @@ def test_scan_b524_replays_dual_namespace_fixture_end_to_end(
     assert artifact["schema_version"] == CURRENT_ARTIFACT_SCHEMA_VERSION
     local_inst = artifact_op_group(artifact, op="0x02", group="0x09")["instances"]["0x00"]
     local_fw = local_inst["registers"]["0x0004"]
-    remote_inst = artifact_op_group(artifact, op="0x06", group="0x09")["instances"]["0x00"]
-    remote_fw = remote_inst["registers"]["0x0004"]
-    accessory_fw = artifact_op_group(artifact, op="0x06", group="0x0c")["instances"]["0x00"][
-        "registers"
-    ]["0x0004"]
+    remote_inst = artifact_op_group(artifact, op="0x06", group="0x09")["instances"]["0x01"]
+    remote_temperature = remote_inst["registers"]["0x0007"]
 
     assert local_fw["type"] == "FW"
     assert local_fw["value"] == "03.17.02"
     assert local_fw["flags_access"] == "read_only_visible"
-    assert local_fw["myvaillant_name"] == "radio_device_firmware_local"
-    assert remote_fw["type"] == "FWU"
-    assert remote_fw["value"] == "02.23.03"
-    assert remote_fw["flags_access"] == "read_only_visible"
-    assert remote_fw["myvaillant_name"] == "radio_device_firmware"
-    assert accessory_fw["type"] == "FWU"
-    assert accessory_fw["value"] == "08.05.00"
-    assert accessory_fw["read_opcode_label"] == "GetDeviceParameter"
-    assert accessory_fw["myvaillant_name"] == "device_firmware_version"
+    assert local_fw["myvaillant_name"] == "ventilation_status_special_operating_mode"
+    assert remote_temperature["type"] == "EXP"
+    assert remote_temperature["value"] == 22.5
+    assert remote_temperature["flags_access"] == "read_only_visible"
     assert (0x02, 0x09, 0x00, 0x0004) in transport.register_reads
-    assert (0x06, 0x09, 0x00, 0x0004) in transport.register_reads
-    assert (0x06, 0x0C, 0x00, 0x0004) in transport.register_reads
+    assert (0x06, 0x09, 0x01, 0x0007) in transport.register_reads
+    assert (0x06, 0x09, 0x00, 0x0004) not in transport.register_reads
 
 
 def test_scan_b524_normalizes_legacy_aggressive_preset_to_full_for_textual_default_plan(
@@ -1455,7 +1451,12 @@ def test_scan_b524_normalizes_legacy_aggressive_preset_to_full_for_textual_defau
         default_plan,
         default_preset,
         system_information,
+        operation_requests,
+        operation_selection,
     ):
+        assert isinstance(operation_requests, list)
+        assert isinstance(operation_selection, list)
+        assert len(operation_requests) == len(operation_selection)
         captured["default_preset"] = default_preset
         captured["default_plan"] = default_plan
         captured["request_rate_rps"] = request_rate_rps
@@ -1501,7 +1502,12 @@ def test_scan_b524_normalizes_exhaustive_preset_to_research_for_textual_default_
         default_plan,
         default_preset,
         system_information,
+        operation_requests,
+        operation_selection,
     ):
+        assert isinstance(operation_requests, list)
+        assert isinstance(operation_selection, list)
+        assert len(operation_requests) == len(operation_selection)
         captured["default_preset"] = default_preset
         captured["default_plan"] = default_plan
         captured["request_rate_rps"] = request_rate_rps
@@ -1546,7 +1552,12 @@ def test_scan_b524_normalizes_conservative_preset_to_recommended_for_textual_def
         default_plan,
         default_preset,
         system_information,
+        operation_requests,
+        operation_selection,
     ):
+        assert isinstance(operation_requests, list)
+        assert isinstance(operation_selection, list)
+        assert len(operation_requests) == len(operation_selection)
         captured["default_preset"] = default_preset
         captured["default_plan"] = default_plan
         captured["request_rate_rps"] = request_rate_rps
@@ -1585,15 +1596,16 @@ def test_scan_b524_applies_research_preset_in_non_interactive_mode(tmp_path: Pat
     assert set(scan_plan["0x69"]["operations"]) == {"0x02", "0x06"}
     for op in ("0x02", "0x06"):
         assert scan_plan["0x69"]["operations"][op]["rr_max"] == "0x00ff"
+        expected_instances = range(0x01, 0x09) if op == "0x06" else range(0x0B)
         assert scan_plan["0x69"]["operations"][op]["instances"] == [
-            f"0x{ii:02x}" for ii in range(0x0B)
+            f"0x{ii:02x}" for ii in expected_instances
         ]
 
     # v2.3: each OP has its own group entry
     local_group = artifact_op_group(artifact, op="0x02", group="0x69")
     remote_group = artifact_op_group(artifact, op="0x06", group="0x69")
     assert local_group["instances"]["0x00"]["present"] is True
-    assert remote_group["instances"]["0x00"]["present"] is True
+    assert remote_group["instances"]["0x01"]["present"] is True
 
 
 def test_scan_b524_full_preset_uses_profile_groups_not_system_information_ids(
@@ -1618,7 +1630,9 @@ def test_scan_b524_recommended_plan_keeps_namespace_rr_max(tmp_path: Path) -> No
     assert plan["multi_op"] is True
     assert plan["operations"]["0x02"]["rr_max"] == "0x000f"
     assert plan["operations"]["0x06"]["rr_max"] == "0x0035"
-    assert artifact["meta"]["scan_plan"]["estimated_register_requests"] == 640
+    # Recommended keeps only the namespace rows with affirmative instance
+    # evidence; the no-instance peer remains planner-visible but unselected.
+    assert artifact["meta"]["scan_plan"]["estimated_register_requests"] == 326
 
 
 def test_scan_b524_instance_discovery_runs_local_namespace_before_remote(
@@ -1755,18 +1769,17 @@ def test_scan_unknown_group_probes_both_opcodes_and_two_instances(tmp_path: Path
 
     local_group = artifact_op_group(artifact, op="0x02", group="0x69")
     assert local_group["descriptor_observed"] is None
-    # v2.3: verify both OPs have the group
+    # The profile convention starts OP06 at II=01 and confines it to II=01..08.
     assert "0x69" in artifact["operations"]["0x02"]["groups"]
     assert "0x69" in artifact["operations"]["0x06"]["groups"]
     probed_instances = {
         (opcode, ii)
         for (opcode, gg, ii, rr) in transport.register_reads
-        if gg == 0x69 and rr == 0x0000 and ii in {0x00, 0x01}
+        if gg == 0x69 and rr == 0x0000 and ii in {0x00, 0x01, 0x08}
     }
     assert probed_instances >= {
         (0x02, 0x00),
         (0x02, 0x01),
-        (0x06, 0x00),
         (0x06, 0x01),
     }
 
@@ -1776,7 +1789,7 @@ def test_probe_unknown_group_opcodes_ignores_absent_flags_access() -> None:
         def send(self, dst: int, payload: bytes) -> bytes:  # noqa: ARG002
             if payload == bytes((0x02, 0x00, 0x69, 0x00, 0x00, 0x00)):
                 return b"\x00"
-            if payload == bytes((0x06, 0x00, 0x69, 0x00, 0x00, 0x00)):
+            if payload == bytes((0x06, 0x00, 0x69, 0x01, 0x00, 0x00)):
                 return b"\x01\x69\x00\x00\x01"
             raise AssertionError(f"unexpected probe payload: {payload.hex()}")
 
@@ -1798,7 +1811,7 @@ def test_probe_unknown_group_opcodes_treats_empty_reply_as_responsive() -> None:
         def send(self, dst: int, payload: bytes) -> bytes:  # noqa: ARG002
             if payload == bytes((0x02, 0x00, 0x69, 0x00, 0x00, 0x00)):
                 return b""
-            if payload == bytes((0x06, 0x00, 0x69, 0x00, 0x00, 0x00)):
+            if payload == bytes((0x06, 0x00, 0x69, 0x01, 0x00, 0x00)):
                 return b"\x01\x69\x00\x00\x01"
             raise AssertionError(f"unexpected probe payload: {payload.hex()}")
 
@@ -1817,7 +1830,9 @@ def test_probe_unknown_group_opcodes_treats_empty_reply_as_responsive() -> None:
     assert probe_summary["candidates"]["0x02"]["responsive"] is True
 
 
-def test_scan_unknown_group_expands_to_instance_ff_after_readable_probe(tmp_path: Path) -> None:
+def test_scan_unknown_group_uses_bounded_op06_instances_after_readable_probe(
+    tmp_path: Path,
+) -> None:
     transport = RecordingTransport(
         DummyTransport(_write_fixture_unknown_group_69_with_ff(tmp_path))
     )
@@ -1831,15 +1846,15 @@ def test_scan_unknown_group_expands_to_instance_ff_after_readable_probe(tmp_path
 
     # Group 0x69 is only responsive on OP=0x06 per the fixture
     group = artifact_op_group(artifact, op="0x06", group="0x69")
-    assert group["ii_max"] == "0x0a"
+    assert group["ii_max"] == "0x08"
     remote_instances = group["instances"]
-    assert remote_instances["0x00"]["present"] is True
-    assert remote_instances["0xff"]["present"] is True
+    assert remote_instances["0x01"]["present"] is True
+    assert remote_instances["0x08"]["present"] is True
 
     assert "0x69" in artifact["meta"]["scan_plan"]["groups"]
     plan_group = artifact["meta"]["scan_plan"]["groups"]["0x69"]
     assert plan_group["rr_max"] == "0x00ff"
-    assert plan_group["instances"][-1] == "0xff"
+    assert plan_group["instances"][-1] == "0x08"
 
     advisory = group["discovery_advisory"]
     assert advisory["proven_register_opcodes"] == ["0x06"]
@@ -1851,7 +1866,65 @@ def test_scan_unknown_group_expands_to_instance_ff_after_readable_probe(tmp_path
         if gg == 0x69 and opcode == 0x02
     }
     assert local_reads == {(0x02, ii, rr) for ii in (0, 1) for rr in (0, 1)}
-    assert (0x06, 0x69, 0xFF, 0x0000) in transport.register_reads
+    assert (0x06, 0x69, 0x08, 0x0000) in transport.register_reads
+    assert (0x06, 0x69, 0xFF, 0x0000) not in transport.register_reads
+
+
+@pytest.mark.parametrize("group", [0x0D, 0x0E])
+@pytest.mark.parametrize("planner_ui", ["textual", "classic"])
+def test_interactive_planner_preserves_explicit_routes_outside_native_inventory(
+    monkeypatch,
+    tmp_path: Path,
+    group: int,
+    planner_ui: str,
+) -> None:
+    import sys
+
+    from textual.app import App
+
+    import helianthus_vrc_explorer.scanner.scan as scan_mod
+    from helianthus_vrc_explorer.ui.planner import _build_default_plan
+
+    transport = RecordingTransport(DummyTransport(_write_fixture_groups_00_and_01(tmp_path)))
+    key = make_plan_key(group, 0x02)
+    requested = GroupScanPlan(
+        group=group, opcode=0x02, rr_max=0x0003, instances=(0x00,), registers=(0x0001, 0x0003)
+    )
+
+    def classic_accept_default(_console, groups, **kwargs):
+        return _build_default_plan(
+            {row.key: row for row in groups},
+            kwargs["default_plan"],
+            default_preset="custom",
+        )
+
+    original_run = App.run
+
+    async def save_plan(pilot):
+        await pilot.press("s")
+
+    def headless_run(app, *_args, **_kwargs):
+        return original_run(app, headless=True, auto_pilot=save_plan)
+
+    monkeypatch.setattr(App, "run", headless_run)
+    monkeypatch.setattr(scan_mod, "prompt_scan_plan", classic_accept_default)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    artifact = scan_b524(
+        transport,
+        dst=0x15,
+        observer=_NoopObserver(),
+        console=Console(force_terminal=True),
+        planner_ui=planner_ui,
+        planner_preset="custom",
+        explicit_plan={key: requested},
+        probe_constraints=False,
+    )
+    operation_plan = artifact["meta"]["scan_plan"]["groups"][f"0x{group:02x}"]["operations"]["0x02"]
+    assert operation_plan["registers"] == ["0x0001", "0x0003"]
+    assert operation_plan["instances"] == ["0x00"]
+    assert (0x02, group, 0x00, 0x0001) in transport.register_reads
+    assert (0x02, group, 0x00, 0x0003) in transport.register_reads
+    assert (0x02, group, 0x00, 0x0002) not in transport.register_reads
 
 
 def test_scan_b524_textual_failure_falls_back_to_classic_in_auto_mode(
@@ -1932,23 +2005,26 @@ def test_scan_b524_textual_planner_receives_remote_heating_source_rows(
     assert (0x02, 0x06) in planner_keys
 
     name_by_key = {(group.group, group.opcode): group.name for group in planner_groups}
-    assert name_by_key[(0x00, 0x02)] == "Regulator Parameters"
-    assert name_by_key[(0x01, 0x02)] == "Hot Water Circuit"
-    assert name_by_key[(0x01, 0x06)] == "Primary Heating Source"
+    assert name_by_key[(0x00, 0x02)] == "System"
+    assert name_by_key[(0x01, 0x02)] == "Native Domestic Hot Water"
+    assert name_by_key[(0x01, 0x06)] == "Boiler"
     by_key = {(group.group, group.opcode): group for group in planner_groups}
     assert by_key[(0x01, 0x06)].ii_max == 0x08
+    assert by_key[(0x01, 0x02)].native_dhw_admitted is True
 
     default_plan = captured["default_plan"]
     assert isinstance(default_plan, dict)
     assert make_plan_key(0x00, 0x02) in default_plan
     assert make_plan_key(0x01, 0x02) in default_plan
-    assert make_plan_key(0x01, 0x06) in default_plan
-    assert make_plan_key(0x02, 0x06) in default_plan
+    assert make_plan_key(0x01, 0x06) not in default_plan
+    assert make_plan_key(0x02, 0x06) not in default_plan
     assert make_plan_key(0x00, 0x06) not in default_plan
+    native_dhw = artifact_op_group(artifact, op="0x02", group="0x01")
+    assert native_dhw["availability_probes"]["0x00"]["present"] is True
     assert artifact["meta"]["scan_plan"]["estimated_register_requests"] == 0
 
 
-def test_scan_b524_textual_planner_excludes_uncharacterized_remote_rows(
+def test_scan_b524_textual_planner_shows_unqualified_named_remote_rows_unselected(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -1980,20 +2056,73 @@ def test_scan_b524_textual_planner_excludes_uncharacterized_remote_rows(
     assert isinstance(planner_groups, list)
 
     by_key = {(group.group, group.opcode): group for group in planner_groups}
-    assert by_key[(0x02, 0x06)].name == "Secondary Heating Source"
-    assert (0x03, 0x06) not in by_key
-    assert (0x04, 0x06) not in by_key
-    assert (0x05, 0x06) not in by_key
+    assert by_key[(0x02, 0x06)].name == "Heat Pump"
+    assert by_key[(0x03, 0x06)].name == "Air Recovery (VAR) recoVair"
+    assert by_key[(0x03, 0x06)].rr_max == 0x002F
+    assert by_key[(0x03, 0x06)].instances_probed is True
+    default_plan = captured["default_plan"]
+    assert isinstance(default_plan, dict)
+    assert make_plan_key(0x03, 0x06) not in default_plan
+    assert by_key[(0x04, 0x06)].rr_max is None
+    assert by_key[(0x05, 0x06)].rr_max == 0x002F
     assert by_key[(0x04, 0x02)].ii_max == 0x01
     assert by_key[(0x02, 0x06)].ii_max == 0x08
 
     default_plan = captured["default_plan"]
     assert isinstance(default_plan, dict)
-    assert make_plan_key(0x02, 0x06) in default_plan
+    assert make_plan_key(0x02, 0x06) not in default_plan
     assert make_plan_key(0x03, 0x06) not in default_plan
     assert make_plan_key(0x04, 0x06) not in default_plan
     assert make_plan_key(0x05, 0x06) not in default_plan
     assert artifact["meta"]["scan_plan"]["estimated_register_requests"] == 0
+
+
+@pytest.mark.parametrize("planner_ui", ["classic", "textual"])
+def test_interactive_recommended_keeps_empty_known_rows_visible_but_unselected(
+    monkeypatch,
+    tmp_path: Path,
+    planner_ui: str,
+) -> None:
+    import sys
+
+    captured: dict[str, object] = {}
+
+    def accept_empty_plan(groups, **kwargs):
+        captured["groups"] = groups
+        captured["default_plan"] = kwargs["default_plan"]
+        return {}
+
+    if planner_ui == "textual":
+        monkeypatch.setattr(
+            "helianthus_vrc_explorer.ui.planner_textual.run_textual_scan_plan",
+            accept_empty_plan,
+        )
+    else:
+        monkeypatch.setattr(
+            "helianthus_vrc_explorer.scanner.scan.prompt_scan_plan",
+            lambda _console, groups, **kwargs: accept_empty_plan(groups, **kwargs),
+        )
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
+    scan_b524(
+        DummyTransport(_write_fixture_groups_00_to_05(tmp_path)),
+        dst=0x15,
+        observer=_NoopObserver(),
+        console=Console(force_terminal=True),
+        planner_ui=planner_ui,
+        planner_preset="recommended",
+    )
+
+    planner_groups = captured["groups"]
+    assert isinstance(planner_groups, list)
+    visible_keys = {group.key for group in planner_groups}
+    assert make_plan_key(0x02, 0x06) in visible_keys
+    assert make_plan_key(0x03, 0x06) in visible_keys
+
+    default_plan = captured["default_plan"]
+    assert isinstance(default_plan, dict)
+    assert make_plan_key(0x02, 0x06) not in default_plan
+    assert make_plan_key(0x03, 0x06) not in default_plan
 
 
 def test_scan_b524_textual_planner_uses_remote_presence_for_remote_namespace_rows(
@@ -2026,7 +2155,7 @@ def test_scan_b524_textual_planner_uses_remote_presence_for_remote_namespace_row
     planner_groups = captured["groups"]
     assert isinstance(planner_groups, list)
     by_key = {(group.group, group.opcode): group for group in planner_groups}
-    assert by_key[(0x02, 0x02)].present_instances == (0x00, 0x01, 0x02)
+    assert by_key[(0x02, 0x02)].present_instances == (0x01, 0x02)
     assert by_key[(0x02, 0x06)].present_instances == (0x01, 0x02)
 
 
@@ -2061,11 +2190,12 @@ def test_scan_b524_textual_full_preset_keeps_exploratory_rows_visible_but_unsele
     planner_groups = captured["groups"]
     assert isinstance(planner_groups, list)
     by_key = {(group.group, group.opcode): group for group in planner_groups}
-    # UI and CLI expose the same characterized profile pairs.
+    # The UI shows the full named inventory while the preset stays qualified.
     assert (0x02, 0x06) in by_key
-    assert (0x03, 0x06) not in by_key
-    assert (0x04, 0x06) not in by_key
-    assert (0x05, 0x06) not in by_key
+    assert (0x03, 0x06) in by_key
+    assert by_key[(0x03, 0x06)].rr_max == 0x002F
+    assert by_key[(0x04, 0x06)].rr_max is None
+    assert by_key[(0x05, 0x06)].rr_max == 0x002F
 
     default_plan = captured["default_plan"]
     assert isinstance(default_plan, dict)
@@ -2075,9 +2205,9 @@ def test_scan_b524_textual_full_preset_keeps_exploratory_rows_visible_but_unsele
     assert make_plan_key(0x04, 0x02) in default_plan
     assert make_plan_key(0x05, 0x02) in default_plan
     assert make_plan_key(0x02, 0x06) in default_plan
-    assert make_plan_key(0x03, 0x06) not in default_plan
+    assert make_plan_key(0x03, 0x06) in default_plan
     assert make_plan_key(0x04, 0x06) not in default_plan
-    assert make_plan_key(0x05, 0x06) not in default_plan
+    assert make_plan_key(0x05, 0x06) in default_plan
 
 
 def test_scan_b524_textual_full_preset_keeps_remote_only_group_selected_on_remote_opcode(
@@ -2187,10 +2317,10 @@ def test_scan_b524_textual_planner_models_group_08_as_instanced_on_local_and_rem
     planner_groups = captured["groups"]
     assert isinstance(planner_groups, list)
     by_key = {(group.group, group.opcode): group for group in planner_groups}
-    assert by_key[(0x08, 0x02)].name == "Unknown"
-    assert by_key[(0x08, 0x06)].name == "Unknown"
+    assert by_key[(0x08, 0x02)].name == "DeltaT"
+    assert by_key[(0x08, 0x06)].name == "Modul Solar (VMS) auroSTEP"
     assert by_key[(0x08, 0x02)].ii_max == 0x0A
-    assert by_key[(0x08, 0x06)].ii_max == 0x0A
+    assert by_key[(0x08, 0x06)].ii_max == 0x08
 
 
 def test_scan_b524_textual_planner_uses_namespace_owned_labels_for_groups_09_and_0a(
@@ -2226,10 +2356,16 @@ def test_scan_b524_textual_planner_uses_namespace_owned_labels_for_groups_09_and
     planner_label_map = {
         (group.group, group.opcode): (group.name, group.namespace_label) for group in planner_groups
     }
-    assert planner_label_map[(0x09, 0x02)] == ("System", "local")
-    assert planner_label_map[(0x09, 0x06)] == ("Regulators", "remote")
-    assert artifact_op_group(artifact, op="0x02", group="0x09")["name"] == "System"
-    assert artifact_op_group(artifact, op="0x06", group="0x09")["name"] == "Regulators"
+    assert planner_label_map[(0x09, 0x02)] == ("Ventilation", "local")
+    assert planner_label_map[(0x09, 0x06)] == (
+        "Remote Control Regulators (VRC7xx, VRT38x)",
+        "remote",
+    )
+    assert artifact_op_group(artifact, op="0x02", group="0x09")["name"] == "Ventilation"
+    assert (
+        artifact_op_group(artifact, op="0x06", group="0x09")["name"]
+        == "Remote Control Regulators (VRC7xx, VRT38x)"
+    )
 
 
 def test_scan_b524_textual_planner_uses_remote_presence_for_op06_rows(
@@ -2259,6 +2395,7 @@ def test_scan_b524_textual_planner_uses_remote_presence_for_op06_rows(
         (0x05, 0x06): {0x01},
         (0x0A, 0x06): {0x03},
         (0x0C, 0x06): {0x04},
+        (0x0F, 0x06): {0x01},
     }
     local_present = {
         (0x02, 0x02): {0x00, 0x01, 0x02},
@@ -2295,12 +2432,13 @@ def test_scan_b524_textual_planner_uses_remote_presence_for_op06_rows(
             DiscoveredGroup(group=0x05, descriptor=1.0),
             DiscoveredGroup(group=0x0A, descriptor=1.0),
             DiscoveredGroup(group=0x0C, descriptor=1.0),
+            DiscoveredGroup(group=0x0F, descriptor=1.0),
         ],
     )
     monkeypatch.setattr(scan_mod, "probe_instance_availability", fake_probe_instance_availability)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
-    scan_b524(
+    artifact = scan_b524(
         DummyTransport(_write_fixture_groups_00_to_05(tmp_path)),
         dst=0x15,
         observer=_NoopObserver(),
@@ -2315,16 +2453,27 @@ def test_scan_b524_textual_planner_uses_remote_presence_for_op06_rows(
 
     assert by_key[(0x01, 0x06)].present_instances == (0x01,)
     assert by_key[(0x02, 0x06)].present_instances == (0x01,)
-    assert (0x03, 0x06) not in by_key
-    assert (0x05, 0x06) not in by_key
+    assert by_key[(0x03, 0x06)].present_instances == (0x02,)
+    assert by_key[(0x03, 0x06)].instances_probed is True
+    assert by_key[(0x05, 0x06)].present_instances == (0x01,)
+    assert by_key[(0x05, 0x06)].instances_probed is True
     assert by_key[(0x0A, 0x06)].present_instances == (0x03,)
     assert by_key[(0x0C, 0x06)].present_instances == (0x04,)
+    assert by_key[(0x0F, 0x06)].name == "Base Station"
+    assert by_key[(0x0F, 0x06)].present_instances == (0x01,)
+    assert by_key[(0x0F, 0x06)].ii_min == 0x01
+    assert by_key[(0x0F, 0x06)].ii_max == 0x08
+    base_station = artifact_op_group(artifact, op="0x06", group="0x0f")
+    assert base_station["ii_min"] == "0x01"
+    assert base_station["ii_max"] == "0x08"
+    assert base_station["instances"]["0x01"]["present"] is True
 
     # Local rows keep their own namespace evidence.
-    assert by_key[(0x02, 0x02)].present_instances == (0x00, 0x01, 0x02)
+    assert by_key[(0x02, 0x02)].present_instances == (0x01, 0x02)
     assert by_key[(0x03, 0x02)].present_instances == (0x00, 0x01)
     assert by_key[(0x05, 0x02)].present_instances == (0x00,)
-    assert (0x0A, 0x02) not in by_key
+    assert by_key[(0x0A, 0x02)].name == "Unknown"
+    assert by_key[(0x0A, 0x02)].instances_probed is False
 
 
 def test_scan_b524_textual_planner_does_not_leak_remote_presence_into_local_mirror_rows(
@@ -2496,7 +2645,7 @@ def test_scan_b524_replan_promotes_group_01_to_dual_namespace_before_queue_rebui
                 group=0x01,
                 opcode=0x06,
                 rr_max=0x0000,
-                instances=(0x00,),
+                instances=(0x01,),
             ),
         }
 
@@ -2516,11 +2665,11 @@ def test_scan_b524_replan_promotes_group_01_to_dual_namespace_before_queue_rebui
     local_group = artifact_op_group(artifact, op="0x02", group="0x01")
     remote_group = artifact_op_group(artifact, op="0x06", group="0x01")
     assert local_group["instances"]["0x00"]["registers"]["0x0000"]["raw_hex"] == "02"
-    assert remote_group["instances"]["0x00"]["registers"]["0x0000"]["raw_hex"] == "06"
+    assert remote_group["instances"]["0x01"]["registers"]["0x0000"]["raw_hex"] == "06"
 
     scan_plan = artifact["meta"]["scan_plan"]["groups"]["0x01"]
     assert set(scan_plan["operations"]) == {"0x02", "0x06"}
-    assert (0x06, 0x01, 0x00, 0x0000) in transport.register_reads
+    assert (0x06, 0x01, 0x01, 0x0000) in transport.register_reads
 
 
 def test_scan_b524_replan_back_to_single_preserves_promoted_dual_namespace_data(
@@ -2649,7 +2798,7 @@ def test_scan_b524_replan_textual_failure_prompts_classic_immediately(
                 group=0x02,
                 opcode=0x02,
                 rr_max=0x0000,
-                instances=(0x00,),
+                instances=(0x01,),
             )
         }
 
@@ -2670,7 +2819,7 @@ def test_scan_b524_replan_textual_failure_prompts_classic_immediately(
     )
 
     grp = artifact_op_group(artifact, op="0x02", group="0x02")
-    registers = grp["instances"]["0x00"]["registers"]
+    registers = grp["instances"]["0x01"]["registers"]
     assert set(registers) == {"0x0000"}
     assert textual_calls["count"] == 2
     assert classic_calls["count"] == 1
@@ -2684,3 +2833,40 @@ def test_scan_b524_marks_incomplete_on_keyboard_interrupt(tmp_path: Path) -> Non
 
     assert artifact["meta"]["incomplete"] is True
     assert artifact["meta"]["incomplete_reason"] == "user_interrupt"
+
+
+def test_discovery_reports_separate_sorted_operation_groups(tmp_path: Path) -> None:
+    class Observer(_NoopObserver):
+        def __init__(self):
+            self.messages = []
+
+        def log(self, message, *, level="info"):
+            self.messages.append(message)
+
+    transport = RecordingTransport(DummyTransport(_write_fixture_groups_00_and_01(tmp_path)))
+    discovery_reads = []
+
+    class DiscoveryObserver(Observer):
+        def phase_finish(self, phase):
+            if phase == "instance_discovery":
+                discovery_reads.extend(transport.register_reads)
+
+    observer = DiscoveryObserver()
+    scan_b524(
+        transport,
+        dst=0x15,
+        observer=observer,
+    )
+    rows = [m for m in observer.messages if "registers/instance)" in m]
+    identities = [
+        (int(row.split()[0].split("=")[1], 16), int(row.split()[1][3:-1], 16)) for row in rows
+    ]
+    assert identities == sorted(identities)
+    probe_identities = [(op, gg) for op, gg, _, _ in discovery_reads]
+    assert probe_identities == sorted(probe_identities)
+    assert (2, 1) in identities and (6, 1) in identities
+    local = next(row for row in rows if row.startswith("OP=0x02 GG=0x08:"))
+    remote = next(row for row in rows if row.startswith("OP=0x06 GG=0x08:"))
+    assert "DeltaT" in local and "RR_max=0x0007" in local
+    assert "auroSTEP" in remote and "RR_max=0x002F" in remote
+    assert all("[Local Devices" not in row and "[Remote Devices" not in row for row in rows)

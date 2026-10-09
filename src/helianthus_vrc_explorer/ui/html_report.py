@@ -9,7 +9,9 @@ from typing import Any
 
 from ..artifact_schema import migrate_artifact_schema
 from ..scanner.director import group_name_for_opcode
-from ..schema.parameter_descriptions import attach_bundled_descriptions
+from ..schema.b524_register_names import apply_b524_canonical_register_names
+from ..schema.b524_value_labels import apply_b524_value_labels
+from ..schema.parameter_descriptions import attach_bundled_descriptions, description_profile
 from .emphasis import html_star_bold
 
 
@@ -360,6 +362,70 @@ _TEMPLATE = """<!doctype html>
         font-family: var(--sans);
       }
 
+      .operation-editor {
+        margin-top: 12px;
+        padding: 12px;
+        display: grid;
+        gap: 10px;
+        border: 1px solid rgba(122, 162, 255, 0.25);
+        border-radius: 10px;
+        background: rgba(122, 162, 255, 0.06);
+      }
+
+      .operation-editor-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+        gap: 8px;
+      }
+
+      .operation-editor-field {
+        display: grid;
+        gap: 4px;
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .operation-editor-field input {
+        width: 100%;
+        background: #0c111a;
+        color: var(--ink);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 8px;
+        font-family: var(--mono);
+        padding: 6px 8px;
+      }
+
+      .operation-editor-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .operation-editor button, table button {
+        padding: 6px 9px;
+        border: 1px solid rgba(122, 162, 255, 0.35);
+        border-radius: 8px;
+        background: rgba(122, 162, 255, 0.12);
+        color: var(--ink);
+        cursor: pointer;
+      }
+
+      .operation-editor button:disabled, table button:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+
+      .operation-preview {
+        margin: 0;
+        padding: 10px;
+        overflow-x: auto;
+        white-space: pre-wrap;
+        background: #0c111a;
+        border-radius: 8px;
+        font-family: var(--mono);
+        font-size: 11px;
+      }
+
 
       .identity-card {
         display: grid;
@@ -468,6 +534,7 @@ __ARTIFACT_JSON__
       }
 
       const meta = artifact && typeof artifact === "object" ? artifact.meta || {} : {};
+      const B524_CIRCUIT_II_MIN = __B524_CIRCUIT_II_MIN__;
       metaDst.textContent = safeMetaString(meta.destination_address || meta.dest || meta.dst || "dst=?");
       metaTs.textContent = safeMetaString(meta.scan_timestamp || meta.ts || "ts=?");
       if (meta && meta.incomplete) {
@@ -504,13 +571,17 @@ __ARTIFACT_JSON__
       // Returns the group object or null.
       function getOperationGroup(opKey, groupKey) {
         const ops = artifact && typeof artifact === "object" ? artifact.operations : null;
-        if (!ops || typeof ops !== "object") return null;
-        const opObj = ops[opKey];
-        if (!opObj || typeof opObj !== "object") return null;
-        const opGroups = opObj.groups;
-        if (!opGroups || typeof opGroups !== "object") return null;
-        const g = opGroups[groupKey];
-        return g && typeof g === "object" ? g : null;
+        const opObj = ops && typeof ops === "object" ? ops[opKey] : null;
+        const opGroups = opObj && typeof opObj === "object" ? opObj.groups : null;
+        const g = opGroups && typeof opGroups === "object" ? opGroups[groupKey] : null;
+        if (g && typeof g === "object") return g;
+        const plan = finalPlanForRoute(groupKey, opKey);
+        if (!plan || typeof plan !== "object") return null;
+        const instances = {};
+        for (const iiKey of (Array.isArray(plan.instances) ? plan.instances : [])) {
+          if (typeof iiKey === "string") instances[iiKey] = { present: false, registers: {} };
+        }
+        return { name: "Planned group", instances };
       }
 
       // Collect all unique group keys across all operations.
@@ -724,11 +795,14 @@ __ARTIFACT_JSON__
 
       const B524_SECTIONS = [
         { key: "scan_coverage", label: "Scan coverage and descriptions" },
-        { key: "system_information", label: "OP=00h ReadSystemInformation" },
-        { key: "controller_registers", label: "OP=02h GetParameter" },
-        { key: "timer_programs", label: "OP=03h ReadTimer" },
-        { key: "device_slots", label: "OP=06h GetDeviceParameter" },
-        { key: "register_tables", label: "OP=0Bh GetEventSetPoint" },
+        { key: "system_information", label: "OP00 ReadSystemInformation" },
+        { key: "controller_registers", label: "OP02 GetParameter" },
+        { key: "operation_03", label: "OP03 ReadTimer" },
+        { key: "operation_08", label: "OP08 ReadVR91" },
+        { key: "operation_09", label: "OP09 GetEvent" },
+        { key: "operation_0b", label: "OP0B GetEventSetPoint" },
+        { key: "device_slots", label: "OP06 GetDeviceParameter" },
+        { key: "register_tables", label: "OP0B GetEventSetPoint" },
         { key: "group_directory", label: "Legacy unqualified group-directory artifacts" },
         { key: "register_constraints", label: "Legacy unqualified constraint artifacts" },
       ];
@@ -784,6 +858,9 @@ __ARTIFACT_JSON__
       }
 
       function normalizeOpcodeKey(opcodeRaw) {
+        if (typeof opcodeRaw === "number" && Number.isInteger(opcodeRaw) && opcodeRaw >= 0 && opcodeRaw <= 0xff) {
+          return `0x${opcodeRaw.toString(16).padStart(2, "0")}`;
+        }
         if (typeof opcodeRaw !== "string") return null;
         const trimmed = opcodeRaw.trim().toLowerCase();
         if (!trimmed) return null;
@@ -1453,10 +1530,367 @@ __ARTIFACT_JSON__
       function b524GroupKeysForSection(sectionKey) {
         const required = requiredNamespaceForSection(sectionKey);
         if (!required) return [];
-        return groupKeysForOp(required);
+        const all = groupKeysForOp(required);
+        const groups = finalPlanGroups();
+        if (groups === null) return all;
+        return Object.keys(groups)
+          .filter((groupKey) => finalPlanForRoute(groupKey, required) !== null)
+          .sort((a, b) => Number(a) - Number(b));
+      }
+
+      function finalPlanGroups() {
+        const scanPlan = meta && typeof meta === "object" ? meta.scan_plan : null;
+        if (!scanPlan || typeof scanPlan !== "object" || !("groups" in scanPlan)) return null;
+        return scanPlan.groups && typeof scanPlan.groups === "object" ? scanPlan.groups : null;
+      }
+
+      function finalPlanForRoute(groupKey, opcode) {
+        const groups = finalPlanGroups();
+        if (groups === null) return undefined;
+        const groupPlan = groups[groupKey];
+        if (!groupPlan || typeof groupPlan !== "object") return null;
+        const operations = groupPlan.operations;
+        if (operations && typeof operations === "object") {
+          const operationPlan = operations[opcode];
+          return operationPlan && typeof operationPlan === "object" ? operationPlan : null;
+        }
+        return normalizeOpcodeKey(groupPlan.opcode) === opcode ? groupPlan : null;
+      }
+
+      const B524_TIMER_CHANNELS = {
+        "ventilation": [0x00, 0x01],
+        "noise-reduction": [0x00, 0x02],
+        "tariff": [0x00, 0x03],
+        "dhw": [0x01, 0x01],
+        "circulation": [0x01, 0x02],
+        "zone-cooling": [0x03, 0x01],
+        "zone-heating": [0x03, 0x02],
+      };
+      const B524_EVENT_SYSTEM_TYPES = {system: 0x00, dhw: 0x01, zone: 0x03};
+
+      function b524HexBytes(raw, expectedLength) {
+        if (typeof raw !== "string" || !new RegExp(`^[0-9a-fA-F]{${expectedLength * 2}}$`).test(raw)) return null;
+        return raw.match(/../g).map((value) => parseInt(value, 16));
+      }
+
+      function b524BytesHex(values) {
+        return values.map((value) => value.toString(16).padStart(2, "0")).join("");
+      }
+
+      function b524SelectorKey(selector) {
+        if (!selector || typeof selector !== "object" || Array.isArray(selector)) return null;
+        return JSON.stringify(Object.keys(selector).sort().map((key) => [key, typeof selector[key], selector[key]]));
+      }
+
+      function b524CanonicalSelector(selector, operation) {
+        if (!selector || typeof selector !== "object" || Array.isArray(selector)) return null;
+        const byte = (value) => Number.isInteger(value) && value >= 0 && value <= 0xff;
+        if (operation === "WriteTimer") {
+          if (Object.keys(selector).sort().join(",") !== "channel,instance,weekday") return null;
+          if (!(selector.channel in B524_TIMER_CHANNELS) || !byte(selector.instance)
+              || !Number.isInteger(selector.weekday) || selector.weekday < 0 || selector.weekday > 6) return null;
+          if (!selector.channel.startsWith("zone-") && selector.instance !== 0) return null;
+          return {channel: selector.channel, instance: selector.instance, weekday: selector.weekday};
+        }
+        if (Object.keys(selector).sort().join(",") !== "address,instance,profile,weekday_code") return null;
+        if (!(selector.profile in B524_EVENT_SYSTEM_TYPES) || !byte(selector.instance)
+            || !byte(selector.address) || !byte(selector.weekday_code)) return null;
+        const addresses = selector.profile === "system" ? [1, 2, 3] : [1, 2];
+        if (!addresses.includes(selector.address)) return null;
+        return {
+          profile: selector.profile,
+          instance: selector.instance,
+          address: selector.address,
+          weekday_code: selector.weekday_code,
+        };
+      }
+
+      function b524OperationForSection(sectionKey) {
+        return {operation_03: "WriteTimer", operation_09: "SetEvent", operation_0b: "SetEventSetPoint"}[sectionKey] || null;
+      }
+
+      function b524BaselineReason(row, opcode, operation) {
+        if (!row || typeof row !== "object") return "record is missing";
+        if (row.response_state !== "value") return `response state is ${String(row.response_state || "unknown")}`;
+        if (!row.decoded || typeof row.decoded !== "object" || Array.isArray(row.decoded)) {
+          return "a decoded canonical baseline is required";
+        }
+        if (!b524CanonicalSelector(row.selector, operation)) return "selector is not canonical for this operation";
+        const expectedLength = opcode === "0x03" ? 7 : 8;
+        if (!b524HexBytes(row.response_raw_hex, expectedLength)) return `raw baseline must contain ${expectedLength} bytes`;
+        return null;
+      }
+
+      function b524EditAvailability(row, operation, reads) {
+        const sourceOpcode = operation === "WriteTimer" ? "0x03" : operation === "SetEvent" ? "0x09" : "0x0b";
+        const sourceReason = b524BaselineReason(row, sourceOpcode, operation);
+        if (sourceReason) return {available: false, reason: sourceReason};
+        if (operation === "WriteTimer") return {available: true, reason: "complete decoded timer baseline"};
+        const key = b524SelectorKey(row.selector);
+        const matching = (opcode) => reads.filter((candidate) => candidate && typeof candidate === "object"
+          && normalizeOpcodeKey(candidate.opcode_hex || candidate.opcode) === opcode
+          && b524SelectorKey(candidate.selector) === key);
+        const events = matching("0x09");
+        const setpoints = matching("0x0b");
+        if (events.length !== 1 || setpoints.length !== 1) {
+          return {available: false, reason: "exactly one OP09 and one OP0B baseline are required for this selector"};
+        }
+        const eventReason = b524BaselineReason(events[0], "0x09", operation);
+        const setpointReason = b524BaselineReason(setpoints[0], "0x0b", operation);
+        if (eventReason || setpointReason) {
+          return {available: false, reason: `paired baseline is incomplete: ${eventReason || setpointReason}`};
+        }
+        return {available: true, reason: "complete decoded OP09/OP0B pair"};
+      }
+
+      function b524EditDocumentForRow(row, operation, reads, metaObj) {
+        const availability = b524EditAvailability(row, operation, reads);
+        if (!availability.available) throw new Error(availability.reason);
+        const destinationAddress = b524DestinationAddress(metaObj);
+        const selector = b524CanonicalSelector(row.selector, operation);
+        if (operation === "WriteTimer") {
+          const raw = b524HexBytes(row.response_raw_hex, 7);
+          const values = [];
+          for (const offset of [1, 3, 5]) {
+            values.push(raw[offset] === 0x90 && raw[offset + 1] === 0x90 ? null : [raw[offset], raw[offset + 1]]);
+          }
+          return {schema_version: 1, destination_address: destinationAddress, operation, selector, values, expected_before_raw_hex: [row.response_raw_hex.toLowerCase()]};
+        }
+        const key = b524SelectorKey(row.selector);
+        const event = reads.find((candidate) => normalizeOpcodeKey(candidate && (candidate.opcode_hex || candidate.opcode)) === "0x09"
+          && b524SelectorKey(candidate.selector) === key);
+        const setpoint = reads.find((candidate) => normalizeOpcodeKey(candidate && (candidate.opcode_hex || candidate.opcode)) === "0x0b"
+          && b524SelectorKey(candidate.selector) === key);
+        const eventRaw = b524HexBytes(event.response_raw_hex, 8);
+        const setpointRaw = b524HexBytes(setpoint.response_raw_hex, 8);
+        const values = (operation === "SetEvent" ? eventRaw : setpointRaw).slice(1);
+        return {
+          schema_version: 1,
+          destination_address: destinationAddress,
+          operation,
+          selector,
+          values,
+          expected_before_raw_hex: [event.response_raw_hex.toLowerCase(), setpoint.response_raw_hex.toLowerCase()],
+        };
+      }
+
+      function b524ReadUint8(input, label) {
+        const text = String(input.value || "").trim();
+        const value = text ? Number(text) : NaN;
+        if (!Number.isInteger(value) || value < 0 || value > 0xff) throw new Error(`${label} must be an integer from 0 to 255 (decimal or 0xNN)`);
+        return value;
+      }
+
+      function b524DestinationAddress(metaObj) {
+        const raw = metaObj && (metaObj.destination_address ?? metaObj.dest ?? metaObj.dst);
+        const parsed = typeof raw === "number" ? raw : typeof raw === "string" && raw.trim() ? Number(raw) : NaN;
+        return Number.isInteger(parsed) && parsed >= 0 && parsed <= 0xff ? parsed : null;
+      }
+
+      function b524Destination(metaObj) {
+        const parsed = b524DestinationAddress(metaObj);
+        return parsed === null ? "unknown" : `0x${parsed.toString(16).padStart(2, "0")}`;
+      }
+
+      function b524BuildPreview(documentValue, metaObj) {
+        const destination = b524Destination(metaObj);
+        if (destination === "unknown") throw new Error("artifact destination is missing or invalid");
+        const destinationAddress = b524DestinationAddress(metaObj);
+        if (documentValue.destination_address !== destinationAddress) throw new Error("edit document destination does not match artifact target");
+        const operation = documentValue.operation;
+        const selector = b524CanonicalSelector(documentValue.selector, operation);
+        if (!selector) throw new Error("selector is not canonical for this operation");
+        const before = documentValue.expected_before_raw_hex.map((raw, index) => {
+          const length = operation === "WriteTimer" ? 7 : 8;
+          const parsed = b524HexBytes(raw, length);
+          if (!parsed) throw new Error(`baseline ${index + 1} is not a complete ${length}-byte value`);
+          return parsed;
+        });
+        let opcode;
+        let payload;
+        let after;
+        if (operation === "WriteTimer") {
+          if (!Array.isArray(documentValue.values) || documentValue.values.length !== 3) throw new Error("exactly three timer slots are required");
+          const channel = B524_TIMER_CHANNELS[selector.channel];
+          const slots = [];
+          for (let index = 0; index < 3; index += 1) {
+            const slot = documentValue.values[index];
+            if (slot === null) { slots.push(0x90, 0x90); continue; }
+            if (!Array.isArray(slot) || slot.length !== 2) throw new Error(`slot ${index + 1} must be a pair or unused`);
+            const [start, stop] = slot;
+            if (!Number.isInteger(start) || !Number.isInteger(stop) || start < 0 || start > 0x8f || stop < 0 || stop > 0x90 || start >= stop) {
+              throw new Error(`slot ${index + 1} must satisfy 0 <= start < stop <= 0x90`);
+            }
+            slots.push(start, stop);
+          }
+          opcode = 0x04;
+          payload = [opcode, channel[0], selector.instance, channel[1], selector.weekday, ...slots];
+          after = [[before[0][0], ...slots]];
+        } else {
+          if (!Array.isArray(documentValue.values) || documentValue.values.length !== 7
+              || documentValue.values.some((value) => !Number.isInteger(value) || value < 0 || value > 0xff)) {
+            throw new Error("exactly seven uint8 raw values are required");
+          }
+          opcode = operation === "SetEvent" ? 0x0a : 0x0c;
+          payload = [opcode, B524_EVENT_SYSTEM_TYPES[selector.profile], selector.instance, selector.address, selector.weekday_code, ...documentValue.values];
+          after = operation === "SetEvent"
+            ? [[before[0][0], ...documentValue.values], before[1].slice()]
+            : [before[0].slice(), [before[1][0], ...documentValue.values]];
+        }
+        const beforeHex = before.map(b524BytesHex);
+        const afterHex = after.map(b524BytesHex);
+        return {
+          schema_version: 1,
+          operation,
+          opcode_hex: `0x${opcode.toString(16).toUpperCase().padStart(2, "0")}`,
+          destination,
+          selector,
+          payload_hex: b524BytesHex(payload),
+          expected_before_raw_hex: beforeHex,
+          expected_after_raw_hex: afterHex,
+          diff: beforeHex.map((raw, index) => ({before_raw_hex: raw, after_raw_hex: afterHex[index], changed: raw !== afterHex[index]})),
+          live_send: false,
+          live_write: false,
+          native_write_available: false,
+        };
+      }
+
+      function b524DownloadEditDocument(documentValue) {
+        const blob = new Blob([JSON.stringify(documentValue, null, 2) + "\\n"], {type: "application/json"});
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = "b524-operation-edit.json";
+        link.click();
+        URL.revokeObjectURL(link.href);
+      }
+
+      function b524AppendValueField(parent, labelText, value, onChange, index) {
+        const label = document.createElement("label");
+        label.className = "operation-editor-field";
+        label.textContent = labelText;
+        const input = document.createElement("input");
+        input.type = "text";
+        input.value = String(value);
+        input.dataset.role = "operation-value";
+        input.dataset.valueIndex = String(index);
+        input.addEventListener("input", onChange);
+        label.appendChild(input);
+        parent.appendChild(label);
+        return input;
+      }
+
+      function renderB524OperationEditor(sectionKey, rows, reads, container, metaObj) {
+        const operation = b524OperationForSection(sectionKey);
+        const table = document.createElement("table");
+        table.innerHTML = "<thead><tr><th>Selector</th><th>State</th><th>Raw response</th><th>Decoded</th><th>Qualification</th><th>Correlation</th><th>Attempts</th><th>Offline edit</th></tr></thead>";
+        const tbody = document.createElement("tbody");
+        const editorHost = document.createElement("div");
+
+        const openEditor = (row) => {
+          editorHost.innerHTML = "";
+          const documentValue = b524EditDocumentForRow(row, operation, reads, metaObj);
+          const editor = document.createElement("div"); editor.className = "operation-editor";
+          const heading = document.createElement("div"); heading.className = "table-title";
+          heading.textContent = `${operation} offline editor — ${Object.entries(documentValue.selector).map(([key, value]) => `${key}=${String(value)}`).join(", ")}`;
+          editor.appendChild(heading);
+          const boundary = document.createElement("div"); boundary.className = "subtitle";
+          boundary.textContent = `Recorded qualification: ${String(row.decode_qualification || "unknown")}. Candidate labels remain offline hints. No native write or network action is available.`;
+          editor.appendChild(boundary);
+          const grid = document.createElement("div"); grid.className = "operation-editor-grid";
+          const inputs = [];
+          const invalidate = () => { exportButton.disabled = true; previewBox.textContent = "Change pending. Preview again before export."; };
+          let timerSlots = null;
+          if (operation === "WriteTimer") {
+            timerSlots = documentValue.values.map((slot, index) => {
+              const cell = document.createElement("div"); cell.className = "operation-editor-field";
+              const unusedLabel = document.createElement("label"); unusedLabel.textContent = `Slot ${index + 1} unused (0x90/0x90)`;
+              const unused = document.createElement("input"); unused.type = "checkbox"; unused.checked = slot === null;
+              unused.dataset.role = "timer-slot-unused"; unused.dataset.slotIndex = String(index);
+              unused.addEventListener("change", invalidate); unusedLabel.appendChild(unused); cell.appendChild(unusedLabel);
+              const start = b524AppendValueField(cell, `Slot ${index + 1} start raw`, slot === null ? 0x90 : slot[0], invalidate, index * 2);
+              const stop = b524AppendValueField(cell, `Slot ${index + 1} stop raw`, slot === null ? 0x90 : slot[1], invalidate, index * 2 + 1);
+              grid.appendChild(cell);
+              return {unused, start, stop};
+            });
+          } else {
+            for (let index = 0; index < 7; index += 1) {
+              let label;
+              if (operation === "SetEvent") {
+                label = index === 0 ? "Event value 1 raw (meaning unknown; edit explicitly)" : `Event start ${index + 1} raw (candidate 10-minute code)`;
+              } else if (documentValue.selector.profile === "dhw") {
+                label = `Setpoint ${index + 1} raw (candidate states: 253 enable, 254 disable, 255 replacement)`;
+              } else {
+                label = `Setpoint ${index + 1} raw (candidate temperature = raw / 2 °C)`;
+              }
+              inputs.push(b524AppendValueField(grid, label, documentValue.values[index], invalidate, index));
+            }
+          }
+          editor.appendChild(grid);
+          const status = document.createElement("div"); status.className = "subtitle"; status.dataset.role = "operation-validation";
+          const previewBox = document.createElement("pre"); previewBox.className = "operation-preview"; previewBox.dataset.role = "operation-preview";
+          previewBox.textContent = "Preview has not been built.";
+          const actions = document.createElement("div"); actions.className = "operation-editor-actions";
+          const previewButton = document.createElement("button"); previewButton.type = "button"; previewButton.dataset.role = "operation-preview-button"; previewButton.textContent = "Preview encoded payload";
+          const exportButton = document.createElement("button"); exportButton.type = "button"; exportButton.dataset.role = "operation-export-button"; exportButton.textContent = "Export offline edit document"; exportButton.disabled = true;
+          let lastDocument = null;
+          previewButton.addEventListener("click", () => {
+            try {
+              const next = {...documentValue, values: []};
+              if (operation === "WriteTimer") {
+                next.values = timerSlots.map((slot, index) => slot.unused.checked ? null : [
+                  b524ReadUint8(slot.start, `slot ${index + 1} start`),
+                  b524ReadUint8(slot.stop, `slot ${index + 1} stop`),
+                ]);
+              } else {
+                next.values = inputs.map((input, index) => b524ReadUint8(input, `value ${index + 1}`));
+              }
+              const preview = b524BuildPreview(next, metaObj);
+              lastDocument = next;
+              previewBox.textContent = JSON.stringify(preview, null, 2);
+              status.textContent = "Offline preview validated. Export contains values and recorded baselines only; it cannot write to a device.";
+              exportButton.disabled = false;
+            } catch (error) {
+              lastDocument = null; exportButton.disabled = true;
+              status.textContent = String(error && error.message ? error.message : error);
+              previewBox.textContent = "Preview rejected.";
+            }
+          });
+          exportButton.addEventListener("click", () => { if (lastDocument) b524DownloadEditDocument(lastDocument); });
+          actions.appendChild(previewButton); actions.appendChild(exportButton);
+          editor.appendChild(actions); editor.appendChild(status); editor.appendChild(previewBox);
+          editorHost.appendChild(editor);
+        };
+
+        rows.forEach((row, index) => {
+          const selector = row.selector && typeof row.selector === "object" ? Object.entries(row.selector).map(([key, value]) => `${key}=${String(value)}`).join(", ") : "unqualified selector";
+          const decoded = row.decoded === null || typeof row.decoded === "undefined" ? "—" : JSON.stringify(row.decoded);
+          const values = [selector, row.response_state || "unknown", row.response_raw_hex || "—", decoded, row.decode_qualification || "unknown", row.selector_correlation || "unknown", row.request_attempts ?? "—"];
+          const tr = document.createElement("tr");
+          for (const value of values) { const td = document.createElement("td"); td.textContent = String(value); tr.appendChild(td); }
+          const action = document.createElement("td");
+          if (operation) {
+            const availability = b524EditAvailability(row, operation, reads);
+            const button = document.createElement("button"); button.type = "button"; button.textContent = "Edit offline";
+            button.dataset.role = "operation-edit-select"; button.dataset.operationEditIndex = String(index);
+            button.disabled = !availability.available; button.title = availability.reason;
+            button.addEventListener("click", () => openEditor(row)); action.appendChild(button);
+          } else {
+            action.textContent = "Read-only";
+          }
+          tr.appendChild(action); tbody.appendChild(tr);
+        });
+        table.appendChild(tbody); container.appendChild(table);
+        const note = document.createElement("div"); note.className = "subtitle";
+        note.textContent = "Offline editors require complete decoded canonical baselines. Event edits require one exact-selector OP09/OP0B pair in this artifact. This report cannot send a native write; no fetch, network call, or native writer is present.";
+        container.appendChild(note); container.appendChild(editorHost);
       }
 
       function b524SectionHasContent(sectionKey, operations, metaObj) {
+        if (sectionKey.startsWith("operation_")) {
+          const opcode = `0x${sectionKey.slice("operation_".length)}`;
+          const reads = artifact && Array.isArray(artifact.b524_operation_reads) ? artifact.b524_operation_reads : [];
+          return reads.some((row) => normalizeOpcodeKey(row && (row.opcode_hex || row.opcode)) === opcode);
+        }
         if (sectionKey === "scan_coverage") {
           return !!(metaObj && (metaObj.scan_coverage || metaObj.parameter_description_coverage));
         }
@@ -1473,6 +1907,10 @@ __ARTIFACT_JSON__
           return !!(metaObj && typeof metaObj === "object" && metaObj.constraint_dictionary && Object.keys(metaObj.constraint_dictionary).length)
             || !!(operations && typeof operations === "object" && Array.isArray(operations.register_constraints) && operations.register_constraints.length);
         }
+        if (sectionKey === "register_tables") {
+          const reads = artifact && Array.isArray(artifact.b524_operation_reads) ? artifact.b524_operation_reads : [];
+          if (reads.some((row) => normalizeOpcodeKey(row && (row.opcode_hex || row.opcode)) === "0x0b")) return false;
+        }
         return !!(operations && typeof operations === "object" && Array.isArray(operations[sectionKey]) && operations[sectionKey].length);
       }
 
@@ -1488,6 +1926,14 @@ __ARTIFACT_JSON__
         title.className = "section-title";
         title.textContent = sectionLabel(sectionKey);
         container.appendChild(title);
+
+        if (sectionKey.startsWith("operation_")) {
+          const opcode = `0x${sectionKey.slice("operation_".length)}`;
+          const reads = artifact && Array.isArray(artifact.b524_operation_reads) ? artifact.b524_operation_reads : [];
+          const rows = reads.filter((row) => row && typeof row === "object" && normalizeOpcodeKey(row.opcode_hex || row.opcode) === opcode);
+          renderB524OperationEditor(sectionKey, rows, reads, container, metaObj);
+          mountTarget.innerHTML = ""; mountTarget.appendChild(container); return;
+        }
 
         if (sectionKey === "scan_coverage") {
           const scan = metaObj && metaObj.scan_coverage || {};
@@ -1728,6 +2174,7 @@ __ARTIFACT_JSON__
         function instanceIsConnected(instancesObj, iiKey, namespaceKey) {
           const inst = instancesObj[iiKey];
           if (!inst || typeof inst !== "object") return false;
+          if (Object.prototype.hasOwnProperty.call(inst, "present")) return inst.present === true;
           const regs = inst.registers;
           if (!regs || typeof regs !== "object") return false;
           if (namespaceKey === "0x06" || opKey === "0x06") {
@@ -1763,7 +2210,12 @@ __ARTIFACT_JSON__
         }
 
         function buildGroupTable(instancesObj, namespaceKey = null) {
-          let instanceKeys = sortedHexKeys(Object.keys(instancesObj || {}));
+          let instanceKeys = sortedHexKeys(Object.keys(instancesObj || {})).filter((iiKey) => {
+            const ii = parseInt(iiKey, 16);
+            if (namespaceKey === "0x06" || opKey === "0x06") return ii >= 1 && ii <= 8;
+            if (groupKey === "0x02") return ii >= B524_CIRCUIT_II_MIN && ii <= 9;
+            return true;
+          });
           if (state.b524Filters.hideMissingInstances) {
             instanceKeys = instanceKeys.filter((iiKey) => instanceIsConnected(instancesObj, iiKey, namespaceKey));
           }
@@ -1773,6 +2225,9 @@ __ARTIFACT_JSON__
             if (instancesObj[iiKey]) visibleInstances[iiKey] = instancesObj[iiKey];
           }
           let rrKeys = visibleRegisterKeys(visibleInstances);
+          if (groupKey === "0x00") {
+            rrKeys = rrKeys.filter((rrKey) => parseHexKey(rrKey) <= 0x00FF);
+          }
           if (state.b524Filters.hideAbsent) {
             rrKeys = rrKeys.filter((rrKey) => !rowIsAbsent(visibleInstances, rrKey));
           }
@@ -1909,9 +2364,13 @@ __ARTIFACT_JSON__
               const displayValue = (typeof entry.value_display === "string" && entry.value_display.length)
                 ? entry.value_display
                 : entry.value;
+              const hasQualifiedValueLabel = (
+                typeof entry.enum_resolved_name === "string" && entry.enum_resolved_name.length
+                && typeof entry.value_label_qualification === "string" && entry.value_label_qualification.length
+              );
               const statusKind = entryStatusKind(entry);
               const statusLabel = entryStatusLabel(entry);
-              const decoded = selectedType && valueBytes
+              const decoded = (override || !hasQualifiedValueLabel) && selectedType && valueBytes
                 ? parseTypedValue(selectedType, valueBytes)
                 : { value: displayValue, error: null };
 
@@ -1943,7 +2402,7 @@ __ARTIFACT_JSON__
 
               const description = entry.parameter_description;
               const bundled = entry.bundled_parameter_description;
-              if (bundled && typeof bundled === "object") {
+              if (bundled && typeof bundled === "object" && bundled.verification !== "matches") {
                 const bundledEl = document.createElement("div");
                 bundledEl.className = "cell-raw";
                 const verification = typeof bundled.verification === "string"
@@ -1952,10 +2411,8 @@ __ARTIFACT_JSON__
                 const isMismatch = verification === "differs" || verification === "profile_mismatch";
                 const comparison = isMismatch
                   ? "Description mismatch"
-                  : verification === "matches"
-                    ? "Description matches cached baseline"
-                    : `Cached description ${verification}`;
-                bundledEl.textContent = `${comparison}: ${bundled.type || "unknown"} · min=${formatValue(bundled.min)} · max=${formatValue(bundled.max)} · step=${formatValue(bundled.step)}. Current-target verification is separate.`;
+                  : `Cached description ${verification}`;
+                bundledEl.textContent = `${comparison}: ${bundled.type || "unknown"} · min=${formatValue(bundled.min)} · max=${formatValue(bundled.max)} · step=${formatValue(bundled.step)}.`;
                 td.appendChild(bundledEl);
               }
               if (description && typeof description === "object") {
@@ -2011,6 +2468,7 @@ __ARTIFACT_JSON__
               if (typeof entry.value !== "undefined") tipParts.push(`original_value=${formatValue(entry.value)}`);
               if (entry.enum_raw_name) tipParts.push(`enum_raw_name=${entry.enum_raw_name}`);
               if (entry.enum_resolved_name) tipParts.push(`enum_resolved_name=${entry.enum_resolved_name}`);
+              if (entry.value_label_qualification) tipParts.push(`value_label_qualification=${entry.value_label_qualification} (presentation only; no write authority)`);
               if (entry.constraint_type) tipParts.push(`constraint_type=${entry.constraint_type}`);
               if (typeof entry.constraint_min !== "undefined") tipParts.push(`constraint_min=${formatValue(entry.constraint_min)}`);
               if (typeof entry.constraint_max !== "undefined") tipParts.push(`constraint_max=${formatValue(entry.constraint_max)}`);
@@ -2079,7 +2537,11 @@ __ARTIFACT_JSON__
 
         // Operations-first: instances come directly from the operation's group.
         // No merging or namespace splitting needed.
-        const activeInstances = groupObj.instances || {};
+        const finalPlan = finalPlanForRoute(groupKey, opKey);
+        const sourceInstances = groupObj.instances || {};
+        const activeInstances = finalPlan && Array.isArray(finalPlan.instances)
+          ? Object.fromEntries(finalPlan.instances.map((key) => [key, sourceInstances[key]]).filter(([, value]) => value && typeof value === "object"))
+          : sourceInstances;
         mountTarget.appendChild(buildGroupTable(activeInstances, opKey));
       }
 
@@ -2188,6 +2650,7 @@ __ARTIFACT_JSON__
       const hasB524 = !!(
         allGroupKeys().length > 0
         || (artifact && typeof artifact === "object" && artifact.b524_operations && typeof artifact.b524_operations === "object")
+        || (artifact && typeof artifact === "object" && Array.isArray(artifact.b524_operation_reads) && artifact.b524_operation_reads.length)
         || (meta && typeof meta === "object" && meta.constraint_dictionary && typeof meta.constraint_dictionary === "object")
       );
       const hasB555 = !!(artifact && typeof artifact === "object" && artifact.b555_dump && typeof artifact.b555_dump === "object");
@@ -2204,6 +2667,10 @@ __ARTIFACT_JSON__
 def render_html_report(artifact: dict[str, Any], *, title: str | None = None) -> str:
     # Ensure operations-first structure for consistent JS traversal.
     artifact, _migration = migrate_artifact_schema(artifact)
+    apply_b524_value_labels(artifact)
+    operations = artifact.get("operations")
+    if isinstance(operations, dict):
+        apply_b524_canonical_register_names(operations)
     attach_bundled_descriptions(artifact)
     meta = artifact.get("meta")
     # Build group_name_map from operations-first structure
@@ -2228,8 +2695,6 @@ def render_html_report(artifact: dict[str, Any], *, title: str | None = None) ->
                 # Presentation-only correction: scanner policy keeps its own
                 # declared profile bounds and is intentionally not changed here.
                 local_presentation["rr_max"] = "0x00FF"
-            if group == 0x01:
-                local_presentation["name"] = "Native Drinkable Hot Water"
             group_name_map[group_key] = {
                 "0x02": local_presentation,
                 "0x06": {"name": group_name_for_opcode(group, 0x06)},
@@ -2241,6 +2706,11 @@ def render_html_report(artifact: dict[str, Any], *, title: str | None = None) ->
             identity_obj = meta.get("resolved_identity")
         if isinstance(identity_obj, dict):
             rows: list[tuple[str, str]] = []
+            from .regulator_identity import regulator_profile_label
+
+            profile = regulator_profile_label(identity_obj)
+            if profile:
+                rows.append(("Profile", profile))
             for label, key in (
                 ("Device", "device"),
                 ("Model", "model"),
@@ -2279,6 +2749,11 @@ def render_html_report(artifact: dict[str, Any], *, title: str | None = None) ->
                 "__IDENTITY_CARD__": identity_html,
                 "__ARTIFACT_JSON__": _json_for_html(artifact),
                 "__B524_GROUP_NAMES__": _json_for_html(group_name_map),
+                "__B524_CIRCUIT_II_MIN__": (
+                    "0"
+                    if description_profile(artifact).get("profile_id") == "basv2_sw0507_hw1704_api1"
+                    else "1"
+                ),
             },
         ).rstrip()
         + "\n"

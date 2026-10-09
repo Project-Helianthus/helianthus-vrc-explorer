@@ -11,7 +11,11 @@ from helianthus_vrc_explorer.protocol.b524 import (
     build_directory_probe_payload,
     build_register_read_payload,
 )
-from helianthus_vrc_explorer.transport.base import TransportTimeout
+from helianthus_vrc_explorer.transport.base import (
+    TransportError,
+    TransportNack,
+    TransportTimeout,
+)
 from helianthus_vrc_explorer.transport.dummy import DummyTransport
 
 
@@ -67,6 +71,118 @@ def test_dummy_transport_missing_system_information_returns_nan(tmp_path: Path) 
     transport = DummyTransport(_write_min_fixture(tmp_path))
     response = transport.send(0x15, build_directory_probe_payload(0x03))
     assert struct.unpack("<f", response)[0] != struct.unpack("<f", response)[0]
+
+
+def test_dummy_transport_replays_exact_operation_payload_states(tmp_path: Path) -> None:
+    fixture = {
+        "meta": {},
+        "operations": {},
+        "b524_operation_reads_schema_version": 1,
+        "b524_operation_reads": [
+            {
+                "request_payload_hex": "0301000100",
+                "response_raw_hex": "00002430909090",
+                "response_state": "value",
+            },
+            {
+                "request_payload_hex": "0900000100",
+                "response_raw_hex": "",
+                "response_state": "empty",
+            },
+            {
+                "request_payload_hex": "0b01000100",
+                "response_raw_hex": None,
+                "response_state": "nack",
+            },
+            {
+                "request_payload_hex": "0900000200",
+                "response_raw_hex": None,
+                "response_state": "timeout",
+            },
+            {
+                "request_payload_hex": "08",
+                "response_raw_hex": None,
+                "response_state": "transport_error",
+            },
+            {
+                "request_payload_hex": "0900000300",
+                "response_raw_hex": "0102",
+                "response_state": "malformed",
+            },
+        ],
+    }
+    fixture_path = tmp_path / "operation_reads.json"
+    fixture_path.write_text(json.dumps(fixture), encoding="utf-8")
+    transport = DummyTransport(fixture_path)
+
+    assert transport.send(0x15, bytes.fromhex("0301000100")) == bytes.fromhex("00002430909090")
+    assert transport.send(0x15, bytes.fromhex("0900000100")) == b""
+    with pytest.raises(TransportNack):
+        transport.send(0x15, bytes.fromhex("0b01000100"))
+    with pytest.raises(TransportTimeout):
+        transport.send(0x15, bytes.fromhex("0900000200"))
+    with pytest.raises(TransportError, match="transport_error"):
+        transport.send(0x15, bytes.fromhex("08"))
+    assert transport.send(0x15, bytes.fromhex("0900000300")) == bytes.fromhex("0102")
+
+
+def test_dummy_transport_does_not_invent_unrecorded_operation_response(tmp_path: Path) -> None:
+    fixture = {
+        "meta": {},
+        "operations": {},
+        "b524_operation_reads_schema_version": 1,
+        "b524_operation_reads": [
+            {
+                "request_payload_hex": "0900000100",
+                "response_raw_hex": "0000000000000000",
+                "response_state": "value",
+            }
+        ],
+    }
+    fixture_path = tmp_path / "operation_reads.json"
+    fixture_path.write_text(json.dumps(fixture), encoding="utf-8")
+    transport = DummyTransport(fixture_path)
+
+    with pytest.raises(TransportError, match="no exact"):
+        transport.send(0x15, bytes.fromhex("0900000200"))
+
+
+def test_dummy_transport_replays_duplicate_operation_observations_in_recorded_order(
+    tmp_path: Path,
+) -> None:
+    payload = bytes.fromhex("0900000100")
+    fixture = {
+        "meta": {},
+        "operations": {},
+        "b524_operation_reads_schema_version": 1,
+        "b524_operation_reads": [
+            {
+                "request_payload_hex": payload.hex(),
+                "response_raw_hex": "0001020304050607",
+                "response_state": "value",
+            },
+            {
+                "request_payload_hex": payload.hex(),
+                "response_raw_hex": "08090a0b0c0d0e0f",
+                "response_state": "value",
+            },
+            {
+                "request_payload_hex": payload.hex(),
+                "response_raw_hex": None,
+                "response_state": "nack",
+            },
+        ],
+    }
+    fixture_path = tmp_path / "duplicate_operation_reads.json"
+    fixture_path.write_text(json.dumps(fixture), encoding="utf-8")
+    transport = DummyTransport(fixture_path)
+
+    assert transport.send(0x15, payload) == bytes.fromhex("0001020304050607")
+    assert transport.send(0x15, payload) == bytes.fromhex("08090a0b0c0d0e0f")
+    with pytest.raises(TransportNack):
+        transport.send(0x15, payload)
+    with pytest.raises(TransportError, match="no exact"):
+        transport.send(0x15, payload)
 
 
 def test_dummy_transport_parameter_description_supports_qualified_nested_fixture(
@@ -530,6 +646,9 @@ def test_partial_system_information_keeps_valid_fixture_registers(
         "raw_hex": "0100",
         "flags": 1,
     }
+    fixture["groups"]["0x02"]["instances"]["0x01"] = fixture["groups"]["0x02"]["instances"].pop(
+        "0x00"
+    )
     path.write_text(json.dumps(fixture))
     transport = DummyTransport(path)
     if circuit_raw_hex is None:
@@ -548,8 +667,8 @@ def test_partial_system_information_keeps_valid_fixture_registers(
     assert artifact["meta"]["system_information"][2]["raw_hex"] == "00"
     circuit_counts = artifact["meta"]["instance_counts"]["0x02:0x02"]
     assert circuit_counts["expected"] is None
-    assert circuit_counts["probed_instances"] == 11
-    regs = artifact["operations"]["0x02"]["groups"]["0x02"]["instances"]["0x00"]["registers"]
+    assert circuit_counts["probed_instances"] == 9
+    regs = artifact["operations"]["0x02"]["groups"]["0x02"]["instances"]["0x01"]["registers"]
     assert regs["0x000f"]["value"] == 0x1234
     path.write_text(json.dumps(artifact))
     replay_transport = DummyTransport(path)
@@ -558,6 +677,6 @@ def test_partial_system_information_keeps_valid_fixture_registers(
             replay_transport.send(0x15, build_directory_probe_payload(0)).hex() == circuit_raw_hex
         )
     assert replay_transport.send(0x15, build_directory_probe_payload(2)) == b"\x00"
-    assert replay_transport.send(0x15, build_register_read_payload(2, 2, 0, 0xF)).endswith(
+    assert replay_transport.send(0x15, build_register_read_payload(2, 2, 1, 0xF)).endswith(
         b"\x34\x12"
     )

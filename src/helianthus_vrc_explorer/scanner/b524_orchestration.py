@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import inspect
 import math
 import sys
 import time
 from collections import deque
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -14,20 +16,32 @@ from rich.console import Console
 from ..artifact_schema import CURRENT_ARTIFACT_SCHEMA_VERSION
 from ..protocol.b524 import RegisterOpcode
 from ..protocol.b524_metadata import (
+    CAPACITY_SYSTEM_INFORMATION_IDS,
     COUNT_GROUP_IDS,
     SYSTEM_INFORMATION_NAMES,
     expected_instance_count,
+    module_capacity_crosscheck,
+    supported_capacity,
 )
+from ..protocol.b524_schedules import EventProfileName
 from ..schema.b524_constraints import (
     CONSTRAINT_SCOPE_PROTOCOL,
     constraint_scope_metadata,
     load_default_b524_constraints_catalog,
 )
+from ..schema.b524_register_names import b524_register_name
 from ..schema.ebusd_csv import EbusdCsvSchema
 from ..schema.myvaillant_map import MyvaillantRegisterMap
+from ..schema.parameter_descriptions import description_catalog_status
 from ..transport.base import TransportInterface, TransportRecoveryExhausted, emit_trace_label
 from ..transport.instrumented import CountingTransport, ScanRequestBudgetExceeded
 from ..ui.planner import PlannerGroup, PlannerPreset, build_plan_from_preset
+from ..ui.planner_selection import (
+    DescriptionPolicySelection,
+    PlannerSelection,
+    default_description_policy,
+    description_probe_required,
+)
 from .b524_artifact import (
     _artifact_contract_metadata,
     _ensure_group_artifact,
@@ -40,11 +54,19 @@ from .b524_artifact import (
     _record_availability_probes,
     _record_namespace_topology,
 )
+from .b524_default_events import DEFAULT_EVENT_WEEKDAY_CODES, build_default_event_requests
+from .b524_operation_reads import (
+    B524OperationReadRequest,
+    acquire_operation_reads,
+    record_operation_read_observation,
+    validate_operation_read_identity,
+)
 from .b524_plan import (
     _KNOWN_DESCRIPTOR_TYPES,
     PlannerUiMode,
     _group_name_for_opcode,
     _ii_max_for_opcode,
+    _ii_min_for_opcode,
     _instance_discovery_decision,
     _instance_discovery_targets,
     _is_instanced_group,
@@ -55,7 +77,10 @@ from .b524_plan import (
     _rr_max_for_opcode,
     _rr_max_full_for_opcode,
     _scan_plan_meta_groups,
+    _sorted_namespace_opcodes,
     opcode_label,
+    planner_native_opcodes,
+    planner_rr_max,
 )
 from .b524_probe import (
     ConstraintEntry,
@@ -69,6 +94,7 @@ from .b524_probe import (
     _probe_present_instances,
     _probe_unknown_group_opcodes,
     _probe_unknown_present_instances,
+    _unknown_instance_candidates,
 )
 from .description_acquisition import acquire_descriptions, finish_description_coverage
 from .description_scheduler import DescriptionCandidate
@@ -83,13 +109,117 @@ from .register import (
 from .scan import (
     _UNKNOWN_GROUP_DEFAULT_II_MAX,
     _UNKNOWN_GROUP_DEFAULT_RR_MAX,
-    _UNKNOWN_GROUP_EXPANDED_INSTANCES,
-    _UNKNOWN_GROUP_INITIAL_INSTANCES,
     ScanObserver,
     _apply_contextual_enum_annotations,
     _resolve_planner_mode,
 )
 from .scan_policy import profile_opcodes
+
+
+def _planner_kwargs(planner_fn: Any, options: dict[str, Any]) -> dict[str, Any]:
+    """Keep injected legacy planner fakes readable while passing typed UI state."""
+
+    try:
+        parameters = inspect.signature(planner_fn).parameters.values()
+    except (TypeError, ValueError):
+        return options
+    if any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters):
+        return options
+    accepted = {parameter.name for parameter in parameters}
+    return {name: value for name, value in options.items() if name in accepted}
+
+
+def _normalize_profile_plan_instances(
+    plan: dict[PlanKey, GroupScanPlan],
+    *,
+    profile_id: str | None = None,
+) -> dict[PlanKey, GroupScanPlan]:
+    """Apply default-profile instance domains without changing custom plans."""
+
+    normalized: dict[PlanKey, GroupScanPlan] = {}
+    for key, group_plan in plan.items():
+        instances = group_plan.instances
+        if group_plan.opcode == 0x06:
+            instances = tuple(ii for ii in instances if 0x01 <= ii <= 0x08)
+        elif group_plan.opcode == 0x02 and group_plan.group == 0x02:
+            first = 0x00 if profile_id == "basv2_sw0507_hw1704_api1" else 0x01
+            instances = tuple(ii for ii in instances if first <= ii <= 0x09)
+        normalized[key] = GroupScanPlan(
+            group=group_plan.group,
+            opcode=group_plan.opcode,
+            rr_max=group_plan.rr_max,
+            instances=instances,
+            registers=group_plan.registers,
+        )
+    return normalized
+
+
+def _select_live_description_candidates(
+    artifact: dict[str, Any],
+    candidates: list[DescriptionCandidate],
+    entries: dict[tuple[int, int, int, int], dict[str, Any]],
+    *,
+    policy: DescriptionPolicySelection,
+) -> tuple[
+    list[DescriptionCandidate],
+    dict[tuple[int, int, int, int], dict[str, Any]],
+    list[dict[str, Any]],
+]:
+    """Apply policy after scalar reads reveal each remote native identity."""
+
+    selected: list[DescriptionCandidate] = []
+    selected_entries: dict[tuple[int, int, int, int], dict[str, Any]] = {}
+    status_cache: dict[tuple[int, int, int], dict[str, Any]] = {}
+    for candidate in candidates:
+        device_key = (
+            candidate.read_opcode,
+            candidate.group if candidate.read_opcode == 0x06 else 0,
+            candidate.instance if candidate.read_opcode == 0x06 else 0,
+        )
+        status = status_cache.get(device_key)
+        if status is None:
+            selector = {
+                "read_opcode": f"0x{candidate.read_opcode:02x}",
+                "group": f"0x{candidate.group:02x}",
+                "instance": f"0x{candidate.instance:02x}",
+                "register": f"0x{candidate.register:04x}",
+            }
+            status = description_catalog_status(artifact, selector)
+            status_cache[device_key] = status
+        if not (
+            description_probe_required(policy, opcode=candidate.read_opcode)
+            or status.get("status") != "exact"
+        ):
+            continue
+        identity = (
+            candidate.read_opcode,
+            candidate.group,
+            candidate.instance,
+            candidate.register,
+        )
+        selected.append(candidate)
+        selected_entries[identity] = entries[identity]
+
+    remote_statuses = [
+        {
+            "group": f"0x{group:02x}",
+            "instance": f"0x{instance:02x}",
+            **status,
+        }
+        for (opcode, group, instance), status in sorted(status_cache.items())
+        if opcode == 0x06
+    ]
+    return selected, selected_entries, remote_statuses
+
+
+def _count_capacity(*, group: int, opcode: int, ii_max: int, profile_id: str | None = None) -> int:
+    """Return the count-qualified slots for one OP00 family mapping."""
+
+    if (opcode, group) == (0x02, 0x09):
+        return 1
+    if (opcode, group) == (0x02, 0x02):
+        return ii_max if profile_id == "basv2_sw0507_hw1704_api1" else ii_max - 1
+    return ii_max + (opcode != 0x06)
 
 
 def _system_information_records(
@@ -134,6 +264,8 @@ def run_b524_scan(
     explicit_plan: dict[PlanKey, GroupScanPlan] | None = None,
     description_budget: int | None = None,
     request_budget: int | None = None,
+    operation_requests: Sequence[B524OperationReadRequest] = (),
+    operation_identity: Mapping[str, Any] | None = None,
     discover_groups_fn: Any,
     prompt_scan_plan_fn: Any,
     hotkey_reader_cls: Any,
@@ -151,6 +283,25 @@ def run_b524_scan(
     """
 
     planner_preset = _normalize_planner_preset(planner_preset)
+    read_identity = operation_identity or {}
+    device_id = read_identity.get("eid", read_identity.get("device_id"))
+    manufacturer = read_identity.get("manufacturer")
+    if isinstance(manufacturer, str):
+        try:
+            manufacturer = int(manufacturer, 0)
+        except ValueError:
+            manufacturer = None
+    explicit_operation_override = bool(operation_requests)
+    operation_request_list = list(operation_requests)
+    if operation_request_list:
+        validate_operation_read_identity(
+            operation_request_list, device_id=device_id, manufacturer=manufacturer
+        )
+    operation_selection = [True] * len(operation_request_list)
+    operation_planner_options: dict[str, Any] = {
+        "operation_requests": operation_request_list,
+        "operation_selection": operation_selection,
+    }
     research_mode = planner_preset == "research"
     if explicit_plan is not None and planner_preset != "custom":
         raise ValueError("An explicit scan plan requires the custom preset")
@@ -184,6 +335,7 @@ def run_b524_scan(
             "incomplete": False,
             "artifact_contract": _artifact_contract_metadata(),
             "system_information": [],
+            **({"identity": dict(read_identity)} if read_identity else {}),
             "scan_coverage": {
                 "preset": planner_preset,
                 "request_budget": request_budget,
@@ -196,6 +348,23 @@ def run_b524_scan(
         },
         "operations": {},
     }
+
+    def store_operation_read_plan() -> None:
+        if operation_request_list:
+            artifact["meta"]["b524_operation_read_plan"] = [
+                {
+                    "operation": request.operation,
+                    "selector": request.selector,
+                    "request_payload_hex": request.payload.hex(),
+                    "selected": operation_enabled,
+                    "automatic_event": request.automatic_event,
+                }
+                for request, operation_enabled in zip(
+                    operation_request_list, operation_selection, strict=True
+                )
+            ]
+
+    store_operation_read_plan()
     if ebusd_host is not None:
         artifact["meta"]["ebusd_host"] = ebusd_host
     if ebusd_port is not None:
@@ -209,8 +378,13 @@ def run_b524_scan(
     artifact["meta"]["constraint_scope"]["qualification"] = "legacy_unqualified"
 
     incomplete_reason: str | None = None
+    observed_description_candidates: list[DescriptionCandidate] = []
+    observed_description_entries: dict[tuple[int, int, int, int], dict[str, Any]] = {}
     description_candidates: list[DescriptionCandidate] = []
     description_entries: dict[tuple[int, int, int, int], dict[str, Any]] = {}
+    description_policy: DescriptionPolicySelection | None = None
+    description_candidates_prepared = False
+    description_reminder_logged = False
     description_coverage: dict[str, Any] = {}
     if explicit_plan is not None:
         artifact["meta"]["scan_plan"] = {
@@ -235,8 +409,8 @@ def run_b524_scan(
                 )
             if probe_constraints:
                 observer.log(
-                    "Parameter descriptions enabled for all observed writable parameters "
-                    "(OP01 system / OP07 device)"
+                    "Parameter description policy will be resolved from exact profile "
+                    "identity and planner selection (OP01 local / OP07 remote)"
                     + (
                         f", limited to {description_budget} candidates by request."
                         if description_budget is not None
@@ -304,6 +478,35 @@ def run_b524_scan(
             "feature_hints": {"ventilation": ventilation_hint},
             "other_count_routing": "unknown",
         }
+        profile_status = description_catalog_status(artifact)
+        profile_id = (
+            str(profile_status["profile_id"])
+            if profile_status.get("status") == "exact" and profile_status.get("profile_id")
+            else None
+        )
+        artifact["meta"]["description_profile_status"] = profile_status
+        if profile_status.get("status") != "exact":
+            artifact["meta"]["description_profile_reminder"] = {
+                "shown_once": True,
+                "recommendation": "full_within_known_scope",
+                "sharing": "save_and_share_json_manually",
+                "automatic_upload": False,
+            }
+            if observer is not None:
+                observer.log(
+                    "Unknown description profile: use Full for live writable descriptions "
+                    "within known bounds, then save/share JSON manually if useful.",
+                    level="warn",
+                )
+                description_reminder_logged = True
+        description_policy = default_description_policy(
+            planner_preset,
+            exact_profile_known=profile_status.get("status") == "exact",
+        )
+        operation_planner_options.update(
+            description_policy=description_policy,
+            description_profile_status=str(profile_status.get("status", "unknown")),
+        )
         # OP00 identifiers are not groups. Register candidates come from the
         # explicit profile; research explores GG 00..FF by separate register probes.
         candidate_groups = configured_groups
@@ -356,11 +559,16 @@ def run_b524_scan(
         artifact["meta"]["parameter_description_policy"] = {
             "enabled": probe_constraints,
             "request_budget": description_budget,
+            "legacy_request_budget": description_budget,
             "system_description_opcode": "0x01",
             "device_description_opcode": "0x07",
             "scope": "observed_writable_complete_identity",
             "scheduler": "family_reservation_then_instance_round_robin",
             "unknown_codec_raw_evidence": True,
+            "profile_status": profile_status.get("status"),
+            "profile_id": profile_status.get("profile_id"),
+            "local_source": description_policy.local,
+            "remote_source": description_policy.remote,
         }
 
         interactive = (
@@ -395,6 +603,10 @@ def run_b524_scan(
             if config is not None:
                 resolved_group_opcodes[group.group] = profile_opcodes(group.group, planner_preset)
                 availability_group_opcodes[group.group] = resolved_group_opcodes[group.group]
+                if group.group == 0x0D:
+                    availability_group_opcodes[group.group] = _sorted_namespace_opcodes(
+                        (*availability_group_opcodes[group.group], 0x06)
+                    )
                 continue
 
             opcodes, probe_summary = _probe_unknown_group_opcodes(
@@ -488,6 +700,9 @@ def run_b524_scan(
                     opcode=opcode,
                     name=artifact_group_name,
                     descriptor_observed=desc_for_artifact,
+                    ii_min=_ii_min_for_opcode(
+                        group=group.group, opcode=opcode, profile_id=profile_id
+                    ),
                     ii_max=namespace_ii_max,
                     discovery_advisory=discovery_advisory,
                 )
@@ -502,10 +717,9 @@ def run_b524_scan(
         instance_total = 0
         for group, meta, opcode in instance_targets:
             if GROUP_CONFIG.get(group.group) is None:
-                candidate_instances = (
-                    _UNKNOWN_GROUP_EXPANDED_INSTANCES
-                    if research_mode
-                    else _UNKNOWN_GROUP_INITIAL_INSTANCES
+                candidate_instances = _unknown_instance_candidates(
+                    opcode=opcode,
+                    expanded=research_mode,
                 )
                 instance_total += len(candidate_instances)
                 continue
@@ -516,20 +730,28 @@ def run_b524_scan(
             )
             if _is_instanced_group(namespace_ii_max):
                 assert namespace_ii_max is not None
-                instance_total += namespace_ii_max + 1
+                instance_total += (
+                    namespace_ii_max + 1
+                    if profile_id == "basv2_sw0507_hw1704_api1"
+                    and (opcode, group.group) == (0x02, 0x02)
+                    else namespace_ii_max
+                    if opcode == 0x06 or group.group == 0x02
+                    else namespace_ii_max + 1
+                )
         if observer is not None:
             observer.phase_start("instance_discovery", total=instance_total or 1)
 
         instance_discovery_start = time.perf_counter()
         instance_discovery_start_calls = counting_transport.counters.send_calls
-        known_namespace_probe_counts: dict[int, list[str]] = {}
-        unknown_namespace_probe_counts: dict[int, list[str]] = {}
+        known_namespace_probe_counts: dict[tuple[int, int], str] = {}
+        unknown_namespace_probe_counts: dict[tuple[int, int], str] = {}
+        native_dhw_admitted: dict[tuple[int, int], bool] = {}
         for group, meta, opcode in instance_targets:
             rr_max = meta.rr_max
             config = GROUP_CONFIG.get(group.group)
 
             if config is None:
-                total_slots = len(_UNKNOWN_GROUP_EXPANDED_INSTANCES)
+                total_slots = len(_unknown_instance_candidates(opcode=opcode, expanded=True))
                 namespace_ii_max = _ii_max_for_opcode(
                     group=group.group,
                     default_ii_max=meta.ii_max,
@@ -539,6 +761,9 @@ def run_b524_scan(
                     artifact,
                     group=group.group,
                     opcode=opcode,
+                    ii_min=_ii_min_for_opcode(
+                        group=group.group, opcode=opcode, profile_id=profile_id
+                    ),
                     ii_max=namespace_ii_max,
                 )
                 instances_obj = _instances_object(artifact, group=group.group, opcode=opcode)
@@ -558,8 +783,8 @@ def run_b524_scan(
                     research=research_mode,
                 )
                 _mark_present_instances(instances_obj, instances=present_instances)
-                unknown_namespace_probe_counts.setdefault(group.group, []).append(
-                    f"{opcode_label(opcode)} {len(present_instances)}/{total_slots}"
+                unknown_namespace_probe_counts[(int(opcode), group.group)] = (
+                    f"{len(present_instances)}/{total_slots}"
                 )
                 continue
 
@@ -572,9 +797,12 @@ def run_b524_scan(
                 artifact,
                 group=group.group,
                 opcode=opcode,
+                ii_min=_ii_min_for_opcode(group=group.group, opcode=opcode, profile_id=profile_id),
                 ii_max=namespace_ii_max,
             )
-            contract = namespace_availability_contract(group=group.group, opcode=opcode)
+            contract = namespace_availability_contract(
+                group=group.group, opcode=opcode, presence_profile=profile_id
+            )
             instances_obj = _instances_object(artifact, group=group.group, opcode=opcode)
             if _is_instanced_group(namespace_ii_max):
                 _record_availability_contract(
@@ -584,16 +812,74 @@ def run_b524_scan(
                     contract=contract,
                 )
             if not _is_instanced_group(namespace_ii_max):
+                if (opcode, group.group) == (0x02, 0x01):
+                    _record_availability_contract(
+                        artifact,
+                        group=group.group,
+                        opcode=opcode,
+                        contract=contract,
+                    )
+                    probe = probe_instance_availability_fn(
+                        transport,
+                        dst=dst,
+                        group=group.group,
+                        instance=0x00,
+                        opcode=opcode,
+                    )
+                    _record_availability_probes(
+                        artifact,
+                        group=group.group,
+                        opcode=opcode,
+                        probes={0x00: probe},
+                    )
+                    native_dhw_admitted[(int(opcode), group.group)] = probe.present
+                    if probe.present:
+                        _mark_present_instances(instances_obj, instances=(0x00,))
+                    if (
+                        probe.evidence is not None
+                        and probe.evidence.get("availability_qualification") == "unknown"
+                    ):
+                        coverage = artifact["meta"]["scan_coverage"]
+                        coverage["qualification_incomplete"] = True
+                        coverage["instance_discovery_complete"] = False
+                        coverage.setdefault("unknown_instance_probes", []).append(
+                            {
+                                "read_opcode": _hex_u8(opcode),
+                                "group": _hex_u8(group.group),
+                                "instance": "0x00",
+                            }
+                        )
+                    known_namespace_probe_counts[(int(opcode), group.group)] = (
+                        "1/1" if probe.present else "0/1"
+                    )
+                    continue
                 _mark_present_instances(instances_obj, instances=(0x00,))
-                known_namespace_probe_counts.setdefault(group.group, []).append(
-                    f"{_group_name_for_opcode(group.group, opcode)} [{opcode_label(opcode)}] 1/1"
-                )
+                known_namespace_probe_counts[(int(opcode), group.group)] = "1/1"
                 continue
 
             assert namespace_ii_max is not None
             emit_trace_label(
                 transport,
                 f"Identifying instances in group 0x{group.group:02X} ({opcode_label(opcode)})",
+            )
+            count_id = COUNT_GROUP_IDS.get((int(opcode), group.group))
+            capacity = (
+                supported_capacity(information_values.get(count_id, float("nan")))
+                if count_id in CAPACITY_SYSTEM_INFORMATION_IDS
+                else None
+            )
+            expected_count = (
+                expected_instance_count(
+                    information_values.get(count_id, float("nan")),
+                    capacity=_count_capacity(
+                        group=group.group,
+                        opcode=opcode,
+                        ii_max=namespace_ii_max,
+                        profile_id=profile_id,
+                    ),
+                )
+                if count_id is not None and count_id not in CAPACITY_SYSTEM_INFORMATION_IDS
+                else None
             )
 
             def retain_probe(
@@ -615,21 +901,18 @@ def run_b524_scan(
                 dst=dst,
                 group=group.group,
                 opcode=opcode,
-                ii_max=namespace_ii_max,
+                ii_max=(
+                    0x00
+                    if planner_preset == "recommended" and (opcode, group.group) == (0x02, 0x09)
+                    else namespace_ii_max
+                ),
                 observer=observer,
                 probe_instance_availability_fn=probe_instance_availability_fn,
                 stop_at_first_absence=planner_preset == "recommended" and opcode == 6,
                 on_probe=retain_probe,
-                expected_count=(
-                    expected_instance_count(
-                        information_values.get(
-                            COUNT_GROUP_IDS.get((int(opcode), group.group), -1), float("nan")
-                        ),
-                        capacity=namespace_ii_max + 1,
-                    )
-                    if planner_preset == "recommended"
-                    else None
-                ),
+                expected_count=expected_count if planner_preset == "recommended" else None,
+                capacity=capacity if planner_preset == "recommended" else None,
+                presence_profile=profile_id,
             )
             _record_availability_probes(
                 artifact,
@@ -645,13 +928,28 @@ def run_b524_scan(
                     probe.connection_state == "not_connected" for probe in probes.values()
                 )
                 bounded = planner_preset != "recommended"
-                complete = not unknown_slots and (bounded or stopped)
+                confirmed_present = sum(probe.present for probe in probes.values())
+                count_guided_complete = (
+                    planner_preset == "recommended"
+                    and expected_count is not None
+                    and confirmed_present >= expected_count
+                )
+                complete = not unknown_slots and (bounded or stopped or count_guided_complete)
                 artifact["meta"].setdefault("device_discovery", {})[_hex_u8(group.group)] = {
                     "read_opcode": "0x06",
                     "presence_register": "0x0001",
                     "first_instance": "0x01",
                     "last_instance_bound": _hex_u8(namespace_ii_max),
-                    "policy": "bounded_audit" if bounded else "first_confirmed_absence",
+                    "policy": (
+                        "bounded_audit"
+                        if bounded
+                        else "count_guided"
+                        if expected_count is not None
+                        else "first_confirmed_absence"
+                    ),
+                    "count_guided_expected": expected_count,
+                    "count_guided_complete": count_guided_complete,
+                    "presence_name": "device_connected",
                     "absence_semantics": "not_connected_not_physical_absence",
                     "probed_instances": [_hex_u8(ii) for ii in probes],
                     "unknown_instances": [_hex_u8(ii) for ii in unknown_slots],
@@ -684,59 +982,128 @@ def run_b524_scan(
             present_instances = tuple(ii for ii, probe in probes.items() if probe.present)
             count_id = COUNT_GROUP_IDS.get((int(opcode), group.group))
             if count_id is not None:
-                expected = expected_instance_count(
-                    information_values.get(count_id, float("nan")), capacity=namespace_ii_max + 1
+                is_capacity = count_id in CAPACITY_SYSTEM_INFORMATION_IDS
+                expected = (
+                    None
+                    if is_capacity
+                    else expected_instance_count(
+                        information_values.get(count_id, float("nan")),
+                        capacity=_count_capacity(
+                            group=group.group,
+                            opcode=opcode,
+                            ii_max=namespace_ii_max,
+                            profile_id=profile_id,
+                        ),
+                    )
+                )
+                supported = (
+                    supported_capacity(information_values.get(count_id, float("nan")))
+                    if is_capacity
+                    else None
+                )
+                observed = len(
+                    [
+                        ii
+                        for ii in present_instances
+                        if not (opcode == 2 and group.group == 2 and ii == 0x09)
+                    ]
                 )
                 artifact["meta"].setdefault("instance_counts", {})[
                     f"{_hex_u8(opcode)}:{_hex_u8(group.group)}"
                 ] = {
                     "identifier": _hex_u16(count_id),
                     "expected": expected,
-                    "observed": len(
-                        [
-                            ii
-                            for ii in present_instances
-                            if not (opcode == 2 and group.group == 2 and ii == 0x0A)
-                        ]
-                    ),
-                    "mismatch": expected is not None
-                    and expected
-                    != len(
-                        [
-                            ii
-                            for ii in present_instances
-                            if not (opcode == 2 and group.group == 2 and ii == 0x0A)
-                        ]
-                    ),
+                    "semantics": "capacity" if is_capacity else "expected_population",
+                    "capacity": supported,
+                    "observed": observed,
+                    "mismatch": expected is not None and expected != observed,
+                    "capacity_exceeded": supported is not None and observed > supported,
                     "probed_instances": len(probes),
                 }
             _mark_present_instances(instances_obj, instances=present_instances)
-            known_namespace_probe_counts.setdefault(group.group, []).append(
-                f"{_group_name_for_opcode(group.group, opcode)} "
-                f"[{opcode_label(opcode)}] "
-                f"{len(present_instances)}/{namespace_ii_max + 1}"
+            slot_capacity = (
+                namespace_ii_max + 1
+                if profile_id == "basv2_sw0507_hw1704_api1"
+                and (opcode, group.group) == (0x02, 0x02)
+                else namespace_ii_max
+                if opcode == 0x06 or group.group == 0x02
+                else namespace_ii_max + 1
+            )
+            known_namespace_probe_counts[(int(opcode), group.group)] = (
+                f"{len(present_instances)}/{slot_capacity}"
             )
 
+        remote_group_object = artifact["operations"].get("0x06", {}).get("groups", {})
+        observed_remote_instances = (
+            sum(
+                1
+                for group_key, group_object in remote_group_object.items()
+                if int(group_key, 0) in CONNECTED_DEVICE_GROUPS
+                if isinstance(group_object, dict)
+                for probe in group_object.get("availability_probes", {}).values()
+                if isinstance(probe, dict)
+                and probe.get("present") is True
+                and (probe.get("connection_state") == "connected")
+            )
+            if isinstance(remote_group_object, dict)
+            else 0
+        )
+        remote_slot_capacity = sum(
+            _ii_max_for_opcode(
+                group=group.group,
+                default_ii_max=metadata_map[group.group].ii_max,
+                opcode=0x06,
+            )
+            or 0
+            for group in classified
+            if 0x06 in availability_group_opcodes.get(group.group, ())
+        )
+        aggregate_device_count = expected_instance_count(
+            information_values.get(4, float("nan")), capacity=remote_slot_capacity
+        )
+        artifact["meta"]["device_count"] = {
+            "identifier": "0x0004",
+            "expected": aggregate_device_count,
+            "observed": observed_remote_instances,
+            "mismatch": (
+                aggregate_device_count is not None
+                and aggregate_device_count != observed_remote_instances
+            ),
+        }
+        module_capacity = module_capacity_crosscheck(
+            information_values.get(8, float("nan")), information_values.get(9, float("nan"))
+        )
+        if module_capacity is not None:
+            artifact["meta"]["module_capacity_crosscheck"] = {
+                "vr70_identifier": "0x0008",
+                "vr71_identifier": "0x0009",
+                "capacity": module_capacity,
+                "semantics": "crosscheck_only",
+            }
+
         if observer is not None:
-            for group in classified:
-                rr_max = metadata_map[group.group].rr_max
-                unknown_counts = unknown_namespace_probe_counts.get(group.group)
-                if unknown_counts:
-                    observer.log(
-                        f"GG=0x{group.group:02X} {group.name}: "
-                        f"{', '.join(unknown_counts)} present (experimental), "
-                        f"RR_max=0x{rr_max:04X} ({rr_max + 1} registers/instance)",
-                        level="info",
-                    )
+            for group, meta, opcode in instance_targets:
+                key = (int(opcode), group.group)
+                count = known_namespace_probe_counts.get(key)
+                experimental = key in unknown_namespace_probe_counts
+                if experimental:
+                    count = unknown_namespace_probe_counts[key]
+                if count is None:
                     continue
-                known_counts = known_namespace_probe_counts.get(group.group)
-                if known_counts:
-                    observer.log(
-                        f"GG=0x{group.group:02X}: "
-                        f"{', '.join(known_counts)} present, "
-                        f"RR_max=0x{rr_max:04X} ({rr_max + 1} registers/instance)",
-                        level="info",
+                qualifier = " (experimental)" if experimental else ""
+                if (opcode, group.group) == (0x06, 0x0D):
+                    rr_text = "RR_max=unknown (probe-only)"
+                else:
+                    rr_max = _rr_max_for_opcode(
+                        group=group.group, default_rr_max=meta.rr_max, opcode=opcode
                     )
+                    rr_text = f"RR_max=0x{rr_max:04X} ({rr_max + 1} registers/instance)"
+                observer.log(
+                    f"OP=0x{opcode:02X} GG=0x{group.group:02X}: "
+                    f"{_group_name_for_opcode(group.group, opcode)} {count} present{qualifier}, "
+                    f"{rr_text}",
+                    level="info",
+                )
 
         if observer is not None:
             observer.phase_finish("instance_discovery")
@@ -745,6 +1112,75 @@ def run_b524_scan(
             counting_transport.counters.send_calls - instance_discovery_start_calls
         )
         artifact["meta"]["scan_coverage"]["discovery_completed"] = True
+
+        if explicit_operation_override:
+            artifact["meta"]["b524_event_acquisition"] = {
+                "source": "explicit_read_plan_override",
+                "automatic_default_applied": False,
+            }
+        else:
+            system_in_scope = 0x02 in resolved_group_opcodes.get(0x00, ())
+            default_event_instances: dict[EventProfileName, tuple[int, ...]] = {
+                "system": (0x00,) if system_in_scope else (),
+                "dhw": (
+                    _present_instances_for_opcode(artifact, group=0x01, opcode=0x02)
+                    if native_dhw_admitted.get((0x02, 0x01), False)
+                    else ()
+                ),
+                "zone": _present_instances_for_opcode(artifact, group=0x03, opcode=0x02),
+            }
+            default_requests = build_default_event_requests(
+                instances=default_event_instances,
+                weekday_codes=DEFAULT_EVENT_WEEKDAY_CODES,
+            )
+            event_metadata: dict[str, Any] = {
+                "source": "automatic_scalar_topology_candidates",
+                "automatic_default_applied": False,
+                "selector_kind": "raw_u8",
+                "candidate_window": {
+                    "codes": [f"0x{code:02X}" for code in DEFAULT_EVENT_WEEKDAY_CODES],
+                    "range": "0x00..0x07",
+                    "exhaustive_wire_space": False,
+                },
+                "editable_in_planner": True,
+                "scalar_anchor": "OP02 present instances",
+                "profiles": {
+                    profile: {
+                        "instances": [f"0x{instance:02X}" for instance in instances],
+                        "status": (
+                            "candidate_from_scalar_anchor"
+                            if instances
+                            else "not_scheduled_no_scalar_anchor"
+                        ),
+                    }
+                    for profile, instances in default_event_instances.items()
+                },
+                "setpoint_policy": "conditional_exact_usable_op09_pair",
+            }
+            if default_requests:
+                try:
+                    validate_operation_read_identity(
+                        default_requests,
+                        device_id=device_id,
+                        manufacturer=manufacturer,
+                    )
+                except ValueError:
+                    event_metadata["status"] = "not_scheduled_unknown_identity"
+                    for profile_metadata in event_metadata["profiles"].values():
+                        if profile_metadata["instances"]:
+                            profile_metadata["status"] = "not_scheduled_unknown_identity"
+                else:
+                    operation_request_list.extend(default_requests)
+                    operation_selection.extend([True] * len(default_requests))
+                    event_metadata["automatic_default_applied"] = True
+                    event_metadata["status"] = "scheduled_candidates"
+                    event_metadata["worst_case_requests"] = len(default_requests)
+                    for profile_metadata in event_metadata["profiles"].values():
+                        if profile_metadata["instances"]:
+                            profile_metadata["status"] = "scheduled_candidate"
+            else:
+                event_metadata["status"] = "not_scheduled_no_scalar_anchor"
+            artifact["meta"]["b524_event_acquisition"] = event_metadata
 
         # Interactive scan planner (TTY only): allow users to trim the register scan scope.
         plan: dict[PlanKey, GroupScanPlan] = {}
@@ -785,7 +1221,9 @@ def run_b524_scan(
             config = GROUP_CONFIG.get(group.group)
             group_meta = metadata_map[group.group]
             resolved_opcodes = resolved_group_opcodes.get(group.group, ())
-            opcodes = resolved_opcodes
+            opcodes = _sorted_namespace_opcodes(
+                (*planner_native_opcodes(group.group), *resolved_opcodes)
+            )
             if not opcodes:
                 continue
             multi_op = len(opcodes) > 1
@@ -794,6 +1232,15 @@ def run_b524_scan(
                     explicit_plan.get(_plan_key(group.group, opcode))
                     if explicit_plan is not None
                     else None
+                )
+                qualified_rr_max = (
+                    planner_rr_max(group.group, opcode)
+                    if config is not None
+                    else _rr_max_for_opcode(
+                        group=group.group,
+                        default_rr_max=group_meta.rr_max,
+                        opcode=opcode,
+                    )
                 )
                 planner_ii_max = _planner_ii_max(
                     _ii_max_for_opcode(
@@ -809,7 +1256,6 @@ def run_b524_scan(
                 )
                 if requested_plan is not None:
                     present_instances = requested_plan.instances
-                    planner_ii_max = max(requested_plan.instances) or None
                 if planner_ii_max is None and not present_instances:
                     present_instances = (0x00,)
                 planner_groups.append(
@@ -820,33 +1266,52 @@ def run_b524_scan(
                         descriptor=group.descriptor,
                         known=config is not None,
                         ii_max=planner_ii_max,
-                        rr_max=requested_plan.rr_max
-                        if requested_plan is not None
-                        else _rr_max_for_opcode(
-                            group=group.group,
-                            default_rr_max=group_meta.rr_max,
-                            opcode=opcode,
+                        rr_max=(
+                            requested_plan.rr_max
+                            if requested_plan is not None
+                            else qualified_rr_max
                         ),
-                        rr_max_full=_rr_max_full_for_opcode(
-                            group=group.group,
-                            opcode=opcode,
+                        rr_max_full=(
+                            _rr_max_full_for_opcode(group=group.group, opcode=opcode)
+                            if qualified_rr_max is not None
+                            else None
                         ),
                         present_instances=present_instances,
+                        ii_min=_ii_min_for_opcode(
+                            group=group.group, opcode=opcode, profile_id=profile_id
+                        ),
                         expected_count=(
                             expected_instance_count(
                                 information_values.get(
                                     COUNT_GROUP_IDS.get((int(opcode), group.group), -1),
                                     float("nan"),
                                 ),
-                                capacity=planner_ii_max + 1,
+                                capacity=(
+                                    _count_capacity(
+                                        group=group.group,
+                                        opcode=opcode,
+                                        ii_max=planner_ii_max,
+                                        profile_id=profile_id,
+                                    )
+                                ),
                             )
                             if planner_ii_max is not None
+                            and COUNT_GROUP_IDS.get((int(opcode), group.group))
+                            not in CAPACITY_SYSTEM_INFORMATION_IDS
                             else None
                         ),
                         namespace_label=(opcode_label(opcode) if multi_op else None),
                         recommended=_planner_group_is_recommended(
                             group=group.group,
                             opcode=opcode,
+                        ),
+                        instances_probed=opcode in resolved_opcodes,
+                        research_rr_max=_rr_max_full_for_opcode(
+                            group=group.group,
+                            opcode=opcode,
+                        ),
+                        native_dhw_admitted=native_dhw_admitted.get(
+                            (int(opcode), group.group), False
                         ),
                     )
                 )
@@ -856,6 +1321,7 @@ def run_b524_scan(
                 planner_groups,
                 preset=planner_preset,
             )
+            plan = _normalize_profile_plan_instances(plan, profile_id=profile_id)
         elif explicit_plan is not None:
             plan = dict(explicit_plan)
 
@@ -883,6 +1349,7 @@ def run_b524_scan(
                                 default_plan=planner_default_plan,
                                 default_preset=planner_preset,
                                 system_information=artifact["meta"]["system_information"],
+                                **_planner_kwargs(run_textual_scan_plan, operation_planner_options),
                             )
                         except Exception as exc:
                             if planner_ui == "textual":
@@ -897,20 +1364,48 @@ def run_b524_scan(
                         else:
                             if selected is None:
                                 raise KeyboardInterrupt
-                            plan = selected
+                            if isinstance(selected, PlannerSelection):
+                                plan = selected.plan
+                                planner_preset = selected.selected_preset
+                                description_policy = selected.description_policy
+                            else:
+                                plan = dict(selected)
                 if planner_mode == "classic":
-                    plan = prompt_scan_plan_fn(
+                    selected = prompt_scan_plan_fn(
                         console,
                         planner_groups,
                         request_rate_rps=request_rate_rps,
                         default_plan=planner_default_plan,
                         default_preset=planner_preset,
                         system_information=artifact["meta"]["system_information"],
+                        **_planner_kwargs(prompt_scan_plan_fn, operation_planner_options),
                     )
+                    if isinstance(selected, PlannerSelection):
+                        plan = selected.plan
+                        planner_preset = selected.selected_preset
+                        description_policy = selected.description_policy
+                    else:
+                        plan = dict(selected)
+                if planner_preset != "custom":
+                    plan = _normalize_profile_plan_instances(plan, profile_id=profile_id)
 
+        artifact["meta"]["parameter_description_policy"].update(
+            local_source=description_policy.local,
+            remote_source=description_policy.remote,
+            local_override=description_policy.local_override,
+            remote_override=description_policy.remote_override,
+            selected_preset=planner_preset,
+        )
+        artifact["meta"]["scan_coverage"]["preset"] = planner_preset
+
+        store_operation_read_plan()
         artifact["meta"]["scan_plan"] = {
             "groups": _scan_plan_meta_groups(plan),
             "estimated_register_requests": estimate_register_requests(plan),
+            "estimated_operation_requests_worst_case": sum(operation_selection),
+            "estimated_total_requests_worst_case": (
+                estimate_register_requests(plan) + sum(operation_selection)
+            ),
             "measured_request_rate_rps": round(request_rate_rps, 4) if request_rate_rps else None,
         }
         artifact["meta"]["group_metadata_bounds"] = _metadata_map_to_dict(metadata_map)
@@ -940,6 +1435,7 @@ def run_b524_scan(
                     # Pause progress rendering and allow replanning without rewriting scanned data.
                     active_elapsed += time.perf_counter() - active_start
                     with hotkeys.suspend(), observer.suspend():
+                        operation_planner_options["description_policy"] = description_policy
                         if planner_mode == "textual":
                             try:
                                 from ..ui.planner_textual import run_textual_scan_plan
@@ -961,6 +1457,9 @@ def run_b524_scan(
                                         default_plan=plan,
                                         default_preset=planner_preset,
                                         system_information=artifact["meta"]["system_information"],
+                                        **_planner_kwargs(
+                                            run_textual_scan_plan, operation_planner_options
+                                        ),
                                     )
                                 except Exception as exc:
                                     if planner_ui == "textual":
@@ -976,19 +1475,48 @@ def run_b524_scan(
                                 else:
                                     if selected is None:
                                         raise KeyboardInterrupt
-                                    plan = selected
+                                    if isinstance(selected, PlannerSelection):
+                                        plan = selected.plan
+                                        planner_preset = selected.selected_preset
+                                        description_policy = selected.description_policy
+                                    else:
+                                        plan = dict(selected)
                         if planner_mode == "classic":
-                            plan = prompt_scan_plan_fn(
+                            selected = prompt_scan_plan_fn(
                                 console,
                                 planner_groups,
                                 request_rate_rps=request_rate_rps,
                                 default_plan=plan,
                                 default_preset=planner_preset,
                                 system_information=artifact["meta"]["system_information"],
+                                **_planner_kwargs(prompt_scan_plan_fn, operation_planner_options),
                             )
+                            if isinstance(selected, PlannerSelection):
+                                plan = selected.plan
+                                planner_preset = selected.selected_preset
+                                description_policy = selected.description_policy
+                            else:
+                                plan = dict(selected)
+                        if planner_preset != "custom":
+                            plan = _normalize_profile_plan_instances(plan, profile_id=profile_id)
+                    artifact["meta"]["parameter_description_policy"].update(
+                        local_source=description_policy.local,
+                        remote_source=description_policy.remote,
+                        local_override=description_policy.local_override,
+                        remote_override=description_policy.remote_override,
+                        selected_preset=planner_preset,
+                    )
+                    artifact["meta"]["scan_coverage"]["preset"] = planner_preset
+                    store_operation_read_plan()
                     artifact["meta"]["scan_plan"]["groups"] = _scan_plan_meta_groups(plan)
                     artifact["meta"]["scan_plan"]["estimated_register_requests"] = (
                         estimate_register_requests(plan)
+                    )
+                    artifact["meta"]["scan_plan"]["estimated_operation_requests_worst_case"] = sum(
+                        operation_selection
+                    )
+                    artifact["meta"]["scan_plan"]["estimated_total_requests_worst_case"] = (
+                        estimate_register_requests(plan) + sum(operation_selection)
                     )
                     work_queue = deque(build_work_queue(plan, done=done))
                     observer.phase_set_total(
@@ -1087,6 +1615,37 @@ def run_b524_scan(
                             if mapped_ebusd_name:
                                 entry["ebusd_name"] = mapped_ebusd_name
 
+                canonical_name = b524_register_name(
+                    opcode=task.opcode,
+                    group=task.group,
+                    register=task.register,
+                )
+                if canonical_name is not None:
+                    entry["myvaillant_name"] = canonical_name
+                if (
+                    profile_id == "basv2_sw0507_hw1704_api1"
+                    and (task.opcode, task.group) == (0x02, 0x02)
+                    and task.register in {0x0007, 0x000E, 0x0014, 0x001E}
+                ):
+                    entry["candidate_name"] = {
+                        0x0007: "circuit_target_flow_temperature",
+                        0x000E: "circuit_setback_mode",
+                        0x0014: "circuit_outside_temperature_threshold",
+                        0x001E: "circuit_status",
+                    }[task.register]
+                    entry["candidate_evidence"] = "basv2_sw0507_profile_cross_source_candidate"
+                if (
+                    profile_id == "basv2_sw0507_hw1704_api1"
+                    and (task.opcode, task.group, task.register) == (0x02, 0x02, 0x0020)
+                    and entry.get("type") == "UCH"
+                ):
+                    entry["codec_evidence"] = {
+                        "observed": "UCH",
+                        "width": 1,
+                        "qualification": "profile_observed",
+                        "contradicts": "legacy_f32_prose",
+                    }
+
                 constraint = _constraint_for_register(
                     opcode=task.opcode,
                     group=task.group,
@@ -1134,16 +1693,12 @@ def run_b524_scan(
                     type_spec = entry.get("type")
                     if isinstance(flags, int) and flags in {2, 3}:
                         identity = (int(task.opcode), task.group, task.instance, task.register)
-                        description_candidates.append(
+                        observed_description_candidates.append(
                             DescriptionCandidate(
                                 *identity, type_spec if isinstance(type_spec, str) else None
                             )
                         )
-                        description_entries[identity] = cast(dict[str, Any], entry)
-                        entry["parameter_description"] = {
-                            "qualification": "unavailable",
-                            "reason": "description acquisition pending",
-                        }
+                        observed_description_entries[identity] = cast(dict[str, Any], entry)
                 if task.opcode == 2 and task.group == 9 and ventilation_hint:
                     ventilation_names = {
                         2: "operating_mode_for_air_ventilation",
@@ -1175,6 +1730,9 @@ def run_b524_scan(
                         artifact,
                         group=task.group,
                         opcode=task.opcode,
+                        ii_min=_ii_min_for_opcode(
+                            group=task.group, opcode=task.opcode, profile_id=profile_id
+                        ),
                         ii_max=_ii_max_for_opcode(
                             group=task.group,
                             default_ii_max=task_group_meta.ii_max,
@@ -1189,9 +1747,9 @@ def run_b524_scan(
                 instance_key = _hex_u8(task.instance)
                 instance_obj = instances_obj.setdefault(instance_key, {"present": False})
                 if isinstance(instance_obj, dict):
-                    if task.opcode == 2 and task.group == 2 and task.instance == 0x0A:
+                    if task.opcode == 2 and task.group == 2 and task.instance == 0x09:
                         instance_obj.update(
-                            designation="virtual_dhw",
+                            designation="virtual_water_circuit",
                             protocol_role="unknown",
                             role_qualification="unqualified",
                         )
@@ -1199,6 +1757,49 @@ def run_b524_scan(
                     registers[_hex_u16(task.register)] = entry
 
         if probe_constraints:
+            assert description_policy is not None
+            (
+                description_candidates,
+                description_entries,
+                remote_profile_statuses,
+            ) = _select_live_description_candidates(
+                artifact,
+                observed_description_candidates,
+                observed_description_entries,
+                policy=description_policy,
+            )
+            description_candidates_prepared = True
+            if remote_profile_statuses:
+                artifact["meta"]["description_remote_profile_statuses"] = remote_profile_statuses
+            if any(row.get("status") != "exact" for row in remote_profile_statuses):
+                artifact["meta"].setdefault(
+                    "description_profile_reminder",
+                    {
+                        "shown_once": True,
+                        "recommendation": "full_within_known_scope",
+                        "sharing": "save_and_share_json_manually",
+                        "automatic_upload": False,
+                    },
+                )
+                if observer is not None and not description_reminder_logged:
+                    observer.log(
+                        "Unknown remote description profile: use Full for live writable "
+                        "descriptions within known bounds, then save/share JSON manually "
+                        "if useful.",
+                        level="warn",
+                    )
+                    description_reminder_logged = True
+            for candidate in description_candidates:
+                identity = (
+                    candidate.read_opcode,
+                    candidate.group,
+                    candidate.instance,
+                    candidate.register,
+                )
+                description_entries[identity]["parameter_description"] = {
+                    "qualification": "unavailable",
+                    "reason": "description acquisition pending",
+                }
             acquire_descriptions(
                 transport,
                 dst=dst,
@@ -1216,12 +1817,32 @@ def run_b524_scan(
                 observer.log(
                     "Observed register values outside the scoped bundled static "
                     "constraint catalog. Review meta.constraint_mismatches and rerun "
-                    "with --probe-constraints if you want live confirmation.",
+                    "with a live description override in the planner "
+                    "for current-target confirmation.",
                     level="warn",
                 )
 
         if observer is not None:
             observer.phase_finish("register_scan")
+
+        if operation_request_list:
+            selected_operations = tuple(
+                request
+                for request, operation_enabled in zip(
+                    operation_request_list, operation_selection, strict=True
+                )
+                if operation_enabled
+            )
+            if selected_operations:
+                acquire_operation_reads(
+                    transport,
+                    dst=dst,
+                    artifact=artifact,
+                    requests=selected_operations,
+                    device_id=device_id,
+                    manufacturer=manufacturer,
+                    observer=observer,
+                )
 
     except KeyboardInterrupt:
         artifact["meta"]["incomplete"] = True
@@ -1272,17 +1893,58 @@ def run_b524_scan(
             observer.log(str(exc), level="warn")
 
     if probe_constraints:
+        if not description_candidates_prepared and description_policy is not None:
+            description_candidates, description_entries, remote_profile_statuses = (
+                _select_live_description_candidates(
+                    artifact,
+                    observed_description_candidates,
+                    observed_description_entries,
+                    policy=description_policy,
+                )
+            )
+            if remote_profile_statuses:
+                artifact["meta"]["description_remote_profile_statuses"] = remote_profile_statuses
         finish_description_coverage(
             description_candidates,
             description_entries,
             budget=description_budget,
             coverage=description_coverage,
         )
+    store_operation_read_plan()
+    if operation_request_list and "b524_operation_reads" not in artifact:
+        artifact["b524_operation_reads_schema_version"] = 1
+        artifact["b524_operation_reads"] = []
+        for request, operation_enabled in zip(
+            operation_request_list, operation_selection, strict=True
+        ):
+            if operation_enabled:
+                record = record_operation_read_observation(request)
+                record["response_state"] = "unattempted"
+                record["error"] = incomplete_reason or "not_acquired"
+                artifact["b524_operation_reads"].append(record)
     artifact["meta"]["parameter_description_coverage"] = description_coverage
     artifact["meta"]["parameter_description_requests"] = description_coverage.get(
         "request_attempts", 0
     )
     artifact["meta"]["scan_coverage"]["actual_requests"] = counting_transport.counters.send_calls
+    operation_records = artifact.get("b524_operation_reads")
+    if isinstance(operation_records, list):
+        operation_attempts = {
+            "OP09": sum(
+                int(record.get("request_attempts", 0))
+                for record in operation_records
+                if isinstance(record, dict) and record.get("operation") == "GetEvent"
+            ),
+            "OP0B": sum(
+                int(record.get("request_attempts", 0))
+                for record in operation_records
+                if isinstance(record, dict) and record.get("operation") == "GetEventSetPoint"
+            ),
+        }
+        artifact["meta"]["b524_operation_read_attempts"] = {
+            **operation_attempts,
+            "total": sum(operation_attempts.values()),
+        }
     artifact["meta"]["scan_coverage"]["completed"] = not artifact["meta"]["incomplete"]
     artifact["meta"]["scan_duration_seconds"] = round(time.perf_counter() - start_perf, 4)
     if incomplete_reason is not None:

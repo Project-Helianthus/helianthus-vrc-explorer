@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ..scanner.director import group_namespace_profiles
 from .browse_models import BrowseTab, RegisterRow, TreeNodeRef
 
 
@@ -36,6 +37,24 @@ def _has_navigation_children(node: TreeNodeRef, tree_nodes: list[TreeNodeRef]) -
     B509 ranges and B555 programs as leaves.
     """
 
+    if (
+        node.protocol == "b524"
+        and node.level == "section"
+        and (node.section_key or "").startswith("operation_")
+    ):
+        return True
+    if node.protocol == "b524" and node.level == "group" and node.group_key:
+        if (node.section_key or "").startswith("operation_"):
+            return False
+        if node.section_key == "device_slots":
+            return True
+        if node.section_key == "controller_registers":
+            try:
+                profile = group_namespace_profiles(int(node.group_key, 0)).get(2)
+            except ValueError:
+                profile = None
+            if profile is not None and profile.ii_max > 0:
+                return True
     for candidate in tree_nodes:
         if candidate.node_id == node.node_id:
             continue

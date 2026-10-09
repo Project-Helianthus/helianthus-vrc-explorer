@@ -4,12 +4,28 @@ import json
 import struct
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from helianthus_vrc_explorer.cli import app
 from helianthus_vrc_explorer.replay_trace import (
     UnsupportedTraceFormatError,
+    _enrich_register_names,
     replay_trace_to_artifact,
+)
+from helianthus_vrc_explorer.transport.base import (
+    TransportError,
+    TransportNack,
+    TransportProtocolFailure,
+    TransportRecoveryExhausted,
+    TransportTimeout,
+)
+from helianthus_vrc_explorer.transport.enhanced_tcp import (
+    _ENH_RES_RESETTED,
+    _ENH_RES_STARTED,
+    EnhancedTcpConfig,
+    EnhancedTcpTransport,
+    _crc,
 )
 
 
@@ -17,6 +33,18 @@ def _write_trace(tmp_path: Path, name: str, content: str) -> Path:
     trace_path = tmp_path / name
     trace_path.write_text(content, encoding="utf-8")
     return trace_path
+
+
+def _offline_enhanced_transport(trace_path: Path) -> EnhancedTcpTransport:
+    transport = EnhancedTcpTransport(EnhancedTcpConfig(trace_path=trace_path, reconnect_delay_s=0))
+    transport._ensure_trace_handle()
+    transport._trace("INIT features=0x01")
+    transport._start_arbitration = lambda _src: None
+    transport._send_telegram_symbol_with_echo = lambda _symbol: None
+    transport._send_symbol_with_echo = lambda _symbol: None
+    transport._send_end_of_message = lambda: None
+    transport._reset_parser = lambda: None
+    return transport
 
 
 def test_replay_trace_to_artifact_reconstructs_b524_register_reads(tmp_path: Path) -> None:
@@ -65,9 +93,151 @@ def test_replay_trace_to_artifact_reconstructs_b524_register_reads(tmp_path: Pat
     assert local_entry["read_opcode_label"] == "GetParameter"
     assert local_entry["response_state"] == "active"
     assert local_entry["value"] == 1
+    assert local_entry["myvaillant_name"] == "circuit_circuit_type"
     assert remote_entry["read_opcode_label"] == "GetDeviceParameter"
     assert remote_entry["response_state"] == "active"
     assert remote_entry["value"] == 1
+    assert remote_entry["myvaillant_name"] == "device_connected"
+
+
+def test_replay_preserves_historical_system_registers_above_current_scan_ceiling(
+    tmp_path: Path,
+) -> None:
+    trace_path = _write_trace(
+        tmp_path,
+        "system-history.trace",
+        "\n".join(
+            [
+                "2026-04-06T10:00:00.000000Z INIT features=0x01",
+                "2026-04-06T10:00:00.050000Z START initiator=0xF7",
+                "2026-04-06T10:00:00.100000Z #1 SEND_PROTO src=0xF7 dst=0x15 "
+                "primary=0xB5 secondary=0x24 payload=020000000001",
+                "2026-04-06T10:00:00.150000Z #1 PARSED_PROTO len=5 hex=0100000101",
+            ]
+        )
+        + "\n",
+    )
+
+    artifact = replay_trace_to_artifact(trace_path)
+    registers = artifact["operations"]["0x02"]["groups"]["0x00"]["instances"]["0x00"]["registers"]
+    assert registers["0x0100"]["raw_hex"] == "01"
+
+
+def test_replay_preserves_historical_instances_and_unknown_groups(tmp_path: Path) -> None:
+    trace_path = _write_trace(
+        tmp_path,
+        "historical-selectors.trace",
+        "\n".join(
+            [
+                "2026-04-06T10:00:00.000000Z INIT features=0x01",
+                "2026-04-06T10:00:00.050000Z START initiator=0xF7",
+                "2026-04-06T10:00:00.100000Z #1 SEND_PROTO src=0xF7 dst=0x15 "
+                "primary=0xB5 secondary=0x24 payload=0200020a0200",
+                "2026-04-06T10:00:00.150000Z #1 PARSED_PROTO len=6 hex=030202000100",
+                "2026-04-06T10:00:00.200000Z #2 SEND_PROTO src=0xF7 dst=0x15 "
+                "primary=0xB5 secondary=0x24 payload=0600090a0100",
+                "2026-04-06T10:00:00.250000Z #2 PARSED_PROTO len=5 hex=0109010001",
+                "2026-04-06T10:00:00.300000Z #3 SEND_PROTO src=0xF7 dst=0x15 "
+                "primary=0xB5 secondary=0x24 payload=0200690a0500",
+                "2026-04-06T10:00:00.350000Z #3 PARSED_PROTO len=5 hex=0169050001",
+            ]
+        )
+        + "\n",
+    )
+
+    artifact = replay_trace_to_artifact(trace_path)
+    assert (
+        artifact["operations"]["0x02"]["groups"]["0x02"]["instances"]["0x0a"]["registers"][
+            "0x0002"
+        ]["raw_hex"]
+        == "0100"
+    )
+    assert (
+        artifact["operations"]["0x06"]["groups"]["0x09"]["instances"]["0x0a"]["registers"][
+            "0x0001"
+        ]["raw_hex"]
+        == "01"
+    )
+    assert (
+        artifact["operations"]["0x02"]["groups"]["0x69"]["instances"]["0x0a"]["registers"][
+            "0x0005"
+        ]["raw_hex"]
+        == "01"
+    )
+
+
+def test_replay_canonical_names_preserve_legacy_metadata_enrichment() -> None:
+    operations = {
+        "0x02": {
+            "groups": {
+                "0x00": {
+                    "instances": {
+                        "0x00": {
+                            "registers": {
+                                "0x003d": {"raw_hex": "01000000"},
+                                "0x0001": {
+                                    "raw_hex": "00000000",
+                                    "myvaillant_name": "stale_leaf",
+                                    "type": "OPAQUE",
+                                    "value": "keep",
+                                    "register_class": "config",
+                                    "ebusd_name": "existing_alias",
+                                },
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "0x06": {
+            "groups": {
+                "0x09": {
+                    "instances": {
+                        "0x01": {
+                            "registers": {
+                                "0x0004": {
+                                    "raw_hex": "021703",
+                                    "ebusd_name": "existing_alias",
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+    }
+
+    _enrich_register_names(operations)
+
+    typed_op02 = operations["0x02"]["groups"]["0x00"]["instances"]["0x00"]["registers"]["0x003d"]
+    assert typed_op02 == {
+        "raw_hex": "01000000",
+        "myvaillant_name": "system_yield_solar_total",
+        "register_class": "state",
+        "ebusd_name": "SolarYieldTotal",
+        "type": "U32",
+        "value": 1,
+    }
+
+    op06_header = operations["0x06"]["groups"]["0x09"]["instances"]["0x01"]["registers"]["0x0004"]
+    assert op06_header == {
+        "raw_hex": "021703",
+        "ebusd_name": "existing_alias",
+        "myvaillant_name": "device_firmware_version",
+        "register_class": "state",
+        "type": "FW",
+        "value": "02.17.03",
+    }
+
+    stale = operations["0x02"]["groups"]["0x00"]["instances"]["0x00"]["registers"]["0x0001"]
+    assert stale == {
+        "raw_hex": "00000000",
+        "myvaillant_name": "system_dhw_bivalence_point",
+        "type": "OPAQUE",
+        "value": "keep",
+        "register_class": "config",
+        "ebusd_name": "existing_alias",
+    }
 
 
 def test_replay_trace_to_artifact_rejects_non_enhanced_trace(tmp_path: Path) -> None:
@@ -179,6 +349,622 @@ def test_replay_trace_instance_presence_uses_response_state(tmp_path: Path) -> N
     assert instances["0x01"]["registers"]["0x0001"]["response_state"] == "empty_reply"
 
 
+def test_replay_preserves_operation_reads_and_raw_write_history(tmp_path: Path) -> None:
+    exchanges = [
+        ("0301000100", "00002430909090"),
+        ("0401000100002430489090", ""),
+        ("08", "0102030405060708"),
+        ("0903020181", "03ff242a30363c42"),
+        ("0a03020181ff242a30363c42", "7f"),
+        ("0b03020181", "002d2e2f30313233"),
+        ("0c030201812d2e2f30313233", ""),
+    ]
+    lines = [
+        "2026-04-06T10:00:00.000000Z INIT features=0x01",
+        "2026-04-06T10:00:00.050000Z START initiator=0xF7",
+    ]
+    for seq, (payload, reply) in enumerate(exchanges, 1):
+        lines.append(
+            f"2026-04-06T10:00:{seq:02d}.000000Z #{seq} SEND_PROTO src=0xF7 "
+            f"dst=0x15 primary=0xB5 secondary=0x24 payload={payload}"
+        )
+        lines.append(
+            f"2026-04-06T10:00:{seq:02d}.050000Z #{seq} PARSED_PROTO "
+            f"len={len(bytes.fromhex(reply))} hex={reply}"
+        )
+    artifact = replay_trace_to_artifact(
+        _write_trace(tmp_path, "operations.trace", "\n".join(lines) + "\n")
+    )
+
+    reads = artifact["b524_operation_reads"]
+    assert [item["operation"] for item in reads] == [
+        "ReadTimer",
+        "ReadVR91",
+        "GetEvent",
+        "GetEventSetPoint",
+    ]
+    assert reads[0]["decoded"]["slots"][0]["stop_minutes"] == 360
+    assert reads[0]["selector"] == {"channel": "dhw", "instance": 0, "weekday": 0}
+    assert reads[2]["decoded"]["start1_raw"] == 0xFF
+    assert reads[2]["selector"] == {
+        "profile": "zone",
+        "instance": 2,
+        "address": 1,
+        "weekday_code": 129,
+    }
+    assert reads[2]["pair_context"] == {
+        "profile": "zone",
+        "instance": 2,
+        "address": 1,
+        "weekday_code": 129,
+    }
+    assert all(item["selector_correlation"] == "request_context" for item in reads)
+    assert all(item["decode_qualification"] == "schema_unqualified" for item in reads)
+
+    writes = artifact["b524_operations"]["raw_write_history"]
+    assert [item["opcode_hex"] for item in writes] == ["0x04", "0x0a", "0x0c"]
+    assert writes[0]["selector"] == {
+        "system_type": 1,
+        "instance": 0,
+        "address": 1,
+        "weekday": 0,
+    }
+    assert writes[1]["selector"]["weekday_code"] == 129
+    assert all(item["selector_correlation"] == "request_context" for item in writes)
+    assert [item["response_state"] for item in writes] == ["empty", "value", "empty"]
+    assert all(item["feedback_interpretation"] == "unknown" for item in writes)
+
+
+def test_replay_keeps_unknown_operation_selectors_raw_and_separate(tmp_path: Path) -> None:
+    trace_path = _write_trace(
+        tmp_path,
+        "unknown_operation_selectors.trace",
+        "\n".join(
+            [
+                "2026-04-06T10:00:00.000000Z INIT features=0x01",
+                "2026-04-06T10:00:00.050000Z START initiator=0xF7",
+                (
+                    "2026-04-06T10:00:01.000000Z #1 SEND_PROTO src=0xF7 dst=0x15 "
+                    "primary=0xB5 secondary=0x24 payload=0302020181"
+                ),
+                "2026-04-06T10:00:01.100000Z #1 PARSED_PROTO len=7 hex=00002430909090",
+                (
+                    "2026-04-06T10:00:02.000000Z #2 SEND_PROTO src=0xF7 dst=0x15 "
+                    "primary=0xB5 secondary=0x24 payload=0902020181"
+                ),
+                "2026-04-06T10:00:02.100000Z #2 PARSED_PROTO len=8 hex=0001020304050607",
+                (
+                    "2026-04-06T10:00:03.000000Z #3 SEND_PROTO src=0xF7 dst=0x15 "
+                    "primary=0xB5 secondary=0x24 payload=0b02020181"
+                ),
+                "2026-04-06T10:00:03.100000Z #3 PARSED_PROTO len=8 hex=0001020304050607",
+            ]
+        )
+        + "\n",
+    )
+    reads = replay_trace_to_artifact(trace_path)["b524_operation_reads"]
+
+    assert reads[0]["selector"] == {}
+    assert reads[0]["raw_selector"] == {
+        "system_type": 2,
+        "instance": 2,
+        "address": 1,
+        "weekday": 129,
+    }
+    assert reads[0]["decode_qualification"] == "schema_unqualified"
+    assert reads[0]["decoded"] is None
+    assert reads[0]["error"] == "unknown_timer_channel"
+    assert reads[1]["selector"] == {}
+    assert reads[1]["raw_selector"] == {
+        "system_type": 2,
+        "instance": 2,
+        "address": 1,
+        "weekday_code": 129,
+    }
+    assert reads[1]["error"] == "unknown_event_profile"
+    assert reads[1]["decoded"] is None
+    assert reads[2]["selector"] == {}
+    assert reads[2]["raw_selector"] == {
+        "system_type": 2,
+        "instance": 2,
+        "address": 1,
+        "weekday_code": 129,
+    }
+    assert reads[2]["error"] == "unknown_event_profile"
+    assert reads[2]["decoded"] is None
+
+
+@pytest.mark.parametrize("payload", ["0903000981", "0b03000981", "0301000107", "0301010100"])
+def test_replay_unsupported_selector_is_raw_only(tmp_path: Path, payload: str) -> None:
+    raw = "00002430909090" if payload.startswith("03") else "0001020304050607"
+    trace_path = _write_trace(
+        tmp_path,
+        "unsupported-selector.trace",
+        "2026-04-06T10:00:00Z INIT features=0x01\n"
+        "2026-04-06T10:00:01Z #1 SEND_PROTO src=0xF7 dst=0x15 "
+        f"primary=0xB5 secondary=0x24 payload={payload}\n"
+        f"2026-04-06T10:00:02Z #1 PARSED_PROTO len={len(raw) // 2} hex={raw}\n",
+    )
+    record = replay_trace_to_artifact(trace_path)["b524_operation_reads"][0]
+    assert record["selector"] == {}
+    assert record["raw_selector"]["address"] == int(payload[6:8], 16)
+    assert record["decoded"] is None
+    assert record["decode_qualification"] == "schema_unqualified"
+    assert record["request_payload_hex"] == payload
+    assert record["response_raw_hex"] == raw
+    assert record["error"].startswith("unsupported_")
+
+
+def test_replay_keeps_operation_empty_nack_timeout_and_malformed_distinct(tmp_path: Path) -> None:
+    trace_path = _write_trace(
+        tmp_path,
+        "operation_failures.trace",
+        "\n".join(
+            [
+                "2026-04-06T10:00:00.000000Z INIT features=0x01",
+                "2026-04-06T10:00:00.050000Z START initiator=0xF7",
+                (
+                    "2026-04-06T10:00:01.000000Z #1 SEND_PROTO src=0xF7 dst=0x15 "
+                    "primary=0xB5 secondary=0x24 payload=0900000100"
+                ),
+                (
+                    "2026-04-06T10:00:02.000000Z #2 SEND_PROTO src=0xF7 dst=0x15 "
+                    "primary=0xB5 secondary=0x24 payload=0900000200"
+                ),
+                "2026-04-06T10:00:02.100000Z #2 RETRY type=nack n=1/1",
+                (
+                    "2026-04-06T10:00:03.000000Z #3 SEND_PROTO src=0xF7 dst=0x15 "
+                    "primary=0xB5 secondary=0x24 payload=0b01000100"
+                ),
+                "2026-04-06T10:00:03.100000Z #3 PARSED_PROTO len=0 hex=",
+                (
+                    "2026-04-06T10:00:04.000000Z #4 SEND_PROTO src=0xF7 dst=0x15 "
+                    "primary=0xB5 secondary=0x24 payload=0b01000200"
+                ),
+                "2026-04-06T10:00:04.100000Z #4 PARSED_PROTO len=2 hex=0102",
+                (
+                    "2026-04-06T10:00:05.000000Z #5 SEND_PROTO src=0xF7 dst=0x15 "
+                    "primary=0xB5 secondary=0x24 payload=0900000300"
+                ),
+                "2026-04-06T10:00:05.100000Z #5 RETRY type=protocol_sync_error n=1/1",
+            ]
+        )
+        + "\n",
+    )
+    artifact = replay_trace_to_artifact(trace_path)
+    assert [item["response_state"] for item in artifact["b524_operation_reads"]] == [
+        "timeout",
+        "nack",
+        "empty",
+        "malformed",
+        "transport_error",
+    ]
+    assert artifact["b524_operation_reads"][4]["error"] == "protocol_sync_error"
+
+
+def test_replay_recognizes_local_nack_retry_without_overriding_later_outcome(
+    tmp_path: Path,
+) -> None:
+    trace_path = _write_trace(
+        tmp_path,
+        "local_nack_retry.trace",
+        "\n".join(
+            [
+                "2026-04-06T10:00:00.000000Z INIT features=0x01",
+                "2026-04-06T10:00:00.050000Z START initiator=0xF7",
+                (
+                    "2026-04-06T10:00:01.000000Z #1 SEND_PROTO src=0xF7 dst=0x15 "
+                    "primary=0xB5 secondary=0x24 payload=0900000100"
+                ),
+                "2026-04-06T10:00:01.100000Z #1 LOCAL_NACK_RETRY attempt=1",
+                (
+                    "2026-04-06T10:00:02.000000Z #2 SEND_PROTO src=0xF7 dst=0x15 "
+                    "primary=0xB5 secondary=0x24 payload=0b01000100"
+                ),
+                "2026-04-06T10:00:02.100000Z #2 LOCAL_NACK_RETRY attempt=1",
+                "2026-04-06T10:00:02.200000Z #2 PARSED_PROTO len=8 hex=0001020304050607",
+                (
+                    "2026-04-06T10:00:03.000000Z #3 SEND_PROTO src=0xF7 dst=0x15 "
+                    "primary=0xB5 secondary=0x24 payload=0301000100"
+                ),
+                "2026-04-06T10:00:03.100000Z #3 LOCAL_NACK_RETRY attempt=1",
+                "2026-04-06T10:00:03.200000Z #3 RETRY type=protocol_sync_error n=1/1",
+            ]
+        )
+        + "\n",
+    )
+
+    reads = replay_trace_to_artifact(trace_path)["b524_operation_reads"]
+
+    assert [item["response_state"] for item in reads] == [
+        "transport_error",
+        "value",
+        "transport_error",
+    ]
+    assert [item.get("error") for item in reads] == [
+        "local_nack_retry",
+        None,
+        "protocol_sync_error",
+    ]
+    assert [item["request_attempts"] for item in reads] == [2, 2, 2]
+
+
+@pytest.mark.parametrize("release_failure", [False, True])
+def test_replay_actual_enhanced_terminal_nack_preserves_scalar_state_and_counts(
+    tmp_path: Path, release_failure: bool
+) -> None:
+    trace_path = tmp_path / "actual_scalar_nack.trace"
+    transport = _offline_enhanced_transport(trace_path)
+    symbols = iter((0xFF, 0xFF))
+    transport._recv_bus_symbol = lambda **_kwargs: next(symbols)
+    if release_failure:
+
+        def fail_bus_release() -> None:
+            raise TransportError("release failed")
+
+        transport._send_end_of_message = fail_bus_release
+
+    with pytest.raises(TransportNack, match="local retry exhausted"):
+        transport.send(0x15, bytes.fromhex("020002000100"))
+    transport.close()
+
+    entry = replay_trace_to_artifact(trace_path)["operations"]["0x02"]["groups"]["0x02"][
+        "instances"
+    ]["0x00"]["registers"]["0x0001"]
+    assert (entry["response_state"], entry["error"]) == ("nack", "nack")
+    assert entry["transport_diagnostic"] == {
+        "cause": "nack",
+        "phase": "command_ack",
+        "request_attempts": 2,
+        "retry_count": 1,
+        "reconnect_attempts": 0,
+    }
+
+
+def test_replay_actual_enhanced_recovery_preserves_terminal_failure_and_counts(
+    tmp_path: Path,
+) -> None:
+    trace_path = tmp_path / "actual_operation_sync_failure.trace"
+    transport = _offline_enhanced_transport(trace_path)
+    symbols = iter((0xFF, 0x42, 0x42, 0x42, 0x42))
+    transport._recv_bus_symbol = lambda **_kwargs: next(symbols)
+
+    def reconnect(_seq: int, _attempt: int) -> None:
+        transport.close()
+        transport._ensure_trace_handle()
+        transport._trace("INIT features=0x01")
+
+    transport._reconnect = reconnect
+    with pytest.raises(TransportProtocolFailure) as raised:
+        transport.send(0x15, bytes.fromhex("0900000100"))
+    transport.close()
+    assert (
+        raised.value.cause,
+        raised.value.request_attempts,
+        raised.value.retry_count,
+        raised.value.reconnect_attempts,
+    ) == ("protocol_sync_error", 5, 4, 3)
+
+    reads = replay_trace_to_artifact(trace_path)["b524_operation_reads"]
+    assert len(reads) == 1
+    assert (reads[0]["response_state"], reads[0].get("error")) == (
+        "transport_error",
+        "protocol_sync_error",
+    )
+    assert reads[0]["request_attempts"] == 5
+    assert reads[0]["transport_diagnostic"] == {
+        "cause": "protocol_sync_error",
+        "phase": "command_ack",
+        "request_attempts": 5,
+        "retry_count": 4,
+        "reconnect_attempts": 3,
+        "unexpected_symbol": "0x42",
+    }
+
+
+def test_replay_actual_enhanced_local_nack_then_success_keeps_success(
+    tmp_path: Path,
+) -> None:
+    trace_path = tmp_path / "actual_operation_retry_success.trace"
+    transport = _offline_enhanced_transport(trace_path)
+    transport._recv_bus_symbol = lambda **_kwargs: next(iterated_acks)
+    response = bytes.fromhex("0001020304050607")
+    response_symbols = iter((len(response), *response, _crc(bytes((len(response),)) + response)))
+    transport._recv_telegram_symbol = lambda **_kwargs: next(response_symbols)
+    iterated_acks = iter((0xFF, 0x00))
+
+    assert transport.send(0x15, bytes.fromhex("0900000100")) == response
+    transport.close()
+
+    record = replay_trace_to_artifact(trace_path)["b524_operation_reads"][0]
+    assert record["response_state"] == "value"
+    assert record.get("error") is None
+    assert record["response_raw_hex"] == response.hex()
+    assert record["request_attempts"] == 2
+    assert "transport_diagnostic" not in record
+
+
+def test_replay_actual_enhanced_command_syn_terminal_keeps_complete_diagnostic(
+    tmp_path: Path,
+) -> None:
+    trace_path = tmp_path / "actual_command_syn_terminal.trace"
+    transport = _offline_enhanced_transport(trace_path)
+    symbols = iter((0xAA, 0xAA))
+    transport._recv_bus_symbol = lambda **_kwargs: next(symbols)
+
+    with pytest.raises(TransportProtocolFailure) as raised:
+        transport.send(0x15, bytes.fromhex("0900000100"))
+    transport.close()
+    assert (
+        raised.value.cause,
+        raised.value.phase,
+        raised.value.request_attempts,
+        raised.value.retry_count,
+        raised.value.reconnect_attempts,
+        raised.value.unexpected_symbol,
+    ) == ("command_not_acknowledged_before_syn", "command_ack", 2, 1, 0, "0xaa")
+
+    record = replay_trace_to_artifact(trace_path)["b524_operation_reads"][0]
+    assert (record["response_state"], record.get("error"), record["request_attempts"]) == (
+        "transport_error",
+        "command_not_acknowledged_before_syn",
+        2,
+    )
+    assert record["transport_diagnostic"] == {
+        "cause": "command_not_acknowledged_before_syn",
+        "phase": "command_ack",
+        "request_attempts": 2,
+        "retry_count": 1,
+        "reconnect_attempts": 0,
+        "unexpected_symbol": "0xaa",
+    }
+
+
+def test_replay_actual_enhanced_timeout_reconnect_terminal_keeps_complete_diagnostic(
+    tmp_path: Path,
+) -> None:
+    trace_path = tmp_path / "actual_timeout_reconnect_terminal.trace"
+    transport = EnhancedTcpTransport(
+        EnhancedTcpConfig(
+            trace_path=trace_path,
+            reconnect_delay_s=0,
+            timeout_max_retries=1,
+            reconnect_max_retries=1,
+        )
+    )
+    transport._ensure_trace_handle()
+    transport._trace("INIT features=0x01")
+    transport._start_arbitration = lambda _src: None
+    transport._send_telegram_symbol_with_echo = lambda _symbol: None
+    transport._send_symbol_with_echo = lambda _symbol: None
+    transport._send_end_of_message = lambda: None
+    transport._reset_parser = lambda: None
+    acknowledgements = iter((0xFF, 0x00, 0x00))
+    transport._recv_bus_symbol = lambda **_kwargs: next(acknowledgements)
+    transport._recv_telegram_symbol = lambda **_kwargs: (_ for _ in ()).throw(
+        TransportTimeout("response timeout")
+    )
+    transport._reconnect = lambda _seq, _attempt: (_ for _ in ()).throw(
+        TransportError("reconnect failed")
+    )
+
+    with pytest.raises(TransportRecoveryExhausted) as raised:
+        transport.send(0x15, bytes.fromhex("0900000100"))
+    transport.close()
+    assert (
+        raised.value.cause,
+        raised.value.phase,
+        raised.value.request_attempts,
+        raised.value.retry_count,
+        raised.value.reconnect_attempts,
+    ) == ("transport_error", "reconnect", 3, 2, 1)
+
+    records = replay_trace_to_artifact(trace_path)["b524_operation_reads"]
+    assert len(records) == 1
+    record = records[0]
+    assert (record["response_state"], record.get("error"), record["request_attempts"]) == (
+        "transport_error",
+        "transport_error",
+        3,
+    )
+    assert record["transport_diagnostic"] == {
+        "cause": "transport_error",
+        "phase": "reconnect",
+        "request_attempts": 3,
+        "retry_count": 2,
+        "reconnect_attempts": 1,
+    }
+
+
+def test_replay_actual_enhanced_command_syn_retry_then_success_keeps_attempt_count(
+    tmp_path: Path,
+) -> None:
+    trace_path = tmp_path / "actual_command_syn_success.trace"
+    transport = _offline_enhanced_transport(trace_path)
+    acknowledgements = iter((0xAA, 0x00))
+    transport._recv_bus_symbol = lambda **_kwargs: next(acknowledgements)
+    response = bytes.fromhex("0001020304050607")
+    response_symbols = iter((len(response), *response, _crc(bytes((len(response),)) + response)))
+    transport._recv_telegram_symbol = lambda **_kwargs: next(response_symbols)
+
+    assert transport.send(0x15, bytes.fromhex("0900000100")) == response
+    transport.close()
+
+    records = replay_trace_to_artifact(trace_path)["b524_operation_reads"]
+    assert len(records) == 1
+    assert records[0]["response_state"] == "value"
+    assert records[0]["request_attempts"] == 2
+
+
+def test_replay_actual_enhanced_independent_repeated_selector_stays_separate(
+    tmp_path: Path,
+) -> None:
+    trace_path = tmp_path / "actual_independent_repeats.trace"
+    transport = _offline_enhanced_transport(trace_path)
+    transport._recv_bus_symbol = lambda **_kwargs: 0x00
+    first = bytes.fromhex("0001020304050607")
+    second = bytes.fromhex("08090a0b0c0d0e0f")
+    response_symbols = iter(
+        (
+            len(first),
+            *first,
+            _crc(bytes((len(first),)) + first),
+            len(second),
+            *second,
+            _crc(bytes((len(second),)) + second),
+        )
+    )
+    transport._recv_telegram_symbol = lambda **_kwargs: next(response_symbols)
+    payload = bytes.fromhex("0900000100")
+
+    assert transport.send(0x15, payload) == first
+    assert transport.send(0x15, payload) == second
+    transport.close()
+
+    records = replay_trace_to_artifact(trace_path)["b524_operation_reads"]
+    assert [record["response_raw_hex"] for record in records] == [first.hex(), second.hex()]
+    assert [record["request_attempts"] for record in records] == [1, 1]
+
+
+@pytest.mark.parametrize("terminal_failure", [False, True])
+def test_replay_actual_bus_read_reset_stays_in_logical_exchange(
+    tmp_path: Path, terminal_failure: bool
+) -> None:
+    trace_path = tmp_path / f"actual_bus_read_reset_{terminal_failure}.trace"
+    transport = _offline_enhanced_transport(trace_path)
+
+    def reopen_after_reset() -> None:
+        transport._ensure_trace_handle()
+        transport._trace("INIT features=0x01")
+
+    transport._open_session = reopen_after_reset
+    transport._recv_bus_symbol = lambda **kwargs: EnhancedTcpTransport._recv_bus_symbol(
+        transport, **kwargs
+    )
+    bus_messages = iter(
+        [
+            ("frame", _ENH_RES_RESETTED, 0x01),
+            ("data", 0xAA if terminal_failure else 0x00, 0),
+            *(([("data", 0xAA, 0)]) if terminal_failure else []),
+        ]
+    )
+    transport._read_message = lambda: next(bus_messages)
+    response = bytes.fromhex("0001020304050607")
+    response_symbols = iter((len(response), *response, _crc(bytes((len(response),)) + response)))
+    transport._recv_telegram_symbol = lambda **_kwargs: next(response_symbols)
+    payload = bytes.fromhex("0900000100")
+
+    if terminal_failure:
+        with pytest.raises(TransportProtocolFailure) as raised:
+            transport.send(0x15, payload)
+        assert (
+            raised.value.cause,
+            raised.value.request_attempts,
+            raised.value.retry_count,
+        ) == ("command_not_acknowledged_before_syn", 3, 2)
+    else:
+        assert transport.send(0x15, payload) == response
+    transport.close()
+
+    records = replay_trace_to_artifact(trace_path)["b524_operation_reads"]
+    assert len(records) == 1
+    assert records[0]["request_attempts"] == (3 if terminal_failure else 2)
+    assert records[0]["response_state"] == ("transport_error" if terminal_failure else "value")
+    if terminal_failure:
+        assert records[0]["transport_diagnostic"] == {
+            "cause": "command_not_acknowledged_before_syn",
+            "phase": "command_ack",
+            "request_attempts": 3,
+            "retry_count": 2,
+            "reconnect_attempts": 0,
+            "unexpected_symbol": "0xaa",
+        }
+
+
+@pytest.mark.parametrize("terminal_failure", [False, True])
+def test_replay_actual_arbitration_reset_stays_in_logical_exchange(
+    tmp_path: Path, terminal_failure: bool
+) -> None:
+    trace_path = tmp_path / f"actual_arbitration_reset_{terminal_failure}.trace"
+    transport = _offline_enhanced_transport(trace_path)
+    start_calls = 0
+
+    def reopen_after_reset() -> None:
+        transport._ensure_trace_handle()
+        transport._trace("INIT features=0x01")
+
+    def start_with_reset(initiator: int) -> None:
+        nonlocal start_calls
+        start_calls += 1
+        if start_calls == 1:
+            return
+        EnhancedTcpTransport._start_arbitration(transport, initiator)
+
+    transport._open_session = reopen_after_reset
+    transport._start_arbitration = start_with_reset
+    transport._send_enh_frame = lambda _command, _data: None
+    arbitration_messages = iter(
+        [
+            ("frame", _ENH_RES_RESETTED, 0x01),
+            ("frame", _ENH_RES_STARTED, transport._config.src),
+        ]
+    )
+    transport._read_message = lambda: next(arbitration_messages)
+    acknowledgements = iter((0xAA, 0xFF, 0xFF) if terminal_failure else (0xAA, 0x00))
+    transport._recv_bus_symbol = lambda **_kwargs: next(acknowledgements)
+    response = bytes.fromhex("0001020304050607")
+    response_symbols = iter((len(response), *response, _crc(bytes((len(response),)) + response)))
+    transport._recv_telegram_symbol = lambda **_kwargs: next(response_symbols)
+    payload = bytes.fromhex("0900000100")
+
+    if terminal_failure:
+        with pytest.raises(TransportNack):
+            transport.send(0x15, payload)
+    else:
+        assert transport.send(0x15, payload) == response
+    transport.close()
+
+    records = replay_trace_to_artifact(trace_path)["b524_operation_reads"]
+    assert len(records) == 1
+    assert records[0]["request_attempts"] == (4 if terminal_failure else 3)
+    assert records[0]["response_state"] == ("nack" if terminal_failure else "value")
+    if terminal_failure:
+        assert records[0]["transport_diagnostic"] == {
+            "cause": "nack",
+            "phase": "command_ack",
+            "request_attempts": 4,
+            "retry_count": 3,
+            "reconnect_attempts": 0,
+        }
+
+
+def test_replay_actual_independent_transport_sessions_stay_separate(tmp_path: Path) -> None:
+    trace_path = tmp_path / "actual_independent_sessions.trace"
+    payload = bytes.fromhex("0900000100")
+    responses = (
+        bytes.fromhex("0001020304050607"),
+        bytes.fromhex("08090a0b0c0d0e0f"),
+    )
+
+    for response in responses:
+        transport = _offline_enhanced_transport(trace_path)
+        transport._recv_bus_symbol = lambda **_kwargs: 0x00
+        response_symbols = iter(
+            (len(response), *response, _crc(bytes((len(response),)) + response))
+        )
+        transport._recv_telegram_symbol = lambda response_symbols=response_symbols, **_kwargs: next(
+            response_symbols
+        )
+        assert transport.send(0x15, payload) == response
+        transport.close()
+
+    records = replay_trace_to_artifact(trace_path)["b524_operation_reads"]
+    assert [record["response_raw_hex"] for record in records] == [
+        response.hex() for response in responses
+    ]
+    assert [record["request_attempts"] for record in records] == [1, 1]
+
+
 def test_replay_trace_marks_nack_when_retry_evidence_is_nack_or_crc(tmp_path: Path) -> None:
     trace_path = _write_trace(
         tmp_path,
@@ -204,7 +990,9 @@ def test_replay_trace_marks_nack_when_retry_evidence_is_nack_or_crc(tmp_path: Pa
     assert entry["response_state"] == "nack_or_crc"
 
 
-def test_replay_trace_applies_current_namespace_profiles(tmp_path: Path) -> None:
+def test_replay_trace_preserves_historical_namespace_and_instance_observations(
+    tmp_path: Path,
+) -> None:
     trace_path = _write_trace(
         tmp_path,
         "profiles.trace",
@@ -212,13 +1000,13 @@ def test_replay_trace_applies_current_namespace_profiles(tmp_path: Path) -> None
             [
                 "2026-04-06T10:00:00.000000Z INIT features=0x01",
                 "2026-04-06T10:00:00.050000Z START initiator=0xF7",
-                # OP=0x06 GG=0x00 is no longer part of the current profile and must be dropped.
+                # OP=0x06 GG=0x00 is no longer scheduled, but remains replay evidence.
                 (
                     "2026-04-06T10:00:00.100000Z #1 SEND_PROTO src=0xF7 dst=0x15 "
                     "primary=0xB5 secondary=0x24 payload=060000000100"
                 ),
                 "2026-04-06T10:00:00.150000Z #1 PARSED_PROTO len=5 hex=0100010001",
-                # OP=0x02 GG=0x04 keeps only II=0x00..0x01 in the current profile.
+                # OP=0x02 GG=0x04 currently schedules II=0x00..0x01 only.
                 (
                     "2026-04-06T10:00:00.200000Z #2 SEND_PROTO src=0xF7 dst=0x15 "
                     "primary=0xB5 secondary=0x24 payload=020004000400"
@@ -236,15 +1024,14 @@ def test_replay_trace_applies_current_namespace_profiles(tmp_path: Path) -> None
 
     artifact = replay_trace_to_artifact(trace_path)
 
-    # OP=0x06 GG=0x00 is filtered out because GG=0x00 has no remote (0x06)
-    # namespace in its profile.
-    assert "0x00" not in artifact.get("operations", {}).get("0x02", {}).get("groups", {})
+    remote_ns = artifact["operations"]["0x06"]["groups"]["0x00"]
+    assert remote_ns["instances"]["0x00"]["registers"]["0x0001"]["raw_hex"] == "01"
     local_ns = artifact["operations"]["0x02"]["groups"]["0x04"]
-    # II=0x02 exceeds ii_max=0x01 for GG=0x04 OP=0x02 and is filtered out.
-    # rr_max / ii_max are derived from observed trace data within profile bounds.
-    assert local_ns["ii_max"] == "0x00"
+    # Metadata reflects preserved trace observations; new scan scheduling retains
+    # its separate current profile bounds.
+    assert local_ns["ii_max"] == "0x02"
     assert local_ns["rr_max"] == "0x0004"
-    assert set(local_ns["instances"]) == {"0x00"}
+    assert set(local_ns["instances"]) == {"0x00", "0x02"}
 
 
 def test_replay_trace_reconstructs_system_information_and_complete_descriptions(

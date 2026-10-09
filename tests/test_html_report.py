@@ -135,8 +135,8 @@ def test_html_report_supports_b509_tab_and_dual_naming() -> None:
     assert "hideAbsent" in html
     assert "ebusd: " in html
     assert "Legacy unqualified group-directory artifacts" in html
-    assert "OP=02h GetParameter" in html
-    assert "OP=06h GetDeviceParameter" in html
+    assert "OP02 GetParameter" in html
+    assert "OP06 GetDeviceParameter" in html
 
 
 def test_html_report_renders_modern_system_information_and_embedded_descriptions() -> None:
@@ -213,13 +213,44 @@ def test_html_report_renders_modern_system_information_and_embedded_descriptions
 
     html = render_html_report(artifact, title="test")
 
-    assert "OP=00h ReadSystemInformation" in html
+    assert "OP00 ReadSystemInformation" in html
     assert "circuit_count" in html
     assert "raw_hex" in html
     assert "Describe: min=${formatValue(description.min)}" in html
     assert "description_opcode" in html
     assert "Candidate annotation:" in html
     assert "candidate_name=" in html
+
+
+def test_html_report_projects_final_plan_groups_without_removing_raw_evidence() -> None:
+    artifact = {
+        "schema_version": "2.3",
+        "meta": {
+            "scan_plan": {
+                "groups": {
+                    "0x09": {"operations": {"0x02": {"instances": []}}},
+                }
+            }
+        },
+        "operations": {
+            "0x02": {
+                "groups": {
+                    "0x09": {"name": "Selected empty", "instances": {}},
+                    "0x0a": {"name": "Deselected", "instances": {}},
+                }
+            }
+        },
+    }
+
+    html = render_html_report(artifact, title="test")
+
+    assert "OP00 ReadSystemInformation" in html
+    assert "OP02 GetParameter" in html
+    assert "OP06 GetDeviceParameter" in html
+    assert "function finalPlanForRoute(groupKey, opcode)" in html
+    assert "finalPlanForRoute(groupKey, required) !== null" in html
+    assert 'return { name: "Planned group", instances };' in html
+    assert '"0x0a":{"name":"Deselected"' in html
 
 
 def test_html_report_supports_b555_tab() -> None:
@@ -283,7 +314,7 @@ def test_html_report_includes_dormant_status_rendering_logic() -> None:
         "meta": {"destination_address": "0x15", "scan_timestamp": "2026-02-11T00:00:00Z"},
         "groups": {
             "0x00": {
-                "name": "Regulator Parameters",
+                "name": "System",
                 "instances": {
                     "0x00": {
                         "registers": {
@@ -513,7 +544,7 @@ def test_html_report_does_not_use_single_namespace_identity_sentinel() -> None:
         "meta": {"destination_address": "0x15", "scan_timestamp": "2026-02-11T00:00:00Z"},
         "groups": {
             "0x00": {
-                "name": "Regulator Parameters",
+                "name": "System",
                 "instances": {
                     "0x00": {
                         "registers": {
@@ -652,8 +683,10 @@ def test_html_report_browser_presentation_keeps_html_only_corrections() -> None:
 
     html = render_html_report(artifact)
 
-    assert '"0x00":{"0x02":{"name":"Regulator Parameters","rr_max":"0x00FF"}' in html
-    assert '"0x01":{"0x02":{"name":"Native Drinkable Hot Water"}' in html
+    assert '"0x00":{"0x02":{"name":"System","rr_max":"0x00FF"}' in html
+    assert '"0x01":{"0x02":{"name":"Native Domestic Hot Water"}' in html
+    assert "Description matches cached baseline" not in html
+    assert "Current-target verification is separate" not in html
     assert "declared RR_max" in html
     assert (
         "Describe: min=${formatValue(description.min)}, max=${formatValue(description.max)}, "

@@ -17,11 +17,9 @@ from .plan import (
 
 type ScanPreset = Literal["recommended", "full", "research", "custom"]
 
-MAX_EXPLICIT_SCALAR_REQUESTS: Final[int] = 100_000
-
 _PROFILE_GROUPS_BY_OPCODE: Final[dict[RegisterOpcode, frozenset[int]]] = {
     0x02: frozenset({0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x08, 0x09}),
-    0x06: frozenset({0x01, 0x02, 0x08, 0x09, 0x0A, 0x0C, 0x0E, 0x0F}),
+    0x06: frozenset({0x01, 0x02, 0x03, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0E, 0x0F}),
 }
 _READ_OPCODES: Final[tuple[RegisterOpcode, ...]] = (0x02, 0x06)
 
@@ -53,7 +51,7 @@ def research_rr_max(*, group: int, opcode: int, normal_rr_max: int) -> int:
     _require_bounded_int("group", group, max_value=0xFF)
     _require_bounded_int("opcode", opcode, max_value=0xFF)
     _require_bounded_int("normal_rr_max", normal_rr_max, max_value=0xFFFF)
-    floor = 0x01FF if opcode == 0x02 and group == 0x00 else 0x00FF
+    floor = 0x00FF
     return max(normal_rr_max, floor)
 
 
@@ -78,7 +76,6 @@ def parse_scan_plan(data: object) -> dict[PlanKey, GroupScanPlan]:
         raise ValueError("groups must contain at least one scope row")
 
     plan: dict[PlanKey, GroupScanPlan] = {}
-    total_requests = 0
     for index, row in enumerate(rows):
         context = f"groups[{index}]"
         if not isinstance(row, Mapping):
@@ -101,6 +98,9 @@ def parse_scan_plan(data: object) -> dict[PlanKey, GroupScanPlan]:
         instances = _parse_selector_list(
             row["instances"], name=f"{context}.instances", max_value=0xFF
         )
+        _validate_profile_instances(
+            opcode=opcode, group=group, instances=instances, context=context
+        )
         registers = _parse_selector_list(
             row["registers"], name=f"{context}.registers", max_value=0xFFFF
         )
@@ -119,20 +119,26 @@ def parse_scan_plan(data: object) -> dict[PlanKey, GroupScanPlan]:
             )
         if previous is None:
             plan[key] = group_plan
-            total_requests += len(group_plan.instances) * len(registers)
-            _require_request_limit(total_requests)
     return plan
 
 
 def validate_scalar_request_limit(plan: Mapping[PlanKey, GroupScanPlan]) -> None:
-    """Reject plans whose materialized scalar queue would exceed the safe cap."""
+    """Compatibility validator; selector and wire bounds provide finite scope."""
 
-    _require_request_limit(estimate_register_requests(dict(plan)))
+    estimate_register_requests(dict(plan))
 
 
-def _require_request_limit(requests: int) -> None:
-    if requests > MAX_EXPLICIT_SCALAR_REQUESTS:
-        raise ValueError("scan plan exceeds the 100000 scalar request safety limit")
+def _validate_profile_instances(
+    *, opcode: int, group: int, instances: tuple[int, ...], context: str
+) -> None:
+    if opcode == 0x06 and any(not 0x01 <= instance <= 0x08 for instance in instances):
+        raise ValueError(f"{context}.instances for OP=0x06 must be within 0x01..0x08")
+    if (
+        opcode == 0x02
+        and group == 0x02
+        and any(not 0x00 <= instance <= 0x09 for instance in instances)
+    ):
+        raise ValueError(f"{context}.instances for OP=0x02/GG=0x02 must be within 0x00..0x09")
 
 
 def _reject_unknown_fields(

@@ -12,6 +12,7 @@ from helianthus_vrc_explorer.transport.instrumented import (
     CountingTransport,
     ScanRequestBudgetExceeded,
 )
+from helianthus_vrc_explorer.ui.live import NullScanObserver
 
 
 class DescriptionTransport(TransportInterface):
@@ -108,3 +109,77 @@ def test_description_attempt_counters_include_internal_retries(
         assert coverage["not_attempted"] == 1
     else:
         assert description["qualification"] == "matched"
+
+
+class RecordingDescriptionObserver(NullScanObserver):
+    def __init__(self) -> None:
+        self.events: list[tuple[str, str, int]] = []
+
+    def phase_start(self, phase: str, *, total: int) -> None:
+        self.events.append(("start", phase, total))
+
+    def phase_set_total(self, phase: str, *, total: int) -> None:
+        self.events.append(("total", phase, total))
+
+    def phase_advance(self, phase: str, *, advance: int = 1) -> None:
+        self.events.append(("advance", phase, advance))
+
+    def phase_finish(self, phase: str) -> None:
+        self.events.append(("finish", phase, 0))
+
+
+def test_description_progress_counts_actual_requests_and_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    inner = EbusdTcpTransport(EbusdTcpConfig())
+    calls = 0
+
+    def command_lines(*args: object, **kwargs: object) -> list[str]:
+        nonlocal calls
+        calls += 1
+        return ["ERR: timeout"] if calls == 1 else ["010000001401"]
+
+    monkeypatch.setattr(inner, "_send_command_lines", command_lines)
+    monkeypatch.setattr("helianthus_vrc_explorer.transport.ebusd_tcp.time.sleep", lambda _: None)
+    transport = CountingTransport(inner)
+    candidate = DescriptionCandidate(2, 1, 0, 0, "UCH")
+    observer = RecordingDescriptionObserver()
+    acquire_descriptions(
+        transport,
+        dst=0x15,
+        candidates=[candidate],
+        entries={candidate.native_identity: {}},
+        budget=None,
+        coverage={},
+        observer=observer,
+    )
+    assert observer.events == [
+        ("start", "describe", 1),
+        ("total", "describe", 2),
+        ("advance", "describe", 2),
+        ("finish", "describe", 0),
+    ]
+
+
+def test_description_progress_does_not_finish_on_budget_exhaustion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    inner = EbusdTcpTransport(EbusdTcpConfig())
+    monkeypatch.setattr(inner, "_send_command_lines", lambda *_args, **_kwargs: ["ERR: timeout"])
+    monkeypatch.setattr("helianthus_vrc_explorer.transport.ebusd_tcp.time.sleep", lambda _: None)
+    transport = CountingTransport(inner, request_budget=1)
+    candidate = DescriptionCandidate(2, 1, 0, 0, "UCH")
+    observer = RecordingDescriptionObserver()
+    with pytest.raises(ScanRequestBudgetExceeded):
+        acquire_descriptions(
+            transport,
+            dst=0x15,
+            candidates=[candidate],
+            entries={candidate.native_identity: {}},
+            budget=None,
+            coverage={},
+            observer=observer,
+        )
+    assert ("start", "describe", 1) in observer.events
+    assert ("advance", "describe", 1) in observer.events
+    assert not any(event[0] == "finish" for event in observer.events)

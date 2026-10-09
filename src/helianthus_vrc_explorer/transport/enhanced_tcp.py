@@ -30,6 +30,7 @@ _EBUS_SYN = 0xAA
 _EBUS_ACK = 0x00
 _EBUS_NACK = 0xFF
 _ADDRESS_BROADCAST = 0xFE
+_B509_READ_ONLY_SELECTORS: frozenset[int] = frozenset(range(0x24, 0x28))
 
 _ENH_REQ_INIT = 0x0
 _ENH_REQ_SEND = 0x1
@@ -364,6 +365,10 @@ class _EnhancedCrcMismatch(TransportError):
     """Retryable CRC mismatch while reading a target response."""
 
 
+class _EnhancedCommandNotAcknowledgedBeforeSyn(TransportError):
+    """The target did not ACK or NACK before the bus returned to SYN."""
+
+
 class _EnhancedSessionError(TransportError):
     """Recoverable ENH/TCP session failure with sanitized diagnostics."""
 
@@ -421,10 +426,10 @@ def _crc(data: bytes) -> int:
     feeding into the CRC polynomial.  This function accepts logical bytes
     and performs the expansion internally -- callers should NOT pre-expand.
 
-    The enhanced adapter firmware handles wire escape encoding/decoding
-    transparently: ENH SEND carries logical bytes; ENH RECEIVED returns
-    logical bytes.  CRC computation is the only place where escape expansion
-    matters to the client.
+    ENH SEND and RECEIVED carry raw wire symbols.  Telegram transmission and
+    reception therefore expand/decode escaped bytes separately.  This function
+    only computes the checksum value and callers must not pass pre-expanded
+    bytes to it.
     """
     value = 0
     for item in data:
@@ -467,6 +472,10 @@ def _is_retry_safe_b524_read(payload: bytes | bytearray | memoryview) -> bool:
     opcode = value[0]
     if opcode == 0x00:
         return len(value) == 3
+    if opcode == 0x08:
+        return len(value) == 1
+    if opcode in {0x09, 0x0B}:
+        return len(value) == 5
     if opcode in {0x01, 0x03, 0x07}:
         return len(value) == 5
     return opcode in {0x02, 0x06} and len(value) == 6 and value[1] == 0x00
@@ -483,6 +492,11 @@ def _is_retry_safe_proto_read(
         return False
     if primary == 0xB5 and secondary == 0x24:
         return _is_retry_safe_b524_read(payload)
+    # B5/09 is mostly a control family.  Only these recovered one-byte
+    # identity reads are known non-mutating and may re-arbitrate.
+    if primary == 0xB5 and secondary == 0x09:
+        value = bytes(payload)
+        return len(value) == 1 and value[0] in _B509_READ_ONLY_SELECTORS
     # Standard device identification request used by scan discovery.
     return primary == 0x07 and secondary == 0x04 and len(payload) == 0
 
@@ -848,6 +862,7 @@ class EnhancedTcpTransport(TransportInterface):
         raise _EnhancedCollision("Arbitration deadline expired (bus data flooding)")
 
     def _recv_bus_symbol(self, *, deadline: float | None = None) -> int:
+        """Receive exactly one raw eBUS wire symbol from the ENH stream."""
         if deadline is None:
             deadline = time.monotonic() + self._config.timeout_s
         while time.monotonic() < deadline:
@@ -895,17 +910,7 @@ class EnhancedTcpTransport(TransportInterface):
         raise TransportTimeout("Bus symbol read deadline expired")
 
     def _send_symbol_with_echo(self, symbol: int) -> None:
-        """Send a logical eBUS byte via ENH SEND and verify the echo.
-
-        The enhanced adapter firmware handles wire escape encoding
-        (0xA9->[0xA9,0x00], 0xAA->[0xA9,0x01]) transparently.  The ENH
-        protocol operates at the logical byte level -- no client-side
-        escape encoding is needed or desired.
-
-        Audit VE1/VE20: Verified correct -- adapter firmware handles wire
-        escape encoding.  Client-side escaping would cause double-encoding
-        corruption on the physical bus.
-        """
+        """Send one raw eBUS wire symbol via ENH SEND and verify its echo."""
         self._send_enh_frame(_ENH_REQ_SEND, symbol)
         echo = self._recv_bus_symbol()
         if echo == _EBUS_SYN and symbol != _EBUS_SYN:
@@ -915,7 +920,49 @@ class EnhancedTcpTransport(TransportInterface):
                 f"echo mismatch while waiting for 0x{symbol:02X}: got 0x{echo:02X}"
             )
 
+    def _send_telegram_symbol_with_echo(self, symbol: int) -> None:
+        """Escape one logical telegram byte and verify every raw wire echo."""
+        wire_symbols: tuple[int, ...]
+        if symbol == _EBUS_ESCAPE:
+            wire_symbols = (_EBUS_ESCAPE, 0x00)
+        elif symbol == _EBUS_SYN:
+            wire_symbols = (_EBUS_ESCAPE, 0x01)
+        else:
+            wire_symbols = (symbol,)
+        for wire_symbol in wire_symbols:
+            self._send_symbol_with_echo(wire_symbol)
+
+    def _recv_telegram_symbol(self, *, deadline: float) -> int:
+        """Decode one logical telegram byte from raw ENH RECEIVED symbols."""
+        symbol = self._recv_bus_symbol(deadline=deadline)
+        if symbol == _EBUS_SYN:
+            self._reset_parser()
+            raise _EnhancedSessionError(
+                "unexpected SYN before response telegram completed",
+                cause="response_ended_before_complete",
+                phase="response",
+                unexpected_symbol=symbol,
+            )
+        if symbol != _EBUS_ESCAPE:
+            return symbol
+
+        escaped = self._recv_bus_symbol(deadline=deadline)
+        if escaped == 0x00:
+            return _EBUS_ESCAPE
+        if escaped == 0x01:
+            return _EBUS_SYN
+
+        self._reset_parser()
+        raise _EnhancedSessionError(
+            f"invalid eBUS escape suffix 0x{escaped:02X}",
+            cause="malformed_escape",
+            phase="response",
+            unexpected_symbol=escaped,
+        )
+
     def _send_end_of_message(self) -> None:
+        # Structural SYN is deliberately raw.  Escaped A9 01 represents a
+        # logical 0xAA inside telegram data and must not end the transaction.
         self._send_symbol_with_echo(_EBUS_SYN)
 
     def request_info(self, info_id: int) -> bytes:
@@ -1153,6 +1200,7 @@ class EnhancedTcpTransport(TransportInterface):
         successful_reconnects = 0
         collision_retries = 0
         nack_retries = 0
+        command_syn_retries = 0
         request_attempts = 0
 
         def _attempt_admitted() -> None:
@@ -1168,19 +1216,58 @@ class EnhancedTcpTransport(TransportInterface):
                 return (exc.cause, exc.phase)
             return ("transport_error", "transaction")
 
+        def _trace_terminal_failure(
+            *,
+            cause: str,
+            phase: str,
+            attempts: int | None = None,
+            retries: int | None = None,
+            reconnects: int | None = None,
+            unexpected_symbol: str | None = None,
+        ) -> None:
+            terminal_attempts = request_attempts if attempts is None else attempts
+            terminal_retries = max(0, terminal_attempts - 1) if retries is None else retries
+            terminal_reconnects = reconnect_retries if reconnects is None else reconnects
+            trace_was_open = self._trace_handle is not None
+            self._ensure_trace_handle()
+            message = (
+                f"#{seq} REQUEST_FAILED cause={cause} phase={phase} "
+                f"request_attempts={terminal_attempts} retry_count={terminal_retries} "
+                f"reconnect_attempts={terminal_reconnects}"
+            )
+            if unexpected_symbol is not None:
+                message += f" unexpected_symbol={unexpected_symbol}"
+            self._trace(message)
+            if not trace_was_open and self._session is None:
+                trace_handle = self._trace_handle
+                self._trace_handle = None
+                if trace_handle is not None:
+                    with contextlib.suppress(OSError):
+                        trace_handle.close()
+
         def _terminal(exc: TransportError, *, cause: str, phase: str) -> TransportRecoveryExhausted:
-            self.close()
-            return TransportRecoveryExhausted(
+            failure = TransportRecoveryExhausted(
                 cause=cause,
                 phase=phase,
                 request_attempts=request_attempts,
                 reconnect_attempts=reconnect_retries,
             )
+            _trace_terminal_failure(
+                cause=failure.cause,
+                phase=failure.phase,
+                attempts=failure.request_attempts,
+                retries=failure.retry_count,
+                reconnects=failure.reconnect_attempts,
+            )
+            self.close()
+            return failure
 
         def _recover_session(exc: TransportError) -> None:
             nonlocal reconnect_retries, successful_reconnects
             nonlocal timeout_retries, collision_retries, nack_retries
             if self._config.reconnect_max_retries == 0:
+                cause, phase = _failure_details(exc)
+                _trace_terminal_failure(cause=cause, phase=phase)
                 raise exc
             cause, phase = _failure_details(exc)
             self._ensure_trace_handle()
@@ -1224,7 +1311,14 @@ class EnhancedTcpTransport(TransportInterface):
                     reconnect_attempts=reconnect_retries,
                     unexpected_symbol=getattr(exc, "unexpected_symbol", None),
                 )
-                self._trace(f"#{seq} REQUEST_FAILED {failure}")
+                _trace_terminal_failure(
+                    cause=failure.cause,
+                    phase=failure.phase,
+                    attempts=failure.request_attempts,
+                    retries=failure.retry_count,
+                    reconnects=failure.reconnect_attempts,
+                    unexpected_symbol=failure.unexpected_symbol,
+                )
                 self.close()
                 raise failure from exc
             raise _terminal(exc, cause=terminal_cause, phase=terminal_phase) from exc
@@ -1234,6 +1328,7 @@ class EnhancedTcpTransport(TransportInterface):
                 return send_once(_attempt_admitted)
             except TransportTimeout as exc:
                 if not retry_safe:
+                    _trace_terminal_failure(cause="timeout", phase="transaction")
                     raise
                 timeout_retries += 1
                 if timeout_retries > self._config.timeout_max_retries:
@@ -1247,14 +1342,17 @@ class EnhancedTcpTransport(TransportInterface):
                 )
             except TransportHostError:
                 # Host errors are non-retryable — the request is malformed.
+                _trace_terminal_failure(cause="host_error", phase="transaction")
                 raise
             except TransportDisconnected as exc:
                 if not retry_safe:
+                    _trace_terminal_failure(cause="disconnected", phase="receive")
                     raise
                 _recover_session(exc)
                 continue
             except _EnhancedCollision as exc:
                 if not retry_safe:
+                    _trace_terminal_failure(cause="collision", phase="arbitration")
                     raise
                 # Collision is normal on a shared bus.  Per eBUS spec
                 # section 6.2.2.2 the adapter waits for the winner's
@@ -1262,6 +1360,7 @@ class EnhancedTcpTransport(TransportInterface):
                 # We just re-issue START — no software backoff needed.
                 collision_retries += 1
                 if collision_retries > self._config.collision_max_retries:
+                    _trace_terminal_failure(cause="collision", phase="arbitration")
                     self.close()
                     raise TransportError(
                         f"{exc} (collision retries exhausted "
@@ -1284,15 +1383,23 @@ class EnhancedTcpTransport(TransportInterface):
                 )
             except (_EnhancedNack, _EnhancedCrcMismatch) as exc:
                 if not retry_safe:
+                    _trace_terminal_failure(
+                        cause="nack" if isinstance(exc, _EnhancedNack) else "crc_mismatch",
+                        phase="response",
+                    )
                     raise
                 # NACK/CRC are retryable on the same session — the bus
                 # protocol already handled ACK/NACK exchange.
                 nack_retries += 1
                 if nack_retries > self._config.nack_max_retries:
-                    self.close()
                     message = (
                         f"{exc} (nack/crc retries exhausted ({self._config.nack_max_retries}))"
                     )
+                    _trace_terminal_failure(
+                        cause="nack" if isinstance(exc, _EnhancedNack) else "crc_mismatch",
+                        phase="response",
+                    )
+                    self.close()
                     if isinstance(exc, _EnhancedNack):
                         raise TransportNack(message) from exc
                     raise TransportError(message) from exc
@@ -1303,11 +1410,47 @@ class EnhancedTcpTransport(TransportInterface):
                 )
             except TransportNack:
                 # A definitive target rejection is not a broken TCP/ENH session.
+                _trace_terminal_failure(cause="nack", phase="command_ack")
                 raise
+            except _EnhancedCommandNotAcknowledgedBeforeSyn as exc:
+                # A bare RECEIVED(0xAA) at command-ACK is the raw-wire SYN
+                # boundary.  Ownership has already ended, so the TCP/ENH
+                # session remains synchronized and one fresh arbitration is
+                # sufficient for an idempotent read.  Never apply this retry
+                # to a request whose retry safety is unknown.
+                if retry_safe and command_syn_retries == 0:
+                    command_syn_retries += 1
+                    self._reset_parser()
+                    self._trace(
+                        f"#{seq} RETRY type=command_not_acknowledged_before_syn "
+                        f"n={command_syn_retries}/1"
+                    )
+                    continue
+                failure = TransportProtocolFailure(
+                    cause="command_not_acknowledged_before_syn",
+                    request_attempts=request_attempts,
+                    reconnect_attempts=reconnect_retries,
+                    unexpected_symbol=_EBUS_SYN,
+                )
+                _trace_terminal_failure(
+                    cause=failure.cause,
+                    phase=failure.phase,
+                    attempts=failure.request_attempts,
+                    retries=failure.retry_count,
+                    reconnects=failure.reconnect_attempts,
+                    unexpected_symbol=failure.unexpected_symbol,
+                )
+                self._reset_parser()
+                raise failure from exc
             except _EnhancedSessionError as exc:
                 if not retry_safe:
+                    _trace_terminal_failure(cause=exc.cause, phase=exc.phase)
                     raise
                 _recover_session(exc)
+            except TransportError as exc:
+                cause, phase = _failure_details(exc)
+                _trace_terminal_failure(cause=cause, phase=phase)
+                raise
 
     def _send_proto_once(
         self,
@@ -1356,7 +1499,7 @@ class EnhancedTcpTransport(TransportInterface):
                 self._trace(f"#{seq} LOCAL_NACK_RETRY attempt={nack_attempt}")
 
             for symbol in telegram[1:]:
-                self._send_symbol_with_echo(symbol)
+                self._send_telegram_symbol_with_echo(symbol)
 
             if dst == _ADDRESS_BROADCAST or not expect_response:
                 self._send_end_of_message()
@@ -1378,10 +1521,17 @@ class EnhancedTcpTransport(TransportInterface):
                         "nack received (local retry exhausted; bus release failed)"
                     ) from release_exc
                 raise TransportNack("nack received (local retry exhausted)")
+            if ack == _EBUS_SYN:
+                # ENH RECEIVED forwards raw wire symbols.  A bare 0xAA while
+                # waiting for command ACK/NACK is therefore the transaction
+                # boundary: the command ended without target acknowledgement.
+                # It is distinct from both NACK and a malformed ACK symbol.
+                raise _EnhancedCommandNotAcknowledgedBeforeSyn(
+                    "command not acknowledged before SYN"
+                )
             if ack != _EBUS_ACK:
-                # In ENH protocol, 0xAA (SYN) from _recv_bus_symbol is a data
-                # byte, not a bus-idle signal.  Treat any non-ACK/non-NACK as
-                # an unexpected symbol error (not a timeout).
+                # Arbitrary non-ACK/non-NACK symbols leave session alignment
+                # ambiguous and continue through the bounded reconnect path.
                 raise _EnhancedSessionError(
                     f"unexpected symbol 0x{ack:02X} while waiting for command ack",
                     cause="protocol_sync_error",
@@ -1398,22 +1548,17 @@ class EnhancedTcpTransport(TransportInterface):
             response_deadline = time.monotonic() + self._config.timeout_s
 
             for response_attempt in range(2):
-                # In the ENH protocol, response bytes arrive via _ENH_RES_RECEIVED
-                # frames.  The adapter firmware handles wire-level SYN detection and
-                # reports bus loss via _ENH_RES_FAILED / _ENH_RES_ERROR_*, NOT by
-                # sending a RECEIVED frame with data=0xAA.  Therefore 0xAA from
-                # _recv_bus_symbol() is a legitimate data byte (the adapter decoded
-                # wire-escaped [0xA9, 0x01] back to logical 0xAA).  SYN guards are
-                # not needed here — _recv_bus_symbol() already raises appropriate
-                # exceptions for real bus errors and timeouts.
-                length = self._recv_bus_symbol(deadline=response_deadline)
+                # ENH RECEIVED carries raw wire symbols.  Decode escaping only
+                # across telegram length/body/CRC; ACK/NACK and end-of-message
+                # remain structural raw symbols.
+                length = self._recv_telegram_symbol(deadline=response_deadline)
 
                 response = bytearray()
                 for _ in range(length):
-                    value = self._recv_bus_symbol(deadline=response_deadline)
+                    value = self._recv_telegram_symbol(deadline=response_deadline)
                     response.append(value)
 
-                crc_value = self._recv_bus_symbol(deadline=response_deadline)
+                crc_value = self._recv_telegram_symbol(deadline=response_deadline)
 
                 segment = bytes((length,)) + bytes(response)
                 if _crc(segment) != crc_value:

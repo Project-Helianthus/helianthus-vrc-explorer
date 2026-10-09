@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import asyncio
+from dataclasses import dataclass
+
+import pytest
+
 from helianthus_vrc_explorer.scanner.plan import GroupScanPlan
 from helianthus_vrc_explorer.ui.planner import PlannerGroup, split_planner_groups_by_namespace
 from helianthus_vrc_explorer.ui.planner_textual import (
+    PLANNER_TABLE_COLUMNS,
     _EditableGroup,
     _estimate_footer,
     _parse_instances_spec,
@@ -20,14 +26,191 @@ def test_parse_instances_spec_accepts_keywords_and_ranges() -> None:
         name="Heating Circuits",
         descriptor=1.0,
         known=True,
-        ii_max=0x0A,
+        ii_max=0x09,
         rr_max=0x21,
         rr_max_full=0x21,
-        present_instances=(0x00, 0x02, 0x03),
+        present_instances=(0x01, 0x02, 0x03),
     )
-    assert _parse_instances_spec("present", group=group) == (0x00, 0x02, 0x03)
-    assert _parse_instances_spec("all", group=group) == tuple(range(0x0A + 1))
-    assert _parse_instances_spec("0-2", group=group) == (0x00, 0x01, 0x02)
+    assert _parse_instances_spec("present", group=group) == (0x01, 0x02, 0x03)
+    assert _parse_instances_spec("all", group=group) == tuple(range(1, 10))
+    assert _parse_instances_spec("1-2", group=group) == (0x01, 0x02)
+
+
+def test_textual_operation_table_toggles_one_explicit_request(monkeypatch) -> None:
+    from dataclasses import dataclass
+
+    from textual.app import App
+
+    @dataclass(frozen=True)
+    class Request:
+        operation: str = "GetEvent"
+        opcode: int = 0x09
+        selector: dict[str, int] | None = None
+        payload: bytes = b"\x09\x00\x00\x01\x00"
+
+    selection = [True, True]
+
+    def fake_run(self: App[object], *_args: object, **_kwargs: object) -> None:
+        self._focused_operation = lambda: 1  # type: ignore[method-assign]
+        self._refresh_table = lambda: None  # type: ignore[method-assign]
+        self.action_toggle_enabled()
+
+    monkeypatch.setattr(App, "run", fake_run)
+    run_textual_scan_plan(
+        [],
+        request_rate_rps=None,
+        operation_requests=(Request(), Request()),
+        operation_selection=selection,
+    )
+    assert selection == [True, False]
+
+
+def test_textual_operation_toggle_refreshes_rendered_request_estimate(monkeypatch) -> None:
+    from textual.app import App
+    from textual.widgets import Static
+
+    @dataclass(frozen=True)
+    class Request:
+        operation: str = "GetEvent"
+        opcode: int = 0x09
+        selector: dict[str, int] | None = None
+        payload: bytes = b"\x09\x00\x00\x01\x00"
+
+    selection = [True]
+    captured: dict[str, str] = {}
+
+    def fake_run(self: App[object], *_args: object, **_kwargs: object) -> None:
+        async def exercise() -> None:
+            async with self.run_test() as pilot:
+                await pilot.pause()
+                captured["before"] = str(self.query_one("#status", Static).render())
+                await pilot.press("space")
+                await pilot.pause()
+                captured["after"] = str(self.query_one("#status", Static).render())
+
+        asyncio.run(exercise())
+
+    monkeypatch.setattr(App, "run", fake_run)
+    run_textual_scan_plan(
+        [],
+        request_rate_rps=2.0,
+        operation_requests=(Request(),),
+        operation_selection=selection,
+    )
+
+    assert captured["before"].startswith("Plan: 1 requests | ETA: 0s @ 2.00 req/s")
+    assert captured["after"].startswith("Plan: 0 requests | ETA: 0s @ 2.00 req/s")
+    assert selection == [False]
+
+
+@pytest.mark.parametrize("namespaces", [(0x02, 0x06), (0x02,), (0x06,), ()])
+def test_tab_cycles_through_events_and_skips_empty_scalar_panes(monkeypatch, namespaces) -> None:
+    from textual.app import App
+
+    from helianthus_vrc_explorer.scanner.b524_operation_reads import parse_operation_read_plan
+
+    groups = [
+        PlannerGroup(
+            group=0,
+            opcode=opcode,
+            name="System" if opcode == 0x02 else "Boiler",
+            descriptor=float("nan"),
+            known=True,
+            ii_max=None,
+            rr_max=1,
+            rr_max_full=1,
+            present_instances=(0,),
+        )
+        for opcode in namespaces
+    ]
+    requests = parse_operation_read_plan(
+        {
+            "schema_version": 1,
+            "requests": [
+                {
+                    "operation": "GetEvent",
+                    "profile": "zone",
+                    "instance": 1,
+                    "address": 1,
+                    "weekday_code": 0,
+                }
+            ],
+        }
+    )
+    expected = [
+        *("planner-table-local" for opcode in namespaces if opcode == 0x02),
+        *("planner-table-remote" for opcode in namespaces if opcode == 0x06),
+        "planner-table-operations",
+    ]
+    observed: list[str | None] = []
+
+    def fake_run(self: App[object], *_args: object, **_kwargs: object) -> None:
+        async def exercise() -> None:
+            async with self.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                for _ in expected:
+                    observed.append(self.focused.id if self.focused else None)
+                    await pilot.press("tab")
+                observed.append(self.focused.id if self.focused else None)
+                await pilot.press("shift+tab")
+                observed.append(self.focused.id if self.focused else None)
+                await pilot.press("space")
+
+        asyncio.run(exercise())
+
+    monkeypatch.setattr(App, "run", fake_run)
+    selection = [True]
+    run_textual_scan_plan(
+        groups,
+        request_rate_rps=None,
+        operation_requests=requests,
+        operation_selection=selection,
+    )
+    assert observed == [*expected, expected[0], expected[-1]]
+    assert selection == [False]
+
+
+def test_visual_event_program_edits_codes_and_toggles_the_complete_pair(monkeypatch) -> None:
+    from textual.app import App
+    from textual.widgets import DataTable, Input, Static
+
+    from helianthus_vrc_explorer.scanner.b524_default_events import event_program_requests
+
+    requests = list(event_program_requests("zone", instance=1, address=1, weekday_codes=range(8)))
+    selection = [True] * len(requests)
+    captured: dict[str, object] = {}
+
+    def fake_run(self: App[object], *_args: object, **_kwargs: object) -> None:
+        async def exercise() -> None:
+            async with self.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                table = self.query_one("#planner-table-operations", DataTable)
+                assert table.row_count == 1
+                await pilot.press("enter")
+                await pilot.pause()
+                self.screen.query_one(Input).value = "0x01,0x08,0xFF"
+                await pilot.press("enter")
+                await pilot.pause()
+                captured["screen_count"] = len(self.screen_stack)
+                captured["codes"] = [request.selector["weekday_code"] for request in requests]
+                captured["status"] = str(self.query_one("#status", Static).render())
+                assert table.row_count == 1
+                await pilot.press("space")
+                await pilot.pause()
+
+        asyncio.run(exercise())
+
+    monkeypatch.setattr(App, "run", fake_run)
+    run_textual_scan_plan(
+        [],
+        request_rate_rps=None,
+        operation_requests=requests,
+        operation_selection=selection,
+    )
+    assert captured["screen_count"] == 1
+    assert captured["codes"] == [1, 1, 8, 8, 255, 255]
+    assert str(captured["status"]).startswith("Plan: 6 requests")
+    assert selection == [False] * 6
 
 
 def test_parse_register_scope_distinguishes_ceiling_from_exact_selectors() -> None:
@@ -45,17 +228,17 @@ def test_estimate_footer_reports_requests_and_eta() -> None:
         name="Heating Circuits",
         descriptor=1.0,
         known=True,
-        ii_max=0x0A,
+        ii_max=0x09,
         rr_max=0x02,
         rr_max_full=0x02,
-        present_instances=(0x00,),
+        present_instances=(0x01,),
     )
     states = {
         (0x02, 0x02): _EditableGroup(
             group=group,
             enabled=True,
             rr_max=0x02,
-            instances=(0x00, 0x01),
+            instances=(0x01, 0x02),
         )
     }
     footer = _estimate_footer(states, request_rate_rps=2.0)
@@ -71,17 +254,17 @@ def test_estimate_footer_uses_exact_register_selectors() -> None:
         name="Heating Circuits",
         descriptor=1.0,
         known=True,
-        ii_max=0x0A,
+        ii_max=0x09,
         rr_max=0x0100,
         rr_max_full=0x0100,
-        present_instances=(0x00,),
+        present_instances=(0x01,),
     )
     states = {
         group.key: _EditableGroup(
             group=group,
             enabled=True,
             rr_max=0x0100,
-            instances=(0x00, 0x03),
+            instances=(0x01, 0x03),
             registers=(0x0002, 0x0010, 0x0100),
         )
     }
@@ -89,65 +272,87 @@ def test_estimate_footer_uses_exact_register_selectors() -> None:
     assert "Plan: 9 requests" in _estimate_footer(states, request_rate_rps=None)
 
 
-def test_table_row_values_show_explicit_namespace_column() -> None:
+def test_planner_table_columns_replace_namespace_and_type_with_op00_count() -> None:
+    assert PLANNER_TABLE_COLUMNS == (
+        "On",
+        "GG",
+        "Name",
+        "OP00 count",
+        "II range",
+        "Instances",
+        "RR_max",
+        "Descriptions",
+    )
+
+
+def test_table_row_values_show_qualified_op00_count_without_changing_instances() -> None:
     remote_group = PlannerGroup(
         group=0x01,
         opcode=0x06,
         name="Primary Heating Sources",
         descriptor=3.0,
         known=True,
-        ii_max=None,
+        ii_max=8,
         rr_max=0x0015,
         rr_max_full=0x0015,
-        present_instances=(0x00,),
+        present_instances=(0x01,),
         namespace_label="remote",
     )
     local_only_group = PlannerGroup(
-        group=0x00,
+        group=0x02,
         opcode=0x02,
-        name="Regulator Parameters",
-        descriptor=3.0,
+        name="Circuits",
+        descriptor=1.0,
         known=True,
-        ii_max=None,
-        rr_max=0x00FF,
-        rr_max_full=0x00FF,
-        present_instances=(0x00,),
+        ii_max=0x09,
+        rr_max=0x0025,
+        rr_max_full=0x0025,
+        present_instances=(0x01,),
+        expected_count=3,
     )
+    system_information = [
+        {"name": "circuit_count", "value": 3.0, "state": "available"},
+        {"name": "boiler_count", "value": 1.0, "state": "available"},
+    ]
 
     remote_row = _table_row_values(
         _EditableGroup(
             group=remote_group,
             enabled=True,
             rr_max=0x0015,
-            instances=(0x00,),
-        )
+            instances=(0x01,),
+        ),
+        system_information,
     )
     local_row = _table_row_values(
         _EditableGroup(
             group=local_only_group,
             enabled=False,
             rr_max=0x00FF,
-            instances=(0x00,),
-        )
+            instances=(0x01,),
+        ),
+        system_information,
     )
 
     assert remote_row == (
         "✓",
         "0x01",
         "Primary Heating Sources",
-        "remote",
-        "3.0",
-        "singleton",
+        "1",
+        "0x01..0x08",
+        "present 1/8",
         "0x0015",
+        "profile",
     )
     assert local_row == (
         " ",
-        "0x00",
-        "Regulator Parameters",
-        "local",
-        "3.0",
-        "singleton",
+        "0x02",
+        "Circuits",
+        "capacity=3",
+        "0x01..0x09",
+        "present 1/9 (off)",
         "0x00FF",
+        "profile",
     )
 
 
@@ -158,10 +363,10 @@ def test_split_planner_groups_by_namespace_prefers_local_then_remote() -> None:
         name="System",
         descriptor=1.0,
         known=True,
-        ii_max=0x0A,
+        ii_max=0x09,
         rr_max=0x000F,
         rr_max_full=0x000F,
-        present_instances=(0x00,),
+        present_instances=(0x01,),
         namespace_label="local",
     )
     remote_group = PlannerGroup(
@@ -170,10 +375,10 @@ def test_split_planner_groups_by_namespace_prefers_local_then_remote() -> None:
         name="Primary Heating Sources",
         descriptor=3.0,
         known=True,
-        ii_max=None,
+        ii_max=8,
         rr_max=0x0015,
         rr_max_full=0x0015,
-        present_instances=(0x00,),
+        present_instances=(0x01,),
         namespace_label="remote",
     )
 
@@ -191,6 +396,108 @@ def test_planner_pane_id_routes_unexpected_namespaces_into_remote_pane() -> None
     assert _planner_pane_id(0x02) == "local"
     assert _planner_pane_id(0x06) == "remote"
     assert _planner_pane_id(0x08) == "remote"
+
+
+def test_textual_actions_keep_local_and_remote_states_independent_after_column_removal(
+    monkeypatch,
+) -> None:
+    from textual.app import App
+
+    local = PlannerGroup(
+        group=0x02,
+        opcode=0x02,
+        name="Heating Circuits",
+        descriptor=1.0,
+        known=True,
+        ii_max=0x09,
+        rr_max=0x0025,
+        rr_max_full=0x0025,
+        present_instances=(0x01,),
+        expected_count=1,
+    )
+    remote = PlannerGroup(
+        group=0x01,
+        opcode=0x06,
+        name="Boiler",
+        descriptor=3.0,
+        known=True,
+        ii_max=0x08,
+        rr_max=0x0015,
+        rr_max_full=0x0015,
+        present_instances=(0x01,),
+    )
+    captured: dict[str, _EditableGroup] = {}
+
+    def fake_run(self: App[object], *args: object, **kwargs: object) -> None:
+        self._focused_group = lambda: remote.key  # type: ignore[method-assign]
+        self._refresh_table = lambda: None  # type: ignore[method-assign]
+        self._set_help = lambda _text: None  # type: ignore[method-assign]
+        self._focus_table = lambda: None  # type: ignore[method-assign]
+
+        self.action_toggle_enabled()
+        self._editing_group = remote.key
+        self._edit_rr_max("0x0020")
+        captured.update(self._states)
+
+    monkeypatch.setattr(App, "run", fake_run)
+
+    run_textual_scan_plan(
+        [local, remote],
+        request_rate_rps=None,
+        default_plan={
+            local.key: GroupScanPlan(
+                group=local.group,
+                opcode=local.opcode,
+                rr_max=local.rr_max,
+                instances=(0x01,),
+            )
+        },
+    )
+
+    assert captured[local.key].enabled is True
+    assert captured[local.key].rr_max == 0x0025
+    assert captured[remote.key].enabled is True
+    assert captured[remote.key].rr_max == 0x0020
+
+
+def test_textual_unqualified_rr_requires_explicit_scope_before_save(monkeypatch) -> None:
+    from textual.app import App
+
+    group = PlannerGroup(
+        group=0x03,
+        opcode=0x06,
+        name="Air Recovery (VAR) recoVair",
+        descriptor=3.0,
+        known=True,
+        ii_max=0x08,
+        rr_max=None,
+        rr_max_full=None,
+        present_instances=(),
+        instances_probed=False,
+    )
+    captured: dict[str, object] = {}
+
+    def fake_run(self: App[object], *args: object, **kwargs: object) -> None:
+        key = group.key
+        self._focused_group = lambda: key  # type: ignore[method-assign]
+        self._refresh_table = lambda: None  # type: ignore[method-assign]
+        self._set_help = lambda text: captured.__setitem__("help", text)  # type: ignore[method-assign]
+        self.exit = lambda result: captured.__setitem__("plan", result)  # type: ignore[method-assign]
+
+        self.action_toggle_enabled()
+        self.action_save()
+        self._states[key].rr_max = 0x0010
+        self._states[key].instances = (0x01,)
+        self.action_save()
+
+    monkeypatch.setattr(App, "run", fake_run)
+
+    run_textual_scan_plan([group], request_rate_rps=None, default_plan={})
+
+    assert captured["help"] == "RR scope required for: 0x03"
+    assert captured["plan"] == {
+        group.key: GroupScanPlan(group=0x03, opcode=0x06, rr_max=0x0010, instances=(0x01,))
+    }
 
 
 def test_run_textual_scan_plan_registers_enter_binding_for_rr_max(
@@ -220,7 +527,7 @@ def test_run_textual_scan_plan_registers_enter_binding_for_rr_max(
                 ii_max=None,
                 rr_max=0x00FF,
                 rr_max_full=0x00FF,
-                present_instances=(0x00,),
+                present_instances=(0x01,),
             )
         ],
         request_rate_rps=None,
@@ -238,16 +545,16 @@ def test_run_textual_scan_plan_preserves_exact_default_registers_on_save(monkeyp
         name="Heating Circuits",
         descriptor=1.0,
         known=True,
-        ii_max=0x0A,
+        ii_max=0x09,
         rr_max=0x0100,
         rr_max_full=0x0100,
-        present_instances=(0x00, 0x03),
+        present_instances=(0x01, 0x03),
     )
     default = GroupScanPlan(
         group=0x02,
         opcode=0x02,
         rr_max=0x0100,
-        instances=(0x00, 0x03),
+        instances=(0x01, 0x03),
         registers=(0x0002, 0x0010, 0x0100),
     )
     captured: dict[str, object] = {}
@@ -303,7 +610,7 @@ def test_run_textual_scan_plan_rr_dialog_registers_enter_submit_binding(
                 ii_max=None,
                 rr_max=0x00FF,
                 rr_max_full=0x00FF,
-                present_instances=(0x00,),
+                present_instances=(0x01,),
             )
         ],
         request_rate_rps=None,
@@ -344,10 +651,10 @@ def test_run_textual_scan_plan_instances_dialog_registers_enter_submit_binding(
                 name="Heating Circuits",
                 descriptor=1.0,
                 known=True,
-                ii_max=0x0A,
+                ii_max=0x09,
                 rr_max=0x0025,
                 rr_max_full=0x0025,
-                present_instances=(0x00, 0x02, 0x03),
+                present_instances=(0x01, 0x02, 0x03),
             )
         ],
         request_rate_rps=None,
@@ -385,10 +692,10 @@ def test_instances_dialog_submit_suppresses_immediate_rr_reopen(monkeypatch) -> 
                 name="Heating Circuits",
                 descriptor=1.0,
                 known=True,
-                ii_max=0x0A,
+                ii_max=0x09,
                 rr_max=0x0025,
                 rr_max_full=0x0025,
-                present_instances=(0x00, 0x02, 0x03),
+                present_instances=(0x01, 0x02, 0x03),
             )
         ],
         request_rate_rps=None,
@@ -427,10 +734,10 @@ def test_instances_dialog_cancel_does_not_suppress_next_enter(monkeypatch) -> No
                 name="Heating Circuits",
                 descriptor=1.0,
                 known=True,
-                ii_max=0x0A,
+                ii_max=0x09,
                 rr_max=0x0025,
                 rr_max_full=0x0025,
-                present_instances=(0x00, 0x02, 0x03),
+                present_instances=(0x01, 0x02, 0x03),
             )
         ],
         request_rate_rps=None,
@@ -469,10 +776,10 @@ def test_instances_dialog_invalid_submit_suppresses_immediate_rr_reopen(monkeypa
                 name="Heating Circuits",
                 descriptor=1.0,
                 known=True,
-                ii_max=0x0A,
+                ii_max=0x09,
                 rr_max=0x0025,
                 rr_max_full=0x0025,
-                present_instances=(0x00, 0x02, 0x03),
+                present_instances=(0x01, 0x02, 0x03),
             )
         ],
         request_rate_rps=None,

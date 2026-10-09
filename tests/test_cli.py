@@ -19,8 +19,85 @@ from helianthus_vrc_explorer.cli import (
     _resolve_scan_destination,
     app,
 )
+from helianthus_vrc_explorer.transport.base import TransportNack, TransportTimeout
+from helianthus_vrc_explorer.ui.scan_setup import ScanSetup
 
 _ROLE_TARGET_TOKEN = bytes.fromhex("736c617665").decode("ascii")
+
+
+@pytest.fixture(autouse=True)
+def _ui_owned_scan_and_browse_setup(monkeypatch: pytest.MonkeyPatch):
+    """Translate legacy test inputs into the visual setup seam.
+
+    Tests retain their scenario values while public command invocation exercises
+    only its adapter arguments and optional preset.
+    """
+    import helianthus_vrc_explorer.cli as cli
+
+    original_invoke = CliRunner.invoke
+
+    def wrapped(runner, cli_app, args=None, *extra, **kwargs):  # noqa: ANN001
+        argv = list(args or [])
+        if cli_app is not app or not argv or argv[0] not in {"scan", "browse"}:
+            return original_invoke(runner, cli_app, argv, *extra, **kwargs)
+        if "--help" in argv or "-h" in argv:
+            return original_invoke(runner, cli_app, argv, *extra, **kwargs)
+        if argv[0] == "browse":
+            selected = None
+            if "--file" in argv:
+                selected = Path(argv[argv.index("--file") + 1])
+            monkeypatch.setattr(cli, "run_artifact_open_modal", lambda: selected)
+            return original_invoke(runner, cli_app, ["browse"], *extra, **kwargs)
+
+        setup_values: dict[str, object] = {"preset": "recommended", "planner_ui": "disabled"}
+        public = ["scan"]
+        index = 1
+        value_options = {
+            "--dst": "dst",
+            "--output-dir": "output_dir",
+            "--ebusd-csv-path": "ebusd_csv_path",
+            "--myvaillant-map-path": "myvaillant_map_path",
+            "--trace-file": "trace_file",
+            "--planner-ui": "planner_ui",
+            "--b509-range": "b509_range",
+        }
+        adapter_options = {"--transport", "--host", "--port", "--source-address", "--preset"}
+        while index < len(argv):
+            option = argv[index]
+            if option in adapter_options:
+                public.extend((option, argv[index + 1]))
+                if option == "--preset":
+                    setup_values["preset"] = argv[index + 1]
+                index += 2
+            elif option in value_options:
+                field = value_options[option]
+                value = argv[index + 1]
+                if field in {"output_dir", "ebusd_csv_path", "myvaillant_map_path", "trace_file"}:
+                    value = Path(value)
+                if field == "b509_range":
+                    value = [value]
+                setup_values[field] = value
+                index += 2
+            elif option in {
+                "--dry-run",
+                "--b509-dump",
+                "--b555-dump",
+                "--b516-dump",
+                "--no-tips",
+                "--redact",
+            }:
+                setup_values[option[2:].replace("-", "_")] = True
+                index += 1
+            elif option.startswith("--no-"):
+                setup_values[option[5:].replace("-", "_")] = False
+                index += 1
+            else:
+                index += 1
+        selected = ScanSetup(**setup_values)
+        monkeypatch.setattr(cli, "_collect_scan_setup", lambda _preset, _transport: selected)
+        return original_invoke(runner, cli_app, public, *extra, **kwargs)
+
+    monkeypatch.setattr(CliRunner, "invoke", wrapped)
 
 
 def test_version_prints_version() -> None:
@@ -35,11 +112,10 @@ def test_scan_command_is_present() -> None:
     result = runner.invoke(app, ["scan", "--help"])
     assert result.exit_code == 0
     plain = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", result.stdout)
-    assert "planner-ui" in plain
-    assert "preset" in plain
-    assert "no-tips" in plain
-    assert "disabled" in plain
-    assert "auto" in plain
+    for option in ("--transport", "--host", "--port", "--source-address", "--preset"):
+        assert option in plain
+    for removed in ("planner-ui", "no-tips", "--dst", "--dry-run", "--output-dir"):
+        assert removed not in plain
 
 
 def test_scan_invalid_dst_fails_before_transport_setup(monkeypatch) -> None:
@@ -141,7 +217,7 @@ def test_scan_default_transport_failure_cancel_exits(monkeypatch, tmp_path: Path
     assert "Transport setup aborted by user." in result.stderr
 
 
-def test_scan_custom_transport_failure_does_not_prompt_retry(
+def test_scan_custom_transport_failure_can_prompt_retry_and_cancel(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -170,7 +246,146 @@ def test_scan_custom_transport_failure_does_not_prompt_retry(
         ["scan", "--host", "10.0.0.42", "--output-dir", str(tmp_path)],
     )
     assert result.exit_code == 1
-    assert prompt_called["value"] is False
+    assert prompt_called["value"] is True
+    assert "Transport setup aborted by user." in result.stderr
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        pytest.param(TimeoutError("ENS socket connect timed out"), id="timeout"),
+        pytest.param(ConnectionRefusedError("ENS connection refused"), id="refused"),
+        pytest.param(ConnectionAbortedError("ENS connection rejected"), id="rejected"),
+    ],
+)
+def test_scan_ens_startup_failure_non_tty_exits_concisely(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    error: OSError,
+) -> None:
+    import helianthus_vrc_explorer.cli as cli_mod
+
+    class _FailingEnsTransport:
+        @contextmanager
+        def session(self):
+            from helianthus_vrc_explorer.transport.base import TransportError, TransportTimeout
+
+            if isinstance(error, TimeoutError):
+                raise TransportTimeout(str(error))
+            raise TransportError(str(error))
+            yield self  # pragma: no cover - explicit startup failure
+
+    def _build_transport(settings, *, trace_file):  # noqa: ANN001
+        _ = trace_file
+        assert settings.protocol == "enhanced"
+        return _FailingEnsTransport()
+
+    monkeypatch.setattr(cli_mod, "_build_transport", _build_transport)
+    monkeypatch.setattr(cli_mod, "_can_prompt_transport_retry", lambda _console: False)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "scan",
+            "--transport",
+            "ens",
+            "--host",
+            "192.0.2.2",
+            "--dst",
+            "0x15",
+            "--output-dir",
+            str(tmp_path),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert f"Transport setup failed: {error}" in result.stderr
+    assert "Traceback" not in result.output
+
+
+def test_scan_ens_startup_failure_tty_cancel_exits_without_retry_loop(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import helianthus_vrc_explorer.cli as cli_mod
+
+    def _build_transport(_settings, *, trace_file):  # noqa: ANN001
+        _ = trace_file
+        return _SessionOnlyTransport(fail_open=True)
+
+    prompt_calls = 0
+
+    def _cancel(_console, *, settings, error_message):  # noqa: ANN001
+        nonlocal prompt_calls
+        prompt_calls += 1
+        assert settings.protocol == "enhanced"
+        assert "refused" in error_message
+        return None
+
+    monkeypatch.setattr(cli_mod, "_build_transport", _build_transport)
+    monkeypatch.setattr(cli_mod, "_can_prompt_transport_retry", lambda _console: True)
+    monkeypatch.setattr(cli_mod, "_prompt_transport_retry_settings", _cancel)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "scan",
+            "--transport",
+            "ens",
+            "--host",
+            "192.0.2.2",
+            "--dst",
+            "0x15",
+            "--output-dir",
+            str(tmp_path),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert prompt_calls == 1
+    assert "Transport setup aborted by user." in result.stderr
+
+
+def test_scan_runtime_transport_failure_does_not_restart_scan(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import helianthus_vrc_explorer.cli as cli_mod
+    from helianthus_vrc_explorer.transport.base import TransportTimeout
+
+    class _ReadyTransport:
+        @contextmanager
+        def session(self):
+            yield self
+
+    builds = 0
+    prompt_calls = 0
+
+    def _build_transport(_settings, *, trace_file):  # noqa: ANN001
+        nonlocal builds
+        _ = trace_file
+        builds += 1
+        return _ReadyTransport()
+
+    def _prompt(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        nonlocal prompt_calls
+        prompt_calls += 1
+        return None
+
+    def _runtime_timeout(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        raise TransportTimeout("runtime timeout")
+
+    monkeypatch.setattr(cli_mod, "_build_transport", _build_transport)
+    monkeypatch.setattr(cli_mod, "_can_prompt_transport_retry", lambda _console: True)
+    monkeypatch.setattr(cli_mod, "_prompt_transport_retry_settings", _prompt)
+    monkeypatch.setattr(cli_mod, "_probe_scan_identity", lambda _transport, *, dst: {})
+    monkeypatch.setattr(cli_mod, "scan_vrc", _runtime_timeout)
+
+    result = CliRunner().invoke(app, ["scan", "--dst", "0x15", "--output-dir", str(tmp_path)])
+
+    assert result.exit_code == 1
+    assert builds == 1
+    assert prompt_calls == 0
 
 
 def test_scan_command_not_enabled_exits_with_enablehex_hint(
@@ -468,7 +683,7 @@ def test_scan_cli_b509_range_requires_b509_dump(tmp_path: Path) -> None:
     )
 
     assert result.exit_code == 2
-    assert "--b509-range requires --b509-dump." in result.stderr
+    assert "B509 ranges require enabling the B509 dump in scan setup." in result.stderr
 
 
 def test_scan_cli_b509_range_requires_b509_dump_in_dry_run(tmp_path: Path) -> None:
@@ -486,7 +701,7 @@ def test_scan_cli_b509_range_requires_b509_dump_in_dry_run(tmp_path: Path) -> No
     )
 
     assert result.exit_code == 2
-    assert "--b509-range requires --b509-dump." in result.stderr
+    assert "B509 ranges require enabling the B509 dump in scan setup." in result.stderr
 
 
 def test_scan_cli_passes_b509_dump_and_ranges(monkeypatch, tmp_path: Path) -> None:
@@ -716,19 +931,19 @@ def test_browse_command_is_present() -> None:
     result = runner.invoke(app, ["browse", "--help"])
     assert result.exit_code == 0
     plain = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", result.stdout)
-    assert "--file" in plain
-    assert "--live" in plain
-    assert "--allow-write" in plain
+    assert "--file" not in plain
+    assert "--live" not in plain
+    assert "--allow-write" not in plain
 
 
 def test_browse_requires_file_when_not_live() -> None:
     runner = CliRunner()
     result = runner.invoke(app, ["browse"])
     assert result.exit_code == 2
-    assert "Missing required option: --file <artifact.json>." in result.stderr
+    assert "Browse requires a TTY for the visual file-open dialog." in result.stderr
 
 
-def test_browse_non_tty_falls_back_to_summary(tmp_path: Path) -> None:
+def test_browse_non_tty_requires_visual_file_open_dialog(tmp_path: Path) -> None:
     artifact_path = tmp_path / "artifact.json"
     artifact_path.write_text(
         json.dumps(
@@ -744,9 +959,9 @@ def test_browse_non_tty_falls_back_to_summary(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     runner = CliRunner()
-    result = runner.invoke(app, ["browse", "--file", str(artifact_path)])
-    assert result.exit_code == 0
-    assert "Browse UI requires a TTY terminal." in result.stderr
+    result = runner.invoke(app, ["browse"])
+    assert result.exit_code == 2
+    assert "Browse requires a TTY for the visual file-open dialog." in result.stderr
 
 
 def test_scan_dry_run_writes_scan_artifact(tmp_path: Path) -> None:
@@ -972,6 +1187,72 @@ def test_probe_scan_identity_formats_basv2_friendly_name() -> None:
     )
     assert identity["model"] == "Vaillant sensoCOMFORT RF (VRC 720f/2) 0020262148"
     assert identity["serial"] == "21213400202621480000000001N7"
+
+
+class _IdentityProbeTransport:
+    def __init__(self, *, failure: Exception | None = None, stage: str = "") -> None:
+        self._failure = failure
+        self._stage = stage
+
+    def send_proto(self, _dst: int, primary: int, secondary: int, payload: bytes) -> bytes:
+        if (primary, secondary) == (0x07, 0x04):
+            if self._stage == "0704" and self._failure is not None:
+                raise self._failure
+            return bytes.fromhex("b556524320373230662f3205071704")
+        if self._stage == "b509" and self._failure is not None:
+            raise self._failure
+        return _FakeTransport().send_proto(0x15, primary, secondary, payload)
+
+
+@pytest.mark.parametrize(
+    ("stage", "error"),
+    [
+        pytest.param("0704", TransportTimeout("socket timeout"), id="0704-timeout"),
+        pytest.param("b509", TransportTimeout("socket timeout"), id="b509-timeout"),
+    ],
+)
+def test_probe_scan_identity_propagates_transport_startup_failures(
+    stage: str,
+    error: Exception,
+) -> None:
+    transport = _IdentityProbeTransport(failure=error, stage=stage)
+
+    with pytest.raises(TransportTimeout, match="socket timeout"):
+        _probe_scan_identity(transport, dst=0x15)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("stage", ("0704", "b509"))
+def test_probe_scan_identity_does_not_mask_unexpected_failures(stage: str) -> None:
+    transport = _IdentityProbeTransport(failure=RuntimeError("unexpected preflight"), stage=stage)
+
+    with pytest.raises(RuntimeError, match="unexpected preflight"):
+        _probe_scan_identity(transport, dst=0x15)  # type: ignore[arg-type]
+
+
+def test_probe_scan_identity_keeps_0704_fields_when_b509_chunks_fail_to_parse() -> None:
+    class _MalformedScanIdTransport(_IdentityProbeTransport):
+        def send_proto(self, dst: int, primary: int, secondary: int, payload: bytes) -> bytes:
+            if (primary, secondary) == (0xB5, 0x09):
+                return b"\x00"
+            return super().send_proto(dst, primary, secondary, payload)
+
+    identity = _probe_scan_identity(_MalformedScanIdTransport(), dst=0x15)  # type: ignore[arg-type]
+
+    assert identity["device"] == "VRC 720f/2"
+    assert identity["firmware"] == "SW 0507 / HW 1704"
+    assert identity["model"] == "n/a"
+    assert identity["serial"] == "n/a"
+
+
+def test_probe_scan_identity_keeps_0704_fields_when_optional_b509_nacks() -> None:
+    identity = _probe_scan_identity(
+        _IdentityProbeTransport(failure=TransportNack("nack"), stage="b509"), dst=0x15
+    )
+
+    assert identity["device"] == "VRC 720f/2"
+    assert identity["firmware"] == "SW 0507 / HW 1704"
+    assert identity["model"] == "n/a"
+    assert identity["serial"] == "n/a"
 
 
 def test_resolve_scan_destination_explicit_skips_autodiscovery() -> None:

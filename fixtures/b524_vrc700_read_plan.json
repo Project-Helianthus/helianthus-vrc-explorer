@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "requests": [
+    {"operation": "ReadTimer", "channel": "dhw", "instance": 0, "weekday": 0},
+    {"operation": "ReadVR91"}
+  ]
+}

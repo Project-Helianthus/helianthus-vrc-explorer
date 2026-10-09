@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "scope": "timer_write_op04",
+  "manufacturer": 181,
+  "device_id": "70000",
+  "profile": "vrc700",
+  "model": "VRC700",
+  "software_raw_hex": "0417",
+  "selector": {"channel": "ventilation", "instance": 0, "weekday": 0},
+  "evidence_reference": "synthetic-contract-fixture",
+  "native_qualified": false
+}

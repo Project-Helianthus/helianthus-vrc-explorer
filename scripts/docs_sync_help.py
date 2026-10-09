@@ -21,6 +21,18 @@ _SECTIONS: tuple[HelpSection, ...] = (
     HelpSection("scan", ("scan",)),
     HelpSection("browse", ("browse",)),
     HelpSection("discover", ("discover",)),
+    HelpSection("b524", ("b524",)),
+    HelpSection("b524-apply-operation", ("b524", "apply-operation")),
+    HelpSection("b524-read-timer", ("b524", "read-timer")),
+    HelpSection("b524-read-event", ("b524", "read-event")),
+    HelpSection("b524-read-event-setpoint", ("b524", "read-event-setpoint")),
+    HelpSection("b524-read-vr91", ("b524", "read-vr91")),
+    HelpSection("b524-preview-write-timer", ("b524", "preview-write-timer")),
+    HelpSection("b524-preview-set-event", ("b524", "preview-set-event")),
+    HelpSection(
+        "b524-preview-set-event-setpoint",
+        ("b524", "preview-set-event-setpoint"),
+    ),
 )
 
 _ANSI_ESCAPE_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import ast
+import asyncio
 from pathlib import Path
 
 import pytest
+from textual.widgets import Tabs
 
 import helianthus_vrc_explorer.ui.browse_textual as browse_textual
 from helianthus_vrc_explorer.ui.browse_textual import (
@@ -74,6 +76,19 @@ def test_textual_browse_classes_are_module_scoped() -> None:
         assert name not in collector.names
 
 
+def test_textual_browse_exposes_only_config_and_state_without_address_column() -> None:
+    bindings = {(binding.key, binding.action) for binding in browse_textual._BrowseApp.BINDINGS}
+    assert ("1", "tab_config") in bindings
+    assert ("2", "tab_state") in bindings
+    assert not any("config_limits" in action for _key, action in bindings)
+    assert browse_textual._tab_id("config") == "tab-config"
+    assert browse_textual._tab_id("state") == "tab-state"
+
+    source = Path(browse_textual.__file__ or "").read_text(encoding="utf-8")
+    assert 'Tab("Config-Limits"' not in source
+    assert '"Address",' not in source
+
+
 def test_run_browse_from_artifact_preserves_artifact_and_allow_write(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -109,3 +124,32 @@ def test_run_browse_from_artifact_preserves_lazy_textual_error(
         run_browse_from_artifact({}, allow_write=False)
 
     assert raised.value is error
+
+
+def test_headless_browse_hides_config_state_tabs_for_system_information() -> None:
+    artifact = {
+        "schema_version": "2.3",
+        "meta": {
+            "destination_address": "0x15",
+            "system_information": [
+                {
+                    "identifier": "0x0000",
+                    "name": "circuit_count",
+                    "value": 2,
+                    "raw_hex": "00000040",
+                }
+            ],
+        },
+        "operations": {},
+    }
+
+    async def exercise() -> None:
+        app = browse_textual._BrowseApp(artifact, allow_write=False)
+        async with app.run_test() as pilot:
+            tree = app.query_one("#browse-tree")
+            tree.select_node(app._tree_node_by_ref["b524:section:system_information"])
+            await pilot.pause()
+            assert app.query_one("#browse-tabs", Tabs).display is False
+            assert [row.row_id for row in app._table_rows] == ["b524:system_information:0x0000"]
+
+    asyncio.run(exercise())

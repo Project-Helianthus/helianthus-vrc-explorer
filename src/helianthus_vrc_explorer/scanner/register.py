@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass
 from typing import Any, Final, Literal, NotRequired, TypedDict, cast
 
@@ -53,6 +54,7 @@ class RegisterEntry(TypedDict):
     availability_qualification: NotRequired[str]
     candidate_name: NotRequired[str]
     candidate_evidence: NotRequired[str]
+    codec_evidence: NotRequired[dict[str, object]]
     flags: int | None
     # Profile-scoped attribute hints; never role or persistence semantics.
     reply_kind: str | None
@@ -106,9 +108,11 @@ class InstanceAvailabilityProbe:
     connection_state: Literal["connected", "not_connected", "unknown"] | None = None
 
 
-# Connected-device predicates in the characterized controller profile. GG08
-# has an unknown status byte, rather than this Boolean connection contract.
-CONNECTED_DEVICE_GROUPS: Final[frozenset[int]] = frozenset({1, 2, 9, 10, 12, 14, 15})
+# Connected-device predicates in the characterized controller profile.
+CONNECTED_DEVICE_GROUPS: Final[frozenset[int]] = frozenset(
+    {1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}
+)
+_NUMERIC_REMOTE_FIRMWARE_GROUPS: Final[frozenset[int]] = frozenset({1, 2, 9, 10, 12, 14, 15})
 
 
 def opcodes_for_group(group: int) -> list[RegisterOpcode]:
@@ -154,6 +158,7 @@ def namespace_availability_contract(
     *,
     group: int,
     opcode: RegisterOpcode,
+    presence_profile: str | None = None,
 ) -> NamespaceAvailabilityContract:
     """Return the explicit availability contract for a namespace.
 
@@ -163,14 +168,41 @@ def namespace_availability_contract(
 
     relationship = _namespace_relationship(group)
 
+    if group == 0x01 and opcode == 0x02:
+        return NamespaceAvailabilityContract(
+            source="heuristic_probe",
+            namespace_relationship=relationship,
+            probe_register=0x0001,
+            probe_type_hint="UIN",
+            positive_when="decoded unsigned native_dhw_circuit_type is nonzero",
+            description=(
+                "The Native DHW gate is a correlated two-byte RR=0x0001 value. "
+                "Zero disables the native circuit; malformed values remain unknown. "
+                "Described configuration limits are independent of this presence gate."
+            ),
+        )
+
     if group == 0x02 and opcode == 0x02:
+        basv2_native = presence_profile == "basv2_sw0507_hw1704_api1"
         return NamespaceAvailabilityContract(
             source="heuristic_probe",
             namespace_relationship=relationship,
             probe_register=0x0002,
             probe_type_hint="UIN",
-            positive_when="value not in {0x0000, 0xFFFF}",
-            description="Heating circuit CircuitType must decode to a non-empty u16.",
+            positive_when=(
+                "decoded RR=0x0002 is non-sentinel and nonzero"
+                if basv2_native
+                else "decoded RR=0x0002 is non-sentinel and either nonzero or FLAGS=0x03"
+            ),
+            description=(
+                "For BASV2/SW0507, native II00 and II01 are ordinary circuit slots; "
+                "a zero RR=0x0002 is inactive even when visible. II09 is qualified "
+                "separately as the virtual DHW slot."
+                if basv2_native
+                else "In the characterized controller profile, a non-sentinel nonzero "
+                "RR=0x0002 value or a zero value with active visible FLAGS=0x03 "
+                "retains the local circuit slot. FLAGS=0x02 with zero does not."
+            ),
         )
 
     if group == 0x03 and opcode == 0x02:
@@ -199,8 +231,11 @@ def namespace_availability_contract(
             namespace_relationship=relationship,
             probe_register=0x0004,
             probe_type_hint="EXP",
-            positive_when="decoded EXP value is not null",
-            description="Solar circuit availability requires a decodable float payload.",
+            positive_when="visible RR=0x0004 has a finite decoded EXP value",
+            description=(
+                "The characterized solar profile exposes RR=0x0004 for a configured slot. "
+                "Hidden default temperatures alone do not establish presence."
+            ),
         )
 
     if opcode == 0x06 and group in CONNECTED_DEVICE_GROUPS:
@@ -211,8 +246,8 @@ def namespace_availability_contract(
             probe_type_hint="BOOL",
             positive_when="profile-qualified device_connected Boolean is true",
             description=(
-                "Connected-device coverage uses RR=0x0001 in the characterized "
-                "controller profile. False means not connected, not physical absence. "
+                "Device coverage uses device_connected at RR=0x0001. "
+                "False is a negative predicate for this run. "
                 "Other readable headers may retain inventory and do not override it."
             ),
         )
@@ -656,7 +691,7 @@ def read_register(
     raw_hex = value_bytes.hex()
     if (
         opcode == 6
-        and group in CONNECTED_DEVICE_GROUPS
+        and group in _NUMERIC_REMOTE_FIRMWARE_GROUPS
         and register == 4
         and type_hint in (None, "FW")
     ):
@@ -741,13 +776,16 @@ def probe_instance_availability(
     instance: int,
     *,
     opcode: RegisterOpcode | None = None,
+    presence_profile: str | None = None,
 ) -> InstanceAvailabilityProbe:
     """Probe one instance slot and retain the evidence used for presence."""
 
     if opcode is None:
         opcode = opcodes_for_group(group)[0]
 
-    contract = namespace_availability_contract(group=group, opcode=opcode)
+    contract = namespace_availability_contract(
+        group=group, opcode=opcode, presence_profile=presence_profile
+    )
     if contract.source == "always_present":
         return InstanceAvailabilityProbe(present=True, contract=contract, evidence=None)
 
@@ -765,13 +803,25 @@ def probe_instance_availability(
     present = False
     response_state = entry.get("response_state")
 
+    if opcode == 0x02 and (entry.get("error") is not None or response_state == "empty_reply"):
+        entry["availability_qualification"] = "unknown"
+        return InstanceAvailabilityProbe(present=False, contract=contract, evidence=entry)
+
     if opcode == 0x06 and group in CONNECTED_DEVICE_GROUPS:
         state: Literal["connected", "not_connected", "unknown"] = "unknown"
-        if entry.get("error") is None and response_state == "active":
+        if (
+            entry.get("error") is None
+            and response_state == "active"
+            and entry.get("type") == "BOOL"
+            and len(entry.get("raw_hex") or "") == 2
+            and entry.get("raw_hex") in {"00", "01"}
+        ):
             if entry.get("value") is True:
                 state = "connected"
             elif entry.get("value") is False:
                 state = "not_connected"
+        if state == "unknown":
+            entry["availability_qualification"] = "unknown"
         return InstanceAvailabilityProbe(
             present=state == "connected",
             contract=contract,
@@ -782,33 +832,49 @@ def probe_instance_availability(
     if response_state in {"nack", "timeout"}:
         return InstanceAvailabilityProbe(present=False, contract=contract, evidence=entry)
 
+    if group == 0x01 and opcode == 0x02:
+        value = entry.get("value")
+        valid = (
+            entry.get("error") is None
+            and response_state == "active"
+            and len(entry.get("raw_hex") or "") == 4
+            and isinstance(value, int)
+            and not isinstance(value, bool)
+        )
+        if not valid:
+            entry["availability_qualification"] = "unknown"
+        return InstanceAvailabilityProbe(
+            present=valid and value != 0, contract=contract, evidence=entry
+        )
+
     if group == 0x02 and opcode == 0x02:
-        if response_state == "empty_reply":
-            return InstanceAvailabilityProbe(present=True, contract=contract, evidence=entry)
-        if entry["error"] is None and entry.get("flags_access") != "absent":
+        if (
+            entry["error"] is None
+            and response_state == "active"
+            and entry.get("flags_access") != "absent"
+        ):
             value = entry["value"]
             present = (
                 isinstance(value, int)
                 and not isinstance(value, bool)
-                and value
-                not in {
-                    0x0000,
-                    0xFFFF,
-                }
+                and value != 0xFFFF
+                and (
+                    value != 0x0000
+                    or (
+                        presence_profile != "basv2_sw0507_hw1704_api1"
+                        and entry.get("flags") == 0x03
+                    )
+                )
             )
         return InstanceAvailabilityProbe(present=present, contract=contract, evidence=entry)
 
     if group == 0x03 and opcode == 0x02:
-        if response_state == "empty_reply":
-            return InstanceAvailabilityProbe(present=True, contract=contract, evidence=entry)
         if entry["error"] is None and entry.get("flags_access") != "absent":
             value = entry["value"]
             present = isinstance(value, int) and not isinstance(value, bool) and value != 0xFF
         return InstanceAvailabilityProbe(present=present, contract=contract, evidence=entry)
 
     if group == 0x05 and opcode == 0x02:
-        if response_state == "empty_reply":
-            return InstanceAvailabilityProbe(present=True, contract=contract, evidence=entry)
         present = (
             entry["error"] is None
             and entry.get("flags_access") != "absent"
@@ -817,13 +883,16 @@ def probe_instance_availability(
         return InstanceAvailabilityProbe(present=present, contract=contract, evidence=entry)
 
     if group == 0x04 and opcode == 0x02:
-        if response_state == "empty_reply":
-            return InstanceAvailabilityProbe(present=True, contract=contract, evidence=entry)
+        value = entry.get("value")
         present = (
             entry["error"] is None
-            and entry.get("flags_access") != "absent"
-            and entry["value"] is not None
+            and entry.get("flags_access") in {"read_only_visible", "writable_visible"}
+            and isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(value)
         )
+        if not present and entry.get("flags_access") != "absent":
+            entry["availability_qualification"] = "unknown"
         return InstanceAvailabilityProbe(present=present, contract=contract, evidence=entry)
 
     if opcode == 0x06:
@@ -869,14 +938,10 @@ def probe_instance_availability(
         )
 
     if group in {0x09, 0x0A} and opcode == 0x02:
-        if response_state == "empty_reply":
-            return InstanceAvailabilityProbe(present=True, contract=contract, evidence=entry)
         present = entry["error"] is None and entry.get("flags_access") != "absent"
         return InstanceAvailabilityProbe(present=present, contract=contract, evidence=entry)
 
     if group in {0x06, 0x07, 0x08, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10, 0x11} and opcode == 0x02:
-        if response_state == "empty_reply":
-            return InstanceAvailabilityProbe(present=True, contract=contract, evidence=entry)
         present = entry["error"] is None and entry.get("flags_access") != "absent"
         return InstanceAvailabilityProbe(present=present, contract=contract, evidence=entry)
 

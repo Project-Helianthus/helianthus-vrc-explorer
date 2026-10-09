@@ -236,6 +236,9 @@ def acquire_descriptions(
     family_positions = {0x02: 0, 0x06: 0}
     attempt_preempted = False
     finish_description_coverage(candidates, entries, budget=budget, coverage=coverage)
+    progress_total = len(schedule.scheduled)
+    if observer is not None and progress_total:
+        observer.phase_start("describe", total=progress_total)
     for candidate in schedule.scheduled:
         if observer is not None:
             observer.status(
@@ -331,6 +334,18 @@ def acquire_descriptions(
                 )
             finish_description_coverage(candidates, entries, budget=budget, coverage=coverage)
             raise
+        finally:
+            if observer is not None:
+                attempts = (
+                    transport.counters.send_calls - start_attempts
+                    if isinstance(transport, CountingTransport)
+                    else 1
+                )
+                if attempts > 1:
+                    progress_total += attempts - 1
+                    observer.phase_set_total("describe", total=progress_total)
+                if attempts:
+                    observer.phase_advance("describe", advance=attempts)
         metadata["request_attempted"] = True
         metadata["request_attempts"] = (
             transport.counters.send_calls - start_attempts
@@ -341,3 +356,5 @@ def acquire_descriptions(
     finish_description_coverage(candidates, entries, budget=budget, coverage=coverage)
     if attempt_preempted or len(schedule.scheduled) < len(configured_schedule.scheduled):
         raise ScanRequestBudgetExceeded("B524 request budget exhausted during descriptions")
+    if observer is not None and progress_total:
+        observer.phase_finish("describe")

@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
-from ..scanner.identity import opcode_label
 from ..scanner.plan import (
     GroupScanPlan,
     PlanKey,
@@ -14,31 +13,64 @@ from ..scanner.plan import (
     parse_int_token,
 )
 from ..scanner.scan_policy import validate_scalar_request_limit
+from .operation_planner import (
+    OperationPlannerRow,
+    append_exact_operation_request,
+    operation_planner_rows,
+    operation_request_preview,
+    raw_code_range,
+    replace_event_day_codes,
+)
 from .planner import (
     PlannerGroup,
     PlannerPreset,
     _format_seconds,
     build_plan_from_preset,
+    format_planner_instance_bounds,
+    format_planner_op00_count,
+    planner_instance_range,
     planner_namespace_title,
+    planner_present_instances,
+    planner_unmapped_system_information,
     split_planner_groups_by_namespace,
 )
+from .planner_selection import (
+    DescriptionClass,
+    DescriptionPolicySelection,
+    DescriptionSource,
+    PlannerSelection,
+    default_description_policy,
+    make_planner_selection,
+)
 from .system_information import format_system_information_text
+
+PLANNER_TABLE_COLUMNS = (
+    "On",
+    "GG",
+    "Name",
+    "OP00 count",
+    "II range",
+    "Instances",
+    "RR_max",
+    "Descriptions",
+)
+_OPERATION_TABLE_ID = "planner-table-operations"
 
 
 @dataclass(slots=True)
 class _EditableGroup:
     group: PlannerGroup
     enabled: bool
-    rr_max: int
+    rr_max: int | None
     instances: tuple[int, ...]
     registers: tuple[int, ...] | None = None
 
 
-def _namespace_text(group: PlannerGroup) -> str:
-    return group.namespace_label or opcode_label(group.opcode)
-
-
-def _table_row_values(state: _EditableGroup) -> tuple[str, str, str, str, str, str, str]:
+def _table_row_values(
+    state: _EditableGroup,
+    system_information: Sequence[Mapping[str, object]] | None = None,
+    description_policy: DescriptionPolicySelection | None = None,
+) -> tuple[str, str, str, str, str, str, str, str]:
     group = state.group
     mark = "✓" if state.enabled else " "
     name = group.name if group.known else f"{group.name} (experimental)"
@@ -46,14 +78,22 @@ def _table_row_values(state: _EditableGroup) -> tuple[str, str, str, str, str, s
         mark,
         f"0x{group.group:02X}",
         name,
-        _namespace_text(group),
-        f"{group.descriptor:.1f}",
+        format_planner_op00_count(group, system_information),
+        format_planner_instance_bounds(group),
         _format_instances(group, state.instances, enabled=state.enabled),
         _format_register_scope(state),
+        (
+            f"{description_policy.for_opcode(group.opcode)}"
+            + ("*" if description_policy.overridden_for_opcode(group.opcode) else "")
+            if description_policy is not None
+            else "profile"
+        ),
     )
 
 
 def _format_register_scope(state: _EditableGroup) -> str:
+    if state.rr_max is None:
+        return "— (explicit required)"
     if state.registers is None:
         return f"0x{state.rr_max:04X}"
     return ",".join(f"0x{register:04X}" for register in state.registers)
@@ -80,17 +120,21 @@ def _format_instances(group: PlannerGroup, instances: tuple[int, ...], *, enable
     if group.ii_max is None:
         return "singleton"
 
-    total = group.ii_max + 1
+    full = planner_instance_range(group)
+    total = len(full)
     selected = len(instances)
-    full = tuple(range(0x00, total))
-    if instances == full:
+    if not group.instances_probed and not instances:
+        label = f"unprobed 0/{total}"
+    elif instances == full:
         label = f"all {selected}/{total}"
-    elif instances == group.present_instances:
+    elif instances == planner_present_instances(group):
         label = f"present {selected}/{total}"
     elif not instances:
         label = f"none 0/{total}"
     else:
         label = f"{format_int_set(list(instances))} ({selected}/{total})"
+    if not group.instances_probed and instances:
+        label = f"{label} (unprobed)"
     if not enabled:
         return f"{label} (off)"
     return label
@@ -101,12 +145,15 @@ def _parse_instances_spec(spec: str, *, group: PlannerGroup) -> tuple[int, ...]:
         return (0x00,)
     raw = spec.strip().lower()
     if raw in {"all", "*"}:
-        return tuple(range(0x00, group.ii_max + 1))
+        return planner_instance_range(group)
     if raw in {"present", "p"}:
-        return group.present_instances
+        return planner_present_instances(group)
     if raw in {"none", "no"}:
         return ()
-    parsed = parse_int_set(spec, min_value=0x00, max_value=group.ii_max)
+    allowed = planner_instance_range(group)
+    parsed = parse_int_set(spec, min_value=min(allowed), max_value=max(allowed))
+    if any(ii not in allowed for ii in parsed):
+        raise ValueError("instance is outside the operation profile range")
     return tuple(parsed)
 
 
@@ -114,6 +161,7 @@ def _estimate_footer(
     states: dict[PlanKey, _EditableGroup],
     *,
     request_rate_rps: float | None,
+    operation_selection: Sequence[bool] = (),
 ) -> str:
     plan = {
         key: GroupScanPlan(
@@ -124,16 +172,18 @@ def _estimate_footer(
             registers=state.registers,
         )
         for (key, state) in states.items()
-        if state.enabled
+        if state.enabled and state.rr_max is not None
     }
-    requests = estimate_register_requests(plan)
+    requests = estimate_register_requests(plan) + sum(operation_selection)
     eta_s = estimate_eta_seconds(requests=requests, request_rate_rps=request_rate_rps)
     eta_txt = _format_seconds(eta_s) if eta_s is not None else "n/a"
     rate_txt = f"{request_rate_rps:.2f}" if request_rate_rps is not None else "n/a"
     enabled_groups = sum(1 for state in states.values() if state.enabled)
+    missing_rr = sum(1 for state in states.values() if state.enabled and state.rr_max is None)
+    missing_rr_text = f" | {missing_rr} need RR scope" if missing_rr else ""
     return (
         f"Plan: {requests} requests | ETA: {eta_txt} @ {rate_txt} req/s | "
-        f"{enabled_groups} plan entries selected"
+        f"{enabled_groups} plan entries selected{missing_rr_text}"
     )
 
 
@@ -167,7 +217,11 @@ def run_textual_scan_plan(
     default_plan: dict[PlanKey, GroupScanPlan] | None = None,
     default_preset: PlannerPreset = "recommended",
     system_information: Sequence[Mapping[str, object]] | None = None,
-) -> dict[PlanKey, GroupScanPlan] | None:
+    operation_requests: Sequence[object] | None = None,
+    operation_selection: list[bool] | None = None,
+    description_policy: DescriptionPolicySelection | None = None,
+    description_profile_status: str = "exact",
+) -> PlannerSelection | None:
     """Open a Textual planner and return selected plan (None when cancelled).
 
     This function imports Textual lazily so non-interactive environments remain lightweight.
@@ -179,6 +233,16 @@ def run_textual_scan_plan(
     from textual.events import Key
     from textual.screen import ModalScreen
     from textual.widgets import DataTable, Footer, Header, Input, Label, Static
+
+    requests = operation_requests or ()
+    mutable_operation_selection = (
+        operation_selection if operation_selection is not None else [True] * len(requests)
+    )
+    if operation_selection is not None and len(operation_selection) != len(requests):
+        raise ValueError("operation_selection must match operation_requests")
+    initial_description_policy = description_policy or default_description_policy(
+        default_preset, exact_profile_known=description_profile_status == "exact"
+    )
 
     class _InputDialog(ModalScreen[str | None]):
         BINDINGS = [
@@ -229,7 +293,7 @@ def run_textual_scan_plan(
             value = self.query_one(Input).value.strip()
             self.dismiss(value)
 
-    class _PlannerApp(App[dict[PlanKey, GroupScanPlan] | None]):
+    class _PlannerApp(App[PlannerSelection | None]):
         BINDINGS = [
             Binding("space", "toggle_enabled", "Toggle"),
             Binding(
@@ -239,7 +303,12 @@ def run_textual_scan_plan(
                 show=False,
             ),
             Binding("tab", "focus_next", "Next"),
+            Binding("shift+tab", "focus_previous", "Previous", show=False),
+            Binding("d", "edit_event_codes", "Event codes"),
+            Binding("a", "add_operation", "Add operation"),
             Binding("i", "edit_instances", "Edit II"),
+            Binding("l", "toggle_local_descriptions", "Local descriptions"),
+            Binding("r", "toggle_remote_descriptions", "Remote descriptions"),
             Binding("1", "preset_recommended", "Preset 1"),
             Binding("2", "preset_full", "Preset 2"),
             Binding("3", "preset_research", "Preset 3"),
@@ -256,6 +325,13 @@ def run_textual_scan_plan(
         }
         #planner-pane-local, #planner-pane-remote {
             height: 1fr;
+        }
+        #planner-panes {
+            height: 2fr;
+        }
+        #planner-pane-operations {
+            height: 1fr;
+            min-height: 5;
         }
         DataTable {
             height: 1fr;
@@ -274,6 +350,7 @@ def run_textual_scan_plan(
 
         def __init__(self) -> None:
             super().__init__()
+            self._system_information = system_information
             namespace_sections = split_planner_groups_by_namespace(groups)
             self._groups = [
                 group for (_title, pane_groups) in namespace_sections for group in pane_groups
@@ -282,12 +359,18 @@ def run_textual_scan_plan(
             initial_plan = default_plan if default_plan is not None else preset_plan
             self._states: dict[PlanKey, _EditableGroup] = {}
             self._row_groups: dict[str, list[PlanKey]] = {"local": [], "remote": []}
+            self._operation_rows = operation_planner_rows(requests)
+            self._editing_operation: OperationPlannerRow | None = None
             self._editing_group: PlanKey | None = None
             self._suppress_next_enter = False
+            self._description_policy = initial_description_policy
+            self._selected_preset = default_preset
             for group in self._groups:
                 group_plan = initial_plan.get(group.key)
                 if group_plan is None:
-                    instances = (0x00,) if group.ii_max is None else group.present_instances
+                    instances = (
+                        (0x00,) if group.ii_max is None else planner_present_instances(group)
+                    )
                     self._states[group.key] = _EditableGroup(
                         group=group,
                         enabled=False,
@@ -306,23 +389,30 @@ def run_textual_scan_plan(
 
         def compose(self) -> ComposeResult:
             yield Header(show_clock=False)
-            system_information_text = format_system_information_text(system_information)
+            system_information_text = format_system_information_text(
+                planner_unmapped_system_information(system_information)
+            )
             if system_information_text:
                 yield Static(
                     f"System Information: {system_information_text}", id="system-information"
                 )
             yield Vertical(
                 Vertical(
-                    Label(planner_namespace_title(0x02)),
+                    Label(planner_namespace_title(0x02) + " · L toggles descriptions"),
                     DataTable(id="planner-table-local"),
                     id="planner-pane-local",
                 ),
                 Vertical(
-                    Label(planner_namespace_title(0x06)),
+                    Label(planner_namespace_title(0x06) + " · R toggles descriptions"),
                     DataTable(id="planner-table-remote"),
                     id="planner-pane-remote",
                 ),
                 id="planner-panes",
+            )
+            yield Vertical(
+                Label("Exact B524 operation reads · A adds a row"),
+                DataTable(id=_OPERATION_TABLE_ID),
+                id="planner-pane-operations",
             )
             yield Static("", id="status")
             yield Static("", id="help")
@@ -332,20 +422,34 @@ def run_textual_scan_plan(
             for table_id in _PANE_TABLE_IDS.values():
                 table = self.query_one(f"#{table_id}", DataTable)
                 table.cursor_type = "row"
-                table.add_columns("On", "GG", "Name", "Namespace", "Type", "Instances", "RR_max")
+                table.add_columns(*PLANNER_TABLE_COLUMNS)
+            operation_table = self.query_one(f"#{_OPERATION_TABLE_ID}", DataTable)
+            operation_table.cursor_type = "row"
+            operation_table.add_columns("On", "Program", "Scope", "Up to reads")
             self._refresh_table()
-            self._set_help("1/2/3/4 presets | Space toggle | Enter edit RR_max | i edit instances")
-            if self._row_groups["local"]:
-                self.query_one("#planner-table-local", DataTable).focus()
-            else:
-                self.query_one("#planner-table-remote", DataTable).focus()
+            self._set_help(
+                "Tab/Shift+Tab panes | Space toggle program/group | Enter edit RR/codes | "
+                "i instances | l/r description source | s save"
+            )
+            if description_profile_status != "exact":
+                self._set_help(
+                    "Unknown description profile: Full is recommended within shown bounds. "
+                    "Save/share JSON manually; no automatic upload."
+                )
+            tables = self._focusable_tables()
+            if tables:
+                tables[0].focus()
 
         def _set_help(self, text: str) -> None:
             self.query_one("#help", Static).update(text)
 
         def _set_status(self) -> None:
             self.query_one("#status", Static).update(
-                _estimate_footer(self._states, request_rate_rps=request_rate_rps)
+                _estimate_footer(
+                    self._states,
+                    request_rate_rps=request_rate_rps,
+                    operation_selection=mutable_operation_selection,
+                )
             )
 
         def _focused_group(self) -> PlanKey | None:
@@ -361,6 +465,14 @@ def run_textual_scan_plan(
             if row < 0 or row >= len(row_groups):
                 return None
             return row_groups[row]
+
+        def _focused_operation(self) -> int | None:
+            if not requests:
+                return None
+            if not isinstance(self.focused, DataTable) or self.focused.id != _OPERATION_TABLE_ID:
+                return None
+            row = self.focused.cursor_row
+            return row if 0 <= row < len(self._operation_rows) else None
 
         def _refresh_table(self) -> None:
             table_by_pane = {
@@ -379,12 +491,27 @@ def run_textual_scan_plan(
                 if pane_table is None:
                     continue
                 state = self._states[group.key]
-                pane_table.add_row(*_table_row_values(state))
+                pane_table.add_row(
+                    *_table_row_values(state, self._system_information, self._description_policy)
+                )
                 self._row_groups[pane_key].append(group.key)
             for pane_key, table in table_by_pane.items():
                 row_groups = self._row_groups[pane_key]
                 if row_groups:
                     table.move_cursor(row=min(cursor_by_pane[pane_key], len(row_groups) - 1))
+            table = self.query_one(f"#{_OPERATION_TABLE_ID}", DataTable)
+            cursor = max(0, table.cursor_row)
+            table.clear(columns=False)
+            self._operation_rows = operation_planner_rows(requests)
+            for row in self._operation_rows:
+                table.add_row(
+                    row.mark(mutable_operation_selection),
+                    row.name,
+                    row.scope,
+                    str(len(row.indices)),
+                )
+            if self._operation_rows:
+                table.move_cursor(row=min(cursor, len(self._operation_rows) - 1))
             self._set_status()
 
         def _focus_table(self) -> None:
@@ -393,6 +520,9 @@ def run_textual_scan_plan(
                 and _table_id_to_pane_key(self.focused.id) is not None
             ):
                 self.focused.focus()
+                return
+            if requests:
+                self.query_one(f"#{_OPERATION_TABLE_ID}", DataTable).focus()
                 return
             for pane_key in ("local", "remote"):
                 if self._row_groups[pane_key]:
@@ -407,6 +537,24 @@ def run_textual_scan_plan(
             self._suppress_next_enter = True
 
         def _apply_preset(self, preset: PlannerPreset) -> None:
+            self._selected_preset = preset
+            preset_policy = default_description_policy(
+                preset, exact_profile_known=description_profile_status == "exact"
+            )
+            self._description_policy = DescriptionPolicySelection(
+                local=(
+                    self._description_policy.local
+                    if self._description_policy.local_override
+                    else preset_policy.local
+                ),
+                remote=(
+                    self._description_policy.remote
+                    if self._description_policy.remote_override
+                    else preset_policy.remote
+                ),
+                local_override=self._description_policy.local_override,
+                remote_override=self._description_policy.remote_override,
+            )
             preset_plan = build_plan_from_preset(self._groups, preset=preset)
             for group in self._groups:
                 state = self._states[group.key]
@@ -420,6 +568,26 @@ def run_textual_scan_plan(
                 state.registers = planned.registers
             self._refresh_table()
             self._set_help(f"Applied preset: {preset}")
+
+        def _toggle_description_source(self, device_class: DescriptionClass) -> None:
+            current = (
+                self._description_policy.local
+                if device_class == "local"
+                else self._description_policy.remote
+            )
+            source: DescriptionSource = "live" if current == "profile" else "profile"
+            self._description_policy = self._description_policy.with_override(
+                device_class,
+                source,
+            )
+            self._refresh_table()
+            self._set_help(f"{device_class.title()} descriptions: {source} (override)")
+
+        def action_toggle_local_descriptions(self) -> None:
+            self._toggle_description_source("local")
+
+        def action_toggle_remote_descriptions(self) -> None:
+            self._toggle_description_source("remote")
 
         def _edit_rr_max(self, value: str | None) -> None:
             if value is None or self._editing_group is None:
@@ -470,26 +638,31 @@ def run_textual_scan_plan(
             self._suppress_enter_reactivation()
             self._focus_table()
 
-        def action_focus_next(self) -> None:
+        def _focusable_tables(self) -> list[DataTable]:
             tables = [
-                self.query_one("#planner-table-local", DataTable),
-                self.query_one("#planner-table-remote", DataTable),
+                self.query_one(f"#{table_id}", DataTable)
+                for pane_key, table_id in _PANE_TABLE_IDS.items()
+                if self._row_groups[pane_key]
             ]
-            if not any(self._row_groups[pane_key] for pane_key in _PANE_TABLE_IDS):
+            if requests:
+                tables.append(self.query_one(f"#{_OPERATION_TABLE_ID}", DataTable))
+            return tables
+
+        def _cycle_table_focus(self, direction: int) -> None:
+            tables = self._focusable_tables()
+            if not tables:
                 return
-            if isinstance(self.focused, DataTable):
-                current_idx = next(
-                    (index for index, table in enumerate(tables) if table.id == self.focused.id),
-                    0,
-                )
-            else:
-                current_idx = 0
-            for offset in range(1, len(tables) + 1):
-                candidate = tables[(current_idx + offset) % len(tables)]
-                pane_key = _table_id_to_pane_key(candidate.id)
-                if pane_key is not None and self._row_groups[pane_key]:
-                    candidate.focus()
-                    return
+            current_idx = next(
+                (index for index, table in enumerate(tables) if table is self.focused),
+                -1 if direction > 0 else 0,
+            )
+            tables[(current_idx + direction) % len(tables)].focus()
+
+        def action_focus_next(self) -> None:
+            self._cycle_table_focus(1)
+
+        def action_focus_previous(self) -> None:
+            self._cycle_table_focus(-1)
 
         def on_key(self, event: Key) -> None:
             # Accept Enter/Return variants for row edit while avoiding modal interference.
@@ -506,8 +679,16 @@ def run_textual_scan_plan(
             ):
                 event.stop()
                 self.action_edit_rr_max()
+            elif self._focused_operation() is not None:
+                event.stop()
+                self.action_edit_event_codes()
 
         def action_toggle_enabled(self) -> None:
+            operation_index = self._focused_operation()
+            if operation_index is not None:
+                self._operation_rows[operation_index].toggle(mutable_operation_selection)
+                self._refresh_table()
+                return
             key = self._focused_group()
             if key is None:
                 return
@@ -522,7 +703,7 @@ def run_textual_scan_plan(
                 return
             self._editing_group = key
             state = self._states[key]
-            current = _format_register_scope(state)
+            current = "" if state.rr_max is None else _format_register_scope(state)
             planner_group = state.group
             self.push_screen(
                 _InputDialog(
@@ -538,7 +719,79 @@ def run_textual_scan_plan(
             if self._suppress_next_enter:
                 self._suppress_next_enter = False
                 return
-            self.action_edit_rr_max()
+            if self._focused_operation() is None:
+                self.action_edit_rr_max()
+            else:
+                self.action_edit_event_codes()
+
+        def action_edit_event_codes(self) -> None:
+            if len(self.screen_stack) > 1:
+                return
+            index = self._focused_operation()
+            if index is None:
+                return
+            row = self._operation_rows[index]
+            if not row.automatic or not isinstance(requests, list):
+                self._set_help("Explicit operation selectors are retained from their read plan")
+                return
+            self._editing_operation = row
+            self.push_screen(
+                _InputDialog(
+                    title=f"Raw Event codes for {row.name}",
+                    value=",".join(f"0x{code:02X}" for code in row.codes),
+                    hint="Raw codes 0x00..0xFF; e.g. 0x00..0x07. No weekday names assigned.",
+                ),
+                self._edit_event_codes,
+            )
+
+        def action_add_operation(self) -> None:
+            if len(self.screen_stack) > 1:
+                return
+            if not isinstance(requests, list):
+                self._set_help("Operation list is not editable")
+                return
+            self.push_screen(
+                _InputDialog(
+                    title="Add exact B524 read",
+                    value="",
+                    hint=(
+                        "Examples: ReadVR91 | ReadTimer channel=zone-heating "
+                        "instance=1 weekday=2 | "
+                        "GetEvent profile=zone instance=0 address=1 weekday_code=0"
+                    ),
+                ),
+                self._add_operation,
+            )
+
+        def _add_operation(self, value: str | None) -> None:
+            if value is not None and isinstance(requests, list):
+                try:
+                    request = append_exact_operation_request(
+                        requests, mutable_operation_selection, value
+                    )
+                except ValueError as exc:
+                    self._set_help(f"Invalid operation request: {exc}")
+                else:
+                    self._set_help(operation_request_preview(request))
+            self._refresh_table()
+            self._suppress_enter_reactivation()
+            self._focus_table()
+
+        def _edit_event_codes(self, value: str | None) -> None:
+            row, self._editing_operation = self._editing_operation, None
+            if row is not None and value is not None and isinstance(requests, list):
+                try:
+                    codes = parse_int_set(value, min_value=0, max_value=0xFF)
+                    if not codes:
+                        raise ValueError("Choose at least one raw Event code")
+                    replace_event_day_codes(requests, mutable_operation_selection, row, codes)
+                except ValueError as exc:
+                    self._set_help(f"Invalid raw Event codes: {exc}")
+                else:
+                    self._set_help(f"{row.name}: raw codes {raw_code_range(codes)}")
+            self._refresh_table()
+            self._suppress_enter_reactivation()
+            self._focus_table()
 
         def action_edit_instances(self) -> None:
             if len(self.screen_stack) > 1:
@@ -553,11 +806,12 @@ def run_textual_scan_plan(
             self._editing_group = key
             current = self._states[key].instances
             default_value = format_int_set(list(current)) if current else "none"
+            allowed_text = format_int_set(list(planner_instance_range(group)))
             self.push_screen(
                 _InputDialog(
                     title=f"Instances for {group.prompt_label}",
                     value=default_value,
-                    hint="Use present|all|none|0-10",
+                    hint=f"Use present|all|none|{allowed_text}",
                 ),
                 self._edit_instances,
             )
@@ -575,7 +829,10 @@ def run_textual_scan_plan(
             self._apply_preset("custom")
 
         def action_show_help(self) -> None:
-            self._set_help("Space=toggle Enter=RR i=instances 1/2/3/4=presets s=save q=cancel")
+            self._set_help(
+                "Tab/Shift+Tab changes panes; Space toggles group/program; "
+                "Enter edits RR/codes; a adds exact read; i instances; l/r descriptions; s saves"
+            )
 
         def action_save(self) -> None:
             plan = {
@@ -587,14 +844,30 @@ def run_textual_scan_plan(
                     registers=state.registers,
                 )
                 for (key, state) in sorted(self._states.items())
-                if state.enabled
+                if state.enabled and state.rr_max is not None
             }
+            missing_rr = [
+                state.group.prompt_label
+                for state in self._states.values()
+                if state.enabled and state.rr_max is None
+            ]
+            if missing_rr:
+                self._set_help(f"RR scope required for: {', '.join(missing_rr)}")
+                return
             try:
                 validate_scalar_request_limit(plan)
             except ValueError as exc:
                 self._set_help(f"Invalid scan plan: {exc}")
                 return
-            self.exit(plan)
+            self.exit(
+                make_planner_selection(
+                    plan,
+                    selected_preset=self._selected_preset,
+                    operation_requests=requests,
+                    operation_selection=mutable_operation_selection,
+                    description_policy=self._description_policy,
+                )
+            )
 
         def action_cancel(self) -> None:
             self.exit(None)

@@ -86,9 +86,7 @@ def test_render_summary_shows_namespace_totals_and_flags_distribution(tmp_path: 
 
     text = console.export_text()
     assert "namespaces local (0x02)=2, remote (0x06)=1" in text
-    assert (
-        "flags_access state_volatile=0, state_stable=2, config_installer=0, config_user=1" in text
-    )
+    assert "state_stable=2" in text and "config_user=1" in text
     assert "b555 reads=4 errors=1 programs=2" in text
     assert "Local Devices (0x02)" in text
     assert "Remote Devices (0x06)" in text
@@ -448,7 +446,7 @@ def test_render_summary_ignores_synthetic_instance_slots_in_topology_ratios(
     assert "Local Devices (0x02)" in text
     assert "Remote Devices (0x06)" in text
     assert "Unknown 0x69" in text and "1/11" in text
-    assert "Unknown 0x08" in text and "singleton" in text
+    assert "DeltaT" in text and "singleton" in text
 
 
 def test_render_summary_uses_discovery_namespace_for_omitted_single_namespace_group(
@@ -485,7 +483,7 @@ def test_render_summary_uses_discovery_namespace_for_omitted_single_namespace_gr
     text = console.export_text()
 
     assert "Remote Devices (0x06)" in text
-    assert "Hot Water Cylinder" in text
+    assert "Wärmepumpe Zubehör Appliance Interface (VWZ-AI)" in text
     assert "Other Namespaces" not in text
 
 
@@ -528,7 +526,7 @@ def test_render_summary_prefers_observed_namespace_over_discovery_fallback(
     text = console.export_text()
 
     assert "Remote Devices (0x06)" in text
-    assert "Hot Water Circuit" in text
+    assert "Boiler" in text
     assert "Local Devices (0x02)" not in text
     assert "Other Namespaces" not in text
 
@@ -572,5 +570,79 @@ def test_render_summary_does_not_collapse_conflicting_observed_namespaces_with_d
     # v2.3: after migration, flat groups with mixed opcodes go under a single
     # operation (determined by first entry read_opcode). The group appears in
     # the section for that operation.
-    assert "Hot Water Circuit" in text
+    assert "Native Domestic Hot Water" in text
     assert "Local Devices (0x02)" in text
+
+
+def test_summary_uses_explicit_nonzero_instance_minimum(tmp_path: Path) -> None:
+    artifact = {
+        "meta": {"destination_address": "0x15", "scan_duration_seconds": 1.0},
+        "operations": {
+            "0x02": {
+                "groups": {
+                    "0x02": {
+                        "name": "Circuits",
+                        "ii_min": "0x01",
+                        "ii_max": "0x09",
+                        "instances": {
+                            "0x00": {"present": True, "registers": {}},
+                            "0x01": {"present": True, "registers": {}},
+                            "0x02": {"present": True, "registers": {}},
+                            "0x09": {"present": True, "registers": {}},
+                        },
+                    }
+                }
+            },
+            "0x06": {
+                "groups": {
+                    "0x0f": {
+                        "name": "Base Station",
+                        "ii_min": "0x01",
+                        "ii_max": "0x08",
+                        "instances": {
+                            "0x00": {"present": True, "registers": {}},
+                            "0x08": {"present": True, "registers": {}},
+                            "0x09": {"present": True, "registers": {}},
+                        },
+                    }
+                }
+            },
+        },
+    }
+    console = Console(record=True, width=180)
+    render_summary(console, artifact, output_path=tmp_path / "artifact.json")
+    text = console.export_text()
+    assert "3/9" in text
+    assert "1/8" in text
+    assert "3/10" not in text
+    assert "Type" not in text
+
+
+def test_summary_defaults_use_only_current_access_names(tmp_path: Path) -> None:
+    artifact = {
+        "operations": {
+            "0x02": {
+                "groups": {
+                    "0x00": {
+                        "instances": {
+                            "0x00": {
+                                "registers": {
+                                    "0x0001": {"flags_access": "writable_visible"},
+                                    "0x0002": {"flags_access": "read_only_visible"},
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    console = Console(record=True, width=200)
+    render_summary(console, artifact, output_path=tmp_path / "artifact.json")
+    text = console.export_text()
+    assert (
+        "flags_access read_only_not_visible=0, read_only_visible=1, "
+        "writable_not_visible=0, writable_visible=1"
+    ) in text
+    for obsolete in ("state_volatile", "state_stable", "config_installer", "config_user"):
+        assert obsolete not in text

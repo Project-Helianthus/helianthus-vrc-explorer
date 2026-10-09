@@ -7,6 +7,10 @@
     "source_address": "0x31",
     "ebusd_host": "127.0.0.1",
     "ebusd_port": 8888,
+    "identity": {
+      "manufacturer": "0xB5",
+      "device_id": "BASV2"
+    },
     "device_info": {
       "manufacturer": "Vaillant",
       "ebus_model": "BASV2",

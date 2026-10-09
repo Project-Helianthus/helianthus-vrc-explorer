@@ -7,9 +7,12 @@ from typing import Any
 from ..artifact_schema import migrate_artifact_schema
 from ..scanner.director import GROUP_CONFIG, group_name_for_opcode, group_namespace_profiles
 from ..scanner.identity import operation_label
-from ..schema.parameter_descriptions import attach_bundled_descriptions
+from ..schema.b524_register_names import b524_register_name
+from ..schema.b524_value_labels import apply_b524_value_labels
+from ..schema.parameter_descriptions import attach_bundled_descriptions, description_profile
+from .b524_operation_reads import operation_read_views
 from .browse_models import BrowseTab, RegisterAddress, RegisterRow, TreeNodeRef
-from .register_semantics import entry_display_value_text, visible_rr_keys
+from .register_semantics import entry_display_value_text, entry_status_kind, visible_rr_keys
 
 _B524_SECTION_ORDER: tuple[str, ...] = (
     "system_information",
@@ -24,9 +27,9 @@ _B524_SECTION_LABELS: dict[str, str] = {
     "system_information": "OP00 ReadSystemInformation",
     "group_directory": "Legacy unqualified group-directory artifacts",
     "register_constraints": "Legacy unqualified constraint artifacts",
-    "controller_registers": "Controller Registers",
+    "controller_registers": "OP02 GetParameter",
     "timer_programs": "Timer Programs",
-    "device_slots": "Device Slots",
+    "device_slots": "OP06 GetDeviceParameter",
     "register_tables": "Register Tables",
 }
 
@@ -57,15 +60,11 @@ def _parse_timestamp(meta: dict[str, Any]) -> datetime | None:
 
 
 def _tab_from_entry(entry: dict[str, Any]) -> BrowseTab:
-    namespace_key = _entry_namespace_key(entry)
-    if namespace_key is not None and namespace_key != "0x02":
-        return "state"
-
     register_class = str(entry.get("register_class") or "").strip().lower()
     if register_class == "config":
         return "config"
     if register_class in {"config_limits", "limits"}:
-        return "config_limits"
+        return "config"
     if register_class == "state":
         return "state"
 
@@ -73,7 +72,7 @@ def _tab_from_entry(entry: dict[str, Any]) -> BrowseTab:
     if flags_access in {"writable_not_visible", "writable_visible", "config_user"}:
         return "config"
     if flags_access == "config_installer":
-        return "config_limits"
+        return "config"
     return "state"
 
 
@@ -150,11 +149,16 @@ def _instance_label(
         group_name=group_name,
         namespace_key=namespace_key,
     )
-    # Human-friendly numbering: show 1-based index, but always keep the instance ID too.
+    # Remote slots and circuits already use 1-based wire selectors.
     ii = _safe_int_hex(instance_key)
-    if namespace_key == "0x02" and _safe_int_hex(group_key) == 2 and ii == 0x0A:
+    if namespace_key == "0x02" and _safe_int_hex(group_key) == 2 and ii == 0x09:
         return f"Virtual DHW Slot ({instance_key})"
-    return f"{base} {ii + 1} ({instance_key})"
+    number = (
+        ii
+        if namespace_key == "0x06" or (namespace_key == "0x02" and _safe_int_hex(group_key) == 2)
+        else ii + 1
+    )
+    return f"{base} {number} ({instance_key})"
 
 
 def _row_sort_key(row: RegisterRow) -> tuple[int, int, int, int, int, int]:
@@ -243,21 +247,38 @@ def _namespace_display_label(namespace_key: str | None, namespace_label: str | N
     return namespace_key
 
 
-def _expected_instance_keys(
+def _visible_instance_keys(
     *,
     group_key: str,
     namespace_key: str | None,
     instances: dict[str, Any],
+    circuit_ii_min: int = 1,
 ) -> list[str]:
-    keys = {key for key in instances if isinstance(key, str)}
-    if namespace_key is None:
-        return sorted(keys, key=_safe_int_hex)
-
-    profiles = group_namespace_profiles(_safe_int_hex(group_key))
-    profile = profiles.get(_safe_int_hex(namespace_key))
-    if profile is not None and profile.ii_max > 0:
-        for ii in range(profile.ii_max + 1):
-            keys.add(_hex_u8(ii))
+    opcode = _safe_int_hex(namespace_key or "0")
+    group = _safe_int_hex(group_key)
+    keys = []
+    for key, instance in instances.items():
+        if not isinstance(key, str) or not isinstance(instance, dict):
+            continue
+        ii = _safe_int_hex(key)
+        if opcode == 6 and not 1 <= ii <= 8:
+            continue
+        if opcode == 2 and group == 2 and not circuit_ii_min <= ii <= 9:
+            continue
+        if "present" in instance:
+            if instance["present"] is not True:
+                continue
+        else:
+            # Legacy captures omit presence; retain only successful observed rows.
+            registers = instance.get("registers")
+            if not isinstance(registers, dict) or not any(
+                isinstance(entry, dict)
+                and entry.get("raw_hex")
+                and entry_status_kind(entry) == "ok"
+                for entry in registers.values()
+            ):
+                continue
+        keys.append(key)
     return sorted(keys, key=_safe_int_hex)
 
 
@@ -335,6 +356,65 @@ def _namespace_label_for_key(namespace_key: str | None) -> str | None:
     if opcode == 0x06:
         return "remote"
     return namespace_key
+
+
+def _final_plan_routes(artifact: dict[str, Any]) -> dict[tuple[str, str], tuple[str, ...]] | None:
+    """Return the final selected B524 routes, or ``None`` for legacy artifacts.
+
+    Scan artifacts retain all observed/discovery evidence even when a later
+    planner choice deselects a route.  The browser is a projection, so it uses
+    the final ``scan_plan`` when available without mutating that evidence.
+    """
+
+    meta = artifact.get("meta")
+    if not isinstance(meta, dict):
+        return None
+    scan_plan = meta.get("scan_plan")
+    if not isinstance(scan_plan, dict) or "groups" not in scan_plan:
+        return None
+    groups = scan_plan.get("groups")
+    if not isinstance(groups, dict):
+        return None
+
+    routes: dict[tuple[str, str], tuple[str, ...]] = {}
+    for raw_group_key, group_plan in groups.items():
+        group_key = _normalize_opcode_hex(raw_group_key)
+        if group_key is None or not isinstance(group_plan, dict):
+            continue
+        operations = group_plan.get("operations")
+        if not isinstance(operations, dict):
+            operations = {group_plan.get("opcode"): group_plan}
+        for raw_opcode, operation_plan in operations.items():
+            opcode = _normalize_opcode_hex(raw_opcode)
+            if opcode is None or not isinstance(operation_plan, dict):
+                continue
+            raw_instances = operation_plan.get("instances")
+            instances = (
+                tuple(
+                    instance
+                    for value in raw_instances
+                    if (instance := _normalize_opcode_hex(value)) is not None
+                )
+                if isinstance(raw_instances, list)
+                else ()
+            )
+            routes[(group_key, opcode)] = instances
+    return routes
+
+
+def _project_group_for_final_plan(
+    group_obj: dict[str, Any] | None, *, selected_instances: tuple[str, ...]
+) -> dict[str, Any]:
+    """Copy only the selected instance routes for browser display."""
+
+    projected = dict(group_obj) if isinstance(group_obj, dict) else {}
+    instances = projected.get("instances")
+    if not isinstance(instances, dict):
+        projected["instances"] = {}
+        return projected
+    selected = set(selected_instances)
+    projected["instances"] = {key: value for key, value in instances.items() if key in selected}
+    return projected
 
 
 def _single_namespace_key(group_key: str, group_obj: dict[str, Any]) -> str | None:
@@ -460,7 +540,7 @@ def _group_namespace_views(
             namespace_instance = namespace_instances.get(instance_key)
             if not isinstance(namespace_instance, dict):
                 namespace_instance = {
-                    "present": instance_obj.get("present"),
+                    **({"present": instance_obj["present"]} if "present" in instance_obj else {}),
                     "registers": {},
                 }
                 namespace_instances[instance_key] = namespace_instance
@@ -558,7 +638,13 @@ class _HydratedBrowseStore:
     @classmethod
     def from_artifact(cls, artifact: dict[str, Any]) -> _HydratedBrowseStore:
         artifact, _migration = migrate_artifact_schema(artifact)
+        apply_b524_value_labels(artifact)
         attach_bundled_descriptions(artifact)
+        circuit_ii_min = (
+            0
+            if description_profile(artifact).get("profile_id") == "basv2_sw0507_hw1704_api1"
+            else 1
+        )
 
         meta = artifact.get("meta")
         if not isinstance(meta, dict):
@@ -588,7 +674,8 @@ class _HydratedBrowseStore:
         _op_group_views: list[tuple[str, str, str, dict[str, Any]]] = []
         _seen_group_keys: set[str] = set()
         _operations = artifact.get("operations")
-        if isinstance(_operations, dict):
+        final_plan_routes = _final_plan_routes(artifact)
+        if isinstance(_operations, dict) and final_plan_routes is None:
             for _op_key in sorted(
                 (k for k in _operations if isinstance(k, str)), key=_safe_int_hex
             ):
@@ -604,6 +691,25 @@ class _HydratedBrowseStore:
                     if isinstance(_gk, str) and isinstance(_go, dict):
                         _op_group_views.append((_gk, _op_key, _op_label, _go))
                         _seen_group_keys.add(_gk)
+        elif final_plan_routes is not None:
+            for (_gk, _op_key), _instances in sorted(
+                final_plan_routes.items(),
+                key=lambda item: (_safe_int_hex(item[0][1]), _safe_int_hex(item[0][0])),
+            ):
+                _op_obj = _operations.get(_op_key) if isinstance(_operations, dict) else None
+                _op_groups = _op_obj.get("groups") if isinstance(_op_obj, dict) else None
+                _observed_group = _op_groups.get(_gk) if isinstance(_op_groups, dict) else None
+                _group_obj = _project_group_for_final_plan(
+                    _observed_group if isinstance(_observed_group, dict) else None,
+                    selected_instances=_instances,
+                )
+                if not _group_obj.get("name"):
+                    _group_obj["name"] = group_name_for_opcode(
+                        _safe_int_hex(_gk), _safe_int_hex(_op_key)
+                    )
+                _op_label = _namespace_label_for_key(_op_key) or _op_key
+                _op_group_views.append((_gk, _op_key, _op_label, _group_obj))
+                _seen_group_keys.add(_gk)
 
         group_keys = sorted(_seen_group_keys, key=_safe_int_hex)
         b524_operations = artifact.get("b524_operations")
@@ -710,23 +816,15 @@ class _HydratedBrowseStore:
                 namespace_views = [(op_key, op_label, namespace_views[0][2])]
             if not namespace_views:
                 continue
-            all_instance_keys = sorted(
-                {
-                    instance_key
-                    for (_namespace_key, _namespace_label, instances) in namespace_views
-                    for instance_key in instances
-                    if isinstance(instance_key, str)
-                },
-                key=_safe_int_hex,
-            )
-            config = GROUP_CONFIG.get(gg)
-            is_instanced = (config is not None and int(config["ii_max"]) > 0) or any(
-                instance_key != "0x00" for instance_key in all_instance_keys
-            )
-
             for namespace_key, namespace_label, instances in namespace_views:
                 effective_namespace_key = namespace_key or op_key
                 effective_namespace_label = namespace_label or op_label
+                profile = group_namespace_profiles(gg).get(_safe_int_hex(effective_namespace_key))
+                is_instanced = (
+                    effective_namespace_key == "0x06"
+                    or (profile is not None and profile.ii_max > 0)
+                    or any(key != "0x00" for key in instances)
+                )
                 section_key = _b524_section_key_for_opcode(effective_namespace_key)
                 if section_key not in {"controller_registers", "device_slots"}:
                     continue
@@ -770,17 +868,31 @@ class _HydratedBrowseStore:
                             )
                         )
 
-                instance_keys = _expected_instance_keys(
-                    group_key=group_key,
-                    namespace_key=effective_namespace_key,
-                    instances=instances,
+                tree_instance_keys = set(
+                    _visible_instance_keys(
+                        group_key=group_key,
+                        namespace_key=effective_namespace_key,
+                        instances=instances,
+                        circuit_ii_min=circuit_ii_min,
+                    )
+                )
+                instance_keys = sorted(
+                    (key for key in instances if isinstance(key, str)), key=_safe_int_hex
                 )
                 visible_registers = set(visible_rr_keys(instances))
+                if group_key == "0x00":
+                    # Current System scheduling stops at RR=0x00FF. Historical
+                    # trace evidence above that ceiling remains in JSON only.
+                    visible_registers = {
+                        register_key
+                        for register_key in visible_registers
+                        if _safe_int_hex(register_key) <= 0x00FF
+                    }
                 for instance_key in instance_keys:
                     instance_obj = instances.get(instance_key)
                     if not isinstance(instance_obj, dict):
                         instance_obj = {"present": False, "registers": {}}
-                    if is_instanced:
+                    if is_instanced and instance_key in tree_instance_keys:
                         node_id = _build_b524_instance_node_id(
                             section_key=section_key,
                             group_key=group_key,
@@ -822,14 +934,21 @@ class _HydratedBrowseStore:
                         if not isinstance(entry, dict):
                             continue
 
-                        myvaillant_name = str(entry.get("myvaillant_name") or "").strip()
-                        ebusd_name = str(entry.get("ebusd_name") or "").strip()
-                        name = myvaillant_name or register_key
                         tab = _tab_from_entry(entry)
                         entry_namespace_key = effective_namespace_key
                         read_opcode = _normalize_opcode_hex(entry.get("read_opcode"))
                         if read_opcode is not None:
                             entry_namespace_key = read_opcode
+                        canonical_name = b524_register_name(
+                            opcode=_safe_int_hex(entry_namespace_key or "0"),
+                            group=_safe_int_hex(group_key),
+                            register=_safe_int_hex(register_key),
+                        )
+                        myvaillant_name = (
+                            canonical_name or str(entry.get("myvaillant_name") or "").strip()
+                        )
+                        ebusd_name = str(entry.get("ebusd_name") or "").strip()
+                        name = myvaillant_name or register_key
                         entry_section_key = _b524_section_key_for_opcode(entry_namespace_key)
                         if entry_section_key not in {"controller_registers", "device_slots"}:
                             continue
@@ -862,7 +981,6 @@ class _HydratedBrowseStore:
                         path_parts = [
                             "B524",
                             _b524_section_label(entry_section_key),
-                            operation_name,
                             entry_group_name,
                         ]
                         if entry_namespace_display is not None:
@@ -883,6 +1001,9 @@ class _HydratedBrowseStore:
                         bundled_obj = entry.get("bundled_parameter_description")
                         candidate_name = str(entry.get("candidate_name") or "").strip()
                         candidate_evidence = str(entry.get("candidate_evidence") or "").strip()
+                        value_label_qualification = str(
+                            entry.get("value_label_qualification") or ""
+                        ).strip()
                         row = RegisterRow(
                             row_id=row_id,
                             protocol="b524",
@@ -912,6 +1033,7 @@ class _HydratedBrowseStore:
                             ),
                             candidate_name=candidate_name,
                             candidate_evidence=candidate_evidence,
+                            value_label_qualification=value_label_qualification,
                             search_blob=" ".join(
                                 [
                                     path.lower(),
@@ -927,6 +1049,7 @@ class _HydratedBrowseStore:
                                     tab.lower(),
                                     candidate_name.lower(),
                                     candidate_evidence.lower(),
+                                    value_label_qualification.lower(),
                                     str(parameter_description or "").lower(),
                                 ]
                             ),
@@ -939,6 +1062,19 @@ class _HydratedBrowseStore:
             for row in rows
             if row.protocol == "b524" and isinstance(row.section_key, str)
         }
+        if final_plan_routes is not None:
+            b524_sections_present.update(
+                _b524_section_key_for_opcode(opcode)
+                for _group, opcode in final_plan_routes
+                if opcode in {"0x02", "0x06"}
+            )
+        b524_sections_present.update(
+            node.section_key
+            for node in tree_nodes
+            if node.protocol == "b524"
+            and node.level == "instance"
+            and isinstance(node.section_key, str)
+        )
         for section_key in _B524_SECTION_ORDER:
             if _b524_operation_rows_present(
                 artifact=artifact,
@@ -946,6 +1082,87 @@ class _HydratedBrowseStore:
                 section_key=section_key,
             ):
                 b524_sections_present.add(section_key)
+        # Operation reads have selector leaves, never scalar Config/State
+        # routing.  Their parent operation sections only navigate.
+        operation_views = operation_read_views(artifact)
+        b524_sections_present.update(f"operation_{view.opcode_hex[2:]}" for view in operation_views)
+        if operation_views and not any(node.node_id == "proto:b524" for node in tree_nodes):
+            tree_nodes.append(
+                TreeNodeRef(node_id="proto:b524", label="B524", level="protocol", protocol="b524")
+            )
+        for view in operation_views:
+            section_key = f"operation_{view.opcode_hex[2:]}"
+            section_id = f"b524:section:{section_key}"
+            if not any(node.node_id == section_id for node in tree_nodes):
+                tree_nodes.append(
+                    TreeNodeRef(
+                        node_id=section_id,
+                        label=view.title,
+                        level="section",
+                        protocol="b524",
+                        section_key=section_key,
+                    )
+                )
+            selector_id = (
+                f"b524:operation:{view.opcode_hex}:{view.request_payload_hex}:{view.selector_key}"
+            )
+            tree_nodes.append(
+                TreeNodeRef(
+                    node_id=selector_id,
+                    label=view.selector_label,
+                    level="group",
+                    protocol="b524",
+                    section_key=section_key,
+                    group_key=selector_id,
+                    namespace_key=view.opcode_hex,
+                )
+            )
+            for field_name, field_value in view.fields:
+                path = f"B524/{view.title}/{view.selector_label}/{field_name}"
+                row = RegisterRow(
+                    row_id=f"{selector_id}:{field_name}",
+                    protocol="b524",
+                    group_key=selector_id,
+                    namespace_key=view.opcode_hex,
+                    namespace_label=view.title,
+                    section_key=section_key,
+                    group_name=view.selector_label,
+                    instance_key=None,
+                    register_key=field_name,
+                    name=field_name,
+                    myvaillant_name="",
+                    ebusd_name="",
+                    path=path,
+                    tab="state",
+                    address=RegisterAddress(
+                        protocol="b524",
+                        group_key=None,
+                        namespace_key=view.opcode_hex,
+                        namespace_label=view.title,
+                        instance_key=None,
+                        register_key=field_name,
+                        read_opcode=view.opcode_hex,
+                        selector_label=view.selector_label,
+                    ),
+                    value_text=field_value,
+                    raw_hex=view.response_raw_hex,
+                    unit="",
+                    access_flags="read-only",
+                    last_update_text=last_update_text,
+                    age_text=age_text,
+                    change_indicator="-",
+                    search_blob=" ".join(
+                        (
+                            path,
+                            field_value,
+                            view.qualification,
+                            view.response_state,
+                            view.selector_correlation,
+                        )
+                    ).lower(),
+                )
+                rows.append(row)
+                row_by_id[row.row_id] = row
         if b524_sections_present:
             tree_nodes = [
                 node

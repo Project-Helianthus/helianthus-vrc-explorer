@@ -3,14 +3,21 @@ from __future__ import annotations
 import math
 import re
 import struct
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, cast
 
 from .artifact_schema import CURRENT_ARTIFACT_SCHEMA_VERSION
 from .protocol.b524_metadata import SYSTEM_INFORMATION_NAMES, decode_parameter_description
+from .protocol.b524_schedules import EVENT_PROFILES, TIMER_CHANNELS
 from .protocol.parser import ValueParseError, parse_typed_value
+from .scanner.b524_operation_reads import (
+    B524OperationReadRequest,
+    decode_operation_read_observation,
+    parse_operation_read_plan,
+    record_operation_read_observation,
+)
 from .scanner.director import (
     GROUP_CONFIG,
     NamespaceProfile,
@@ -25,9 +32,12 @@ from .scanner.register import (
     _sentinel_value_display,
     _strip_echo_header,
 )
+from .schema.b524_register_names import b524_register_name
+from .schema.b524_value_labels import apply_b524_value_labels
 from .schema.myvaillant_map import MyvaillantRegisterMap
 
 _TRACE_LINE_RE = re.compile(r"^(?P<timestamp>\S+)\s+(?P<body>.*)$")
+_START_RE = re.compile(r"^START\s+initiator=0x(?P<initiator>[0-9a-fA-F]{2})$")
 _SEND_PROTO_RE = re.compile(
     r"^#(?P<seq>\d+)\s+SEND_PROTO\s+src=0x(?P<src>[0-9a-fA-F]{2})\s+"
     r"dst=0x(?P<dst>[0-9a-fA-F]{2})\s+primary=0x(?P<primary>[0-9a-fA-F]{2})\s+"
@@ -40,6 +50,23 @@ _RECV_NO_RESPONSE_RE = re.compile(
     r"^#(?P<seq>\d+)\s+RECV_PROTO\s+(broadcast_or_no_response|initiator_initiator=no_response)$"
 )
 _RETRY_RE = re.compile(r"^#(?P<seq>\d+)\s+RETRY\s+type=(?P<kind>[a-zA-Z0-9_]+)(?:\s+|$)")
+_LOCAL_NACK_RETRY_RE = re.compile(
+    r"^#(?P<seq>\d+)\s+LOCAL_NACK_RETRY\s+attempt=(?P<attempt>\d+)(?:\s+|$)"
+)
+_RECOVERY_RE = re.compile(
+    r"^#(?P<seq>\d+)\s+RECOVERY\s+cause=(?P<cause>[a-zA-Z0-9_]+)\s+"
+    r"phase=(?P<phase>[a-zA-Z0-9_]+)\s+request_attempt=(?P<request_attempts>\d+)\s+"
+    r"reconnects_used=(?P<reconnect_attempts>\d+)/(?P<reconnect_max>\d+)$"
+)
+_REQUEST_FAILED_RE = re.compile(
+    r"^#(?P<seq>\d+)\s+REQUEST_FAILED\s+"
+    r"(?:(?:read protocol recovery exhausted|transport recovery exhausted):\s+)?"
+    r"cause=(?P<cause>[a-zA-Z0-9_]+)\s+phase=(?P<phase>[a-zA-Z0-9_]+)\s+"
+    r"request_attempts=(?P<request_attempts>\d+)\s+"
+    r"(?:retry_count=(?P<retry_count>\d+)\s+)?"
+    r"reconnect_attempts=(?P<reconnect_attempts>\d+)"
+    r"(?:\s+unexpected_symbol=(?P<unexpected_symbol>\S+))?$"
+)
 _OP_LABEL_RE = re.compile(r"^OP\s+(?P<label>.+)$")
 _SUPPORTED_ENH_MARKERS: tuple[str, ...] = ("INIT ",)
 
@@ -64,6 +91,12 @@ class _TraceExchange:
     response: bytes | None = None
     op_label: str | None = None
     retry_kind: str | None = None
+    failure_cause: str | None = None
+    failure_phase: str | None = None
+    request_attempts: int = 1
+    retry_count: int = 0
+    reconnect_attempts: int = 0
+    unexpected_symbol: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,9 +152,13 @@ def _parse_enhanced_trace_lines(
     lines: list[str], *, source_path: str
 ) -> tuple[list[_TraceExchange], TraceReplayMetadata]:
     exchange_by_seq: dict[int, _TraceExchange] = {}
-    sequence_order: list[int] = []
+    exchanges_in_order: list[_TraceExchange] = []
     pending_labels: list[str] = []
     saw_enh_marker = False
+    session_recovery_pending = False
+    session_init_pending = False
+    active_exchange: _TraceExchange | None = None
+    attempt_precounted = False
     truncated_hex_frames = 0
     # Offset to make seq numbers unique across multiple INIT sessions
     # in concatenated traces.
@@ -147,8 +184,28 @@ def _parse_enhanced_trace_lines(
 
         if body.startswith(_SUPPORTED_ENH_MARKERS):
             saw_enh_marker = True
-            # Detect session restart: bump seq offset so seqs stay unique
-            _seq_offset = _prev_seq + _seq_offset
+            if session_recovery_pending:
+                # EnhancedTcpTransport keeps its logical request sequence when
+                # reconnecting. Keep the next SEND attached to that request.
+                session_recovery_pending = False
+                session_init_pending = False
+            else:
+                # RESETTED also opens a session before the retry marker is
+                # emitted. Defer classification until the next sequenced line.
+                session_init_pending = True
+            continue
+
+        if _START_RE.match(body) is not None:
+            if (
+                not session_init_pending
+                and active_exchange is not None
+                and active_exchange.response is None
+            ):
+                active_exchange.request_attempts += 1
+                active_exchange.retry_count = max(
+                    active_exchange.retry_count, active_exchange.request_attempts - 1
+                )
+                attempt_precounted = True
             continue
 
         op_match = _OP_LABEL_RE.match(body)
@@ -160,6 +217,11 @@ def _parse_enhanced_trace_lines(
 
         send_match = _SEND_PROTO_RE.match(body)
         if send_match is not None:
+            if session_init_pending:
+                # No retry/recovery marker followed INIT, so this is an
+                # independent concatenated session rather than RESET recovery.
+                _seq_offset = _prev_seq + _seq_offset
+                session_init_pending = False
             raw_seq = int(send_match.group("seq"), 10)
             seq = raw_seq + _seq_offset
             _prev_seq = raw_seq
@@ -170,23 +232,50 @@ def _parse_enhanced_trace_lines(
             )
             if payload_truncated:
                 truncated_hex_frames += 1
+            src = int(send_match.group("src"), 16)
+            dst = int(send_match.group("dst"), 16)
+            primary = int(send_match.group("primary"), 16)
+            secondary = int(send_match.group("secondary"), 16)
+            existing = exchange_by_seq.get(seq)
+            if (
+                existing is not None
+                and existing.response is None
+                and (
+                    existing.src,
+                    existing.dst,
+                    existing.primary,
+                    existing.secondary,
+                    existing.payload,
+                )
+                == (src, dst, primary, secondary, payload)
+            ):
+                if not attempt_precounted:
+                    existing.request_attempts += 1
+                    existing.retry_count = max(existing.retry_count, existing.request_attempts - 1)
+                if existing.op_label is None and pending_labels:
+                    existing.op_label = pending_labels.pop(0)
+                active_exchange = existing
+                attempt_precounted = False
+                continue
             exchange = _TraceExchange(
                 seq=seq,
                 timestamp=timestamp,
-                src=int(send_match.group("src"), 16),
-                dst=int(send_match.group("dst"), 16),
-                primary=int(send_match.group("primary"), 16),
-                secondary=int(send_match.group("secondary"), 16),
+                src=src,
+                dst=dst,
+                primary=primary,
+                secondary=secondary,
                 payload=payload,
                 op_label=pending_labels.pop(0) if pending_labels else None,
             )
             exchange_by_seq[seq] = exchange
-            if seq not in sequence_order:
-                sequence_order.append(seq)
+            exchanges_in_order.append(exchange)
+            active_exchange = exchange
+            attempt_precounted = False
             continue
 
         parsed_match = _PARSED_PROTO_RE.match(body)
         if parsed_match is not None:
+            session_init_pending = False
             seq = int(parsed_match.group("seq"), 10) + _seq_offset
             parsed, parsed_truncated = _parse_hex(
                 parsed_match.group("hex"),
@@ -202,6 +291,7 @@ def _parse_enhanced_trace_lines(
 
         recv_match = _RECV_NO_RESPONSE_RE.match(body)
         if recv_match is not None:
+            session_init_pending = False
             seq = int(recv_match.group("seq"), 10) + _seq_offset
             matched_exchange = exchange_by_seq.get(seq)
             if matched_exchange is not None and matched_exchange.response is None:
@@ -210,10 +300,70 @@ def _parse_enhanced_trace_lines(
 
         retry_match = _RETRY_RE.match(body)
         if retry_match is not None:
+            session_init_pending = False
             seq = int(retry_match.group("seq"), 10) + _seq_offset
             matched_exchange = exchange_by_seq.get(seq)
             if matched_exchange is not None:
                 matched_exchange.retry_kind = retry_match.group("kind").strip().lower()
+            continue
+
+        local_nack_retry_match = _LOCAL_NACK_RETRY_RE.match(body)
+        if local_nack_retry_match is not None:
+            session_init_pending = False
+            seq = int(local_nack_retry_match.group("seq"), 10) + _seq_offset
+            matched_exchange = exchange_by_seq.get(seq)
+            if matched_exchange is not None:
+                # This marker starts another local attempt; it is not terminal
+                # NACK evidence. A later response, recovery, or REQUEST_FAILED
+                # marker remains authoritative.
+                matched_exchange.retry_kind = "local_nack_retry"
+                matched_exchange.request_attempts += 1
+                matched_exchange.retry_count = max(
+                    matched_exchange.retry_count, matched_exchange.request_attempts - 1
+                )
+            continue
+
+        recovery_match = _RECOVERY_RE.match(body)
+        if recovery_match is not None:
+            session_init_pending = False
+            session_recovery_pending = True
+            seq = int(recovery_match.group("seq"), 10) + _seq_offset
+            matched_exchange = exchange_by_seq.get(seq)
+            if matched_exchange is not None:
+                request_attempts = int(recovery_match.group("request_attempts"), 10)
+                matched_exchange.retry_kind = recovery_match.group("cause").strip().lower()
+                matched_exchange.failure_cause = matched_exchange.retry_kind
+                matched_exchange.failure_phase = recovery_match.group("phase").strip().lower()
+                matched_exchange.request_attempts = request_attempts
+                matched_exchange.retry_count = max(0, request_attempts - 1)
+                matched_exchange.reconnect_attempts = int(
+                    recovery_match.group("reconnect_attempts"), 10
+                )
+            continue
+
+        request_failed_match = _REQUEST_FAILED_RE.match(body)
+        if request_failed_match is not None:
+            session_init_pending = False
+            seq = int(request_failed_match.group("seq"), 10) + _seq_offset
+            matched_exchange = exchange_by_seq.get(seq)
+            if matched_exchange is not None:
+                matched_exchange.retry_kind = request_failed_match.group("cause").strip().lower()
+                matched_exchange.failure_cause = matched_exchange.retry_kind
+                matched_exchange.failure_phase = request_failed_match.group("phase").strip().lower()
+                matched_exchange.request_attempts = int(
+                    request_failed_match.group("request_attempts"), 10
+                )
+                raw_retry_count = request_failed_match.group("retry_count")
+                matched_exchange.retry_count = (
+                    int(raw_retry_count, 10)
+                    if raw_retry_count is not None
+                    else max(0, matched_exchange.request_attempts - 1)
+                )
+                matched_exchange.reconnect_attempts = int(
+                    request_failed_match.group("reconnect_attempts"), 10
+                )
+                matched_exchange.unexpected_symbol = request_failed_match.group("unexpected_symbol")
+            session_recovery_pending = False
             continue
 
         if body.startswith("#") and ("SEND " in body or "PARSED " in body):
@@ -228,7 +378,7 @@ def _parse_enhanced_trace_lines(
     if first_ts is None or last_ts is None:
         raise UnsupportedTraceFormatError("Trace file does not contain timestamped entries.")
 
-    exchanges = [exchange_by_seq[seq] for seq in sequence_order if seq in exchange_by_seq]
+    exchanges = exchanges_in_order
     if not exchanges:
         raise UnsupportedTraceFormatError("No ENH/ENS SEND_PROTO exchanges found in trace.")
 
@@ -245,6 +395,21 @@ def _parse_enhanced_trace_lines(
 
 def _response_state_implies_present(response_state: object) -> bool:
     return isinstance(response_state, str) and response_state in {"active", "empty_reply"}
+
+
+def _transport_diagnostic(exchange: _TraceExchange) -> dict[str, str | int] | None:
+    if exchange.failure_cause is None or exchange.failure_phase is None:
+        return None
+    diagnostic: dict[str, str | int] = {
+        "cause": exchange.failure_cause,
+        "phase": exchange.failure_phase,
+        "request_attempts": exchange.request_attempts,
+        "retry_count": exchange.retry_count,
+        "reconnect_attempts": exchange.reconnect_attempts,
+    }
+    if exchange.unexpected_symbol is not None:
+        diagnostic["unexpected_symbol"] = exchange.unexpected_symbol
+    return diagnostic
 
 
 def _opcode_from_payload(payload: bytes) -> int | None:
@@ -315,6 +480,7 @@ def _decode_register_read_entry(
     payload: bytes,
     response: bytes | None,
     retry_kind: str | None = None,
+    transport_diagnostic: dict[str, str | int] | None = None,
 ) -> dict[str, Any]:
     read_opcode = _hex_u8(opcode)
     entry: dict[str, Any] = {
@@ -334,14 +500,22 @@ def _decode_register_read_entry(
     }
 
     if response is None:
-        if retry_kind == "nack_or_crc":
+        if retry_kind == "nack":
+            entry["response_state"] = "nack"
+            entry["error"] = "nack"
+        elif retry_kind == "nack_or_crc":
             # Transport traces emit "nack_or_crc" for both NACK and CRC errors;
             # preserve the ambiguity instead of misclassifying as pure NACK.
             entry["response_state"] = "nack_or_crc"
             entry["error"] = "nack_or_crc"
-        else:
+        elif retry_kind in {None, "timeout"}:
             entry["response_state"] = "timeout"
             entry["error"] = "timeout"
+        else:
+            entry["response_state"] = "transport_error"
+            entry["error"] = retry_kind
+        if transport_diagnostic is not None:
+            entry["transport_diagnostic"] = transport_diagnostic
         return entry
     if len(response) == 0:
         entry["response_state"] = "empty_reply"
@@ -378,6 +552,159 @@ def _decode_register_read_entry(
     elif inferred_type == "EXP" and inferred_value is None:
         entry["value_display"] = "NaN"
     return entry
+
+
+def _operation_read_request(payload: bytes) -> B524OperationReadRequest | None:
+    opcode = _opcode_from_payload(payload)
+    if opcode == 0x08 and len(payload) == 1:
+        return B524OperationReadRequest("ReadVR91", opcode, {}, payload, True)
+    if opcode not in {0x03, 0x09, 0x0B} or len(payload) != 5:
+        return None
+    if opcode == 0x03:
+        channel_by_selector = {
+            (system_type, address): channel
+            for channel, (system_type, address) in TIMER_CHANNELS.items()
+        }
+        channel = channel_by_selector.get((payload[1], payload[3]))
+        selector: dict[str, str | int] = (
+            {"channel": channel, "instance": payload[2], "weekday": payload[4]}
+            if channel is not None
+            else {}
+        )
+        return B524OperationReadRequest("ReadTimer", opcode, selector, payload, True)
+    profile_by_system_type = {profile.system_type: name for name, profile in EVENT_PROFILES.items()}
+    profile = profile_by_system_type.get(payload[1])
+    selector = (
+        {
+            "profile": profile,
+            "instance": payload[2],
+            "address": payload[3],
+            "weekday_code": payload[4],
+        }
+        if profile is not None
+        else {}
+    )
+    operation: Literal["GetEvent", "GetEventSetPoint"] = (
+        "GetEvent" if opcode == 0x09 else "GetEventSetPoint"
+    )
+    return B524OperationReadRequest(operation, opcode, selector, payload, False)
+
+
+def _unknown_operation_raw_selector(payload: bytes) -> dict[str, int] | None:
+    opcode = _opcode_from_payload(payload)
+    if opcode not in {0x03, 0x09, 0x0B} or len(payload) != 5:
+        return None
+    return {
+        "system_type": payload[1],
+        "instance": payload[2],
+        "address": payload[3],
+        "weekday_code" if opcode in {0x09, 0x0B} else "weekday": payload[4],
+    }
+
+
+def _replay_operation_read(exchange: _TraceExchange) -> dict[str, Any] | None:
+    """Translate one trace exchange without assuming a selector echo."""
+
+    request = _operation_read_request(exchange.payload)
+    if request is None:
+        return None
+    if request.selector:
+        try:
+            canonical = parse_operation_read_plan(
+                {
+                    "schema_version": 1,
+                    "requests": [{"operation": request.operation, **request.selector}],
+                }
+            )[0]
+            if canonical.payload != request.payload:
+                raise ValueError("selector does not round-trip to the recorded payload")
+        except (TypeError, ValueError):
+            request = replace(request, selector={})
+        else:
+            request = canonical
+    record = record_operation_read_observation(request)
+    record["trace_seq"] = exchange.seq
+    record["request_attempts"] = exchange.request_attempts
+    if not request.selector:
+        raw_selector = _unknown_operation_raw_selector(exchange.payload)
+        if raw_selector is not None:
+            record["raw_selector"] = raw_selector
+    response = exchange.response
+    record["response_raw_hex"] = response.hex() if isinstance(response, bytes) else None
+    if response is None:
+        if exchange.retry_kind == "nack":
+            record["response_state"] = "nack"
+            record["error"] = "nack"
+        elif exchange.retry_kind == "nack_or_crc":
+            record["response_state"] = "transport_error"
+            record["error"] = "nack_or_crc"
+        elif exchange.retry_kind not in {None, "timeout"}:
+            record["response_state"] = "transport_error"
+            record["error"] = exchange.retry_kind
+        else:
+            record["response_state"] = "timeout"
+            record["error"] = "timeout"
+        transport_diagnostic = _transport_diagnostic(exchange)
+        if transport_diagnostic is not None:
+            record["transport_diagnostic"] = transport_diagnostic
+        return record
+    unknown_timer_channel = request.operation == "ReadTimer" and "channel" not in request.selector
+    unknown_event_profile = (
+        request.operation in {"GetEvent", "GetEventSetPoint"} and "profile" not in request.selector
+    )
+    if unknown_timer_channel or unknown_event_profile:
+        record["response_state"] = "empty" if not response else "value"
+        if response:
+            if unknown_timer_channel:
+                known = (exchange.payload[1], exchange.payload[3]) in TIMER_CHANNELS.values()
+                record["error"] = "unsupported_timer_selector" if known else "unknown_timer_channel"
+            else:
+                known = any(
+                    profile.system_type == exchange.payload[1]
+                    for profile in EVENT_PROFILES.values()
+                )
+                record["error"] = "unsupported_event_selector" if known else "unknown_event_profile"
+        return record
+    decoded, _qualification, state = decode_operation_read_observation(request, response)
+    record["response_state"] = state
+    record["decoded"] = decoded
+    record["decode_qualification"] = "schema_unqualified"
+    if state == "malformed":
+        record["error"] = "malformed_response"
+    return record
+
+
+def _raw_operation_history(exchange: _TraceExchange) -> dict[str, Any]:
+    payload = exchange.payload
+    opcode = payload[0]
+    selector: dict[str, int] = {}
+    if opcode in {0x04, 0x0A, 0x0C} and len(payload) >= 5:
+        selector = {
+            "system_type": payload[1],
+            "instance": payload[2],
+            "address": payload[3],
+            "weekday_code" if opcode in {0x0A, 0x0C} else "weekday": payload[4],
+        }
+    if exchange.response is None:
+        response_state = "transport_error" if exchange.retry_kind else "timeout"
+    elif exchange.response:
+        response_state = "value"
+    else:
+        response_state = "empty"
+    return {
+        "trace_seq": exchange.seq,
+        "operation": operation_label(opcode=opcode, optype=0x00),
+        "opcode_hex": _hex_u8(opcode),
+        "selector": selector,
+        "selector_correlation": "request_context",
+        "request_payload_hex": payload.hex(),
+        "response_raw_hex": (
+            exchange.response.hex() if isinstance(exchange.response, bytes) else None
+        ),
+        "response_state": response_state,
+        "feedback_interpretation": "unknown",
+        "mutative": opcode in {0x04, 0x0A, 0x0C},
+    }
 
 
 def replay_trace_to_artifact(trace_path: Path) -> dict[str, Any]:
@@ -446,8 +773,12 @@ def replay_trace_to_artifact(trace_path: Path) -> dict[str, Any]:
         "register_constraints": [],
         "parameter_descriptions": [],
         "timer_programs": [],
+        "events": [],
+        "event_setpoints": [],
+        "raw_write_history": [],
         "register_tables": [],
     }
+    operation_reads: list[dict[str, Any]] = []
 
     for exchange in b524_exchanges:
         opcode = _opcode_from_payload(exchange.payload)
@@ -461,19 +792,10 @@ def replay_trace_to_artifact(trace_path: Path) -> dict[str, Any]:
             group = int(payload[2])
             instance = int(payload[3])
             register = int.from_bytes(payload[4:6], byteorder="little", signed=False)
-            # Filter by namespace profile: skip entries where the opcode is
-            # not valid for this group, or where instance/register exceed the
-            # configured bounds.  This replicates the guardrails the live
-            # scanner applies and prevents _update_namespace_bounds_from_observed
-            # from widening metadata beyond profile limits.
-            profile = _namespace_profile(group, opcode)
-            if profile is None:
-                # Opcode not in the active namespace profile for this group.
-                continue
-            if instance > profile.ii_max:
-                continue
-            if register > profile.rr_max:
-                continue
+            # Replay preserves recorded OP02/OP06 observations independently
+            # of current scheduling profiles.  Unknown groups and selectors
+            # outside current II/RR bounds remain raw evidence; new scans keep
+            # their separate profile limits.
             group_obj = _ensure_operation_group(artifact["operations"], group=group, opcode=opcode)
             instances = group_obj.setdefault("instances", {})
             instance_key = _hex_u8(instance)
@@ -485,6 +807,7 @@ def replay_trace_to_artifact(trace_path: Path) -> dict[str, Any]:
                 payload=payload,
                 response=response,
                 retry_kind=exchange.retry_kind,
+                transport_diagnostic=_transport_diagnostic(exchange),
             )
             entry["trace_seq"] = exchange.seq
             if exchange.op_label:
@@ -552,17 +875,40 @@ def replay_trace_to_artifact(trace_path: Path) -> dict[str, Any]:
                     "reply_hex": response.hex() if isinstance(response, bytes) else None,
                 }
             )
+            if opcode == 0x03:
+                operation_read = _replay_operation_read(exchange)
+                if operation_read is not None:
+                    operation_reads.append(operation_read)
+            else:
+                b524_operations["raw_write_history"].append(_raw_operation_history(exchange))
             continue
 
-        if opcode == 0x0B:
-            b524_operations["register_tables"].append(
-                {
-                    "trace_seq": exchange.seq,
-                    "operation": operation_label(opcode=opcode, optype=0x00),
-                    "payload_hex": payload.hex(),
-                    "reply_hex": response.hex() if isinstance(response, bytes) else None,
-                }
-            )
+        if opcode == 0x08:
+            operation_read = _replay_operation_read(exchange)
+            if operation_read is not None:
+                operation_reads.append(operation_read)
+            continue
+
+        if opcode in {0x09, 0x0A, 0x0B, 0x0C} and len(payload) >= 5:
+            bucket = "events" if opcode in {0x09, 0x0A} else "event_setpoints"
+            history = _raw_operation_history(exchange)
+            b524_operations[bucket].append(history)
+            if opcode in {0x0A, 0x0C}:
+                b524_operations["raw_write_history"].append(history)
+            else:
+                operation_read = _replay_operation_read(exchange)
+                if operation_read is not None:
+                    operation_reads.append(operation_read)
+            if opcode == 0x0B:
+                b524_operations["register_tables"].append(
+                    {
+                        "trace_seq": exchange.seq,
+                        "operation": operation_label(opcode=opcode, optype=0x00),
+                        "payload_hex": payload.hex(),
+                        "reply_hex": response.hex() if isinstance(response, bytes) else None,
+                    }
+                )
+            continue
 
     artifact["meta"]["system_information"] = [
         system_information[identifier] for identifier in sorted(system_information)
@@ -635,6 +981,9 @@ def replay_trace_to_artifact(trace_path: Path) -> dict[str, Any]:
         key=lambda e: e["request_hex"],
     )
     artifact["b524_operations"] = b524_operations
+    if operation_reads:
+        artifact["b524_operation_reads_schema_version"] = 1
+        artifact["b524_operation_reads"] = operation_reads
 
     # Enrich register entries with myvaillant register names.
     _enrich_register_names(artifact["operations"])
@@ -642,6 +991,7 @@ def replay_trace_to_artifact(trace_path: Path) -> dict[str, Any]:
     # Derive rr_max / ii_max from observed trace data so that metadata
     # reflects the actual scan range, not the GROUP_CONFIG profile defaults.
     _update_namespace_bounds_from_observed(artifact["operations"])
+    apply_b524_value_labels(artifact)
 
     return artifact
 
@@ -703,34 +1053,41 @@ def _enrich_register_names(operations: dict[str, Any]) -> None:
                 for rr_key, entry in registers.items():
                     if not isinstance(entry, dict):
                         continue
-                    if entry.get("myvaillant_name") is not None:
-                        continue
                     register = int(rr_key, 16)
-                    mv = mv_map.lookup(
-                        group=group,
-                        instance=instance,
-                        register=register,
+                    if entry.get("myvaillant_name") is None:
+                        mv = mv_map.lookup(
+                            group=group,
+                            instance=instance,
+                            register=register,
+                            opcode=opcode,
+                        )
+                        if mv is not None:
+                            entry["myvaillant_name"] = mv.leaf
+                            if mv.register_class is not None:
+                                entry.setdefault("register_class", mv.register_class)
+                            if entry.get("ebusd_name") is None:
+                                resolved = mv.resolved_ebusd_name(
+                                    group=group,
+                                    instance=instance,
+                                    register=register,
+                                )
+                                if resolved:
+                                    entry["ebusd_name"] = resolved
+                            if mv.type_hint and entry.get("raw_hex"):
+                                try:
+                                    raw = bytes.fromhex(entry["raw_hex"])
+                                    value = parse_typed_value(mv.type_hint, raw)
+                                    entry["type"] = mv.type_hint
+                                    entry["value"] = value
+                                    if mv.type_hint == "EXP" and value is None:
+                                        entry["value_display"] = "NaN"
+                                except (ValueParseError, ValueError):
+                                    pass
+
+                    canonical_name = b524_register_name(
                         opcode=opcode,
+                        group=group,
+                        register=register,
                     )
-                    if mv is not None:
-                        entry["myvaillant_name"] = mv.leaf
-                        if mv.register_class is not None:
-                            entry.setdefault("register_class", mv.register_class)
-                        if entry.get("ebusd_name") is None:
-                            resolved = mv.resolved_ebusd_name(
-                                group=group,
-                                instance=instance,
-                                register=register,
-                            )
-                            if resolved:
-                                entry["ebusd_name"] = resolved
-                        if mv.type_hint and entry.get("raw_hex"):
-                            try:
-                                raw = bytes.fromhex(entry["raw_hex"])
-                                value = parse_typed_value(mv.type_hint, raw)
-                                entry["type"] = mv.type_hint
-                                entry["value"] = value
-                                if mv.type_hint == "EXP" and value is None:
-                                    entry["value_display"] = "NaN"
-                            except (ValueParseError, ValueError):
-                                pass
+                    if canonical_name is not None:
+                        entry["myvaillant_name"] = canonical_name

@@ -40,7 +40,7 @@ def fixture_transport(tmp_path: Path) -> RecordingTransport:
                 "groups": {
                     "0x02": {
                         "instances": {
-                            "0x00": {"registers": {"0x0002": {"type": "UIN", "raw_hex": "0100"}}},
+                            "0x01": {"registers": {"0x0002": {"type": "UIN", "raw_hex": "0100"}}},
                             "0x03": {"registers": {"0x0002": {"type": "UIN", "raw_hex": "0200"}}},
                         }
                     }
@@ -53,17 +53,20 @@ def fixture_transport(tmp_path: Path) -> RecordingTransport:
     return RecordingTransport(DummyTransport(path))
 
 
-def test_full_audits_count_underreporting_across_all_declared_slots(tmp_path: Path) -> None:
+def test_full_audits_capacity_exceedance_across_all_declared_slots(tmp_path: Path) -> None:
     transport = fixture_transport(tmp_path)
     artifact = scan_b524(transport, dst=0x15, planner_preset="full", probe_constraints=False)
     coverage = artifact["meta"]["instance_counts"]["0x02:0x02"]
     assert artifact["meta"]["scan_coverage"]["request_budget"] is None
-    assert coverage["expected"] == 1
+    assert coverage["expected"] is None
+    assert coverage["capacity"] == 1
+    assert coverage["semantics"] == "capacity"
     assert coverage["observed"] == 2
-    assert coverage["mismatch"] is True
-    assert coverage["probed_instances"] == 11
+    assert coverage["mismatch"] is False
+    assert coverage["capacity_exceeded"] is True
+    assert coverage["probed_instances"] == 9
     plan = artifact["meta"]["scan_plan"]["groups"]["0x02"]["operations"]["0x02"]
-    assert plan["instances"] == [f"0x{ii:02x}" for ii in range(11)]
+    assert plan["instances"] == [f"0x{ii:02x}" for ii in range(1, 10)]
 
 
 def test_finite_request_budget_keeps_partial_raw_evidence(tmp_path: Path) -> None:

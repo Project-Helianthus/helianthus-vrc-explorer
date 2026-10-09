@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal
@@ -20,11 +21,18 @@ from ..scanner.plan import (
     format_plan_key,
     make_plan_key,
     parse_int_set,
+    parse_int_token,
 )
 from ..scanner.scan_policy import (
     profile_opcodes,
     research_rr_max,
     validate_scalar_request_limit,
+)
+from .planner_selection import (
+    DescriptionPolicySelection,
+    PlannerSelection,
+    default_description_policy,
+    make_planner_selection,
 )
 from .system_information import format_system_information_rows
 
@@ -37,12 +45,16 @@ class PlannerGroup:
     descriptor: float
     known: bool
     ii_max: int | None
-    rr_max: int
-    rr_max_full: int
+    rr_max: int | None
+    rr_max_full: int | None
     present_instances: tuple[int, ...]
     namespace_label: str | None = None
     recommended: bool = True
     expected_count: int | None = None
+    ii_min: int | None = None
+    instances_probed: bool = True
+    research_rr_max: int | None = None
+    native_dhw_admitted: bool = False
 
     @property
     def key(self) -> PlanKey:
@@ -69,6 +81,25 @@ PlannerPreset = Literal[
     "research",
     "custom",
 ]
+
+
+# UI-only OP00 associations. These do not participate in planner discovery,
+# instance bounds, or presence qualification.
+OP00_GROUP_COUNT_NAMES: dict[tuple[int, int], str] = {
+    (0x02, 0x02): "circuit_count",
+    (0x02, 0x03): "zone_count",
+    (0x02, 0x04): "solar_circuit_count",
+    (0x02, 0x05): "solar_loaded_tank_count",
+    (0x02, 0x08): "delta_t_count",
+    (0x06, 0x01): "boiler_count",
+    (0x06, 0x02): "heat_pump_count",
+    (0x06, 0x03): "recovair_count",
+    (0x06, 0x06): "vpm_s_count",
+    (0x06, 0x07): "vpm_w_count",
+    (0x06, 0x0B): "vr70_count",
+    (0x06, 0x0C): "vr71_count",
+}
+_LEGACY_EXPECTED_COUNT_KEYS = frozenset({(0x02, 0x02), (0x02, 0x03)})
 
 
 def _hex_u8(value: int) -> str:
@@ -189,16 +220,122 @@ def _build_default_plan(
     )
 
 
+def planner_instance_bounds(group: PlannerGroup) -> tuple[int, int]:
+    """Return the configured inclusive II bounds shown by planner surfaces."""
+    if group.opcode == 0x06:
+        ii_min = group.ii_min if group.ii_min is not None else 0x01
+        ii_max = min(group.ii_max if group.ii_max is not None else 0x08, 0x08)
+    elif group.opcode == 0x02 and group.group == 0x02:
+        ii_min = group.ii_min if group.ii_min is not None else 0x01
+        ii_max = min(group.ii_max if group.ii_max is not None else 0x09, 0x09)
+    elif group.ii_max is None:
+        return (0x00, 0x00)
+    else:
+        ii_min = group.ii_min if group.ii_min is not None else 0x00
+        ii_max = group.ii_max
+    if ii_min > ii_max:
+        raise ValueError(
+            f"Invalid II bounds for GG=0x{group.group:02X}/OP=0x{group.opcode:02X}: "
+            f"0x{ii_min:02X}..0x{ii_max:02X}"
+        )
+    return (ii_min, ii_max)
+
+
+def format_planner_instance_bounds(group: PlannerGroup) -> str:
+    ii_min, ii_max = planner_instance_bounds(group)
+    return f"0x{ii_min:02X}..0x{ii_max:02X}"
+
+
+def format_planner_op00_count(
+    group: PlannerGroup,
+    system_information: Sequence[Mapping[str, object]] | None = None,
+) -> str:
+    """Return a UI-only qualified OP00 count/capacity for one native planner group.
+
+    The snapshot association is intentionally separate from ``expected_count``:
+    it neither guides instance probing nor asserts that an OP00 count proves
+    presence.  ``expected_count`` remains a compatibility fallback for older
+    planner records when the snapshot has no corresponding record.
+    """
+
+    key = (int(group.opcode), group.group)
+    count_name = OP00_GROUP_COUNT_NAMES.get(key)
+    if count_name is None:
+        return "—"
+    if system_information is not None:
+        for record in system_information:
+            if record.get("name") != count_name:
+                continue
+            state = record.get("state")
+            value = record.get("value")
+            if (
+                (state is None or state == "available")
+                and not isinstance(value, bool)
+                and isinstance(value, (int, float))
+                and math.isfinite(value)
+                and value >= 0
+                and float(value).is_integer()
+            ):
+                rendered = str(int(value))
+                return f"capacity={rendered}" if key in _LEGACY_EXPECTED_COUNT_KEYS else rendered
+            return "—"
+        return "—"
+    if key in _LEGACY_EXPECTED_COUNT_KEYS and group.expected_count is not None:
+        return f"capacity={group.expected_count}"
+    return "—"
+
+
+def planner_unmapped_system_information(
+    system_information: Sequence[Mapping[str, object]] | None,
+) -> tuple[Mapping[str, object], ...]:
+    """Keep planner-level OP00 details that have no dedicated group cell."""
+
+    if not system_information:
+        return ()
+    mapped_names = frozenset(OP00_GROUP_COUNT_NAMES.values())
+    return tuple(record for record in system_information if record.get("name") not in mapped_names)
+
+
+def planner_instance_range(group: PlannerGroup) -> tuple[int, ...]:
+    ii_min, ii_max = planner_instance_bounds(group)
+    result = tuple(range(ii_min, ii_max + 1))
+    if group.opcode == 0x06 or (group.opcode == 0x02 and group.group == 0x02):
+        return result
+    return result + ((0xFF,) if 0xFF in group.present_instances else ())
+
+
+def planner_present_instances(group: PlannerGroup) -> tuple[int, ...]:
+    allowed = set(planner_instance_range(group))
+    return tuple(ii for ii in group.present_instances if ii in allowed)
+
+
 def _instances_for_preset(group: PlannerGroup, preset: PlannerPreset) -> tuple[int, ...]:
-    if group.ii_max is None:
+    if group.ii_max is None and group.opcode != 6 and not (group.opcode == 2 and group.group == 2):
         return (0x00,)
     if preset == "recommended":
-        return group.present_instances
-    # full and research: scan all instance slots
-    full_range = tuple(range(0x00, group.ii_max + 1))
-    if 0xFF in group.present_instances:
-        return full_range + (0xFF,)
-    return full_range
+        return planner_present_instances(group)
+    return planner_instance_range(group)
+
+
+def _has_recommended_availability(group: PlannerGroup) -> bool:
+    """Return whether an admitted group has affirmative default-scan evidence.
+
+    The profile policy remains the static admission rule.  OP00 counts guide
+    discovery only: a count cannot admit a family without a confirmed instance,
+    and a confirmed instance remains usable when it contradicts a zero count.
+    System is the mandatory OP=0x02/GG=0x00 singleton.  Native DHW has a
+    dedicated, correlated gate; other singleton rows are not admitted by
+    static inventory alone.  All other rows require a confirmed present
+    instance, so unknown or unprobed results stay manually selectable only.
+    """
+
+    if group.opcode == 0x02 and group.group == 0x00:
+        return True
+    if group.opcode == 0x02 and group.group == 0x01:
+        return group.native_dhw_admitted
+    if group.ii_max is None:
+        return False
+    return bool(planner_present_instances(group))
 
 
 def build_plan_from_preset(
@@ -210,7 +347,11 @@ def build_plan_from_preset(
     for group in sorted(groups, key=planner_group_sort_key):
         if group.opcode not in profile_opcodes(group.group, preset):
             continue
+        if preset == "recommended" and not _has_recommended_availability(group):
+            continue
         if preset in {"recommended", "full"}:
+            if group.rr_max is None:
+                continue
             selected[group.key] = GroupScanPlan(
                 group=group.group,
                 opcode=group.opcode,
@@ -218,20 +359,33 @@ def build_plan_from_preset(
                 instances=_instances_for_preset(group, preset),
             )
         elif preset == "research":
+            normal_rr_max = group.research_rr_max
+            if normal_rr_max is None and group.rr_max is not None:
+                normal_rr_max = max(group.rr_max, group.rr_max_full or group.rr_max)
+            if normal_rr_max is None:
+                continue
             selected[group.key] = GroupScanPlan(
                 group=group.group,
                 opcode=group.opcode,
                 rr_max=research_rr_max(
                     group=group.group,
                     opcode=group.opcode,
-                    normal_rr_max=max(group.rr_max, group.rr_max_full),
+                    normal_rr_max=normal_rr_max,
                 ),
                 instances=_instances_for_preset(group, preset),
             )
     return selected
 
 
-def _render_table(title: str, rows: list[PlannerGroup], *, unknown: bool, console: Console) -> None:
+def _render_table(
+    title: str,
+    rows: list[PlannerGroup],
+    *,
+    unknown: bool,
+    console: Console,
+    system_information: Sequence[Mapping[str, object]] | None = None,
+    description_policy: DescriptionPolicySelection | None = None,
+) -> None:
     if not rows:
         return
     for namespace_title, namespace_rows in split_planner_groups_by_namespace(rows):
@@ -239,26 +393,39 @@ def _render_table(title: str, rows: list[PlannerGroup], *, unknown: bool, consol
         table = Table(show_lines=False, header_style="bold dim")
         table.add_column("GG", style="cyan", no_wrap=True)
         table.add_column("Name", style="white")
-        table.add_column("Type", style="dim", justify="right", no_wrap=True)
+        table.add_column("OP00 context", style="dim", justify="right", no_wrap=True)
+        table.add_column("II range", style="dim", justify="right", no_wrap=True)
         table.add_column("Instances", style="dim", justify="right", no_wrap=True)
         table.add_column("RR_max", style="magenta", justify="right", no_wrap=True)
+        table.add_column("Descriptions", style="dim", no_wrap=True)
         for g in namespace_rows:
             if g.ii_max is None:
                 instances = "singleton"
+            elif not g.instances_probed:
+                instances = f"unprobed/{len(planner_instance_range(g))}"
             elif unknown:
-                instances = f"0/{g.ii_max + 1} (est.)"
+                instances = f"0/{len(planner_instance_range(g))} (est.)"
             else:
-                instances = f"{len(g.present_instances)}/{g.ii_max + 1}"
+                instances = f"{len(planner_present_instances(g))}/{len(planner_instance_range(g))}"
             name = g.display_name if not unknown else f"{g.display_name} (experimental)"
-            rr_max = _hex_u16(g.rr_max_full)
-            if g.rr_max_full != g.rr_max:
+            rr_max = (
+                "— (explicit required)" if g.rr_max is None else _hex_u16(g.rr_max_full or g.rr_max)
+            )
+            if g.rr_max is not None and g.rr_max_full is not None and g.rr_max_full != g.rr_max:
                 rr_max = f"{_hex_u16(g.rr_max)} / {rr_max}"
             table.add_row(
                 _hex_u8(g.group),
                 name,
-                f"{g.descriptor:.1f}",
+                format_planner_op00_count(g, system_information),
+                format_planner_instance_bounds(g),
                 instances,
                 rr_max,
+                (
+                    f"{description_policy.for_opcode(g.opcode)}"
+                    + (" (override)" if description_policy.overridden_for_opcode(g.opcode) else "")
+                    if description_policy is not None
+                    else "profile"
+                ),
             )
         console.print(table)
 
@@ -266,7 +433,7 @@ def _render_table(title: str, rows: list[PlannerGroup], *, unknown: bool, consol
 def _render_system_information(
     console: Console, system_information: Sequence[Mapping[str, object]] | None
 ) -> None:
-    rows = format_system_information_rows(system_information)
+    rows = format_system_information_rows(planner_unmapped_system_information(system_information))
     if not rows:
         return
     console.print(Rule("System Information", style="dim"))
@@ -378,11 +545,9 @@ def _ask_instances(
     current_instances: tuple[int, ...],
 ) -> tuple[int, ...]:
     assert group.ii_max is not None
-    full_range = tuple(range(0x00, group.ii_max + 1)) + (
-        (0xFF,) if 0xFF in group.present_instances else ()
-    )
+    full_range = planner_instance_range(group)
     allowed_instances = set(full_range)
-    if current_instances == group.present_instances:
+    if current_instances == planner_present_instances(group):
         default_mode = "present"
     elif current_instances == full_range:
         default_mode = "all"
@@ -393,14 +558,14 @@ def _ask_instances(
 
     while True:
         raw_instances = Prompt.ask(
-            f"{group.prompt_label} instances ('present', 'all', 'none', or '0-10')",
+            f"{group.prompt_label} instances ('present', 'all', 'none', or a selector range)",
             default=default_mode,
             show_default=True,
             console=console,
         ).strip()
         lowered = raw_instances.lower()
         if lowered in {"present", "p"}:
-            return group.present_instances
+            return planner_present_instances(group)
         if lowered in {"all", "*"}:
             return full_range
         if lowered in {"none", "no"}:
@@ -421,12 +586,141 @@ def _ask_instances(
             invalid_text = ", ".join(_hex_u8(instance) for instance in invalid_instances)
             console.print(
                 "[red]Invalid instance selection:[/red] "
-                f"allowed values are 0x00..{_hex_u8(group.ii_max)}"
+                f"allowed values are {_hex_u8(full_range[0])}..{_hex_u8(full_range[-1])}"
                 + (" plus 0xFF" if 0xFF in allowed_instances else "")
                 + f"; got {invalid_text}"
             )
             continue
         return tuple(parsed_instances)
+
+
+def _custom_plan_with_required_rr(console: Console, group: PlannerGroup) -> GroupScanPlan:
+    """Create a custom row only after the operator supplies an RR scope."""
+
+    from .planner_textual import _parse_register_scope
+
+    while True:
+        raw_rr_max = Prompt.ask(
+            f"{group.prompt_label} RR scope is unqualified; enter ceiling, list, or range",
+            console=console,
+        ).strip()
+        try:
+            rr_max, registers = _parse_register_scope(raw_rr_max)
+        except ValueError as exc:
+            console.print(f"[red]Invalid RR_max:[/red] {exc}")
+            continue
+        return GroupScanPlan(
+            group=group.group,
+            opcode=group.opcode,
+            rr_max=rr_max,
+            instances=(0x00,) if group.ii_max is None else planner_present_instances(group),
+            registers=registers,
+        )
+
+
+def _operation_request_label(request: object) -> str:
+    operation = str(getattr(request, "operation", "operation"))
+    opcode = getattr(request, "opcode", None)
+    opcode_text = f"0x{opcode:02X}" if isinstance(opcode, int) else "?"
+    selector = getattr(request, "selector", {})
+    selector_text = (
+        ", ".join(f"{key}={value}" for key, value in selector.items())
+        if isinstance(selector, Mapping)
+        else ""
+    )
+    return " ".join(part for part in (opcode_text, operation, selector_text) if part)
+
+
+def _prompt_operation_selection(
+    console: Console,
+    operation_requests: Sequence[object],
+    operation_selection: list[bool],
+) -> None:
+    """Select complete Event programs, preserving every underlying selector."""
+    from .operation_planner import (
+        append_exact_operation_request,
+        operation_planner_rows,
+        operation_request_preview,
+        replace_event_day_codes,
+    )
+
+    if len(operation_selection) != len(operation_requests):
+        raise ValueError("operation_selection must match operation_requests")
+    if not operation_requests and not isinstance(operation_requests, list):
+        return
+    rows = operation_planner_rows(operation_requests)
+    table = Table(title="Exact B524 operation reads")
+    table.add_column("On")
+    table.add_column("Request")
+    for index, row in enumerate(rows, start=1):
+        table.add_row(
+            row.mark(operation_selection),
+            f"{index}. {row.name} · {row.scope} · up to {len(row.indices)} reads",
+        )
+    console.print(table)
+    while True:
+        raw = (
+            Prompt.ask(
+                "Operations: keep, all, none, indexes, codes N <range>, or add <exact read>",
+                default="keep",
+                console=console,
+            )
+            .strip()
+            .lower()
+        )
+        if raw in {"", "keep", "k"}:
+            return
+        if raw in {"all", "*"}:
+            operation_selection[:] = [True] * len(operation_requests)
+            return
+        if raw in {"none", "off"}:
+            operation_selection[:] = [False] * len(operation_requests)
+            return
+        if raw.startswith("add "):
+            try:
+                if not isinstance(operation_requests, list):
+                    raise ValueError("Operation list is not editable")
+                request = append_exact_operation_request(
+                    operation_requests, operation_selection, raw[4:]
+                )
+            except ValueError as exc:
+                console.print(f"[red]Invalid operation request:[/red] {exc}")
+            else:
+                rows = operation_planner_rows(operation_requests)
+                console.print(operation_request_preview(request))
+            continue
+        if raw.startswith("codes "):
+            try:
+                _command, index_text, code_text = raw.split(maxsplit=2)
+                index = parse_int_token(index_text)
+                if not 1 <= index <= len(rows):
+                    raise ValueError("Program index is outside the displayed list")
+                codes = parse_int_set(code_text, min_value=0, max_value=0xFF)
+                if not codes:
+                    raise ValueError("Choose at least one raw Event code")
+                if not isinstance(operation_requests, list):
+                    raise ValueError(
+                        "Explicit operation selectors are retained from their read plan"
+                    )
+                replace_event_day_codes(
+                    operation_requests, operation_selection, rows[index - 1], codes
+                )
+            except ValueError as exc:
+                console.print(f"[red]Invalid Event codes:[/red] {exc}")
+            else:
+                rows = operation_planner_rows(operation_requests)
+                console.print(f"{rows[index - 1].name}: {rows[index - 1].scope}")
+            continue
+        try:
+            selected = parse_int_set(raw, min_value=1, max_value=len(rows))
+        except ValueError as exc:
+            console.print(f"[red]Invalid operation selection:[/red] {exc}")
+            continue
+        operation_selection[:] = [False] * len(operation_requests)
+        for index in selected:
+            for request_index in rows[index - 1].indices:
+                operation_selection[request_index] = True
+        return
 
 
 def prompt_scan_plan(
@@ -437,15 +731,35 @@ def prompt_scan_plan(
     default_plan: dict[PlanKey, GroupScanPlan] | None = None,
     default_preset: PlannerPreset = "recommended",
     system_information: Sequence[Mapping[str, object]] | None = None,
-) -> dict[PlanKey, GroupScanPlan]:
+    operation_requests: Sequence[object] | None = None,
+    operation_selection: list[bool] | None = None,
+    description_policy: DescriptionPolicySelection | None = None,
+    description_profile_status: str = "exact",
+) -> PlannerSelection:
     """Prompt for a scan plan in interactive TTY mode.
 
     Returns a dict mapping (GG, opcode) -> GroupScanPlan.
     """
 
+    requests = operation_requests or ()
+    mutable_operation_selection = (
+        operation_selection if operation_selection is not None else [True] * len(requests)
+    )
+    selected_preset = default_preset
+    policy = description_policy or default_description_policy(
+        default_preset, exact_profile_known=description_profile_status == "exact"
+    )
+    if operation_selection is not None:
+        _prompt_operation_selection(console, requests, operation_selection)
     eligible = {g.key: g for g in groups}
     if not eligible:
-        return {}
+        return make_planner_selection(
+            {},
+            selected_preset=selected_preset,
+            operation_requests=requests,
+            operation_selection=mutable_operation_selection,
+            description_policy=policy,
+        )
     eligible_groups: dict[int, list[PlannerGroup]] = {}
     for group in groups:
         eligible_groups.setdefault(group.group, []).append(group)
@@ -463,6 +777,12 @@ def prompt_scan_plan(
             style="dim",
         )
     )
+    if description_profile_status != "exact":
+        console.print(
+            "[yellow]Unknown description profile.[/yellow] Full scans live writable "
+            "descriptions within the shown scope. Save and share the JSON manually if useful; "
+            "nothing is uploaded automatically."
+        )
     _render_system_information(console, system_information)
 
     known_groups = sorted([g for g in groups if g.known], key=lambda x: (x.group, x.opcode))
@@ -470,9 +790,21 @@ def prompt_scan_plan(
         [g for g in groups if not g.known],
         key=lambda x: (x.group, x.opcode),
     )
-    _render_table("Known Groups", known_groups, unknown=False, console=console)
     _render_table(
-        "Unknown Groups (Disabled By Default)", unknown_groups, unknown=True, console=console
+        "Known Groups",
+        known_groups,
+        unknown=False,
+        console=console,
+        system_information=system_information,
+        description_policy=policy,
+    )
+    _render_table(
+        "Unknown Groups (Disabled By Default)",
+        unknown_groups,
+        unknown=True,
+        console=console,
+        system_information=system_information,
+        description_policy=policy,
     )
 
     _print_estimate(
@@ -485,10 +817,31 @@ def prompt_scan_plan(
     if not _ask_yes_no(console, "Customize scan plan?", default=False):
         if not _ask_yes_no(console, "Proceed with register scan?", default=True):
             raise KeyboardInterrupt
-        return default_selected_plan
+        return make_planner_selection(
+            default_selected_plan,
+            selected_preset=selected_preset,
+            operation_requests=requests,
+            operation_selection=mutable_operation_selection,
+            description_policy=policy,
+        )
 
     preset = _ask_preset(console, default_preset=default_preset)
+    selected_preset = preset
+    preset_policy = default_description_policy(
+        preset, exact_profile_known=description_profile_status == "exact"
+    )
+    policy = DescriptionPolicySelection(
+        local=policy.local if policy.local_override else preset_policy.local,
+        remote=policy.remote if policy.remote_override else preset_policy.remote,
+        local_override=policy.local_override,
+        remote_override=policy.remote_override,
+    )
+    if description_policy is not None:
+        policy = _prompt_description_policy(console, policy)
     if preset == "custom":
+        # An explicit incoming plan is already operator-selected, including
+        # unqualified native routes. Ask for an RR scope only when a new route
+        # is added below.
         selected_plan = dict(default_selected_plan)
     else:
         selected_plan = build_plan_from_preset(groups, preset=preset)
@@ -511,24 +864,31 @@ def prompt_scan_plan(
             eligible_groups=eligible_groups,
             default_groups=sorted({group for (group, _opcode) in selected_plan}),
         )
-        selected_plan = {
-            planner_group.key: selected_plan.get(
-                planner_group.key,
-                GroupScanPlan(
-                    group=planner_group.group,
-                    opcode=planner_group.opcode,
-                    rr_max=planner_group.rr_max,
-                    instances=(
-                        (0x00,) if planner_group.ii_max is None else planner_group.present_instances
-                    ),
-                ),
-            )
-            for group in selected_groups
+        retained_plan: dict[PlanKey, GroupScanPlan] = {}
+        for selected_group_id in selected_groups:
             for planner_group in sorted(
-                eligible_groups[group],
+                eligible_groups[selected_group_id],
                 key=lambda item: (item.group, item.opcode),
-            )
-        }
+            ):
+                existing = selected_plan.get(planner_group.key)
+                if existing is not None:
+                    retained_plan[planner_group.key] = existing
+                elif planner_group.rr_max is not None:
+                    retained_plan[planner_group.key] = GroupScanPlan(
+                        group=planner_group.group,
+                        opcode=planner_group.opcode,
+                        rr_max=planner_group.rr_max,
+                        instances=(
+                            (0x00,)
+                            if planner_group.ii_max is None
+                            else planner_present_instances(planner_group)
+                        ),
+                    )
+                else:
+                    retained_plan[planner_group.key] = _custom_plan_with_required_rr(
+                        console, planner_group
+                    )
+        selected_plan = retained_plan
 
         if _ask_yes_no(console, "Override register selections?", default=False):
             from .planner_textual import _parse_register_scope
@@ -595,4 +955,44 @@ def prompt_scan_plan(
     if not _ask_yes_no(console, "Proceed with register scan?", default=True):
         raise KeyboardInterrupt
 
-    return selected_plan
+    return make_planner_selection(
+        selected_plan,
+        selected_preset=selected_preset,
+        operation_requests=requests,
+        operation_selection=mutable_operation_selection,
+        description_policy=policy,
+    )
+
+
+def _prompt_description_policy(
+    console: Console, policy: DescriptionPolicySelection
+) -> DescriptionPolicySelection:
+    """Allow independent local/remote source overrides in the classic planner."""
+
+    console.print(f"[dim]Description sources:[/dim] local={policy.local}, remote={policy.remote}")
+    while True:
+        raw = (
+            Prompt.ask(
+                "Description override (keep, local=profile|live, remote=profile|live)",
+                default="keep",
+                console=console,
+            )
+            .strip()
+            .lower()
+        )
+        if raw in {"", "keep", "k"}:
+            return policy
+        updated = policy
+        try:
+            for token in raw.replace(",", " ").split():
+                device_class, source = token.split("=", 1)
+                if device_class not in {"local", "remote"} or source not in {
+                    "profile",
+                    "live",
+                }:
+                    raise ValueError
+                updated = updated.with_override(device_class, source)  # type: ignore[arg-type]
+        except ValueError:
+            console.print("[red]Use keep or local/remote=profile/live.[/red]")
+            continue
+        return updated
