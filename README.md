@@ -55,7 +55,7 @@ Key scan UX flags:
 - `--description-budget` (optional limit; all eligible parameters in the selected scope by default)
 - `--request-budget` (optional B524 send limit including transport retries; no implicit send cap)
 - `--scan-plan` (version 1 JSON file for exact custom read selectors)
-- `--b524-read-plan` (version 1 JSON file for explicit OP03/08/09/0B reads)
+- `--b524-read-plan` (optional version 1 JSON override for OP03/08/09/0B reads)
 - `--preview-read-plan` (validate and display that operation plan without device I/O)
 - `--b509-dump` (B509 is opt-in; `--b509-range` requires this flag)
 - `--no-tips`
@@ -188,14 +188,27 @@ device writes are planned.
 - Tabbed register views: `Config`, `State`. Writable OP02 and OP06 parameters and their limit records belong in Config.
 - Watch/pin/rate controls and safe write workflow (`--allow-write` + confirmation).
 
-## Timer and Event operation plans
+## Events and schedules in the planner
 
-`scan --b524-read-plan FILE` adds only the explicitly listed OP03/08/09/0B
-requests after scalar reads and descriptions. Both planners can select those
-requests. They share scan progress and optional request budgets, including
-transport retries. Scalar presets do not generate Event selectors. Separate
-examples are available for [experimental Events](fixtures/b524_event_read_plan.json)
-and [VRC700 timers](fixtures/b524_vrc700_read_plan.json).
+Normal scans offer Event programs automatically for discovered System, admitted
+native DHW, and present zones. No extra option or JSON file is needed. Each
+program includes OP09 `GetEvent` and conditional OP0B `GetEventSetPoint` reads
+for the same selector. Setpoints are requested only after a usable Event reply.
+Reads run after scalar registers and descriptions, sharing progress and the
+optional caller budget, including transport retries.
+
+In the visual planner, **Tab / Shift+Tab** changes panes, **Space** selects a
+complete program, and **Enter** or **d** edits its raw-code range. Programs are
+grouped rather than showing a separate row for every wire request. The initial
+raw window is **00..07**; it is not a qualified weekday mapping or a protocol
+maximum. The editor accepts raw codes up to FF. Empty replies do not stop later
+codes and do not establish that a family is absent. The classic planner also
+accepts `codes N <raw range>` for an automatic program.
+
+`scan --b524-read-plan FILE` remains an advanced override for exact OP03/08/09/0B
+selectors. Separate examples are available for
+[experimental Events](fixtures/b524_event_read_plan.json) and
+[VRC700 timers](fixtures/b524_vrc700_read_plan.json).
 
 ```bash
 python -m helianthus_vrc_explorer scan --b524-read-plan fixtures/b524_event_read_plan.json --preview-read-plan

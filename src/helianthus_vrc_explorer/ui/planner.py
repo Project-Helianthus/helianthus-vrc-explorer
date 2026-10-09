@@ -21,6 +21,7 @@ from ..scanner.plan import (
     format_plan_key,
     make_plan_key,
     parse_int_set,
+    parse_int_token,
 )
 from ..scanner.scan_policy import (
     profile_opcodes,
@@ -621,24 +622,27 @@ def _prompt_operation_selection(
     operation_requests: Sequence[object],
     operation_selection: list[bool],
 ) -> None:
-    """Edit explicit operation reads; scalar presets never synthesize them."""
+    """Select complete Event programs, preserving every underlying selector."""
+    from .operation_planner import operation_planner_rows, replace_event_day_codes
+
     if not operation_requests:
         return
     if len(operation_selection) != len(operation_requests):
         raise ValueError("operation_selection must match operation_requests")
-    table = Table(title="Explicit B524 Operation Reads")
+    rows = operation_planner_rows(operation_requests)
+    table = Table(title="Events and Schedules (B524)")
     table.add_column("On")
     table.add_column("Request")
-    for index, request in enumerate(operation_requests, start=1):
+    for index, row in enumerate(rows, start=1):
         table.add_row(
-            "✓" if operation_selection[index - 1] else " ",
-            f"{index}. {_operation_request_label(request)}",
+            row.mark(operation_selection),
+            f"{index}. {row.name} · {row.scope} · up to {len(row.indices)} reads",
         )
     console.print(table)
     while True:
         raw = (
             Prompt.ask(
-                "Operation reads: all, none, or comma-separated indexes",
+                "Programs: all, none, indexes, or codes N <raw range>",
                 default="keep",
                 console=console,
             )
@@ -653,14 +657,37 @@ def _prompt_operation_selection(
         if raw in {"none", "off"}:
             operation_selection[:] = [False] * len(operation_requests)
             return
+        if raw.startswith("codes "):
+            try:
+                _command, index_text, code_text = raw.split(maxsplit=2)
+                index = parse_int_token(index_text)
+                if not 1 <= index <= len(rows):
+                    raise ValueError("Program index is outside the displayed list")
+                codes = parse_int_set(code_text, min_value=0, max_value=0xFF)
+                if not codes:
+                    raise ValueError("Choose at least one raw Event code")
+                if not isinstance(operation_requests, list):
+                    raise ValueError(
+                        "Explicit operation selectors are retained from their read plan"
+                    )
+                replace_event_day_codes(
+                    operation_requests, operation_selection, rows[index - 1], codes
+                )
+            except ValueError as exc:
+                console.print(f"[red]Invalid Event codes:[/red] {exc}")
+            else:
+                rows = operation_planner_rows(operation_requests)
+                console.print(f"{rows[index - 1].name}: {rows[index - 1].scope}")
+            continue
         try:
-            selected = parse_int_set(raw, min_value=1, max_value=len(operation_requests))
+            selected = parse_int_set(raw, min_value=1, max_value=len(rows))
         except ValueError as exc:
             console.print(f"[red]Invalid operation selection:[/red] {exc}")
             continue
-        operation_selection[:] = [
-            index in selected for index in range(1, len(operation_requests) + 1)
-        ]
+        operation_selection[:] = [False] * len(operation_requests)
+        for index in selected:
+            for request_index in rows[index - 1].indices:
+                operation_selection[request_index] = True
         return
 
 

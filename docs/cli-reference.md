@@ -105,8 +105,10 @@ This file is generated from the CLI's `--help` output. Refresh it with
 │                                                                          [default: probe-constraints]                │
 │ --scan-plan                                          <file>              Version 1 JSON plan file for custom         │
 │                                                                          OP02/OP06, GG, II and RR16 selectors.       │
-│ --b524-read-plan                                     <file>              Explicit JSON read plan for B524 Timer,     │
-│                                                                          VR91, Event and EventSetPoint operations.   │
+│ --b524-read-plan                                     <file>              Optional explicit JSON override for B524    │
+│                                                                          Timer, VR91, Event and EventSetPoint reads. │
+│                                                                          Without it, normal scans propose bounded    │
+│                                                                          raw Event candidates.                       │
 │ --preview-read-plan                                                      Validate and encode --b524-read-plan        │
 │                                                                          offline, without opening a transport.       │
 │ --description-budget                                 <int range> [x>=0]  Maximum description requests, shared fairly │

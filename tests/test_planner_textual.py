@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 
+import pytest
+
 from helianthus_vrc_explorer.scanner.plan import GroupScanPlan
 from helianthus_vrc_explorer.ui.planner import PlannerGroup, split_planner_groups_by_namespace
 from helianthus_vrc_explorer.ui.planner_textual import (
@@ -99,6 +101,116 @@ def test_textual_operation_toggle_refreshes_rendered_request_estimate(monkeypatc
     assert captured["before"].startswith("Plan: 1 requests | ETA: 0s @ 2.00 req/s")
     assert captured["after"].startswith("Plan: 0 requests | ETA: 0s @ 2.00 req/s")
     assert selection == [False]
+
+
+@pytest.mark.parametrize("namespaces", [(0x02, 0x06), (0x02,), (0x06,), ()])
+def test_tab_cycles_through_events_and_skips_empty_scalar_panes(monkeypatch, namespaces) -> None:
+    from textual.app import App
+
+    from helianthus_vrc_explorer.scanner.b524_operation_reads import parse_operation_read_plan
+
+    groups = [
+        PlannerGroup(
+            group=0,
+            opcode=opcode,
+            name="System" if opcode == 0x02 else "Boiler",
+            descriptor=float("nan"),
+            known=True,
+            ii_max=None,
+            rr_max=1,
+            rr_max_full=1,
+            present_instances=(0,),
+        )
+        for opcode in namespaces
+    ]
+    requests = parse_operation_read_plan(
+        {
+            "schema_version": 1,
+            "requests": [
+                {
+                    "operation": "GetEvent",
+                    "profile": "zone",
+                    "instance": 1,
+                    "address": 1,
+                    "weekday_code": 0,
+                }
+            ],
+        }
+    )
+    expected = [
+        *("planner-table-local" for opcode in namespaces if opcode == 0x02),
+        *("planner-table-remote" for opcode in namespaces if opcode == 0x06),
+        "planner-table-operations",
+    ]
+    observed: list[str | None] = []
+
+    def fake_run(self: App[object], *_args: object, **_kwargs: object) -> None:
+        async def exercise() -> None:
+            async with self.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                for _ in expected:
+                    observed.append(self.focused.id if self.focused else None)
+                    await pilot.press("tab")
+                observed.append(self.focused.id if self.focused else None)
+                await pilot.press("shift+tab")
+                observed.append(self.focused.id if self.focused else None)
+                await pilot.press("space")
+
+        asyncio.run(exercise())
+
+    monkeypatch.setattr(App, "run", fake_run)
+    selection = [True]
+    run_textual_scan_plan(
+        groups,
+        request_rate_rps=None,
+        operation_requests=requests,
+        operation_selection=selection,
+    )
+    assert observed == [*expected, expected[0], expected[-1]]
+    assert selection == [False]
+
+
+def test_visual_event_program_edits_codes_and_toggles_the_complete_pair(monkeypatch) -> None:
+    from textual.app import App
+    from textual.widgets import DataTable, Input, Static
+
+    from helianthus_vrc_explorer.scanner.b524_default_events import event_program_requests
+
+    requests = list(event_program_requests("zone", instance=1, address=1, weekday_codes=range(8)))
+    selection = [True] * len(requests)
+    captured: dict[str, object] = {}
+
+    def fake_run(self: App[object], *_args: object, **_kwargs: object) -> None:
+        async def exercise() -> None:
+            async with self.run_test(size=(120, 40)) as pilot:
+                await pilot.pause()
+                table = self.query_one("#planner-table-operations", DataTable)
+                assert table.row_count == 1
+                await pilot.press("enter")
+                await pilot.pause()
+                self.screen.query_one(Input).value = "0x01,0x08,0xFF"
+                await pilot.press("enter")
+                await pilot.pause()
+                captured["screen_count"] = len(self.screen_stack)
+                captured["codes"] = [request.selector["weekday_code"] for request in requests]
+                captured["status"] = str(self.query_one("#status", Static).render())
+                assert table.row_count == 1
+                await pilot.press("space")
+                await pilot.pause()
+
+        asyncio.run(exercise())
+
+    monkeypatch.setattr(App, "run", fake_run)
+    run_textual_scan_plan(
+        [],
+        request_rate_rps=None,
+        operation_requests=requests,
+        operation_selection=selection,
+    )
+    assert captured["screen_count"] == 1
+    assert captured["codes"] == [1, 1, 8, 8, 255, 255]
+    assert str(captured["status"]).startswith("Plan: 6 requests")
+    assert selection == [False] * 6
 
 
 def test_parse_register_scope_distinguishes_ceiling_from_exact_selectors() -> None:
