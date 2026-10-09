@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Any
+
+import pytest
 
 from helianthus_vrc_explorer.replay_trace import replay_trace_to_artifact
 from helianthus_vrc_explorer.scanner.scan import _apply_contextual_enum_annotations
@@ -197,3 +201,109 @@ def test_html_embeds_ventilation_labels_without_namespace_bleed() -> None:
     assert "value_label_qualification=${entry.value_label_qualification}" in html
     assert "value_display" not in remote["0x0002"]
     assert "value_display" not in unrelated["0x0002"]
+
+
+def test_html_dom_prefers_label_until_user_explicitly_overrides_codec() -> None:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node is required for the generated HTML table regression")
+
+    html = render_html_report(_artifact())
+    start = html.index("function renderActiveGroup(")
+    end = html.index("function renderB524Tab()", start)
+    render_function = html[start:end]
+    script = f"""
+class Node {{
+  constructor(tag) {{
+    this.tag = tag;
+    this.children = [];
+    this.className = "";
+    this.classList = {{add: (...names) => {{
+      this.className = [this.className, ...names].filter(Boolean).join(" ");
+    }}}};
+    this.textContent = "";
+    this.innerHTML = "";
+    this.title = "";
+  }}
+  appendChild(child) {{ this.children.push(child); return child; }}
+  addEventListener() {{}}
+}}
+const document = {{
+  createElement: (tag) => new Node(tag),
+  createTextNode: (text) => {{
+    const node = new Node("text");
+    node.textContent = text;
+    return node;
+  }},
+}};
+const sheetArea = new Node("div");
+const state = {{b524Filters: {{
+  hideMissingInstances: false,
+  hideAbsent: false,
+  hideDormant: false,
+}}}};
+let groupData = null;
+let overrideValue = null;
+function getOperationGroup() {{ return groupData; }}
+function getGroupObject(value) {{ return value; }}
+function groupLabelForSection(_group, _section, fallback) {{ return fallback; }}
+function entryStatusKind() {{ return "ok"; }}
+function entryStatusLabel() {{ return "OK"; }}
+function sortedHexKeys(keys) {{ return keys.sort((a, b) => parseInt(a, 16) - parseInt(b, 16)); }}
+function visibleRegisterKeys(instances) {{
+  const keys = new Set();
+  for (const instance of Object.values(instances)) {{
+    for (const key of Object.keys(instance.registers || {{}})) keys.add(key);
+  }}
+  return sortedHexKeys(Array.from(keys));
+}}
+function parseHexKey(value) {{ return parseInt(value, 16); }}
+function rowIsAbsent() {{ return false; }}
+function rowIsDormant() {{ return false; }}
+function groupPresentationForSection() {{ return null; }}
+function getInstanceObject(value) {{ return value; }}
+function bytesFromHex(raw) {{ return raw.match(/../g).map((value) => parseInt(value, 16)); }}
+function getRowOverride() {{ return overrideValue; }}
+function setRowOverride() {{}}
+function candidateTypeSpecsForLength() {{ return ["U8", "HEX:1"]; }}
+function parseTypedValue(typeSpec, bytes) {{
+  return typeSpec === "HEX:1"
+    ? {{value: "0x" + bytes[0].toString(16).padStart(2, "0"), error: null}}
+    : {{value: bytes[0], error: null}};
+}}
+function formatValue(value) {{ return String(value); }}
+function statusChipClass() {{ return ""; }}
+function appendAccessBadges() {{}}
+function finalPlanForRoute() {{ return null; }}
+{render_function}
+function valueCell(entry, opKey = "0x02", override = null) {{
+  overrideValue = override;
+  const instanceKey = opKey === "0x06" ? "0x01" : "0x00";
+  groupData = {{name: "Ventilation", instances: {{
+    [instanceKey]: {{present: true, registers: {{"0x0002": entry}}}},
+  }}}};
+  const mount = new Node("div");
+  renderActiveGroup("0x09", opKey, mount);
+  const walk = (item) => [item, ...item.children.flatMap(walk)];
+  const cell = walk(mount).find((item) => item.className.split(" ").includes("cell-value"));
+  return cell ? cell.textContent : null;
+}}
+const labelled = {{
+  value: 2, raw_hex: "02", type: "U8", response_state: "active",
+  value_display: "2 (NORMAL)", enum_resolved_name: "NORMAL",
+  value_label_qualification: "candidate_unqualified",
+}};
+const unknown = {{value: 99, raw_hex: "63", type: "U8", response_state: "active"}};
+const remote = {{value: 2, raw_hex: "02", type: "U8", response_state: "active"}};
+console.log(JSON.stringify([
+  valueCell(labelled),
+  valueCell(labelled, "0x02", "HEX:1"),
+  valueCell(unknown),
+  valueCell(remote, "0x06"),
+]));
+"""
+    result = subprocess.run(
+        [node, "-e", script], check=True, text=True, capture_output=True, timeout=10
+    )
+
+    assert json.loads(result.stdout) == ["2 (NORMAL)", "0x02", "99", "2"]

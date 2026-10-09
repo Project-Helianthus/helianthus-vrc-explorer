@@ -2363,9 +2363,13 @@ __ARTIFACT_JSON__
               const displayValue = (typeof entry.value_display === "string" && entry.value_display.length)
                 ? entry.value_display
                 : entry.value;
+              const hasQualifiedValueLabel = (
+                typeof entry.enum_resolved_name === "string" && entry.enum_resolved_name.length
+                && typeof entry.value_label_qualification === "string" && entry.value_label_qualification.length
+              );
               const statusKind = entryStatusKind(entry);
               const statusLabel = entryStatusLabel(entry);
-              const decoded = selectedType && valueBytes
+              const decoded = (override || !hasQualifiedValueLabel) && selectedType && valueBytes
                 ? parseTypedValue(selectedType, valueBytes)
                 : { value: displayValue, error: null };
 
