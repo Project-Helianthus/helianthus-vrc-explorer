@@ -1,4 +1,5 @@
 import json
+import re
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -56,11 +57,12 @@ def test_normal_scan_passes_resolved_identity_for_automatic_event_policy(
 
 
 def test_read_plan_help_describes_optional_override() -> None:
-    result = CliRunner().invoke(app, ["scan", "--help"])
+    result = CliRunner().invoke(app, ["scan", "--help"], env={"COLUMNS": "120", "LINES": "60"})
     assert result.exit_code == 0
-    assert "--b524-read-plan" in result.stdout
-    assert "Optional" in result.stdout and "explicit JSON" in result.stdout
-    assert "normal scans" in result.stdout and "bounded" in result.stdout
+    help_text = re.sub(r"\x1B\[[0-?]*[ -/]*[@-~]", "", result.stdout)
+    assert "--b524-read-plan" in help_text
+    assert "Optional" in help_text and "explicit JSON" in help_text
+    assert "normal scans" in help_text and "bounded" in help_text
 
 
 def test_operation_plan_preview_validates_and_encodes_without_transport(tmp_path, monkeypatch):
