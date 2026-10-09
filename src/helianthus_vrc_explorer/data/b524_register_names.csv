@@ -261,7 +261,7 @@ opcode,group,register,name
 0x02,0x02,0x0011,circuit_cooling_flow_temperature_min_setpoint
 0x02,0x02,0x0012,circuit_flow_temperature_min_setpoint
 0x02,0x02,0x0013,circuit_dhw_operating_mode
-0x02,0x02,0x0014,circuit_outside_temperature_limit_summer_detection
+0x02,0x02,0x0014,circuit_maximum_outside_temperature_heating
 0x02,0x02,0x0015,circuit_room_temperature_influence
 0x02,0x02,0x0016,circuit_screed_drying_day
 0x02,0x02,0x0017,circuit_screed_drying_setpoint

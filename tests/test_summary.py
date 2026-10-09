@@ -86,9 +86,7 @@ def test_render_summary_shows_namespace_totals_and_flags_distribution(tmp_path: 
 
     text = console.export_text()
     assert "namespaces local (0x02)=2, remote (0x06)=1" in text
-    assert (
-        "flags_access state_volatile=0, state_stable=2, config_installer=0, config_user=1" in text
-    )
+    assert "state_stable=2" in text and "config_user=1" in text
     assert "b555 reads=4 errors=1 programs=2" in text
     assert "Local Devices (0x02)" in text
     assert "Remote Devices (0x06)" in text
@@ -618,3 +616,33 @@ def test_summary_uses_explicit_nonzero_instance_minimum(tmp_path: Path) -> None:
     assert "1/8" in text
     assert "3/10" not in text
     assert "Type" not in text
+
+
+def test_summary_defaults_use_only_current_access_names(tmp_path: Path) -> None:
+    artifact = {
+        "operations": {
+            "0x02": {
+                "groups": {
+                    "0x00": {
+                        "instances": {
+                            "0x00": {
+                                "registers": {
+                                    "0x0001": {"flags_access": "writable_visible"},
+                                    "0x0002": {"flags_access": "read_only_visible"},
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    console = Console(record=True, width=200)
+    render_summary(console, artifact, output_path=tmp_path / "artifact.json")
+    text = console.export_text()
+    assert (
+        "flags_access read_only_not_visible=0, read_only_visible=1, "
+        "writable_not_visible=0, writable_visible=1"
+    ) in text
+    for obsolete in ("state_volatile", "state_stable", "config_installer", "config_user"):
+        assert obsolete not in text

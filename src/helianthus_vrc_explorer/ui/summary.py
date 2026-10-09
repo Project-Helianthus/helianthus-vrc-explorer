@@ -400,7 +400,12 @@ def _compute_flags_distribution(artifact: dict[str, Any]) -> dict[str, int]:
         for entry in _iter_register_entries(artifact)
         if isinstance(entry.get("flags_access"), str) and str(entry.get("flags_access")).strip()
     )
-    ordered = ("state_volatile", "state_stable", "config_installer", "config_user")
+    ordered = (
+        "read_only_not_visible",
+        "read_only_visible",
+        "writable_not_visible",
+        "writable_visible",
+    )
     result = {key: counts.get(key, 0) for key in ordered}
     for key in sorted(counts):
         if key not in result:

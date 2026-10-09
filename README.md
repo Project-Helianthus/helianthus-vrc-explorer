@@ -197,6 +197,10 @@ and custom-scope choices. `browse` opens an artifact picker and connects only
 when the user selects **Connect**. Technical commands such as `replay-trace`
 and the `b524` command group remain scriptable.
 
+The scan resolves the output directory to an absolute path and checks that it
+can create files there before opening transport. If the shell's current directory
+has been removed, choose an absolute output path or change to an existing directory.
+
 ## Events and schedules in the planner
 
 Normal scans offer Event programs automatically for discovered System, admitted

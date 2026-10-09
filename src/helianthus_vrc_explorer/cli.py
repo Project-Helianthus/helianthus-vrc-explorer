@@ -10,7 +10,7 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from importlib import resources
 from pathlib import Path
-from tempfile import TemporaryDirectory
+from tempfile import TemporaryDirectory, TemporaryFile
 from typing import Any, cast
 
 import typer
@@ -744,6 +744,20 @@ def _scan_configured(
     if preset_value == "custom" and (planner_ui_value == "disabled" or not console.is_terminal):
         typer.echo("Custom scanning requires an interactive planner.", err=True)
         raise typer.Exit(2)
+
+    # Freeze relative paths before I/O; a later cwd change must not redirect results.
+    try:
+        output_dir = output_dir.expanduser().resolve()
+        output_dir.mkdir(parents=True, exist_ok=True)
+        with TemporaryFile(dir=output_dir):
+            pass
+    except OSError as exc:
+        typer.echo(
+            f"Cannot prepare output directory: {exc}. "
+            "Choose an absolute output directory in scan setup or change to an existing directory.",
+            err=True,
+        )
+        raise typer.Exit(2) from exc
 
     ebusd_schema: EbusdCsvSchema | None = None
     ebusd_schema_source: str | None = None

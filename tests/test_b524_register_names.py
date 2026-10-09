@@ -13,6 +13,8 @@ def test_bundled_op02_register_catalog_is_complete_and_opcode_scoped() -> None:
     assert all(opcode == 0x02 for opcode, _group, _register in names)
     assert names[(0x02, 0x00, 0x0001)] == "system_dhw_bivalence_point"
     assert names[(0x02, 0x02, 0x0001)] == "circuit_circuit_type"
+    assert names[(0x02, 0x02, 0x0014)] == "circuit_maximum_outside_temperature_heating"
+    assert names[(0x02, 0x02, 0x001F)] == "circuit_minimum_outside_temperature_cooling"
     assert names[(0x02, 0x09, 0x0004)] == "ventilation_status_special_operating_mode"
 
 

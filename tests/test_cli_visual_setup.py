@@ -82,6 +82,9 @@ def test_postscan_browser_keeps_trace_after_scan_session_closes(
 
     transport = Transport()
     captured: dict = {}
+    monkeypatch.chdir(tmp_path)
+    later_cwd = tmp_path / "later"
+    later_cwd.mkdir()
 
     @contextmanager
     def observer(**kwargs):
@@ -94,20 +97,49 @@ def test_postscan_browser_keeps_trace_after_scan_session_closes(
     monkeypatch.setattr(cli, "_build_transport", lambda *a, **kw: transport)
     monkeypatch.setattr(cli, "_probe_scan_identity", lambda *a, **kw: {})
     monkeypatch.setattr(cli, "make_scan_observer", observer)
-    monkeypatch.setattr(
-        cli,
-        "scan_vrc",
-        lambda *a, **kw: {
+
+    def scan(*args, **kwargs):
+        monkeypatch.chdir(later_cwd)
+        return {
             "schema_version": "2.3",
             "meta": {"destination_address": "0x15", "scan_timestamp": "2026-10-09T18:00:00Z"},
             "operations": {},
-        },
-    )
+        }
+
+    monkeypatch.setattr(cli, "scan_vrc", scan)
     monkeypatch.setattr(cli, "_can_launch_interactive_browse", lambda console: True)
     monkeypatch.setattr(cli, "run_browse_from_artifact", browse)
     trace = tmp_path / "scan.trace"
     cli._scan_configured(
-        transport_protocol=protocol, dst="0x15", output_dir=tmp_path, trace_file=trace
+        transport_protocol=protocol, dst="0x15", output_dir=Path("results"), trace_file=trace
     )
     assert captured["connection_settings"]["trace_path"] == trace
     assert captured["connection_settings"]["protocol"] == expected
+    assert list((tmp_path / "results").glob("*.json"))
+    assert not (later_cwd / "results").exists()
+
+
+@pytest.mark.parametrize("failure", ["existing_file", "deleted_cwd"])
+def test_output_preflight_rejects_before_transport(monkeypatch, tmp_path: Path, capsys, failure):
+    monkeypatch.setattr(
+        cli, "_build_transport", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("I/O"))
+    )
+    if failure == "existing_file":
+        output = tmp_path / "file"
+        output.write_text("preserve")
+    else:
+        output = Path("results")
+        original = Path.resolve
+
+        def resolve(path, *args, **kwargs):
+            if path == output:
+                raise FileNotFoundError("working directory removed")
+            return original(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "resolve", resolve)
+    with pytest.raises(cli.typer.Exit) as exc:
+        cli._scan_configured(transport_protocol="ens", dst="0x15", output_dir=output)
+    assert exc.value.exit_code == 2
+    assert "Cannot prepare output directory" in capsys.readouterr().err
+    if failure == "existing_file":
+        assert output.read_text() == "preserve"
