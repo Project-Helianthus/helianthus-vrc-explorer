@@ -208,7 +208,7 @@ This file is generated from the CLI's `--help` output. Refresh it with
 │    --execute                                            Apply one qualified native write.                            │
 │    --qualification           <file>                                                                                  │
 │    --confirm                 <str>                      Exact confirmation from the offline preview.                 │
-│    --dst                     <str>                      [default: 0x15]                                              │
+│    --dst                     <str>                                                                                   │
 │    --transport               <str>                      [default: tcp]                                               │
 │    --source-address          <str>                      [default: 0xF7]                                              │
 │    --host                    <str>                      [default: 127.0.0.1]                                         │
