@@ -231,7 +231,7 @@ the exact confirmation text from the preview. It verifies live EID/SW and the
 baseline, sends once, and reads back. OP0A/0C native execution remains disabled
 until a native Event contract is qualified. Neither a preview nor a successful
 synthetic test establishes live behavior. The
-[operation contract](https://github.com/Project-Helianthus/helianthus-docs-ebus/blob/main/protocols/vaillant/b524-operation-reads.md)
+[operation contract](https://github.com/Project-Helianthus/helianthus-docs-ebus/blob/main/development/ebus-vaillant-b524-operation-reads.md)
 defines the plan and qualification schemas.
 
 ## Canonical B524 Register Names
