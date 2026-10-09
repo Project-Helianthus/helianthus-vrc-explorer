@@ -257,3 +257,37 @@ console.log(JSON.stringify({preview, exported}));
     assert result["preview"]["payload_hex"] == "04030202040c1890909090"
     assert result["exported"]["values"] == [[12, 24], None, None]
     _assert_preview_matches_python(result["preview"], result["exported"])
+
+
+@pytest.mark.parametrize("destination", [None, True, 256, -1, "invalid"])
+def test_invalid_target_rejects_preview_and_cannot_export(destination) -> None:
+    artifact = _artifact()
+    artifact["meta"]["destination_address"] = destination
+    result = _run_editor(
+        artifact,
+        "operation_09",
+        r"""
+byRole(container, "operation-edit-select")[0].click();
+byRole(container, "operation-preview-button")[0].click();
+byRole(container, "operation-export-button")[0].click();
+console.log(JSON.stringify({message: byRole(container, "operation-validation")[0].textContent, disabled: byRole(container, "operation-export-button")[0].disabled, downloaded: capturedBlob !== null}));
+""",
+    )
+    assert "destination" in result["message"]
+    assert result["disabled"] is True
+    assert result["downloaded"] is False
+
+
+def test_numeric_nondefault_target_is_retained_in_preview() -> None:
+    artifact = _artifact()
+    artifact["meta"]["destination_address"] = 0x26
+    result = _run_editor(
+        artifact,
+        "operation_09",
+        r"""
+byRole(container, "operation-edit-select")[0].click();
+byRole(container, "operation-preview-button")[0].click();
+console.log(byRole(container, "operation-preview")[0].textContent);
+""",
+    )
+    assert result["destination"] == "0x26"

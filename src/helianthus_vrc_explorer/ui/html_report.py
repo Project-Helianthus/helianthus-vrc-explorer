@@ -1685,6 +1685,8 @@ __ARTIFACT_JSON__
       }
 
       function b524BuildPreview(documentValue, metaObj) {
+        const destination = b524Destination(metaObj);
+        if (destination === "unknown") throw new Error("artifact destination is missing or invalid");
         const operation = documentValue.operation;
         const selector = b524CanonicalSelector(documentValue.selector, operation);
         if (!selector) throw new Error("selector is not canonical for this operation");
@@ -1731,7 +1733,7 @@ __ARTIFACT_JSON__
           schema_version: 1,
           operation,
           opcode_hex: `0x${opcode.toString(16).toUpperCase().padStart(2, "0")}`,
-          destination: b524Destination(metaObj),
+          destination,
           selector,
           payload_hex: b524BytesHex(payload),
           expected_before_raw_hex: beforeHex,

@@ -347,6 +347,10 @@ if _TEXTUAL_IMPORT_ERROR is None:
         def on_mount(self) -> None:
             self._refresh_preview()
 
+        def on_input_changed(self, event: Input.Changed) -> None:
+            if event.input.id == "operation-values" and self.is_mounted:
+                self._refresh_preview()
+
         def _edited(self) -> tuple[dict[str, object], dict[str, object]]:
             from ..scanner.b524_operation_edit import build_operation_edit_preview
 
@@ -1388,10 +1392,11 @@ if _TEXTUAL_IMPORT_ERROR is None:
                 document = operation_edit_export(records, selector=selector, operation=operation)
                 meta = self._artifact.get("meta")
                 dst = meta.get("destination_address") if isinstance(meta, dict) else None
-                try:
-                    destination = int(dst, 0) if isinstance(dst, str) else 0x15
-                except ValueError:
-                    destination = 0x15
+                if isinstance(dst, bool) or not isinstance(dst, (str, int)):
+                    raise ValueError("artifact destination must be a byte address")
+                destination = int(dst, 0) if isinstance(dst, str) else dst
+                if not 0 <= destination <= 0xFF:
+                    raise ValueError("artifact destination must be in range 0..255")
                 build_operation_edit_preview(document, dst=destination)
             except ValueError as exc:
                 self._set_status(f"Offline export unavailable: {exc}")

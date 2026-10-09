@@ -4,6 +4,7 @@ import json
 import struct
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from helianthus_vrc_explorer.cli import app
@@ -445,6 +446,27 @@ def test_replay_keeps_unknown_operation_selectors_raw_and_separate(tmp_path: Pat
     }
     assert reads[2]["error"] == "unknown_event_profile"
     assert reads[2]["decoded"] is None
+
+
+@pytest.mark.parametrize("payload", ["0903000981", "0b03000981", "0301000107", "0301010100"])
+def test_replay_unsupported_selector_is_raw_only(tmp_path: Path, payload: str) -> None:
+    raw = "00002430909090" if payload.startswith("03") else "0001020304050607"
+    trace_path = _write_trace(
+        tmp_path,
+        "unsupported-selector.trace",
+        "2026-04-06T10:00:00Z INIT features=0x01\n"
+        "2026-04-06T10:00:01Z #1 SEND_PROTO src=0xF7 dst=0x15 "
+        f"primary=0xB5 secondary=0x24 payload={payload}\n"
+        f"2026-04-06T10:00:02Z #1 PARSED_PROTO len={len(raw) // 2} hex={raw}\n",
+    )
+    record = replay_trace_to_artifact(trace_path)["b524_operation_reads"][0]
+    assert record["selector"] == {}
+    assert record["raw_selector"]["address"] == int(payload[6:8], 16)
+    assert record["decoded"] is None
+    assert record["decode_qualification"] == "schema_unqualified"
+    assert record["request_payload_hex"] == payload
+    assert record["response_raw_hex"] == raw
+    assert record["error"].startswith("unsupported_")
 
 
 def test_replay_keeps_operation_empty_nack_timeout_and_malformed_distinct(tmp_path: Path) -> None:

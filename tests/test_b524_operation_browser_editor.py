@@ -89,11 +89,12 @@ def test_in_memory_decoded_tuples_show_all_event_times_and_timer_slots():
     assert ("slot_3", "unused (0x90/0x90)") in views[-1].fields
 
 
-def test_browser_edits_previews_and_exports_without_native_write(tmp_path):
+@pytest.mark.parametrize("destination", ["0x75", 0x26])
+def test_browser_edits_previews_and_exports_without_native_write(tmp_path, destination):
     records = _records()
     artifact = {
         "schema_version": "2.3",
-        "meta": {"destination_address": "0x75"},
+        "meta": {"destination_address": destination},
         "operations": {},
         "b524_operation_reads": records,
     }
@@ -121,7 +122,8 @@ def test_browser_edits_previews_and_exports_without_native_write(tmp_path):
             await pilot.click("#operation-preview-button")
             preview = str(dialog.query_one("#operation-preview-content", Static).render())
             assert "0c030201ff28212223242526" in preview
-            assert "0x75" in preview
+            target = int(destination, 0) if isinstance(destination, str) else destination
+            assert f"0x{target:02X}" in preview
             await pilot.click("#operation-export-button")
             document = json.loads(output.read_text())
             assert document["values"][0] == 40

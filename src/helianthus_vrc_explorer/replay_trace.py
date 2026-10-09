@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import re
 import struct
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -15,6 +15,7 @@ from .protocol.parser import ValueParseError, parse_typed_value
 from .scanner.b524_operation_reads import (
     B524OperationReadRequest,
     decode_operation_read_observation,
+    parse_operation_read_plan,
     record_operation_read_observation,
 )
 from .scanner.director import (
@@ -441,6 +442,20 @@ def _replay_operation_read(exchange: _TraceExchange) -> dict[str, Any] | None:
     request = _operation_read_request(exchange.payload)
     if request is None:
         return None
+    if request.selector:
+        try:
+            canonical = parse_operation_read_plan(
+                {
+                    "schema_version": 1,
+                    "requests": [{"operation": request.operation, **request.selector}],
+                }
+            )[0]
+            if canonical.payload != request.payload:
+                raise ValueError("selector does not round-trip to the recorded payload")
+        except (TypeError, ValueError):
+            request = replace(request, selector={})
+        else:
+            request = canonical
     record = record_operation_read_observation(request)
     record["trace_seq"] = exchange.seq
     record["request_attempts"] = 1
@@ -471,9 +486,15 @@ def _replay_operation_read(exchange: _TraceExchange) -> dict[str, Any] | None:
     if unknown_timer_channel or unknown_event_profile:
         record["response_state"] = "empty" if not response else "value"
         if response:
-            record["error"] = (
-                "unknown_timer_channel" if unknown_timer_channel else "unknown_event_profile"
-            )
+            if unknown_timer_channel:
+                known = (exchange.payload[1], exchange.payload[3]) in TIMER_CHANNELS.values()
+                record["error"] = "unsupported_timer_selector" if known else "unknown_timer_channel"
+            else:
+                known = any(
+                    profile.system_type == exchange.payload[1]
+                    for profile in EVENT_PROFILES.values()
+                )
+                record["error"] = "unsupported_event_selector" if known else "unknown_event_profile"
         return record
     decoded, _qualification, state = decode_operation_read_observation(request, response)
     record["response_state"] = state
