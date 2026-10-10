@@ -1,0 +1,15 @@
+type,raw_shape,interpreted_shape
+BOOL,1 byte,boolean
+UCH,1 unsigned byte,integer
+UIN,2 unsigned bytes,integer
+I8,1 signed byte,integer
+I16,2 signed bytes,integer
+U32,4 unsigned bytes,integer
+I32,4 signed bytes,integer
+EXP,4 bytes,decimal number
+HTI,3 bytes,time of day HH:MM:SS
+HDA:3,3 bytes,calendar date
+FW,variable,version text
+FWU,3 numeric bytes,version text
+STR:n,n bytes,text
+HEX:n,n bytes,uninterpreted bytes

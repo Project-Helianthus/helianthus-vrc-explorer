@@ -186,6 +186,17 @@ for validation, missing-limit exceptions and evidence boundaries.
 - Tabbed register views: `Config`, `State`. Writable OP02 and OP06 parameters and their limit records belong in Config.
 - Watch/pin/rate controls and safe write workflow: select **Connect** in the
   Browser, then confirm each concrete value change.
+- Register list limited to `Register` and `Value` (the change/write marker
+  folds into the Value cell); every other field -- eBUSd name, raw bytes,
+  unit, FLAGS access, described limits, write-admission gates, every
+  observed name (Explorer, Vaillant friendly/VRC720/VRC700, myVaillant,
+  eBUSd), ENUM candidate labels and raw evidence -- moves to a read-only
+  detail panel for the highlighted row. Toggle it with `d`; below 110
+  columns it is hidden by default and swaps with the tree pane instead of
+  stacking. The panel never writes to the artifact and does not change the
+  existing edit-confirmation flow (`e` still opens the same modal). Unit is
+  shown as `not recorded` for every B524 register today -- no per-register
+  unit is tracked yet.
 
 ### Scan and browse configuration
 
