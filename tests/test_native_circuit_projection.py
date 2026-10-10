@@ -126,6 +126,7 @@ function formatValue(value) {return String(value);}
 function statusChipClass() {return "";}
 function appendAccessBadges() {}
 function finalPlanForRoute() {return null;}
+function b524CorrespondenceSecondaryText() {return "";}
 """
     actions = r"""
 const mount = new Node("div");

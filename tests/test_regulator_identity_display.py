@@ -9,17 +9,18 @@ from helianthus_vrc_explorer.ui.browse_textual import _build_identity_header_ren
 from helianthus_vrc_explorer.ui.html_report import render_html_report
 
 
-def artifact_with_sw(sw: str) -> dict:
+def artifact_with_hw(hw: str) -> dict:
     return {
         "schema_version": "2.3",
-        "meta": {"identity": {"device_id": "BASV0", "sw": sw, "model": "n/a"}},
+        "meta": {"identity": {"device_id": "BASV0", "hw": hw, "model": "n/a"}},
         "operations": {},
     }
 
 
-def test_same_eid_displays_distinct_models_from_sw_in_all_headers() -> None:
-    for sw, expected in (("0388", "VRC720"), ("0403", "VRT380")):
-        artifact = artifact_with_sw(sw)
+def test_same_eid_displays_distinct_models_from_hw_in_all_headers() -> None:
+    # hw="8803" byte-swaps to decimal 388 (SPN 0184); hw="0304" to 403 (SPN 0193).
+    for hw, expected in (("8803", "VRC720"), ("0304", "VRT380")):
+        artifact = artifact_with_hw(hw)
         baseline = deepcopy(artifact)
         html = render_html_report(artifact)
         assert 'class="identity-label">Profile' in html
@@ -38,30 +39,36 @@ def test_same_eid_displays_distinct_models_from_sw_in_all_headers() -> None:
         assert artifact == baseline
 
 
-def test_no_family_is_inferred_from_eid_or_hardware_version() -> None:
-    artifact = artifact_with_sw("0507")
-    artifact["meta"]["identity"]["hw"] = "0388"
+def test_no_family_is_inferred_from_eid_or_an_unmatched_hardware_version() -> None:
+    artifact = artifact_with_hw("9999")
+    # Raw sw is preserved as evidence but must not drive identification, even
+    # though it would have matched the catalog under the pre-0.6.1 sw rule.
+    artifact["meta"]["identity"]["sw"] = "0388"
     html = render_html_report(artifact)
     assert 'class="identity-label">Profile' not in html
     assert _build_identity_header_renderable(artifact) is None
 
 
-def test_conflicting_supplied_spn_and_sw_do_not_select_a_profile() -> None:
-    artifact = artifact_with_sw("0388")
+def test_conflicting_supplied_spn_and_hw_do_not_select_a_profile() -> None:
+    artifact = artifact_with_hw("8803")
     artifact["meta"]["identity"]["spn"] = "0193"
     assert 'class="identity-label">Profile' not in render_html_report(artifact)
 
 
-def test_native_sw_selects_exact_model_before_optional_serial_enrichment() -> None:
+def test_native_hw_selects_exact_model_before_optional_serial_enrichment() -> None:
     class IdentityTransport:
         def send_proto(self, dst: int, primary: int, secondary: int, payload: bytes) -> bytes:
             if (primary, secondary) == (0x07, 0x04):
-                return b"\xb5BASV0\x04\x03\x01\x00"
+                # manufacturer=0xb5, device_id="BASV0", sw=0403 (raw, unused
+                # for matching), hw=0304 (byte-swaps to decimal 403 -> 0193).
+                return b"\xb5BASV0\x04\x03\x03\x04"
             raise TransportNack("optional enrichment unavailable")
 
     identity = _probe_scan_identity(IdentityTransport(), dst=0x15)  # type: ignore[arg-type]
     assert identity["sw"] == "0403"
+    assert identity["hw"] == "0304"
     assert identity["spn"] == "0193"
+    assert identity["spn_source"] == "hw"
     assert identity["assigned_model"] == "VRT380"
     assert identity["model_assignment_qualification"] == "project_catalog"
     assert identity["protocol_family"] == "VRC720"
@@ -70,28 +77,99 @@ def test_native_sw_selects_exact_model_before_optional_serial_enrichment() -> No
 
 
 def test_other_manufacturer_does_not_receive_the_regulator_profile() -> None:
-    artifact = artifact_with_sw("0388")
+    artifact = artifact_with_hw("8803")
     artifact["meta"]["identity"]["manufacturer"] = "0x50"
     assert 'class="identity-label">Profile' not in render_html_report(artifact)
 
 
-def test_ctlx0_sw0127_hw0404_is_vrc720_in_all_headers() -> None:
+def test_ctlx0_sw0127_hw0404_is_vr940_in_all_headers() -> None:
     from helianthus_vrc_explorer.schema.regulator_identity import (
         lookup_regulator_identity,
-        spn_from_sw,
+        spn_from_hw,
     )
 
+    # Real recorded example: a CTLX0 reporting SW 0127 / HW 0404 resolves,
+    # under the hw-based rule, to SPN 0x0194 -- not the stale 0x007F an
+    # sw-based rule would have produced.
     identity = {"manufacturer": "0xB5", "device_id": "CTLX0", "sw": "0127", "hw": "0404"}
-    match = lookup_regulator_identity("CTLX0", spn_from_sw("0127"))
-    assert match is not None and match.model_name == "VRC720"
-    assert match.spn_hex == "007F"
-    assert lookup_regulator_identity("CTLX0", "0194").model_name == "VR940"
+    match = lookup_regulator_identity("CTLX0", spn_from_hw("0404"))
+    assert match is not None and match.model_name == "VR940"
+    assert match.spn_hex == "0194"
     artifact = {"schema_version": "2.3", "meta": {"identity": identity}, "operations": {}}
     baseline = deepcopy(artifact)
-    assert "VRC720" in render_html_report(artifact)
+    assert "VR940" in render_html_report(artifact)
     output = StringIO()
     Console(file=output, width=140).print(_build_identity_header_renderable(artifact))
-    assert "VRC720" in output.getvalue()
+    assert "VR940" in output.getvalue()
     preface = _build_scan_session_preface(dst=0x15, endpoint="offline", identity=identity)
-    assert any(label == "Profile" and "VRC720" in value for label, value in preface.rows)
+    assert any(label == "Profile" and "VR940" in value for label, value in preface.rows)
     assert artifact == baseline
+
+
+def _artifact_with_identity(identity: dict[str, object]) -> dict[str, object]:
+    return {"schema_version": "2.3", "meta": {"identity": identity}, "operations": {}}
+
+
+def _browser_header_text(artifact: dict[str, object]) -> str:
+    renderable = _build_identity_header_renderable(artifact)
+    if renderable is None:
+        return ""
+    output = StringIO()
+    Console(file=output, width=140).print(renderable)
+    return output.getvalue()
+
+
+def test_artifact_written_by_0_6_0_shows_profile_from_raw_hardware_field() -> None:
+    # 0.6.0 persisted an SPN decoded from the software-version field next to
+    # the raw fields. For this regulator that stored value (01FB) matches no
+    # catalog row, while the raw hardware field decodes to BASV2/01A1.
+    identity: dict[str, object] = {
+        "device_id": "BASV2",
+        "eid": "BASV2",
+        "manufacturer": "0xB5",
+        "sw": "0507",
+        "hw": "1704",
+        "spn": "01FB",
+        "spn_source": "sw",
+        "model": "n/a",
+    }
+    artifact = _artifact_with_identity(identity)
+    baseline = deepcopy(artifact)
+
+    html = render_html_report(artifact)
+    assert 'class="identity-label">Profile' in html
+    assert "BASV2/01A1" in html
+    assert "BASV2/01A1" in _browser_header_text(artifact)
+    # Presentation only: the stored raw and derived fields are left as written.
+    assert artifact == baseline
+
+
+def test_software_derived_spn_is_not_trusted_without_raw_hardware_field() -> None:
+    # CTLX0 with software version 0127 was stored by 0.6.0 as SPN 007F. With
+    # no raw hardware field to recompute from, that value must not select a row.
+    identity: dict[str, object] = {
+        "device_id": "CTLX0",
+        "manufacturer": "0xB5",
+        "sw": "0127",
+        "spn": "0194",
+        "spn_source": "sw",
+    }
+    artifact = _artifact_with_identity(identity)
+    assert 'class="identity-label">Profile' not in render_html_report(artifact)
+    assert _browser_header_text(artifact) == ""
+
+
+def test_disagreeing_spn_still_vetoes_when_not_marked_software_derived() -> None:
+    # A supplied SPN that names a different catalog row than the raw hardware
+    # field is an inconsistent identity and keeps being rejected.
+    identity: dict[str, object] = {
+        "device_id": "BASV2",
+        "manufacturer": "0xB5",
+        "sw": "0507",
+        "hw": "1704",
+        "spn": "01CF",
+        "spn_source": "hw",
+    }
+    artifact = _artifact_with_identity(identity)
+    assert 'class="identity-label">Profile' not in render_html_report(artifact)
+    assert _browser_header_text(artifact) == ""

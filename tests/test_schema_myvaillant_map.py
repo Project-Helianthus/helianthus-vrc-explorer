@@ -64,9 +64,9 @@ def test_default_heating_circuit_type_mapping_uses_rr_0x0001() -> None:
     circuit_type = schema.lookup(group=0x02, instance=0x00, register=0x0001)
     assert circuit_type is not None
     assert circuit_type.leaf == "heating_circuit_type"
-    assert circuit_type.resolved_ebusd_name(group=0x02, instance=0x01, register=0x0001) == (
-        "Hc2CircuitType"
-    )
+    # Hc{hc}CircuitType belongs to RR0002 (mixer_circuit_type_external) only;
+    # RR0001 never carries a native eBUSd name.
+    assert circuit_type.resolved_ebusd_name(group=0x02, instance=0x01, register=0x0001) is None
 
 
 def test_default_mixer_circuit_type_external_mapping_uses_rr_0x0002() -> None:
@@ -351,10 +351,13 @@ def test_namespace_owned_required_tuple_rows_are_resolvable() -> None:
     assert remote_gg00_rr0004.type_hint == "FW"
     assert local_gg00_rr0006 is not None
     assert local_gg00_rr0006.leaf == "manual_cooling_days"
-    assert local_gg00_rr0006.type_hint == "UCH"
+    # Two bytes wide on the VRC700 family; no hint lets the length-based
+    # inference decode either width (see test_op02_group00_rr0006_and_
+    # rr0016_have_no_width_hint for the full regression).
+    assert local_gg00_rr0006.type_hint is None
     assert local_gg00_rr0016 is not None
-    assert local_gg00_rr0016.leaf == "system_quick_mode_active"
-    assert local_gg00_rr0016.type_hint == "BOOL"
+    assert local_gg00_rr0016.leaf == "system_ventilation_operating_mode"
+    assert local_gg00_rr0016.type_hint is None
     assert local_gg00_rr0048 is not None
     assert local_gg00_rr0048.leaf == "system_status_bitmask"
     assert local_gg00_rr0048.type_hint == "UIN"
@@ -405,6 +408,40 @@ def test_register_map_minimum_entry_count_and_no_duplicates() -> None:
     assert len(rows) == len(set(rows))
 
 
+def test_op02_group00_rr0006_and_rr0016_have_no_width_hint() -> None:
+    # On the VRC700 family these registers are two bytes wide; a UCH/BOOL
+    # hint makes the length-based inference reject the real reply with a
+    # parse error, so the hint must stay empty and fall back to inference.
+    schema = MyvaillantRegisterMap.from_path(_CSV_PATH)
+
+    manual_cooling_days = schema.lookup(group=0x00, instance=0x00, register=0x0006, opcode=0x02)
+    assert manual_cooling_days is not None
+    assert manual_cooling_days.type_hint is None
+
+    ventilation_mode = schema.lookup(group=0x00, instance=0x00, register=0x0016, opcode=0x02)
+    assert ventilation_mode is not None
+    assert ventilation_mode.type_hint is None
+    assert ventilation_mode.leaf == "system_ventilation_operating_mode"
+
+
+def test_op02_group00_holiday_date_and_time_registers_have_explicit_hints() -> None:
+    schema = MyvaillantRegisterMap.from_path(_CSV_PATH)
+
+    start_date = schema.lookup(group=0x00, instance=0x00, register=0x00F2, opcode=0x02)
+    end_date = schema.lookup(group=0x00, instance=0x00, register=0x00F3, opcode=0x02)
+    start_time = schema.lookup(group=0x00, instance=0x00, register=0x00F4, opcode=0x02)
+    end_time = schema.lookup(group=0x00, instance=0x00, register=0x00F5, opcode=0x02)
+
+    assert start_date is not None and start_date.type_hint == "HDA:3"
+    assert start_date.leaf == "system_holiday_start_date"
+    assert end_date is not None and end_date.type_hint == "HDA:3"
+    assert end_date.leaf == "system_holiday_end_date"
+    assert start_time is not None and start_time.type_hint == "HTI"
+    assert start_time.leaf == "system_holiday_start_time"
+    assert end_time is not None and end_time.type_hint == "HTI"
+    assert end_time.leaf == "system_holiday_end_time"
+
+
 def test_register_map_all_groups_represented() -> None:
     csv_path = _CSV_PATH
     schema = MyvaillantRegisterMap.from_path(csv_path)
@@ -418,3 +455,51 @@ def test_register_map_all_groups_represented() -> None:
     assert core_groups <= groups_in_csv
     # CSV groups must be a subset of GROUP_CONFIG (no stale entries).
     assert groups_in_csv <= set(GROUP_CONFIG)
+
+
+def test_ebusd_names_are_unique_per_opcode_for_concrete_group_rows() -> None:
+    """One literal eBUSd name must not be attached to two different registers.
+
+    Scoped to rows with a concrete (non-wildcard) group, grouped by the row's
+    own opcode value (including the "applies to any opcode" None row shape),
+    matching the identity this catalog otherwise keys lookups by.
+    """
+    seen: dict[tuple[int | None, str], tuple[str, str]] = {}
+    with _CSV_PATH.open(newline="", encoding="utf-8") as handle:
+        for row in csv.DictReader(handle):
+            group_raw = (row.get("group") or "").strip()
+            if group_raw == "*":
+                continue
+            register_raw = (row.get("register") or "").strip()
+            opcode_raw = (row.get("opcode") or "").strip()
+            opcode = int(opcode_raw, 0) if opcode_raw else None
+            for name in (row.get("ebusd_name") or "").split(" | "):
+                name = name.strip()
+                if not name:
+                    continue
+                key = (opcode, name)
+                here = (group_raw, register_raw)
+                if key in seen and seen[key] != here:
+                    raise AssertionError(
+                        f"eBUSd name {name!r} (opcode {opcode!r}) is attached to both "
+                        f"{seen[key]} and {here}"
+                    )
+                seen[key] = here
+
+
+def test_op02_group09_holiday_annotations_follow_the_canonical_start_and_end() -> None:
+    from helianthus_vrc_explorer.schema.b524_register_names import b524_register_name
+
+    schema = MyvaillantRegisterMap.from_path(_CSV_PATH)
+    expected = {
+        0x0007: ("end", "HDA:3"),
+        0x0008: ("end", "HTI"),
+        0x0009: ("start", "HDA:3"),
+        0x000A: ("start", "HTI"),
+    }
+    for register, (edge, type_hint) in expected.items():
+        entry = schema.lookup(group=0x09, instance=0x00, register=register, opcode=0x02)
+        canonical = b524_register_name(opcode=0x02, group=0x09, register=register)
+        assert entry is not None and entry.type_hint == type_hint
+        assert canonical is not None and f"holiday_{edge}" in canonical
+        assert entry.leaf is not None and f"holiday_{edge}" in entry.leaf

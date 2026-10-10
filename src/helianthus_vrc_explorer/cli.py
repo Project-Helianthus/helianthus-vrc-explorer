@@ -298,12 +298,12 @@ def _probe_scan_identity(
     if ident.manufacturer != 0xB5:
         return identity
 
-    from .schema.regulator_identity import lookup_regulator_identity, spn_from_sw
+    from .schema.regulator_identity import lookup_regulator_identity, spn_from_hw
 
-    spn = spn_from_sw(ident.sw)
+    spn = spn_from_hw(ident.hw)
     if spn is not None:
         identity["spn"] = f"{spn:04X}"
-        identity["spn_source"] = "sw"
+        identity["spn_source"] = "hw"
         try:
             matched = lookup_regulator_identity(ident.device_id, spn)
         except ValueError:

@@ -18,11 +18,12 @@ from helianthus_vrc_explorer.protocol.b524_schedules import (
 
 
 def test_timer_builders_use_documented_vrc700_selectors() -> None:
+    # Observed Vaillant addressing: 0x01 = noise reduction, 0x02 = ventilation.
     assert build_timer_read_payload("ventilation", instance=0, weekday=0) == bytes.fromhex(
-        "0300000100"
+        "0300000200"
     )
     assert build_timer_read_payload("noise-reduction", instance=0, weekday=6) == bytes.fromhex(
-        "0300000206"
+        "0300000106"
     )
     assert build_timer_read_payload("zone-heating", instance=2, weekday=1) == bytes.fromhex(
         "0303020201"

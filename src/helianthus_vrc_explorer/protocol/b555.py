@@ -46,23 +46,45 @@ class B555ConfigRead:
     status: int
     max_slots: int
     time_resolution_min: int
-    min_duration_min: int
-    has_temperature: bool
-    temp_slots: int
+    setpoint_step_raw: int
+    setpoint_unit_code: int
+    setpoint_count: int
     min_temp_c: int | None
     max_temp_c: int | None
-    padding: int
+    time_program_mode: int
 
     @property
     def available(self) -> bool:
         return self.status == 0x00
+
+    # --- Deprecated aliases (pre-0.6.1 names), kept for one release. ---
+
+    @property
+    def min_duration_min(self) -> int:
+        """Deprecated alias for `setpoint_step_raw`; removed in a future release."""
+        return self.setpoint_step_raw
+
+    @property
+    def has_temperature(self) -> bool:
+        """Deprecated alias for `setpoint_unit_code != 0`; removed in a future release."""
+        return self.setpoint_unit_code != 0
+
+    @property
+    def temp_slots(self) -> int:
+        """Deprecated alias for `setpoint_count`; removed in a future release."""
+        return self.setpoint_count
+
+    @property
+    def padding(self) -> int:
+        """Deprecated alias for `time_program_mode`; removed in a future release."""
+        return self.time_program_mode
 
 
 @dataclass(frozen=True, slots=True)
 class B555SlotsRead:
     status: int
     slot_counts: tuple[int, int, int, int, int, int, int]
-    padding: int
+    slot_count_24h: int
 
     @property
     def available(self) -> bool:
@@ -70,6 +92,13 @@ class B555SlotsRead:
 
     def as_day_map(self) -> dict[str, int]:
         return dict(zip(_DAY_NAMES, self.slot_counts, strict=True))
+
+    # --- Deprecated alias (pre-0.6.1 name), kept for one release. ---
+
+    @property
+    def padding(self) -> int:
+        """Deprecated alias for `slot_count_24h`; removed in a future release."""
+        return self.slot_count_24h
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,12 +127,12 @@ def parse_b555_config_read_response(payload: bytes) -> B555ConfigRead:
         status=blob[0],
         max_slots=blob[1],
         time_resolution_min=blob[2],
-        min_duration_min=blob[3],
-        has_temperature=blob[4] != 0x00,
-        temp_slots=blob[5],
+        setpoint_step_raw=blob[3],
+        setpoint_unit_code=blob[4],
+        setpoint_count=blob[5],
         min_temp_c=min_temp,
         max_temp_c=max_temp,
-        padding=blob[8],
+        time_program_mode=blob[8],
     )
 
 
@@ -122,7 +151,7 @@ def parse_b555_slots_read_response(payload: bytes) -> B555SlotsRead:
             blob[6],
             blob[7],
         ),
-        padding=blob[8],
+        slot_count_24h=blob[8],
     )
 
 
@@ -166,6 +195,20 @@ def b555_status_label(status: int) -> str:
     if status == 0x03:
         return "unavailable"
     return f"0x{status:02x}"
+
+
+_SETPOINT_UNIT_LABELS: dict[int, str] = {0: "none", 1: "celsius", 2: "fan_stage"}
+
+
+def b555_setpoint_unit_label(unit_code: int) -> str:
+    return _SETPOINT_UNIT_LABELS.get(unit_code, f"0x{unit_code:02x}")
+
+
+_TIME_PROGRAM_MODE_LABELS: dict[int, str] = {0: "weekly", 1: "24-hour"}
+
+
+def b555_time_program_mode_label(mode: int) -> str:
+    return _TIME_PROGRAM_MODE_LABELS.get(mode, f"0x{mode:02x}")
 
 
 def format_b555_time(hour: int, minute: int) -> str:

@@ -9,10 +9,31 @@ from typing import Any
 
 from ..artifact_schema import migrate_artifact_schema
 from ..scanner.director import group_name_for_opcode
+from ..schema.b524_register_name_correspondence import bundled_b524_register_name_correspondence
 from ..schema.b524_register_names import apply_b524_canonical_register_names
 from ..schema.b524_value_labels import apply_b524_value_labels
 from ..schema.parameter_descriptions import attach_bundled_descriptions, description_profile
 from .emphasis import html_star_bold
+
+
+def _correspondence_json_map() -> dict[str, dict[str, dict[str, dict[str, list[str]]]]]:
+    """Build the observed-name cross-reference table for client-side lookup.
+
+    Purely presentational, resolved for this render only -- never written
+    into the scan artifact.
+    """
+    table: dict[str, dict[str, dict[str, dict[str, list[str]]]]] = {}
+    for (opcode, group, register), entry in bundled_b524_register_name_correspondence().items():
+        opcode_key = f"0x{opcode:02x}"
+        group_key = f"0x{group:02x}"
+        register_key = f"0x{register:04x}"
+        other_names = list(dict.fromkeys(entry.vaillant_name_vrc720 + entry.vaillant_name_vrc700))
+        table.setdefault(opcode_key, {}).setdefault(group_key, {})[register_key] = {
+            "vaillant_friendly_name": list(entry.vaillant_friendly_name),
+            "vaillant_name": other_names,
+            "ebusd_name": list(entry.ebusd_name),
+        }
+    return table
 
 
 def _json_for_html(obj: Any) -> str:
@@ -524,6 +545,24 @@ __ARTIFACT_JSON__
     <script>
       const artifact = JSON.parse(document.getElementById("artifact-data").textContent || "{}");
       const B524_GROUP_NAMES = __B524_GROUP_NAMES__;
+      const B524_REGISTER_NAME_CORRESPONDENCE = __B524_REGISTER_NAME_CORRESPONDENCE__;
+
+      function b524CorrespondenceSecondaryText(opHex, groupHex, registerHex) {
+        const byGroup = B524_REGISTER_NAME_CORRESPONDENCE && B524_REGISTER_NAME_CORRESPONDENCE[opHex];
+        const entry = byGroup && byGroup[groupHex] && byGroup[groupHex][registerHex];
+        if (!entry) return "";
+        const parts = [];
+        if (Array.isArray(entry.vaillant_friendly_name) && entry.vaillant_friendly_name.length) {
+          parts.push("Observed Vaillant friendly name: " + entry.vaillant_friendly_name.join(", "));
+        }
+        if (Array.isArray(entry.vaillant_name) && entry.vaillant_name.length) {
+          parts.push("Observed Vaillant name: " + entry.vaillant_name.join(", "));
+        }
+        if (Array.isArray(entry.ebusd_name) && entry.ebusd_name.length) {
+          parts.push("eBUSd name: " + entry.ebusd_name.join(", "));
+        }
+        return parts.join(" · ");
+      }
 
       const metaDst = document.getElementById("metaDst");
       const metaTs = document.getElementById("metaTs");
@@ -1186,7 +1225,8 @@ __ARTIFACT_JSON__
           if (config && typeof config === "object") {
             const parts = [];
             if (typeof config.max_slots === "number") parts.push(`max_slots=${config.max_slots}`);
-            if (typeof config.temp_slots === "number") parts.push(`temp_slots=${config.temp_slots}`);
+            const setpointCount = typeof config.setpoint_count === "number" ? config.setpoint_count : config.temp_slots;
+            if (typeof setpointCount === "number") parts.push(`setpoints=${setpointCount}`);
             if (typeof config.time_resolution_min === "number") parts.push(`resolution=${config.time_resolution_min}m`);
             pushRow("A3", "config", config, parts.join(", ") || "config");
           }
@@ -1301,7 +1341,7 @@ __ARTIFACT_JSON__
         const table = document.createElement("table");
         const thead = document.createElement("thead");
         const trHead = document.createElement("tr");
-        for (const col of ["Label", "Selector", "kWh", "Wh", "Request", "Reply", "Error"]) {
+        for (const col of ["Label", "Selector", "Status", "kWh", "Wh", "Request", "Reply", "Error"]) {
           const th = document.createElement("th");
           th.textContent = col;
           trHead.appendChild(th);
@@ -1320,8 +1360,19 @@ __ARTIFACT_JSON__
           const requestHex = typeof entry.request_hex === "string" ? entry.request_hex : "";
           const replyHex = typeof entry.reply_hex === "string" ? entry.reply_hex : "";
           const error = typeof entry.error === "string" ? entry.error : "";
-          const valueKwh = typeof entry.value_kwh === "number" ? formatValue(entry.value_kwh) : "—";
-          const valueWh = typeof entry.value_wh === "number" ? formatValue(entry.value_wh) : "—";
+          const status = typeof entry.status === "string" ? entry.status : "";
+          const unavailable = status === "not_ok";
+          const valueKwh = unavailable
+            ? "unavailable"
+            : typeof entry.value_kwh === "number"
+              ? formatValue(entry.value_kwh)
+              : "—";
+          const valueWh = unavailable
+            ? "unavailable"
+            : typeof entry.value_wh === "number"
+              ? formatValue(entry.value_wh)
+              : "—";
+          const statusText = status === "ok" ? "OK" : status === "not_ok" ? "not OK" : "—";
 
           const labelTd = document.createElement("td");
           const nameEl = document.createElement("div");
@@ -1340,6 +1391,8 @@ __ARTIFACT_JSON__
           if (typeof entry.echo_period === "string") echoParts.push(`p=${entry.echo_period}`);
           if (typeof entry.echo_source === "string") echoParts.push(`s=${entry.echo_source}`);
           if (typeof entry.echo_usage === "string") echoParts.push(`u=${entry.echo_usage}`);
+          // echo_window/echo_qualifier are the pre-0.6.1 field names, kept
+          // readable here so artifacts written by 0.6.0 still render.
           if (typeof entry.echo_window === "string") echoParts.push(`w=${entry.echo_window}`);
           if (typeof entry.echo_qualifier === "string") echoParts.push(`q=${entry.echo_qualifier}`);
           if (echoParts.length) {
@@ -1348,7 +1401,19 @@ __ARTIFACT_JSON__
             echoEl.textContent = `echo ${echoParts.join(" ")}`;
             selectorTd.appendChild(echoEl);
           }
+          const replyDate = entry.reply_date && typeof entry.reply_date === "object" ? entry.reply_date : null;
+          if (replyDate) {
+            const dateEl = document.createElement("div");
+            dateEl.className = "offset-name-secondary";
+            dateEl.textContent = `reply date ${replyDate.year}-${String(replyDate.month).padStart(2, "0")}-${String(replyDate.day).padStart(2, "0")}`;
+            selectorTd.appendChild(dateEl);
+          }
           tr.appendChild(selectorTd);
+
+          const statusTd = document.createElement("td");
+          statusTd.textContent = statusText;
+          if (unavailable) statusTd.className = "cell-error";
+          tr.appendChild(statusTd);
 
           for (const value of [valueKwh, valueWh, requestHex || "—", replyHex || "—", error || "—"]) {
             const td = document.createElement("td");
@@ -1557,9 +1622,11 @@ __ARTIFACT_JSON__
         return normalizeOpcodeKey(groupPlan.opcode) === opcode ? groupPlan : null;
       }
 
+      // Observed Vaillant addressing of the system timer row: 0x01 = noise
+      // reduction, 0x02 = ventilation, 0x03 = tariff.
       const B524_TIMER_CHANNELS = {
-        "ventilation": [0x00, 0x01],
-        "noise-reduction": [0x00, 0x02],
+        "ventilation": [0x00, 0x02],
+        "noise-reduction": [0x00, 0x01],
         "tariff": [0x00, 0x03],
         "dhw": [0x01, 0x01],
         "circulation": [0x01, 0x02],
@@ -1567,6 +1634,37 @@ __ARTIFACT_JSON__
         "zone-heating": [0x03, 0x02],
       };
       const B524_EVENT_SYSTEM_TYPES = {system: 0x00, dhw: 0x01, zone: 0x03};
+      const B524_TIMER_CHANNEL_BY_REQUEST_SELECTOR = Object.fromEntries(
+        Object.entries(B524_TIMER_CHANNELS).map(([name, pair]) => [`${pair[0]},${pair[1]}`, name])
+      );
+
+      // Derive a stored OP03 record's timer channel strictly from its request
+      // bytes, not from the recorded selector name (0.6.0 swapped two names
+      // for the same two addresses). Returns null when the bytes are missing
+      // or do not decode as an OP03 request.
+      function b524TimerChannelFromRequest(requestPayloadHex) {
+        const bytes = b524HexBytes(requestPayloadHex, 5);
+        if (!bytes || bytes[0] !== 0x03) return null;
+        return B524_TIMER_CHANNEL_BY_REQUEST_SELECTOR[`${bytes[1]},${bytes[3]}`] || null;
+      }
+
+      // Returns {selector, storedChannel, channelSource} with the OP03 timer
+      // channel corrected from request bytes when it is decodable; storedChannel
+      // is set only when the correction changes the displayed/used name.
+      function b524EffectiveSelector(row) {
+        const selector = row && row.selector && typeof row.selector === "object" && !Array.isArray(row.selector)
+          ? {...row.selector} : null;
+        if (!selector || typeof selector.channel !== "string") {
+          return {selector, storedChannel: null, channelSource: null};
+        }
+        const requestChannel = b524TimerChannelFromRequest(row.request_payload_hex);
+        if (requestChannel === null) {
+          return {selector, storedChannel: null, channelSource: "stored_selector_unverified"};
+        }
+        const storedChannel = selector.channel !== requestChannel ? selector.channel : null;
+        selector.channel = requestChannel;
+        return {selector, storedChannel, channelSource: "request_bytes"};
+      }
 
       function b524HexBytes(raw, expectedLength) {
         if (typeof raw !== "string" || !new RegExp(`^[0-9a-fA-F]{${expectedLength * 2}}$`).test(raw)) return null;
@@ -1615,7 +1713,7 @@ __ARTIFACT_JSON__
         if (!row.decoded || typeof row.decoded !== "object" || Array.isArray(row.decoded)) {
           return "a decoded canonical baseline is required";
         }
-        if (!b524CanonicalSelector(row.selector, operation)) return "selector is not canonical for this operation";
+        if (!b524CanonicalSelector(b524EffectiveSelector(row).selector, operation)) return "selector is not canonical for this operation";
         const expectedLength = opcode === "0x03" ? 7 : 8;
         if (!b524HexBytes(row.response_raw_hex, expectedLength)) return `raw baseline must contain ${expectedLength} bytes`;
         return null;
@@ -1647,7 +1745,10 @@ __ARTIFACT_JSON__
         const availability = b524EditAvailability(row, operation, reads);
         if (!availability.available) throw new Error(availability.reason);
         const destinationAddress = b524DestinationAddress(metaObj);
-        const selector = b524CanonicalSelector(row.selector, operation);
+        // The exported selector's channel must name the same address the
+        // baseline below was actually read from, not the stored label on a
+        // 0.6.0 artifact (see b524EffectiveSelector).
+        const selector = b524CanonicalSelector(b524EffectiveSelector(row).selector, operation);
         if (operation === "WriteTimer") {
           const raw = b524HexBytes(row.response_raw_hex, 7);
           const values = [];
@@ -1862,7 +1963,11 @@ __ARTIFACT_JSON__
         };
 
         rows.forEach((row, index) => {
-          const selector = row.selector && typeof row.selector === "object" ? Object.entries(row.selector).map(([key, value]) => `${key}=${String(value)}`).join(", ") : "unqualified selector";
+          const effective = b524EffectiveSelector(row);
+          const displaySelector = effective.selector || row.selector;
+          let selector = displaySelector && typeof displaySelector === "object" ? Object.entries(displaySelector).map(([key, value]) => `${key}=${String(value)}`).join(", ") : "unqualified selector";
+          if (effective.storedChannel) selector += ` (stored_channel=${effective.storedChannel}, channel_source=request_bytes)`;
+          else if (effective.channelSource) selector += ` (channel_source=${effective.channelSource})`;
           const decoded = row.decoded === null || typeof row.decoded === "undefined" ? "—" : JSON.stringify(row.decoded);
           const values = [selector, row.response_state || "unknown", row.response_raw_hex || "—", decoded, row.decode_qualification || "unknown", row.selector_correlation || "unknown", row.request_attempts ?? "—"];
           const tr = document.createElement("tr");
@@ -2328,6 +2433,15 @@ __ARTIFACT_JSON__
               td0.appendChild(ebusdEl);
             }
 
+            const correspondenceText = b524CorrespondenceSecondaryText(opKey, groupKey, rrKey);
+            if (correspondenceText) {
+              const corrEl = document.createElement("div");
+              corrEl.className = "offset-name-secondary";
+              corrEl.textContent = correspondenceText;
+              corrEl.title = correspondenceText;
+              td0.appendChild(corrEl);
+            }
+
             if (candidates.length) {
               const sel = document.createElement("select");
               sel.className = "type-select";
@@ -2749,6 +2863,7 @@ def render_html_report(artifact: dict[str, Any], *, title: str | None = None) ->
                 "__IDENTITY_CARD__": identity_html,
                 "__ARTIFACT_JSON__": _json_for_html(artifact),
                 "__B524_GROUP_NAMES__": _json_for_html(group_name_map),
+                "__B524_REGISTER_NAME_CORRESPONDENCE__": _json_for_html(_correspondence_json_map()),
                 "__B524_CIRCUIT_II_MIN__": (
                     "0"
                     if description_profile(artifact).get("profile_id") == "basv2_sw0507_hw1704_api1"

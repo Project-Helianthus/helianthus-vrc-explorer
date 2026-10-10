@@ -8,7 +8,7 @@ from helianthus_vrc_explorer.schema.regulator_identity import (
     load_regulator_identity_catalog,
     lookup_regulator_identity,
     normalize_spn,
-    spn_from_sw,
+    spn_from_hw,
 )
 
 
@@ -19,7 +19,7 @@ def _repo_root() -> Path:
 def test_catalog_contains_all_exact_eid_spn_pairs() -> None:
     catalog = load_regulator_identity_catalog()
 
-    assert len(catalog) == 39
+    assert len(catalog) == 38
     assert {(entry.eid, entry.spn_hex) for entry in catalog} == {
         ("70000", "0141"),
         ("70000", "0155"),
@@ -57,7 +57,6 @@ def test_catalog_contains_all_exact_eid_spn_pairs() -> None:
         ("CTLV3", "01B5"),
         ("CTLV3", "01DC"),
         ("CTLV3", "01E0"),
-        ("CTLX0", "007F"),
         ("CTLX0", "0194"),
         ("EMM00", "0181"),
     }
@@ -97,16 +96,22 @@ def test_spn_requires_u16_or_canonical_four_hex_digits(value: object) -> None:
 
 
 @pytest.mark.parametrize(
-    ("sw", "expected_spn"),
-    [("0417", 0x01A1), ("0463", 0x01CF), ("0507", 0x01FB)],
+    ("hw", "expected_spn"),
+    [
+        # Real recorded vector: raw bytes 17 04 -> hw="1704", byte-swapped
+        # to BCD digits "0417" -> decimal 417 -> SPN 0x01A1 (BASV2).
+        ("1704", 0x01A1),
+        ("6304", 0x01CF),
+        ("0705", 0x01FB),
+    ],
 )
-def test_spn_from_sw_decodes_four_digit_bcd_as_a_decimal_pin(sw: str, expected_spn: int) -> None:
-    assert spn_from_sw(sw) == expected_spn
+def test_spn_from_hw_decodes_byte_swapped_bcd_as_a_decimal_pin(hw: str, expected_spn: int) -> None:
+    assert spn_from_hw(hw) == expected_spn
 
 
-@pytest.mark.parametrize("sw", [None, True, 417, "417", "04A7", "05F7", " 0417"])
-def test_spn_from_sw_rejects_non_bcd_or_noncanonical_raw_sw(sw: object) -> None:
-    assert spn_from_sw(sw) is None  # type: ignore[arg-type]
+@pytest.mark.parametrize("hw", [None, True, 417, "417", "04A7", "05F7", " 0417"])
+def test_spn_from_hw_rejects_non_bcd_or_noncanonical_raw_hw(hw: object) -> None:
+    assert spn_from_hw(hw) is None  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(

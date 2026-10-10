@@ -33,8 +33,10 @@ EVENT_PROFILES: Final[dict[str, EventProfile]] = {
 }
 
 TIMER_CHANNELS: Final[dict[str, tuple[int, int]]] = {
-    "ventilation": (0x00, 0x01),
-    "noise-reduction": (0x00, 0x02),
+    # Observed Vaillant addressing of the system timer row: 0x01 = noise
+    # reduction, 0x02 = ventilation, 0x03 = tariff.
+    "ventilation": (0x00, 0x02),
+    "noise-reduction": (0x00, 0x01),
     "tariff": (0x00, 0x03),
     "dhw": (0x01, 0x01),
     "circulation": (0x01, 0x02),

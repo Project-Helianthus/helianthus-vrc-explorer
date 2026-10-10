@@ -592,8 +592,9 @@ def _format_b555_value(entry: dict[str, Any]) -> str:
         parts: list[str] = []
         if isinstance(entry.get("max_slots"), int):
             parts.append(f"max_slots={entry['max_slots']}")
-        if isinstance(entry.get("temp_slots"), int):
-            parts.append(f"temp_slots={entry['temp_slots']}")
+        setpoint_count = entry.get("setpoint_count", entry.get("temp_slots"))
+        if isinstance(setpoint_count, int):
+            parts.append(f"setpoints={setpoint_count}")
         if isinstance(entry.get("time_resolution_min"), int):
             parts.append(f"resolution={entry['time_resolution_min']}m")
         return ", ".join(parts) or "config"
@@ -616,6 +617,9 @@ def _format_b516_value(entry: dict[str, Any]) -> str:
     error = entry.get("error")
     if isinstance(error, str) and error:
         return error
+    status = entry.get("status")
+    if status == "not_ok":
+        return "unavailable"
     value_kwh = entry.get("value_kwh")
     value_wh = entry.get("value_wh")
     if isinstance(value_kwh, (int, float)) and not isinstance(value_kwh, bool):
@@ -1517,8 +1521,8 @@ class _HydratedBrowseStore:
                             str(entry.get("echo_period") or "").lower(),
                             str(entry.get("echo_source") or "").lower(),
                             str(entry.get("echo_usage") or "").lower(),
-                            str(entry.get("echo_window") or "").lower(),
-                            str(entry.get("echo_qualifier") or "").lower(),
+                            str(entry.get("status") or "").lower(),
+                            str(entry.get("return_code") or "").lower(),
                             "state",
                         ]
                     )
