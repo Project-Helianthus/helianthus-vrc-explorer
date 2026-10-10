@@ -11,7 +11,7 @@ group,instance,register,leaf,ebusd_name,register_class,type_hint,opcode
 0x00,0x00,0x000E,max_room_humidity,MaxRoomHumidity,config,,
 0x00,0x00,0x0012,continuous_heating_room_setpoint,,config,,
 0x00,0x00,0x0014,adaptive_heating_curve,AdaptHeatCurve,config,,
-0x00,0x00,0x0015,parallel_tank_loading_allowed,HwcParallelLoading,config,,
+0x00,0x00,0x0015,automatic_daylight_saving_time,,config,,
 0x00,0x00,0x0016,system_ventilation_operating_mode,,state,,0x02
 0x00,0x00,0x0017,dhw_maximum_loading_time,MaxCylinderChargeTime,config,,
 0x00,0x00,0x0018,hwc_lock_time,HwcLockTime,config,,
@@ -112,7 +112,7 @@ group,instance,register,leaf,ebusd_name,register_class,type_hint,opcode
 0x01,*,0x0015,heatgen_status,,state,,0x06
 0x02,*,0x0012,heatgen_error,,state,,0x06
 0x02,*,0x0015,heatgen_status,,state,,0x06
-0x02,*,0x0001,heating_circuit_type,Hc{hc}CircuitType,,,
+0x02,*,0x0001,heating_circuit_type,,,,
 0x02,*,0x0002,mixer_circuit_type_external,Hc{hc}CircuitType,,,
 0x02,*,0x0003,room_influence_type,Hc{hc}RoomInfluenceType,config,,
 0x02,*,0x0004,desired_return_temperature_setpoint,Hc{hc}ReturnTempDesired,,,

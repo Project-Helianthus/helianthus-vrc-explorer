@@ -17,7 +17,7 @@ opcode,group,register,name,vaillant_friendly_name,vaillant_name_vrc720,vaillant_
 0x02,0x00,0x0012,energy_rate_high_tariff,Electricity rate high tariff,,,,,
 0x02,0x00,0x0013,backup_heater_type,Backup heater type,system_backup_heater_type,system_backup_heater_type,backupHeaterType,,
 0x02,0x00,0x0014,adaptive_heating_curve,Adaptive heating curve,system_adaptive_heating_curve,system_adaptive_heating_curve,,,AdaptHeatCurve
-0x02,0x00,0x0015,automatic_daylight_saving_time,Automatic daylight saving time,,,,,HwcParallelLoading
+0x02,0x00,0x0015,automatic_daylight_saving_time,Automatic daylight saving time,,,,,
 0x02,0x00,0x0016,system_ventilation_operating_mode,Operating mode for air ventilation,,system_vrc700_operating_mode_for_air_ventilation | ventilations_are_active,,,
 0x02,0x00,0x0017,system_dhw_max_loading_time,Maximum DHW loading time,system_maximum_dhw_loading_time,system_maximum_dhw_loading_time,,domesticHotWaterMaximumLoadingTime,MaxCylinderChargeTime
 0x02,0x00,0x0018,system_dhw_blocking_time,DHW Blocking time,system_dhw_blocking_time,,domesticHotWaterTappingBlockingTime,,HwcLockTime
@@ -247,7 +247,7 @@ opcode,group,register,name,vaillant_friendly_name,vaillant_name_vrc720,vaillant_
 0x02,0x01,0x0014,native_dhw_preference,,nativedhw_dhw_preference,,,,
 0x02,0x01,0x0015,native_dhw_recharge_tapping_setpoint,,nativedhw_dhw_recharge_tapping_set_point,,,,
 0x02,0x01,0x0019,native_dhw_loading_efficiency_state,,nativedhw_dhw_loading_efficiency_state,,,,
-0x02,0x02,0x0001,circuit_circuit_type,Circuit type,circuit_circuit_type,circuit_circuit_type,,,Hc{hc}CircuitType
+0x02,0x02,0x0001,circuit_circuit_type,Circuit type,circuit_circuit_type,circuit_circuit_type,,,
 0x02,0x02,0x0002,circuit_mixer_type_external,Type of mixed circuit external,circuit_type | circuit_type_of_mixed_circuit_external,circuit_type | circuit_type_of_mixed_circuit_external,mixerCircuitTypeExternal,mixerCircuitTypeExternal,Hc{hc}CircuitType
 0x02,0x02,0x0003,circuit_influence_type,,,,,,Hc{hc}RoomInfluenceType
 0x02,0x02,0x0004,circuit_backflow_temperature_setpoint,Back flow temperature set point,,,,,Hc{hc}ReturnTempDesired

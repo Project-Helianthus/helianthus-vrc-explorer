@@ -64,9 +64,9 @@ def test_default_heating_circuit_type_mapping_uses_rr_0x0001() -> None:
     circuit_type = schema.lookup(group=0x02, instance=0x00, register=0x0001)
     assert circuit_type is not None
     assert circuit_type.leaf == "heating_circuit_type"
-    assert circuit_type.resolved_ebusd_name(group=0x02, instance=0x01, register=0x0001) == (
-        "Hc2CircuitType"
-    )
+    # Hc{hc}CircuitType belongs to RR0002 (mixer_circuit_type_external) only;
+    # RR0001 never carries a native eBUSd name.
+    assert circuit_type.resolved_ebusd_name(group=0x02, instance=0x01, register=0x0001) is None
 
 
 def test_default_mixer_circuit_type_external_mapping_uses_rr_0x0002() -> None:
@@ -455,3 +455,33 @@ def test_register_map_all_groups_represented() -> None:
     assert core_groups <= groups_in_csv
     # CSV groups must be a subset of GROUP_CONFIG (no stale entries).
     assert groups_in_csv <= set(GROUP_CONFIG)
+
+
+def test_ebusd_names_are_unique_per_opcode_for_concrete_group_rows() -> None:
+    """One literal eBUSd name must not be attached to two different registers.
+
+    Scoped to rows with a concrete (non-wildcard) group, grouped by the row's
+    own opcode value (including the "applies to any opcode" None row shape),
+    matching the identity this catalog otherwise keys lookups by.
+    """
+    seen: dict[tuple[int | None, str], tuple[str, str]] = {}
+    with _CSV_PATH.open(newline="", encoding="utf-8") as handle:
+        for row in csv.DictReader(handle):
+            group_raw = (row.get("group") or "").strip()
+            if group_raw == "*":
+                continue
+            register_raw = (row.get("register") or "").strip()
+            opcode_raw = (row.get("opcode") or "").strip()
+            opcode = int(opcode_raw, 0) if opcode_raw else None
+            for name in (row.get("ebusd_name") or "").split(" | "):
+                name = name.strip()
+                if not name:
+                    continue
+                key = (opcode, name)
+                here = (group_raw, register_raw)
+                if key in seen and seen[key] != here:
+                    raise AssertionError(
+                        f"eBUSd name {name!r} (opcode {opcode!r}) is attached to both "
+                        f"{seen[key]} and {here}"
+                    )
+                seen[key] = here

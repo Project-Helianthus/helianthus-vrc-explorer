@@ -86,3 +86,28 @@ def test_dataclass_fields_are_tuples_of_stripped_values() -> None:
         for value in field_values:
             assert value == value.strip()
             assert value != ""
+
+
+def test_ebusd_names_are_unique_per_opcode() -> None:
+    """One literal eBUSd name must not be attached to two different registers.
+
+    HwcParallelLoading (GG00 RR000A) and Hc{hc}CircuitType (GG02 RR0002) were
+    each found duplicated onto a second, unrelated register.
+    """
+    seen: dict[tuple[int, str], tuple[int, int]] = {}
+    for row in _rows():
+        opcode = int(row["opcode"], 0)
+        group = int(row["group"], 0)
+        register = int(row["register"], 0)
+        for name in (row.get("ebusd_name") or "").split(" | "):
+            name = name.strip()
+            if not name:
+                continue
+            key = (opcode, name)
+            here = (group, register)
+            if key in seen and seen[key] != here:
+                raise AssertionError(
+                    f"eBUSd name {name!r} (opcode 0x{opcode:02X}) is attached to both "
+                    f"{seen[key]} and {here}"
+                )
+            seen[key] = here
