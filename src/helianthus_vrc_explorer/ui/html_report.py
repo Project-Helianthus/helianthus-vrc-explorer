@@ -1582,9 +1582,11 @@ __ARTIFACT_JSON__
         return normalizeOpcodeKey(groupPlan.opcode) === opcode ? groupPlan : null;
       }
 
+      // Observed Vaillant addressing of the system timer row: 0x01 = noise
+      // reduction, 0x02 = ventilation, 0x03 = tariff.
       const B524_TIMER_CHANNELS = {
-        "ventilation": [0x00, 0x01],
-        "noise-reduction": [0x00, 0x02],
+        "ventilation": [0x00, 0x02],
+        "noise-reduction": [0x00, 0x01],
         "tariff": [0x00, 0x03],
         "dhw": [0x01, 0x01],
         "circulation": [0x01, 0x02],
