@@ -7,7 +7,6 @@ from typing import Any
 from ..artifact_schema import migrate_artifact_schema
 from ..scanner.director import GROUP_CONFIG, group_name_for_opcode, group_namespace_profiles
 from ..scanner.identity import operation_label
-from ..schema.b524_register_name_correspondence import b524_register_name_correspondence
 from ..schema.b524_register_names import b524_register_name
 from ..schema.b524_value_labels import apply_b524_value_labels
 from ..schema.parameter_descriptions import attach_bundled_descriptions, description_profile
@@ -75,26 +74,6 @@ def _tab_from_entry(entry: dict[str, Any]) -> BrowseTab:
     if flags_access == "config_installer":
         return "config"
     return "state"
-
-
-def _b524_correspondence_secondary_text(*, opcode: int, group: int, register: int) -> str:
-    """Resolve the observed Vaillant/eBUSd name cross-reference as secondary text.
-
-    Resolved at render time from the bundled catalog; never written into
-    scan artifacts, and never changes the canonical Explorer name.
-    """
-    entry = b524_register_name_correspondence(opcode=opcode, group=group, register=register)
-    if entry is None:
-        return ""
-    parts: list[str] = []
-    if entry.vaillant_friendly_name:
-        parts.append("Observed Vaillant friendly name: " + ", ".join(entry.vaillant_friendly_name))
-    other_names = dict.fromkeys(entry.vaillant_name_vrc720 + entry.vaillant_name_vrc700)
-    if other_names:
-        parts.append("Observed Vaillant name: " + ", ".join(other_names))
-    if entry.ebusd_name:
-        parts.append("eBUSd name: " + ", ".join(entry.ebusd_name))
-    return " · ".join(parts)
 
 
 def _fmt_group_label(group_key: str, group_name: str) -> str:
@@ -974,11 +953,6 @@ class _HydratedBrowseStore:
                         )
                         ebusd_name = str(entry.get("ebusd_name") or "").strip()
                         name = myvaillant_name or register_key
-                        correspondence_text = _b524_correspondence_secondary_text(
-                            opcode=_safe_int_hex(entry_namespace_key or "0"),
-                            group=_safe_int_hex(group_key),
-                            register=_safe_int_hex(register_key),
-                        )
                         entry_section_key = _b524_section_key_for_opcode(entry_namespace_key)
                         if entry_section_key not in {"controller_registers", "device_slots"}:
                             continue
@@ -1064,7 +1038,6 @@ class _HydratedBrowseStore:
                             candidate_name=candidate_name,
                             candidate_evidence=candidate_evidence,
                             value_label_qualification=value_label_qualification,
-                            correspondence_text=correspondence_text,
                             search_blob=" ".join(
                                 [
                                     path.lower(),
@@ -1082,7 +1055,6 @@ class _HydratedBrowseStore:
                                     candidate_evidence.lower(),
                                     value_label_qualification.lower(),
                                     str(parameter_description or "").lower(),
-                                    correspondence_text.lower(),
                                 ]
                             ),
                         )

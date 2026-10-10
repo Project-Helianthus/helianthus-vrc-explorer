@@ -248,7 +248,7 @@ opcode,group,register,name,vaillant_friendly_name,vaillant_name_vrc720,vaillant_
 0x02,0x01,0x0015,native_dhw_recharge_tapping_setpoint,,nativedhw_dhw_recharge_tapping_set_point,,,,
 0x02,0x01,0x0019,native_dhw_loading_efficiency_state,,nativedhw_dhw_loading_efficiency_state,,,,
 0x02,0x02,0x0001,circuit_circuit_type,Circuit type,circuit_circuit_type,circuit_circuit_type,,,Hc{hc}CircuitType
-0x02,0x02,0x0002,circuit_mixer_type_external,Type of mixed circuit external,circuit_type,circuit_type | circuit_type_of_mixed_circuit_external,,,Hc{hc}CircuitType
+0x02,0x02,0x0002,circuit_mixer_type_external,Type of mixed circuit external,circuit_type | circuit_type_of_mixed_circuit_external,circuit_type | circuit_type_of_mixed_circuit_external,mixerCircuitTypeExternal,mixerCircuitTypeExternal,Hc{hc}CircuitType
 0x02,0x02,0x0003,circuit_influence_type,,,,,,Hc{hc}RoomInfluenceType
 0x02,0x02,0x0004,circuit_backflow_temperature_setpoint,Back flow temperature set point,,,,,Hc{hc}ReturnTempDesired
 0x02,0x02,0x0005,circuit_condensate_sensitive_emitter,Condensate sensitive emitter,circuit_condensate_sensitive_emitter,,,,Hc{hc}DewPointMonitoring

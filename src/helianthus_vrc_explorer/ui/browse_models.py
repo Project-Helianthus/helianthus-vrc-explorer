@@ -73,7 +73,6 @@ class RegisterRow:
     candidate_name: str = ""
     candidate_evidence: str = ""
     value_label_qualification: str = ""
-    correspondence_text: str = ""
 
     @property
     def display_label(self) -> str:
@@ -112,8 +111,6 @@ class RegisterRow:
                 )
             else:
                 parts.append(f"Description {state}")
-        if self.correspondence_text:
-            parts.append(self.correspondence_text)
         return " | ".join(parts) or "Unknown"
 
 
