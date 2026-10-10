@@ -163,6 +163,13 @@ def test_browse_store_builds_rows_and_left_tree_uses_only_myvaillant_name() -> N
     assert by_register["0x0002"].myvaillant_name == "device_class_address"
     assert by_register["0x0002"].ebusd_name == ""
 
+    # Secondary observed-name annotations, resolved at render time, never
+    # alter the canonical Explorer name shown above.
+    assert by_register["0x0001"].correspondence_text.startswith(
+        "Observed Vaillant friendly name: Bivalence point for DHW"
+    )
+    assert "Observed Vaillant friendly name" in by_register["0x0001"].description_text
+
     assert by_register["0x0001"].access_flags == "config_user"
     assert by_register["0x0001"].row_id == "0x00:0x02:0x00:0x0001"
     assert by_register["0x0002"].row_id == "0x00:0x06:0x00:0x0002"

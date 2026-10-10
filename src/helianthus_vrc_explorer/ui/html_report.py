@@ -9,10 +9,31 @@ from typing import Any
 
 from ..artifact_schema import migrate_artifact_schema
 from ..scanner.director import group_name_for_opcode
+from ..schema.b524_register_name_correspondence import bundled_b524_register_name_correspondence
 from ..schema.b524_register_names import apply_b524_canonical_register_names
 from ..schema.b524_value_labels import apply_b524_value_labels
 from ..schema.parameter_descriptions import attach_bundled_descriptions, description_profile
 from .emphasis import html_star_bold
+
+
+def _correspondence_json_map() -> dict[str, dict[str, dict[str, dict[str, list[str]]]]]:
+    """Build the observed-name cross-reference table for client-side lookup.
+
+    Purely presentational, resolved for this render only -- never written
+    into the scan artifact.
+    """
+    table: dict[str, dict[str, dict[str, dict[str, list[str]]]]] = {}
+    for (opcode, group, register), entry in bundled_b524_register_name_correspondence().items():
+        opcode_key = f"0x{opcode:02x}"
+        group_key = f"0x{group:02x}"
+        register_key = f"0x{register:04x}"
+        other_names = list(dict.fromkeys(entry.vaillant_name_vrc720 + entry.vaillant_name_vrc700))
+        table.setdefault(opcode_key, {}).setdefault(group_key, {})[register_key] = {
+            "vaillant_friendly_name": list(entry.vaillant_friendly_name),
+            "vaillant_name": other_names,
+            "ebusd_name": list(entry.ebusd_name),
+        }
+    return table
 
 
 def _json_for_html(obj: Any) -> str:
@@ -524,6 +545,24 @@ __ARTIFACT_JSON__
     <script>
       const artifact = JSON.parse(document.getElementById("artifact-data").textContent || "{}");
       const B524_GROUP_NAMES = __B524_GROUP_NAMES__;
+      const B524_REGISTER_NAME_CORRESPONDENCE = __B524_REGISTER_NAME_CORRESPONDENCE__;
+
+      function b524CorrespondenceSecondaryText(opHex, groupHex, registerHex) {
+        const byGroup = B524_REGISTER_NAME_CORRESPONDENCE && B524_REGISTER_NAME_CORRESPONDENCE[opHex];
+        const entry = byGroup && byGroup[groupHex] && byGroup[groupHex][registerHex];
+        if (!entry) return "";
+        const parts = [];
+        if (Array.isArray(entry.vaillant_friendly_name) && entry.vaillant_friendly_name.length) {
+          parts.push("Observed Vaillant friendly name: " + entry.vaillant_friendly_name.join(", "));
+        }
+        if (Array.isArray(entry.vaillant_name) && entry.vaillant_name.length) {
+          parts.push("Observed Vaillant name: " + entry.vaillant_name.join(", "));
+        }
+        if (Array.isArray(entry.ebusd_name) && entry.ebusd_name.length) {
+          parts.push("eBUSd name: " + entry.ebusd_name.join(", "));
+        }
+        return parts.join(" · ");
+      }
 
       const metaDst = document.getElementById("metaDst");
       const metaTs = document.getElementById("metaTs");
@@ -2356,6 +2395,15 @@ __ARTIFACT_JSON__
               td0.appendChild(ebusdEl);
             }
 
+            const correspondenceText = b524CorrespondenceSecondaryText(opKey, groupKey, rrKey);
+            if (correspondenceText) {
+              const corrEl = document.createElement("div");
+              corrEl.className = "offset-name-secondary";
+              corrEl.textContent = correspondenceText;
+              corrEl.title = correspondenceText;
+              td0.appendChild(corrEl);
+            }
+
             if (candidates.length) {
               const sel = document.createElement("select");
               sel.className = "type-select";
@@ -2777,6 +2825,7 @@ def render_html_report(artifact: dict[str, Any], *, title: str | None = None) ->
                 "__IDENTITY_CARD__": identity_html,
                 "__ARTIFACT_JSON__": _json_for_html(artifact),
                 "__B524_GROUP_NAMES__": _json_for_html(group_name_map),
+                "__B524_REGISTER_NAME_CORRESPONDENCE__": _json_for_html(_correspondence_json_map()),
                 "__B524_CIRCUIT_II_MIN__": (
                     "0"
                     if description_profile(artifact).get("profile_id") == "basv2_sw0507_hw1704_api1"

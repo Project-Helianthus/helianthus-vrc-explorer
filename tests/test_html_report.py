@@ -720,3 +720,41 @@ def test_html_report_browser_presentation_keeps_html_only_corrections() -> None:
         [node, "-e", script], check=True, text=True, capture_output=True, timeout=10
     )
     assert json.loads(result.stdout) == ["Transport failure", ["read-only", "visible"]]
+
+
+def test_html_report_embeds_register_name_correspondence_table() -> None:
+    html = render_html_report({"meta": {}})
+
+    match = re.search(r"const B524_REGISTER_NAME_CORRESPONDENCE = (\{.*?\});\n", html, re.S)
+    assert match is not None
+    table = json.loads(match.group(1))
+
+    # OP02 GG00 RR0001 is a known correspondence row (system_dhw_bivalence_point).
+    entry = table["0x02"]["0x00"]["0x0001"]
+    assert entry["vaillant_friendly_name"] == ["Bivalence point for DHW"]
+    assert entry["ebusd_name"] == []
+    # Correspondence annotations never appear in the embedded scan artifact itself.
+    artifact_match = re.search(
+        r'<script id="artifact-data" type="application/json">(.*?)</script>', html, re.S
+    )
+    assert artifact_match is not None
+    assert "b524_register_name_correspondence" not in artifact_match.group(1)
+
+
+def test_b524_correspondence_secondary_text_formats_observed_vaillant_names() -> None:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node is required for this test")
+    html = render_html_report({"meta": {}})
+    start = html.index("const B524_REGISTER_NAME_CORRESPONDENCE")
+    end = html.index("function b524CorrespondenceSecondaryText(")
+    func_end = html.index("\n      }\n", end) + len("\n      }\n")
+    script = (
+        html[start:func_end]
+        + 'console.log(JSON.stringify(b524CorrespondenceSecondaryText("0x02", "0x00", "0x0001")));'
+    )
+    result = subprocess.run(
+        [node, "-e", script], check=True, text=True, capture_output=True, timeout=10
+    )
+    text = json.loads(result.stdout)
+    assert text.startswith("Observed Vaillant friendly name: Bivalence point for DHW")

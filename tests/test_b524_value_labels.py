@@ -298,6 +298,7 @@ function formatValue(value) {{ return String(value); }}
 function statusChipClass() {{ return ""; }}
 function appendAccessBadges() {{}}
 function finalPlanForRoute() {{ return null; }}
+function b524CorrespondenceSecondaryText() {{ return ""; }}
 {render_function}
 function valueCell(entry, opKey = "0x02", override = null) {{
   overrideValue = override;
