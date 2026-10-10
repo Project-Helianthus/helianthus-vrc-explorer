@@ -9,7 +9,9 @@ from ..protocol.b555 import (
     B555ConfigRead,
     B555SlotsRead,
     B555TimerRead,
+    b555_setpoint_unit_label,
     b555_status_label,
+    b555_time_program_mode_label,
     build_b555_config_read_payload,
     build_b555_slots_read_payload,
     build_b555_timer_read_payload,
@@ -103,11 +105,19 @@ def _config_entry(
             "available": parsed.available,
             "max_slots": parsed.max_slots,
             "time_resolution_min": parsed.time_resolution_min,
+            "setpoint_step_raw": parsed.setpoint_step_raw,
+            "setpoint_unit_code": parsed.setpoint_unit_code,
+            "setpoint_unit_label": b555_setpoint_unit_label(parsed.setpoint_unit_code),
+            "setpoint_count": parsed.setpoint_count,
+            "min_temp_c": parsed.min_temp_c,
+            "max_temp_c": parsed.max_temp_c,
+            "time_program_mode": parsed.time_program_mode,
+            "time_program_mode_label": b555_time_program_mode_label(parsed.time_program_mode),
+            # Deprecated keys, kept for one release so existing readers of
+            # 0.6.0 artifacts do not break; see CHANGELOG.md.
             "min_duration_min": parsed.min_duration_min,
             "has_temperature": parsed.has_temperature,
             "temp_slots": parsed.temp_slots,
-            "min_temp_c": parsed.min_temp_c,
-            "max_temp_c": parsed.max_temp_c,
             "padding": _hex_u8(parsed.padding),
         }
     )
@@ -132,6 +142,8 @@ def _slots_entry(
     if parsed is None:
         return entry
     entry["available"] = parsed.available
+    entry["slot_count_24h"] = parsed.slot_count_24h
+    # Deprecated key, kept for one release; see CHANGELOG.md.
     entry["padding"] = _hex_u8(parsed.padding)
     if parsed.available:
         entry["days"] = dict(zip(_DAY_NAMES, parsed.slot_counts, strict=True))

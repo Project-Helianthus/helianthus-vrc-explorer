@@ -111,6 +111,27 @@ def test_value_label_catalog_is_exact_and_operation_scoped() -> None:
     assert b524_value_label(opcode=0x06, group=0x02, register=0x0002, value=2) is None
 
 
+def test_circuit_status_circuit_labels_moved_from_pump_status_and_gained_dhw() -> None:
+    # 0/1/2 = STANDBY/HEATING/COOLING belong to RR001E (circuit_status_circuit),
+    # not RR001B (circuit_pump_status), and RR001E also carries 3 = DHW.
+    expected = {0: "STANDBY", 1: "HEATING", 2: "COOLING", 3: "DHW"}
+    for value, label in expected.items():
+        annotation = b524_value_label(opcode=0x02, group=0x02, register=0x001E, value=value)
+        assert annotation is not None
+        assert annotation.label == label
+        assert annotation.qualification == "candidate_unqualified"
+
+    for value in (0, 1, 2):
+        assert b524_value_label(opcode=0x02, group=0x02, register=0x001B, value=value) is None
+
+
+def test_circuit_type_labels_gained_pool_for_vrc700() -> None:
+    pool = b524_value_label(opcode=0x02, group=0x02, register=0x0002, value=5)
+    assert pool is not None
+    assert pool.label == "POOL"
+    assert pool.qualification == "candidate_unqualified"
+
+
 def test_scan_annotations_are_scoped_and_preserve_raw_unknown_values() -> None:
     artifact = _artifact()
 

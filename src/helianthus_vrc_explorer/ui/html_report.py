@@ -1186,7 +1186,8 @@ __ARTIFACT_JSON__
           if (config && typeof config === "object") {
             const parts = [];
             if (typeof config.max_slots === "number") parts.push(`max_slots=${config.max_slots}`);
-            if (typeof config.temp_slots === "number") parts.push(`temp_slots=${config.temp_slots}`);
+            const setpointCount = typeof config.setpoint_count === "number" ? config.setpoint_count : config.temp_slots;
+            if (typeof setpointCount === "number") parts.push(`setpoints=${setpointCount}`);
             if (typeof config.time_resolution_min === "number") parts.push(`resolution=${config.time_resolution_min}m`);
             pushRow("A3", "config", config, parts.join(", ") || "config");
           }

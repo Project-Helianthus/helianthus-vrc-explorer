@@ -3,7 +3,7 @@ group,instance,register,leaf,ebusd_name,register_class,type_hint,opcode
 0x00,0x00,0x0002,continuous_heating_start_setpoint,ContinuousHeating,config,,
 0x00,0x00,0x0003,frost_override_time,FrostOverRideTime,config,,
 0x00,0x00,0x0004,maximum_preheating_time,,config,,
-0x00,0x00,0x0006,manual_cooling_days,,state,UCH,0x02
+0x00,0x00,0x0006,manual_cooling_days,,state,,0x02
 0x00,0x00,0x0007,system_off,SysOff,config,,
 0x00,0x00,0x0008,temporary_allow_backup_heater,,config,,
 0x00,0x00,0x0009,external_energy_management_activation,,config,,
@@ -12,7 +12,7 @@ group,instance,register,leaf,ebusd_name,register_class,type_hint,opcode
 0x00,0x00,0x0012,continuous_heating_room_setpoint,,config,,
 0x00,0x00,0x0014,adaptive_heating_curve,AdaptHeatCurve,config,,
 0x00,0x00,0x0015,parallel_tank_loading_allowed,HwcParallelLoading,config,,
-0x00,0x00,0x0016,system_quick_mode_active,,state,BOOL,0x02
+0x00,0x00,0x0016,system_ventilation_operating_mode,,state,,0x02
 0x00,0x00,0x0017,dhw_maximum_loading_time,MaxCylinderChargeTime,config,,
 0x00,0x00,0x0018,hwc_lock_time,HwcLockTime,config,,
 0x00,0x00,0x0019,solar_flow_rate_quantity,,config,,
@@ -89,6 +89,10 @@ group,instance,register,leaf,ebusd_name,register_class,type_hint,opcode
 0x00,0x00,0x00DD,heating_curve_day_1,,config,,
 0x00,0x00,0x00DE,heating_curve_day_2,,config,,
 0x00,0x00,0x00DF,heating_curve_day_3,,config,,
+0x00,0x00,0x00F2,system_holiday_start_date,,config,HDA:3,0x02
+0x00,0x00,0x00F3,system_holiday_end_date,,config,HDA:3,0x02
+0x00,0x00,0x00F4,system_holiday_start_time,,config,HTI,0x02
+0x00,0x00,0x00F5,system_holiday_end_time,,config,HTI,0x02
 0x01,0x00,0x0001,hwc_enabled,,config,,
 0x01,0x00,0x0002,hwc_circulation_pump_status,,state,,
 0x01,0x00,0x0003,dhw_operation_mode,HwcOpMode,config,,

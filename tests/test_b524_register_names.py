@@ -9,13 +9,24 @@ from helianthus_vrc_explorer.schema.b524_register_names import (
 def test_bundled_op02_register_catalog_is_complete_and_opcode_scoped() -> None:
     names = bundled_b524_register_names()
 
-    assert len(names) == 363
+    assert len(names) == 368
     assert all(opcode == 0x02 for opcode, _group, _register in names)
     assert names[(0x02, 0x00, 0x0001)] == "system_dhw_bivalence_point"
     assert names[(0x02, 0x02, 0x0001)] == "circuit_circuit_type"
     assert names[(0x02, 0x02, 0x0014)] == "circuit_maximum_outside_temperature_heating"
     assert names[(0x02, 0x02, 0x001F)] == "circuit_minimum_outside_temperature_cooling"
     assert names[(0x02, 0x09, 0x0004)] == "ventilation_status_special_operating_mode"
+
+
+def test_bundled_op02_register_catalog_includes_issue_289_additions() -> None:
+    names = bundled_b524_register_names()
+
+    assert names[(0x02, 0x00, 0x0044)] == "system_ventilation_heat_recovery"
+    assert names[(0x02, 0x00, 0x0047)] == "system_in_failure_mode"
+    assert names[(0x02, 0x00, 0x0049)] == "system_consumption_electricity_reset"
+    assert names[(0x02, 0x00, 0x004A)] == "reset_to_default"
+    # Issue #288.
+    assert names[(0x02, 0x00, 0x00FD)] == "boiler_max_flow_setpoint"
 
 
 def test_op02_canonical_names_do_not_override_shared_op06_identities() -> None:

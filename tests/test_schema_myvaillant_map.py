@@ -351,10 +351,13 @@ def test_namespace_owned_required_tuple_rows_are_resolvable() -> None:
     assert remote_gg00_rr0004.type_hint == "FW"
     assert local_gg00_rr0006 is not None
     assert local_gg00_rr0006.leaf == "manual_cooling_days"
-    assert local_gg00_rr0006.type_hint == "UCH"
+    # Two bytes wide on the VRC700 family; no hint lets the length-based
+    # inference decode either width (see test_op02_group00_rr0006_and_
+    # rr0016_have_no_width_hint for the full regression).
+    assert local_gg00_rr0006.type_hint is None
     assert local_gg00_rr0016 is not None
-    assert local_gg00_rr0016.leaf == "system_quick_mode_active"
-    assert local_gg00_rr0016.type_hint == "BOOL"
+    assert local_gg00_rr0016.leaf == "system_ventilation_operating_mode"
+    assert local_gg00_rr0016.type_hint is None
     assert local_gg00_rr0048 is not None
     assert local_gg00_rr0048.leaf == "system_status_bitmask"
     assert local_gg00_rr0048.type_hint == "UIN"
@@ -403,6 +406,40 @@ def test_register_map_minimum_entry_count_and_no_duplicates() -> None:
 
     assert len(rows) >= 150
     assert len(rows) == len(set(rows))
+
+
+def test_op02_group00_rr0006_and_rr0016_have_no_width_hint() -> None:
+    # On the VRC700 family these registers are two bytes wide; a UCH/BOOL
+    # hint makes the length-based inference reject the real reply with a
+    # parse error, so the hint must stay empty and fall back to inference.
+    schema = MyvaillantRegisterMap.from_path(_CSV_PATH)
+
+    manual_cooling_days = schema.lookup(group=0x00, instance=0x00, register=0x0006, opcode=0x02)
+    assert manual_cooling_days is not None
+    assert manual_cooling_days.type_hint is None
+
+    ventilation_mode = schema.lookup(group=0x00, instance=0x00, register=0x0016, opcode=0x02)
+    assert ventilation_mode is not None
+    assert ventilation_mode.type_hint is None
+    assert ventilation_mode.leaf == "system_ventilation_operating_mode"
+
+
+def test_op02_group00_holiday_date_and_time_registers_have_explicit_hints() -> None:
+    schema = MyvaillantRegisterMap.from_path(_CSV_PATH)
+
+    start_date = schema.lookup(group=0x00, instance=0x00, register=0x00F2, opcode=0x02)
+    end_date = schema.lookup(group=0x00, instance=0x00, register=0x00F3, opcode=0x02)
+    start_time = schema.lookup(group=0x00, instance=0x00, register=0x00F4, opcode=0x02)
+    end_time = schema.lookup(group=0x00, instance=0x00, register=0x00F5, opcode=0x02)
+
+    assert start_date is not None and start_date.type_hint == "HDA:3"
+    assert start_date.leaf == "system_holiday_start_date"
+    assert end_date is not None and end_date.type_hint == "HDA:3"
+    assert end_date.leaf == "system_holiday_end_date"
+    assert start_time is not None and start_time.type_hint == "HTI"
+    assert start_time.leaf == "system_holiday_start_time"
+    assert end_time is not None and end_time.type_hint == "HTI"
+    assert end_time.leaf == "system_holiday_end_time"
 
 
 def test_register_map_all_groups_represented() -> None:

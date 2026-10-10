@@ -3,7 +3,9 @@ from __future__ import annotations
 import pytest
 
 from helianthus_vrc_explorer.protocol.b555 import (
+    b555_setpoint_unit_label,
     b555_status_label,
+    b555_time_program_mode_label,
     build_b555_config_read_payload,
     build_b555_slots_read_payload,
     build_b555_timer_read_payload,
@@ -48,6 +50,31 @@ def test_parse_b555_config_read_response() -> None:
     assert parsed.padding == 0x00
 
 
+def test_parse_b555_config_read_response_exposes_correctly_named_fields() -> None:
+    # Byte 3: setpoint step (raw). Byte 4: setpoint unit code (0=none,
+    # 1=celsius, 2=fan stage). Byte 5: number of setpoints. Byte 8: the
+    # time-program mode (0=weekly, 1=24-hour).
+    parsed = parse_b555_config_read_response(bytes.fromhex("000c0a05010c051e01"))
+    assert parsed.setpoint_step_raw == 5
+    assert parsed.setpoint_unit_code == 1
+    assert b555_setpoint_unit_label(parsed.setpoint_unit_code) == "celsius"
+    assert parsed.setpoint_count == 12
+    assert parsed.time_program_mode == 1
+    assert b555_time_program_mode_label(parsed.time_program_mode) == "24-hour"
+    # Deprecated aliases stay available for one release.
+    assert parsed.min_duration_min == parsed.setpoint_step_raw
+    assert parsed.has_temperature == (parsed.setpoint_unit_code != 0)
+    assert parsed.temp_slots == parsed.setpoint_count
+    assert parsed.padding == parsed.time_program_mode
+
+
+def test_b555_setpoint_unit_label_covers_known_and_unknown_codes() -> None:
+    assert b555_setpoint_unit_label(0) == "none"
+    assert b555_setpoint_unit_label(1) == "celsius"
+    assert b555_setpoint_unit_label(2) == "fan_stage"
+    assert b555_setpoint_unit_label(9) == "0x09"
+
+
 def test_parse_b555_slots_read_response() -> None:
     parsed = parse_b555_slots_read_response(bytes.fromhex("000201000000000000"))
     assert parsed.status == 0x00
@@ -61,6 +88,14 @@ def test_parse_b555_slots_read_response() -> None:
         "saturday": 0,
         "sunday": 0,
     }
+
+
+def test_parse_b555_slots_read_response_exposes_slot_count_24h() -> None:
+    # Byte 8 of the A4 reply is the 24-hour slot count.
+    parsed = parse_b555_slots_read_response(bytes.fromhex("000201000000000003"))
+    assert parsed.slot_count_24h == 3
+    # Deprecated alias stays available for one release.
+    assert parsed.padding == parsed.slot_count_24h
 
 
 def test_parse_b555_timer_read_response() -> None:
