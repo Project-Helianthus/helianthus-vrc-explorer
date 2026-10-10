@@ -30,7 +30,9 @@ Clock = Callable[[], date]
 
 
 def _default_clock() -> date:
-    return datetime.now(UTC).date()
+    # Local calendar date: the fallback stands in for the regulator's own
+    # date, which follows local time rather than UTC.
+    return datetime.now(UTC).astimezone().date()
 
 
 class _B516Transport(Protocol):

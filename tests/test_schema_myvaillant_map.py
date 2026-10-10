@@ -485,3 +485,21 @@ def test_ebusd_names_are_unique_per_opcode_for_concrete_group_rows() -> None:
                         f"{seen[key]} and {here}"
                     )
                 seen[key] = here
+
+
+def test_op02_group09_holiday_annotations_follow_the_canonical_start_and_end() -> None:
+    from helianthus_vrc_explorer.schema.b524_register_names import b524_register_name
+
+    schema = MyvaillantRegisterMap.from_path(_CSV_PATH)
+    expected = {
+        0x0007: ("end", "HDA:3"),
+        0x0008: ("end", "HTI"),
+        0x0009: ("start", "HDA:3"),
+        0x000A: ("start", "HTI"),
+    }
+    for register, (edge, type_hint) in expected.items():
+        entry = schema.lookup(group=0x09, instance=0x00, register=register, opcode=0x02)
+        canonical = b524_register_name(opcode=0x02, group=0x09, register=register)
+        assert entry is not None and entry.type_hint == type_hint
+        assert canonical is not None and f"holiday_{edge}" in canonical
+        assert entry.leaf is not None and f"holiday_{edge}" in entry.leaf

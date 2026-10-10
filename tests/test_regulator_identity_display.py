@@ -104,3 +104,72 @@ def test_ctlx0_sw0127_hw0404_is_vr940_in_all_headers() -> None:
     preface = _build_scan_session_preface(dst=0x15, endpoint="offline", identity=identity)
     assert any(label == "Profile" and "VR940" in value for label, value in preface.rows)
     assert artifact == baseline
+
+
+def _artifact_with_identity(identity: dict[str, object]) -> dict[str, object]:
+    return {"schema_version": "2.3", "meta": {"identity": identity}, "operations": {}}
+
+
+def _browser_header_text(artifact: dict[str, object]) -> str:
+    renderable = _build_identity_header_renderable(artifact)
+    if renderable is None:
+        return ""
+    output = StringIO()
+    Console(file=output, width=140).print(renderable)
+    return output.getvalue()
+
+
+def test_artifact_written_by_0_6_0_shows_profile_from_raw_hardware_field() -> None:
+    # 0.6.0 persisted an SPN decoded from the software-version field next to
+    # the raw fields. For this regulator that stored value (01FB) matches no
+    # catalog row, while the raw hardware field decodes to BASV2/01A1.
+    identity: dict[str, object] = {
+        "device_id": "BASV2",
+        "eid": "BASV2",
+        "manufacturer": "0xB5",
+        "sw": "0507",
+        "hw": "1704",
+        "spn": "01FB",
+        "spn_source": "sw",
+        "model": "n/a",
+    }
+    artifact = _artifact_with_identity(identity)
+    baseline = deepcopy(artifact)
+
+    html = render_html_report(artifact)
+    assert 'class="identity-label">Profile' in html
+    assert "BASV2/01A1" in html
+    assert "BASV2/01A1" in _browser_header_text(artifact)
+    # Presentation only: the stored raw and derived fields are left as written.
+    assert artifact == baseline
+
+
+def test_software_derived_spn_is_not_trusted_without_raw_hardware_field() -> None:
+    # CTLX0 with software version 0127 was stored by 0.6.0 as SPN 007F. With
+    # no raw hardware field to recompute from, that value must not select a row.
+    identity: dict[str, object] = {
+        "device_id": "CTLX0",
+        "manufacturer": "0xB5",
+        "sw": "0127",
+        "spn": "0194",
+        "spn_source": "sw",
+    }
+    artifact = _artifact_with_identity(identity)
+    assert 'class="identity-label">Profile' not in render_html_report(artifact)
+    assert _browser_header_text(artifact) == ""
+
+
+def test_disagreeing_spn_still_vetoes_when_not_marked_software_derived() -> None:
+    # A supplied SPN that names a different catalog row than the raw hardware
+    # field is an inconsistent identity and keeps being rejected.
+    identity: dict[str, object] = {
+        "device_id": "BASV2",
+        "manufacturer": "0xB5",
+        "sw": "0507",
+        "hw": "1704",
+        "spn": "01CF",
+        "spn_source": "hw",
+    }
+    artifact = _artifact_with_identity(identity)
+    assert 'class="identity-label">Profile' not in render_html_report(artifact)
+    assert _browser_header_text(artifact) == ""

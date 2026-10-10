@@ -24,6 +24,11 @@ def regulator_profile_label(identity: Mapping[str, object]) -> str | None:
         if isinstance(parsed, bool) or parsed != 0xB5:
             return None
     supplied_spn = identity.get("spn")
+    if identity.get("spn_source") == "sw":
+        # 0.6.0 stored an SPN decoded from the software-version field. That
+        # derivation is known to be wrong, so the stored value is neither
+        # trusted nor allowed to veto the raw hardware field.
+        supplied_spn = None
     hw = identity.get("hw")
     spn: int | str | None
     if hw is not None:
