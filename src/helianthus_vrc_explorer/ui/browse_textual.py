@@ -2254,18 +2254,17 @@ if _TEXTUAL_IMPORT_ERROR is None:
 
         def _preview_operation_export(self, row: RegisterRow) -> None:
             from ..scanner.b524_operation_edit import build_operation_edit_preview
-            from .b524_operation_reads import operation_edit_export
+            from .b524_operation_reads import (
+                OPERATION_EXPORT_BY_SECTION,
+                operation_edit_export,
+            )
 
             reads = self._artifact.get("b524_operation_reads")
             if not isinstance(reads, list):
                 self._set_status("No operation reads available for offline export.")
                 return
             records = [record for record in reads if isinstance(record, dict)]
-            operation = {
-                "operation_03": "WriteTimer",
-                "operation_09": "SetEvent",
-                "operation_0b": "SetEventSetPoint",
-            }.get(row.section_key or "")
+            operation = OPERATION_EXPORT_BY_SECTION.get(row.section_key or "")
             if operation is None:
                 self._set_status("OP08 has no editable operation export.")
                 return

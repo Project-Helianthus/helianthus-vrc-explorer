@@ -26,7 +26,7 @@ from ..schema.b524_codec_labels import b524_codec_label
 from ..schema.b524_constraints import constraint_scope_metadata
 from ..schema.b524_register_name_correspondence import B524RegisterNameCorrespondence
 from ..schema.myvaillant_map import MyvaillantRegisterName
-from .b524_operation_reads import OperationReadView
+from .b524_operation_reads import OPERATION_EXPORT_BY_SECTION, OperationReadView
 from .browse_models import RegisterRow, TreeNodeRef
 from .parameter_editor import parameter_enum_choices, parameter_value_display
 from .register_semantics import entry_display_value_text, entry_status_kind, entry_status_label
@@ -237,7 +237,7 @@ def _flags_section(entry: dict[str, Any] | None) -> DetailSection | None:
     if facets is not None:
         label = f"{label} [{', '.join(facets)}]"
     flags_text = str(flags) if flags is not None else "?"
-    rows = [DetailRow("Access", f"raw {flags_text} → {label}")]
+    rows = [DetailRow("Raw flags", f"{flags_text} → {label}")]
     reply_kind = entry.get("reply_kind")
     if reply_kind:
         rows.append(DetailRow("Reply kind", str(reply_kind)))
@@ -297,27 +297,29 @@ def _edit_section(entry: dict[str, Any] | None, row: RegisterRow) -> DetailSecti
         value = "unknown"
     rows = [DetailRow("Editable", value, note=reason)]
     if editable is True:
-        rows.append(DetailRow("Hint", "press e to edit"))
+        rows.append(
+            DetailRow("Hint", "press e to edit (waits while a transport operation is running)")
+        )
     return DetailSection(title="EDIT", rows=tuple(rows))
 
 
 def _g1_access(entry: dict[str, Any] | None) -> DetailRow:
     if entry is None:
-        return DetailRow("Access", "unknown", note="no artifact entry")
+        return DetailRow("Write gate", "unknown", note="no artifact entry")
     access = entry.get("flags_access")
     flags = entry.get("flags")
     if isinstance(access, str) and access in _WRITABLE_ACCESS:
-        return DetailRow("Access", "writable")
+        return DetailRow("Write gate", "writable")
     if isinstance(access, str) and access in _KNOWN_ACCESS_LABELS:
         state = "read-only" if access.startswith("read_only") else access
-        return DetailRow("Access", state)
+        return DetailRow("Write gate", state)
     if isinstance(access, str):
         return DetailRow(
-            "Access",
+            "Write gate",
             "unknown",
             note=f"access label '{access}' is not a recognised writable label (raw flags={flags})",
         )
-    return DetailRow("Access", "unknown")
+    return DetailRow("Write gate", "unknown")
 
 
 def _gates_section(
@@ -442,7 +444,9 @@ def _unit_section(row: RegisterRow) -> DetailSection:
     return DetailSection(title="UNIT", rows=(DetailRow("Unit", unit),))
 
 
-def _enumeration_section(row: RegisterRow, entry: dict[str, Any] | None) -> DetailSection | None:
+def _enumeration_section(
+    row: RegisterRow, entry: dict[str, Any] | None, description: dict[str, Any] | None
+) -> DetailSection | None:
     if entry is None or not _has_concrete_selector(row):
         return None
     type_spec = entry.get("type")
@@ -454,8 +458,10 @@ def _enumeration_section(row: RegisterRow, entry: dict[str, Any] | None) -> Deta
         register = int(row.register_key, 0)
     except ValueError:
         return None
+    # Same call the edit dialog makes, so a choice it disables is shown here
+    # with the same reason.
     choices = parameter_enum_choices(
-        entry, read_opcode=opcode, group=group, register=register, description=None
+        entry, read_opcode=opcode, group=group, register=register, description=description
     )
     if not choices:
         return None
@@ -512,7 +518,10 @@ def _operation_detail_sections(
     ]
     if view.request_attempts is not None:
         decode_rows.append(DetailRow("Request attempts", str(view.request_attempts)))
-    decode_rows.append(DetailRow("Export", "offline export available with e"))
+    if (row.section_key or "") in OPERATION_EXPORT_BY_SECTION:
+        decode_rows.append(DetailRow("Export", "offline export available with e"))
+    else:
+        decode_rows.append(DetailRow("Export", "no offline export for this operation"))
     decode_section = DetailSection(title="DECODE QUALIFICATION", rows=tuple(decode_rows))
     return (header, value_section, decode_section)
 
@@ -579,7 +588,7 @@ def register_detail_sections(
     sections.append(_names_section(row, correspondence))
     sections.append(_unit_section(row))
 
-    enumeration = _enumeration_section(row, entry)
+    enumeration = _enumeration_section(row, entry, description)
     if enumeration is not None:
         sections.append(enumeration)
 

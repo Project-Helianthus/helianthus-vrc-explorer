@@ -9,7 +9,7 @@ I32,4 signed bytes,integer
 EXP,4 bytes,decimal number
 HTI,3 bytes,time of day HH:MM:SS
 HDA:3,3 bytes,calendar date
-FW,variable,version text
+FW,3 bytes,version text
 FWU,3 numeric bytes,version text
 STR:n,n bytes,text
 HEX:n,n bytes,uninterpreted bytes

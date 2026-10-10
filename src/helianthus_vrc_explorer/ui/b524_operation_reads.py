@@ -59,6 +59,15 @@ def _corrected_timer_channel(
     return request_channel, (("channel_source", "request_bytes"),)
 
 
+# Operation-read sections that have an offline edit export, and the write
+# operation each one exports to. Shared by the Browser's edit action and the
+# detail panel so the two cannot disagree.
+OPERATION_EXPORT_BY_SECTION: Final[dict[str, str]] = {
+    "operation_03": "WriteTimer",
+    "operation_09": "SetEvent",
+    "operation_0b": "SetEventSetPoint",
+}
+
 _TITLES = {
     0x03: "OP03 ReadTimer",
     0x08: "OP08 ReadVR91",

@@ -186,7 +186,7 @@ def test_gates_section_g1_flags_legacy_access_label_as_unknown_not_read_only() -
     sections = register_detail_sections(row=row, entry=entry, description=None, correspondence=None)
     gates = _section(sections, "GATES")
     assert gates is not None
-    access_row = next(r for r in gates.rows if r.label == "Access")
+    access_row = next(r for r in gates.rows if r.label == "Write gate")
     assert access_row.value == "unknown"
     assert "user_rw" in access_row.note
     assert "not a recognised writable label" in access_row.note
@@ -221,7 +221,15 @@ def test_gates_section_reports_g1_through_g8() -> None:
     gates = _section(sections, "GATES")
     assert gates is not None
     labels = {r.label for r in gates.rows}
-    assert {"Access", "Description", "Limits", "Codec", "Profile", "Enum gate", "Route"} <= labels
+    assert {
+        "Write gate",
+        "Description",
+        "Limits",
+        "Codec",
+        "Profile",
+        "Enum gate",
+        "Route",
+    } <= labels
 
 
 def test_names_section_explorer_name_is_first_and_ebusd_name_included() -> None:
@@ -541,3 +549,81 @@ def test_edit_section_appears_in_register_detail_sections_with_hint() -> None:
     text = " ".join(f"{r.label} {r.value} {r.note}" for r in edit.rows)
     assert "yes" in text
     assert "press e to edit" in text
+
+
+def test_enumeration_rows_carry_the_reason_the_edit_dialog_disables_a_choice() -> None:
+    from helianthus_vrc_explorer.ui.parameter_editor import parameter_enum_choices
+
+    row = _row(register_key="0x0002")
+    entry = {
+        "type": "UCH",
+        "raw_hex": "01",
+        "flags_access": "writable_visible",
+        "enum_options": [
+            {"value": 0, "label": "OFF"},
+            {"value": 1, "label": "ON"},
+            {"value": 2, "label": "AUTO"},
+        ],
+    }
+    description = {"min": 0, "max": 1, "step": 1}
+    sections = register_detail_sections(
+        row=row, entry=entry, description=description, correspondence=None
+    )
+    enumeration = _section(sections, "ENUMERATION")
+    assert enumeration is not None
+    shown = {r.label: r.value for r in enumeration.rows}
+    assert "Outside described range" in shown["2"]
+    assert "Outside described range" not in shown["1"]
+
+    # The panel shows exactly what the edit dialog is given for the same row.
+    dialog = parameter_enum_choices(
+        entry, read_opcode=0x02, group=0x09, register=0x0002, description=description
+    )
+    assert shown == {str(choice.value): choice.display for choice in dialog}
+    assert [choice.enabled for choice in dialog] == [True, True, False]
+
+
+def test_operation_export_row_matches_what_the_edit_action_supports() -> None:
+    from dataclasses import replace
+
+    from helianthus_vrc_explorer.ui.b524_operation_reads import OPERATION_EXPORT_BY_SECTION
+
+    assert "operation_08" not in OPERATION_EXPORT_BY_SECTION
+    for section_key, opcode_hex in (
+        ("operation_03", "0x03"),
+        ("operation_08", "0x08"),
+        ("operation_09", "0x09"),
+        ("operation_0b", "0x0b"),
+    ):
+        row = replace(
+            _row(
+                read_opcode=opcode_hex,
+                group_key="selector-id",
+                instance_key=None,
+                register_key="channel",
+            ),
+            section_key=section_key,
+        )
+        view = OperationReadView(
+            opcode_hex=opcode_hex,
+            title="operation read",
+            selector_key="selector-key",
+            selector_label="selector",
+            request_payload_hex="00",
+            response_raw_hex="00",
+            response_state="value",
+            qualification="schema_unqualified",
+            selector_correlation="matches_request",
+            request_attempts=1,
+            fields=(),
+        )
+        sections = register_detail_sections(
+            row=row, entry=None, description=None, correspondence=None, operation_view=view
+        )
+        decode = _section(sections, "DECODE QUALIFICATION")
+        assert decode is not None
+        export = next(r for r in decode.rows if r.label == "Export")
+        if section_key in OPERATION_EXPORT_BY_SECTION:
+            assert export.value == "offline export available with e"
+        else:
+            assert export.value == "no offline export for this operation"
