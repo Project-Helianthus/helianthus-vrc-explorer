@@ -616,6 +616,9 @@ def _format_b516_value(entry: dict[str, Any]) -> str:
     error = entry.get("error")
     if isinstance(error, str) and error:
         return error
+    status = entry.get("status")
+    if status == "not_ok":
+        return "unavailable"
     value_kwh = entry.get("value_kwh")
     value_wh = entry.get("value_wh")
     if isinstance(value_kwh, (int, float)) and not isinstance(value_kwh, bool):
@@ -1517,8 +1520,8 @@ class _HydratedBrowseStore:
                             str(entry.get("echo_period") or "").lower(),
                             str(entry.get("echo_source") or "").lower(),
                             str(entry.get("echo_usage") or "").lower(),
-                            str(entry.get("echo_window") or "").lower(),
-                            str(entry.get("echo_qualifier") or "").lower(),
+                            str(entry.get("status") or "").lower(),
+                            str(entry.get("return_code") or "").lower(),
                             "state",
                         ]
                     )

@@ -1301,7 +1301,7 @@ __ARTIFACT_JSON__
         const table = document.createElement("table");
         const thead = document.createElement("thead");
         const trHead = document.createElement("tr");
-        for (const col of ["Label", "Selector", "kWh", "Wh", "Request", "Reply", "Error"]) {
+        for (const col of ["Label", "Selector", "Status", "kWh", "Wh", "Request", "Reply", "Error"]) {
           const th = document.createElement("th");
           th.textContent = col;
           trHead.appendChild(th);
@@ -1320,8 +1320,19 @@ __ARTIFACT_JSON__
           const requestHex = typeof entry.request_hex === "string" ? entry.request_hex : "";
           const replyHex = typeof entry.reply_hex === "string" ? entry.reply_hex : "";
           const error = typeof entry.error === "string" ? entry.error : "";
-          const valueKwh = typeof entry.value_kwh === "number" ? formatValue(entry.value_kwh) : "—";
-          const valueWh = typeof entry.value_wh === "number" ? formatValue(entry.value_wh) : "—";
+          const status = typeof entry.status === "string" ? entry.status : "";
+          const unavailable = status === "not_ok";
+          const valueKwh = unavailable
+            ? "unavailable"
+            : typeof entry.value_kwh === "number"
+              ? formatValue(entry.value_kwh)
+              : "—";
+          const valueWh = unavailable
+            ? "unavailable"
+            : typeof entry.value_wh === "number"
+              ? formatValue(entry.value_wh)
+              : "—";
+          const statusText = status === "ok" ? "OK" : status === "not_ok" ? "not OK" : "—";
 
           const labelTd = document.createElement("td");
           const nameEl = document.createElement("div");
@@ -1340,6 +1351,8 @@ __ARTIFACT_JSON__
           if (typeof entry.echo_period === "string") echoParts.push(`p=${entry.echo_period}`);
           if (typeof entry.echo_source === "string") echoParts.push(`s=${entry.echo_source}`);
           if (typeof entry.echo_usage === "string") echoParts.push(`u=${entry.echo_usage}`);
+          // echo_window/echo_qualifier are the pre-0.6.1 field names, kept
+          // readable here so artifacts written by 0.6.0 still render.
           if (typeof entry.echo_window === "string") echoParts.push(`w=${entry.echo_window}`);
           if (typeof entry.echo_qualifier === "string") echoParts.push(`q=${entry.echo_qualifier}`);
           if (echoParts.length) {
@@ -1348,7 +1361,19 @@ __ARTIFACT_JSON__
             echoEl.textContent = `echo ${echoParts.join(" ")}`;
             selectorTd.appendChild(echoEl);
           }
+          const replyDate = entry.reply_date && typeof entry.reply_date === "object" ? entry.reply_date : null;
+          if (replyDate) {
+            const dateEl = document.createElement("div");
+            dateEl.className = "offset-name-secondary";
+            dateEl.textContent = `reply date ${replyDate.year}-${String(replyDate.month).padStart(2, "0")}-${String(replyDate.day).padStart(2, "0")}`;
+            selectorTd.appendChild(dateEl);
+          }
           tr.appendChild(selectorTd);
+
+          const statusTd = document.createElement("td");
+          statusTd.textContent = statusText;
+          if (unavailable) statusTd.className = "cell-error";
+          tr.appendChild(statusTd);
 
           for (const value of [valueKwh, valueWh, requestHex || "—", replyHex || "—", error || "—"]) {
             const td = document.createElement("td");
