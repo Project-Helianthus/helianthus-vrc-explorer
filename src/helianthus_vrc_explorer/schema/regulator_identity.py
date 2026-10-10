@@ -59,19 +59,25 @@ def normalize_spn(spn: int | str | None) -> int | None:
     return int(digits, 16)
 
 
-def spn_from_sw(sw: str) -> int | None:
-    """Decode an exact four-digit BCD software PIN into the catalog SPN value.
+def spn_from_hw(hw: str) -> int | None:
+    """Decode the catalog SPN from the observed Vaillant hardware PIN field.
 
-    This conversion is intentionally distinct from :func:`normalize_spn`: the
-    wire software value is decimal BCD, while catalog SPNs are hexadecimal
+    The identification reply's hardware field is two raw bytes, written here
+    as four hex-pair digits in on-wire byte order (e.g. raw bytes `17 04`
+    give `hw="1704"`). The catalog SPN comes from reading that pair
+    byte-swapped (little-endian) as four BCD digits -- `hw="1704"` swaps to
+    `"0417"`, decoded as the decimal number 417, giving SPN `0x01A1`. This
+    conversion is intentionally distinct from :func:`normalize_spn`: the
+    decoded value here is decimal BCD, while catalog SPNs are hexadecimal
     numeric values.
     """
 
-    if not isinstance(sw, str) or len(sw) != 4 or not sw.isascii():
+    if not isinstance(hw, str) or len(hw) != 4 or not hw.isascii():
         return None
-    if any(character not in "0123456789" for character in sw):
+    if any(character not in "0123456789" for character in hw):
         return None
-    return int(sw, 10)
+    swapped = hw[2:4] + hw[0:2]
+    return int(swapped, 10)
 
 
 def load_regulator_identity_catalog(path: Path | None = None) -> tuple[RegulatorIdentity, ...]:

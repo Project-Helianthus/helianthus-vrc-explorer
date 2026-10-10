@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from ..schema.regulator_identity import lookup_regulator_identity, spn_from_sw
+from ..schema.regulator_identity import lookup_regulator_identity, spn_from_hw
 
 
 def regulator_profile_label(identity: Mapping[str, object]) -> str | None:
@@ -24,12 +24,12 @@ def regulator_profile_label(identity: Mapping[str, object]) -> str | None:
         if isinstance(parsed, bool) or parsed != 0xB5:
             return None
     supplied_spn = identity.get("spn")
-    sw = identity.get("sw")
+    hw = identity.get("hw")
     spn: int | str | None
-    if sw is not None:
-        if not isinstance(sw, str):
+    if hw is not None:
+        if not isinstance(hw, str):
             return None
-        spn = spn_from_sw(sw)
+        spn = spn_from_hw(hw)
         if spn is None:
             return None
     else:

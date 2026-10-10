@@ -250,9 +250,11 @@ defines the plan and qualification schemas.
 The packaged [EID/SPN catalog](data/regulator_eid_spn.csv) assigns a model and
 the `VRC720` or `VRC700` protocol family by an exact pair. The same EID can belong
 to different models, so EID-only names do not select this catalog profile.
-SPN comes from the `07/04` software PIN: BCD `0417` decodes to decimal 417,
-represented as hexadecimal `01A1` in the catalog. Raw SW/HW and product-number
-identity remain available. Missing, invalid or unlisted pairs remain unknown.
+SPN comes from the `07/04` hardware PIN, byte-swapped and read as BCD: raw
+bytes `17 04` (hardware field `1704`) swap to `0417`, decoding to decimal
+417, represented as hexadecimal `01A1` in the catalog. Raw SW/HW and
+product-number identity remain available. Missing, invalid or unlisted
+pairs remain unknown.
 
 Scan, Browser and HTML identity headers show a matched catalog profile. A model
 assignment does not prove support for an opcode or permit a device write. See
