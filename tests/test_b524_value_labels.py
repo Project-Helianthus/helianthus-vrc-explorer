@@ -125,6 +125,22 @@ def test_circuit_status_circuit_labels_moved_from_pump_status_and_gained_dhw() -
         assert b524_value_label(opcode=0x02, group=0x02, register=0x001B, value=value) is None
 
 
+def test_ventilation_operating_mode_labels_are_scoped_and_leave_unknowns_raw() -> None:
+    # GG00 RR0016 (system_ventilation_operating_mode, VRC700 family, two-byte value).
+    expected = {1: "AUTO", 2: "DAY", 3: "SET_BACK"}
+    for value, label in expected.items():
+        annotation = b524_value_label(opcode=0x02, group=0x00, register=0x0016, value=value)
+        assert annotation is not None
+        assert annotation.label == label
+        assert annotation.qualification == "candidate_unqualified"
+
+    for value in (0, 4):
+        assert b524_value_label(opcode=0x02, group=0x00, register=0x0016, value=value) is None
+
+    assert b524_value_label(opcode=0x06, group=0x00, register=0x0016, value=1) is None
+    assert b524_value_label(opcode=0x02, group=0x02, register=0x0016, value=1) is None
+
+
 def test_circuit_type_labels_gained_pool_for_vrc700() -> None:
     pool = b524_value_label(opcode=0x02, group=0x02, register=0x0002, value=5)
     assert pool is not None
