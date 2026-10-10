@@ -1634,6 +1634,37 @@ __ARTIFACT_JSON__
         "zone-heating": [0x03, 0x02],
       };
       const B524_EVENT_SYSTEM_TYPES = {system: 0x00, dhw: 0x01, zone: 0x03};
+      const B524_TIMER_CHANNEL_BY_REQUEST_SELECTOR = Object.fromEntries(
+        Object.entries(B524_TIMER_CHANNELS).map(([name, pair]) => [`${pair[0]},${pair[1]}`, name])
+      );
+
+      // Derive a stored OP03 record's timer channel strictly from its request
+      // bytes, not from the recorded selector name (0.6.0 swapped two names
+      // for the same two addresses). Returns null when the bytes are missing
+      // or do not decode as an OP03 request.
+      function b524TimerChannelFromRequest(requestPayloadHex) {
+        const bytes = b524HexBytes(requestPayloadHex, 5);
+        if (!bytes || bytes[0] !== 0x03) return null;
+        return B524_TIMER_CHANNEL_BY_REQUEST_SELECTOR[`${bytes[1]},${bytes[3]}`] || null;
+      }
+
+      // Returns {selector, storedChannel, channelSource} with the OP03 timer
+      // channel corrected from request bytes when it is decodable; storedChannel
+      // is set only when the correction changes the displayed/used name.
+      function b524EffectiveSelector(row) {
+        const selector = row && row.selector && typeof row.selector === "object" && !Array.isArray(row.selector)
+          ? {...row.selector} : null;
+        if (!selector || typeof selector.channel !== "string") {
+          return {selector, storedChannel: null, channelSource: null};
+        }
+        const requestChannel = b524TimerChannelFromRequest(row.request_payload_hex);
+        if (requestChannel === null) {
+          return {selector, storedChannel: null, channelSource: "stored_selector_unverified"};
+        }
+        const storedChannel = selector.channel !== requestChannel ? selector.channel : null;
+        selector.channel = requestChannel;
+        return {selector, storedChannel, channelSource: "request_bytes"};
+      }
 
       function b524HexBytes(raw, expectedLength) {
         if (typeof raw !== "string" || !new RegExp(`^[0-9a-fA-F]{${expectedLength * 2}}$`).test(raw)) return null;
@@ -1682,7 +1713,7 @@ __ARTIFACT_JSON__
         if (!row.decoded || typeof row.decoded !== "object" || Array.isArray(row.decoded)) {
           return "a decoded canonical baseline is required";
         }
-        if (!b524CanonicalSelector(row.selector, operation)) return "selector is not canonical for this operation";
+        if (!b524CanonicalSelector(b524EffectiveSelector(row).selector, operation)) return "selector is not canonical for this operation";
         const expectedLength = opcode === "0x03" ? 7 : 8;
         if (!b524HexBytes(row.response_raw_hex, expectedLength)) return `raw baseline must contain ${expectedLength} bytes`;
         return null;
@@ -1714,7 +1745,10 @@ __ARTIFACT_JSON__
         const availability = b524EditAvailability(row, operation, reads);
         if (!availability.available) throw new Error(availability.reason);
         const destinationAddress = b524DestinationAddress(metaObj);
-        const selector = b524CanonicalSelector(row.selector, operation);
+        // The exported selector's channel must name the same address the
+        // baseline below was actually read from, not the stored label on a
+        // 0.6.0 artifact (see b524EffectiveSelector).
+        const selector = b524CanonicalSelector(b524EffectiveSelector(row).selector, operation);
         if (operation === "WriteTimer") {
           const raw = b524HexBytes(row.response_raw_hex, 7);
           const values = [];
@@ -1929,7 +1963,11 @@ __ARTIFACT_JSON__
         };
 
         rows.forEach((row, index) => {
-          const selector = row.selector && typeof row.selector === "object" ? Object.entries(row.selector).map(([key, value]) => `${key}=${String(value)}`).join(", ") : "unqualified selector";
+          const effective = b524EffectiveSelector(row);
+          const displaySelector = effective.selector || row.selector;
+          let selector = displaySelector && typeof displaySelector === "object" ? Object.entries(displaySelector).map(([key, value]) => `${key}=${String(value)}`).join(", ") : "unqualified selector";
+          if (effective.storedChannel) selector += ` (stored_channel=${effective.storedChannel}, channel_source=request_bytes)`;
+          else if (effective.channelSource) selector += ` (channel_source=${effective.channelSource})`;
           const decoded = row.decoded === null || typeof row.decoded === "undefined" ? "—" : JSON.stringify(row.decoded);
           const values = [selector, row.response_state || "unknown", row.response_raw_hex || "—", decoded, row.decode_qualification || "unknown", row.selector_correlation || "unknown", row.request_attempts ?? "—"];
           const tr = document.createElement("tr");

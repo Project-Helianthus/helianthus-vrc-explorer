@@ -48,6 +48,42 @@ def test_timer_execute_requires_qualification_and_exact_confirmation_before_io(
     assert "qualification" in result.output.lower()
 
 
+def test_timer_edit_with_extra_payload_hex_field_is_rejected_before_transport(
+    tmp_path, monkeypatch
+):
+    """An on-disk edit plan carrying both a channel name and a raw payload hex
+    field must fail closed before any transport is constructed: the document
+    schema accepts exactly {channel, instance, weekday} inside selector, so a
+    name/address mismatch between an old export's channel and its payload
+    hex cannot be silently reconciled on a path that can reach a device write.
+    """
+    import helianthus_vrc_explorer.commands.b524 as command
+
+    monkeypatch.setattr(command, "_make_transport", lambda **kwargs: 1 / 0)
+    document = timer_edit()
+    document["payload_hex"] = "0401000100012490909090"
+    path = tmp_path / "edit.json"
+    path.write_text(json.dumps(document))
+    result = CliRunner().invoke(app, ["b524", "apply-operation", "--plan", str(path)])
+    assert result.exit_code != 0, result.output
+    assert "must contain exactly" in result.output
+
+
+def test_timer_edit_selector_with_extra_address_field_is_rejected_before_transport(
+    tmp_path, monkeypatch
+):
+    import helianthus_vrc_explorer.commands.b524 as command
+
+    monkeypatch.setattr(command, "_make_transport", lambda **kwargs: 1 / 0)
+    document = timer_edit()
+    document["selector"] = {**document["selector"], "address": 0x01}
+    path = tmp_path / "edit.json"
+    path.write_text(json.dumps(document))
+    result = CliRunner().invoke(app, ["b524", "apply-operation", "--plan", str(path)])
+    assert result.exit_code != 0, result.output
+    assert "must contain exactly" in result.output
+
+
 def test_events_preview_pairs_tables_and_execute_rejects_unqualified_schema(tmp_path, monkeypatch):
     import helianthus_vrc_explorer.commands.b524 as command
 

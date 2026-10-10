@@ -9,6 +9,55 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import Final
+
+from ..protocol.b524_schedules import TIMER_CHANNELS
+
+_TIMER_CHANNEL_BY_REQUEST_SELECTOR: Final[dict[tuple[int, int], str]] = {
+    pair: name for name, pair in TIMER_CHANNELS.items()
+}
+
+
+def _timer_channel_from_request(payload_hex: object) -> str | None:
+    """Derive the OP03 timer channel strictly from its request bytes, if decodable.
+
+    The request bytes (opcode, system_type, instance, address, weekday) are the
+    authoritative identity of a stored timer observation; a selector's stored
+    ``channel`` name can be wrong (0.6.0 swapped two names for the same two
+    addresses). Returns ``None`` when the bytes are missing or do not decode.
+    """
+    if not isinstance(payload_hex, str):
+        return None
+    try:
+        payload = bytes.fromhex(payload_hex)
+    except ValueError:
+        return None
+    if len(payload) != 5 or payload[0] != 0x03:
+        return None
+    return _TIMER_CHANNEL_BY_REQUEST_SELECTOR.get((payload[1], payload[3]))
+
+
+def _corrected_timer_channel(
+    record: Mapping[str, object],
+) -> tuple[str | None, tuple[tuple[str, str], ...]]:
+    """Return the request-bytes-derived channel for a stored OP03 record.
+
+    Also returns provenance evidence: ``channel_source`` always states the
+    basis for the returned channel, and ``stored_channel`` is present only
+    when it disagrees with the originally recorded selector name.
+    """
+    selector = record.get("selector")
+    stored_channel = selector.get("channel") if isinstance(selector, Mapping) else None
+    request_channel = _timer_channel_from_request(record.get("request_payload_hex"))
+    if request_channel is None:
+        return stored_channel, (("channel_source", "stored_selector_unverified"),)
+    if isinstance(stored_channel, str) and stored_channel != request_channel:
+        return request_channel, (
+            ("channel_source", "request_bytes"),
+            ("stored_channel", stored_channel),
+        )
+    return request_channel, (("channel_source", "request_bytes"),)
+
 
 _TITLES = {
     0x03: "OP03 ReadTimer",
@@ -175,6 +224,11 @@ def operation_read_views(artifact: Mapping[str, object]) -> list[OperationReadVi
         selector_obj = selector if isinstance(selector, Mapping) else {}
         if not selector_obj and isinstance(record.get("raw_selector"), Mapping):
             selector_obj = record["raw_selector"]
+        channel_evidence: tuple[tuple[str, str], ...] = ()
+        if opcode == 0x03 and isinstance(selector_obj.get("channel"), str):
+            corrected_channel, channel_evidence = _corrected_timer_channel(record)
+            if corrected_channel is not None:
+                selector_obj = {**selector_obj, "channel": corrected_channel}
         selector_label, selector_key = _selector_parts(selector_obj)
         payload_key = str(record.get("request_payload_hex") or "")
         occurrences[payload_key] = occurrences.get(payload_key, 0) + 1
@@ -201,7 +255,7 @@ def operation_read_views(artifact: Mapping[str, object]) -> list[OperationReadVi
             fields = (("response", "value (undecoded)"),)
         attempts = record.get("request_attempts")
         qualification = str(record.get("decode_qualification") or "unknown")
-        fields = (("decode_qualification", qualification), *fields)
+        fields = (*channel_evidence, ("decode_qualification", qualification), *fields)
         views.append(
             OperationReadView(
                 opcode_hex=f"0x{opcode:02x}",
@@ -253,11 +307,17 @@ def operation_edit_document(
         baseline = source.get("response_raw_hex")
         if not isinstance(baseline, str) or not baseline:
             raise ValueError("timer baseline must contain a raw response")
+        selector_dict = dict(selector)
+        corrected_channel, _evidence = _corrected_timer_channel(source)
+        if corrected_channel is not None:
+            # Keep the exported channel name tied to the same address the
+            # baseline below was actually read from (see _corrected_timer_channel).
+            selector_dict["channel"] = corrected_channel
         return {
             "schema_version": 1,
             "destination_address": destination_address,
             "operation": operation,
-            "selector": dict(selector),
+            "selector": selector_dict,
             "values": list(values),
             "expected_before_raw_hex": [baseline],
         }

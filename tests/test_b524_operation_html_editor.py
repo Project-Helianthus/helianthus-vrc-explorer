@@ -260,6 +260,44 @@ console.log(JSON.stringify({preview, exported}));
     _assert_preview_matches_python(result["preview"], result["exported"])
 
 
+def test_0_6_0_timer_artifact_exports_an_address_consistent_write_plan() -> None:
+    """A 0.6.0-labelled 'ventilation' observation actually addressed 0x01.
+
+    The exported offline edit must target the byte address its baseline was
+    really read from (noise reduction, 0x01), not the one its stale 0.6.0
+    label implies.
+    """
+    selector = {"channel": "ventilation", "instance": 0, "weekday": 0}
+    artifact = {
+        "meta": {"destination_address": "0x15"},
+        "b524_operation_reads": [
+            _record(
+                "0x03",
+                selector,
+                "00002490909090",
+                request_payload_hex=bytes((0x03, 0x00, 0, 0x01, 0)).hex(),
+            )
+        ],
+    }
+    result = _run_editor(
+        artifact,
+        "operation_03",
+        r"""
+byRole(container, "operation-edit-select")[0].click();
+byRole(container, "operation-preview-button")[0].click();
+const preview = JSON.parse(byRole(container, "operation-preview")[0].textContent);
+byRole(container, "operation-export-button")[0].click();
+const exported = JSON.parse(capturedBlob.parts.join(""));
+console.log(JSON.stringify({preview, exported}));
+""",
+    )
+
+    assert result["exported"]["selector"]["channel"] == "noise-reduction"
+    assert result["preview"]["payload_hex"] == "0400000100002490909090"
+    assert result["preview"]["expected_before_raw_hex"] == ["00002490909090"]
+    _assert_preview_matches_python(result["preview"], result["exported"])
+
+
 @pytest.mark.parametrize("destination", [None, True, 256, -1, "invalid"])
 def test_invalid_target_rejects_preview_and_cannot_export(destination) -> None:
     artifact = _artifact()
