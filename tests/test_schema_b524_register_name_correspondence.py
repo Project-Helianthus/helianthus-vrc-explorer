@@ -25,13 +25,22 @@ def _rows() -> list[dict[str, str]]:
 
 
 def test_loader_resolves_a_known_entry_with_split_multi_values() -> None:
-    entry = b524_register_name_correspondence(opcode=0x02, group=0x00, register=0x0016)
+    entry = b524_register_name_correspondence(opcode=0x02, group=0x02, register=0x0002)
     assert entry is not None
-    assert entry.name == "system_ventilation_operating_mode"
-    assert entry.vaillant_name_vrc700 == (
-        "system_vrc700_operating_mode_for_air_ventilation",
-        "ventilations_are_active",
+    assert entry.name == "circuit_mixer_type_external"
+    assert entry.vaillant_name_vrc720 == (
+        "circuit_type",
+        "circuit_type_of_mixed_circuit_external",
     )
+    assert entry.vaillant_name_vrc700 == entry.vaillant_name_vrc720
+
+
+def test_loader_resolves_a_single_name_as_a_one_element_tuple() -> None:
+    entry = b524_register_name_correspondence(opcode=0x02, group=0x02, register=0x0001)
+    assert entry is not None
+    assert entry.name == "circuit_circuit_type"
+    assert entry.vaillant_name_vrc720 == ("circuit_circuit_type",)
+    assert entry.vaillant_name_vrc700 == ("circuit_circuit_type",)
 
 
 def test_loader_returns_none_for_unknown_identity() -> None:
@@ -111,3 +120,73 @@ def test_ebusd_names_are_unique_per_opcode() -> None:
                     f"{seen[key]} and {here}"
                 )
             seen[key] = here
+
+
+_ANNOTATION_COLUMNS = (
+    "vaillant_friendly_name",
+    "vaillant_name_vrc720",
+    "vaillant_name_vrc700",
+    "myvaillant_name_vrc720",
+    "myvaillant_name_vrc700",
+    "ebusd_name",
+)
+
+# A cell lists more than one value only when each value is an observed name
+# of that same register for that column. Every such cell is pinned here, so a
+# regenerated catalog cannot quietly attach the name of a derived value, an
+# aggregate or a composite field to a register again.
+_MULTI_VALUED_CELLS = {
+    (0x02, 0x00, 0x008B, "vaillant_friendly_name"): (
+        "Max Flow Set Point Heat Pump",
+        "Max Flow Set Point Heat Pump CH",
+    ),
+    (0x02, 0x01, 0x0008, "vaillant_friendly_name"): (
+        "Current target flow temperature",
+        "Current target flow temperature heating",
+    ),
+    (0x02, 0x02, 0x0002, "vaillant_name_vrc720"): (
+        "circuit_type",
+        "circuit_type_of_mixed_circuit_external",
+    ),
+    (0x02, 0x02, 0x0002, "vaillant_name_vrc700"): (
+        "circuit_type",
+        "circuit_type_of_mixed_circuit_external",
+    ),
+}
+
+
+def _cell_values(row: dict[str, str], column: str) -> tuple[str, ...]:
+    return tuple(part.strip() for part in (row.get(column) or "").split(" | ") if part.strip())
+
+
+def test_multi_valued_cells_are_exactly_the_pinned_set() -> None:
+    found: dict[tuple[int, int, int, str], tuple[str, ...]] = {}
+    for row in _rows():
+        key = (int(row["opcode"], 0), int(row["group"], 0), int(row["register"], 0))
+        for column in _ANNOTATION_COLUMNS:
+            values = _cell_values(row, column)
+            if len(values) > 1:
+                found[(*key, column)] = values
+    assert found == _MULTI_VALUED_CELLS
+
+
+def test_values_are_not_repeated_within_a_cell() -> None:
+    """Spelling variants of one name are one name, not several."""
+    for row in _rows():
+        for column in _ANNOTATION_COLUMNS:
+            values = _cell_values(row, column)
+            folded = ["".join(ch for ch in value.lower() if ch.isalnum()) for value in values]
+            assert len(set(folded)) == len(folded), (
+                f"{row['opcode']}/{row['group']}/{row['register']} {column}: {values}"
+            )
+
+
+def test_vaillant_names_are_attached_to_one_register_per_family() -> None:
+    for column in ("vaillant_name_vrc720", "vaillant_name_vrc700"):
+        seen: dict[str, tuple[str, str, str]] = {}
+        for row in _rows():
+            key = (row["opcode"], row["group"], row["register"])
+            for value in _cell_values(row, column):
+                assert seen.setdefault(value, key) == key, (
+                    f"{column}: {value!r} is attached to both {seen[value]} and {key}"
+                )

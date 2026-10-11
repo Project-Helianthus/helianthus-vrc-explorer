@@ -18,7 +18,7 @@ opcode,group,register,name,vaillant_friendly_name,vaillant_name_vrc720,vaillant_
 0x02,0x00,0x0013,backup_heater_type,Backup heater type,system_backup_heater_type,system_backup_heater_type,backupHeaterType,,
 0x02,0x00,0x0014,adaptive_heating_curve,Adaptive heating curve,system_adaptive_heating_curve,system_adaptive_heating_curve,,,AdaptHeatCurve
 0x02,0x00,0x0015,automatic_daylight_saving_time,Automatic daylight saving time,,,,,
-0x02,0x00,0x0016,system_ventilation_operating_mode,Operating mode for air ventilation,,system_vrc700_operating_mode_for_air_ventilation | ventilations_are_active,,,
+0x02,0x00,0x0016,system_ventilation_operating_mode,Operating mode for air ventilation,,system_vrc700_operating_mode_for_air_ventilation,,,
 0x02,0x00,0x0017,system_dhw_max_loading_time,Maximum DHW loading time,system_maximum_dhw_loading_time,system_maximum_dhw_loading_time,,domesticHotWaterMaximumLoadingTime,MaxCylinderChargeTime
 0x02,0x00,0x0018,system_dhw_blocking_time,DHW Blocking time,system_dhw_blocking_time,,domesticHotWaterTappingBlockingTime,,HwcLockTime
 0x02,0x00,0x0019,system_solar_flow_rate_setpoint,Set point solar flow rate,,,,,
@@ -71,7 +71,7 @@ opcode,group,register,name,vaillant_friendly_name,vaillant_name_vrc720,vaillant_
 0x02,0x00,0x0054,system_consumption_electricity_dhw_previous_month,Energy consumption Electricity for Dhw at Last month,,,,,PrEnergySumHwcLastMonth
 0x02,0x00,0x0055,system_consumption_fuel_dhw_previous_month,Energy consumption Gas for Dhw at Last month,,,,,PrFuelSumHwcLastMonth
 0x02,0x00,0x0056,system_consumption_fuel_heating_total,Energy consumption Gas for Heating History,,,,,PrFuelSumHc
-0x02,0x00,0x0057,system_consumption_electricity_heating_total,Energy consumption Electricity for Ch History | Energy consumption Electricity for Heating History,,,,,PrEnergySumHc
+0x02,0x00,0x0057,system_consumption_electricity_heating_total,Energy consumption Electricity for Heating History,,,,,PrEnergySumHc
 0x02,0x00,0x0058,system_consumption_electricity_dhw_total,Energy consumption Electricity for Dhw History,,,,,PrEnergySumHwc
 0x02,0x00,0x0059,system_consumption_fuel_dhw_total,Energy consumption Gas for Dhw History,,,,,PrFuelSumHwc
 0x02,0x00,0x005C,system_consumption_electricity_total,Electrical power consumption sum,,,,,PrEnergySum
@@ -226,7 +226,7 @@ opcode,group,register,name,vaillant_friendly_name,vaillant_name_vrc720,vaillant_
 0x02,0x00,0x00FB,heatpump_mss_min_difference,Min difference HP in MSS,,,,,
 0x02,0x00,0x00FC,heatpump_max_flow_dhw_setpoint,Max Flow Set Point Heat Pump DHW,,,,,
 0x02,0x00,0x00FD,boiler_max_flow_setpoint,Max Flow Set Point boiler,,,,,
-0x02,0x01,0x0001,native_dhw_circuit_type,Type of Dhw circuit,nativedhw_is_active | nativedhw_type_of_dhw_circuit,nativedhw_is_active | nativedhw_type_of_dhw_circuit,,,
+0x02,0x01,0x0001,native_dhw_circuit_type,Type of Dhw circuit,nativedhw_type_of_dhw_circuit,nativedhw_type_of_dhw_circuit,,,
 0x02,0x01,0x0002,native_dhw_circulation_pump_status,Status DHW circulation pump,,,,,
 0x02,0x01,0x0003,native_dhw_operation_mode,Operating mode for a DHW circuit,nativedhw_operating_mode_for_a_dhw_circuit,nativedhw_vrc700_operating_mode_for_a_dhw_circuit,,operationModeDomesticHotWater,HwcOpMode
 0x02,0x01,0x0004,native_dhw_tapping_temperature_setpoint,DHW tapping set point,nativedhw_dhw_tapping_set_point,nativedhw_dhw_tapping_set_point,tappingSetPoint,tappingSetpoint,HwcTempDesired
@@ -290,17 +290,17 @@ opcode,group,register,name,vaillant_friendly_name,vaillant_name_vrc720,vaillant_
 0x02,0x03,0x0004,zone_holiday_end_date,Holiday End,zone_holiday_end,zone_holiday_end,,,Zone{zone}HolidayEndPeriod
 0x02,0x03,0x0005,zone_holiday_setpoint,Room temperature set point for holiday,zone_room_temperature_set_point_for_holiday,zone_room_temperature_set_point_for_holiday,,,Zone{zone}HolidayTemp
 0x02,0x03,0x0006,zone_heating_operation_mode,Operating mode heating for a zone,zone_operating_mode_heating_for_a_zone,zone_vrc700_operating_mode_heating_for_a_zone,,,Zone{zone}HeatingOpMode
-0x02,0x03,0x0007,zone_comfort_room_temperature_setpoint_heating,Comfort room temperature set point heating | Holiday End,,zone_vrc700_comfort_room_temperature_set_point_heating,,,
+0x02,0x03,0x0007,zone_comfort_room_temperature_setpoint_heating,Comfort room temperature set point heating,,zone_vrc700_comfort_room_temperature_set_point_heating,,,
 0x02,0x03,0x0008,zone_quick_veto_setpoint,Room temperature set point quick veto,,,,,Zone{zone}QuickVetoTemp
-0x02,0x03,0x0009,zone_setback_room_temperature_setpoint_heating,Holiday Start | Set-back room temperature set point heating,zone_set__back_room_temperature_set_point_heating,zone_set__back_room_temperature_set_point_heating,,,Zone{zone}HeatingSetbackTemp
+0x02,0x03,0x0009,zone_setback_room_temperature_setpoint_heating,Set-back room temperature set point heating,zone_set__back_room_temperature_set_point_heating,zone_set__back_room_temperature_set_point_heating,,,Zone{zone}HeatingSetbackTemp
 0x02,0x03,0x000A,zone_operating_mode_heating_teleswitch,Operating mode heating teleSWITCH for a zone,,,,,
 0x02,0x03,0x000B,zone_operating_mode_cooling_teleswitch,Operating mode cooling teleSWITCH for a zone,,,,,
 0x02,0x03,0x000C,zone_bank_holiday_start,Bank holiday start date,,,,,
 0x02,0x03,0x000D,zone_bank_holiday_end,Bank holiday end date,,,,,
 0x02,0x03,0x000E,zone_quick_mode,Quick Mode,,,,,Zone{zone}SpecialFunction
-0x02,0x03,0x000F,zone_current_measured_temperature,Current measured room temperature,zone_current_measured_room_temperature | zone_current_measured_room_temperature_custom | zone_current_measured_room_temperature_is_visible,zone_current_measured_room_temperature,,currentRoomTemperature,Zone{zone}RoomTemp
+0x02,0x03,0x000F,zone_current_measured_temperature,Current measured room temperature,zone_current_measured_room_temperature,zone_current_measured_room_temperature,,currentRoomTemperature,Zone{zone}RoomTemp
 0x02,0x03,0x0010,zone_schedule_reset_to_default,Reset to default time program,,,,,
-0x02,0x03,0x0011,zone_is_active,Zone enabled,zone_is_active | zones_are_active,zone_is_active | zones_are_active,,,
+0x02,0x03,0x0011,zone_is_active,Zone enabled,zone_is_active,zone_is_active,,,
 0x02,0x03,0x0012,zone_valve_status,Status Zone Valve,,,,,Zone{zone}ValveStatus
 0x02,0x03,0x0013,zone_binding_of_zone,Binding of zone,zone_binding_of_zone,zone_binding_of_zone,,,Zone{zone}AssociatedCircuitIndex
 0x02,0x03,0x0014,zone_heating_setpoint,Displayed wish temperature heating,zone_displayed_wish_temperature_heating,zone_displayed_wish_temperature_heating,desiredRoomTemperatureSetpointHeating,desiredRoomTemperatureSetpointHeating,Zone{zone}HeatingManualSetpoint
@@ -311,18 +311,18 @@ opcode,group,register,name,vaillant_friendly_name,vaillant_name_vrc720,vaillant_
 0x02,0x03,0x0019,zone_heating_schedule_status,Status Zone Period Heating,,,,,Zone{zone}HeatingTimeSlotActive
 0x02,0x03,0x001A,zone_cooling_schedule_status,Status Zone Period Cooling,,,,,Zone{zone}CoolingTimeSlotActive
 0x02,0x03,0x001B,zone_special_function_status,Special function status,zone_special_function_status,zone_special_function_status,,,Zone{zone}Status
-0x02,0x03,0x001C,zone_circuit_for_zone,Circuit for zone,zone_circuit_for_zone | zone_mapping,zone_circuit_for_zone | zone_mapping,,,Zone{zone}Index
-0x02,0x03,0x001D,zone_heating_event_end_time,Event End Time Heating | Event end time heating | EventEndTimeHeating,,,,,
-0x02,0x03,0x001E,zone_quick_veto_end_time,Quick veto end time | QuickVetoEndTime,zone_quick_veto_end_time,,,,Zone{zone}QuickVetoEndTime
+0x02,0x03,0x001C,zone_circuit_for_zone,Circuit for zone,zone_circuit_for_zone,zone_circuit_for_zone,,,Zone{zone}Index
+0x02,0x03,0x001D,zone_heating_event_end_time,Event end time heating,,,,,
+0x02,0x03,0x001E,zone_quick_veto_end_time,Quick veto end time,zone_quick_veto_end_time,,,,Zone{zone}QuickVetoEndTime
 0x02,0x03,0x0020,zone_holiday_end_time,Holiday End Time,zone_holiday_end_time,,,,Zone{zone}HolidayEndTime
 0x02,0x03,0x0021,zone_holiday_start_time,Holiday Start Time,zone_holiday_start_time,,,,Zone{zone}HolidayStartTime
-0x02,0x03,0x0022,zone_heating_manual_setpoint,"Room temperature set point ""Manual"" | Room temperature set point Manual",zone_room_temperature_set_point_manual,,,,Zone{zone}RoomTempDesired
+0x02,0x03,0x0022,zone_heating_manual_setpoint,Room temperature set point Manual,zone_room_temperature_set_point_manual,,,,Zone{zone}RoomTempDesired
 0x02,0x03,0x0023,zone_cooling_manual_setpoint,Room temperature set point cooling Manual,zone_room_temperature_set_point_cooling_manual,,,,Zone{zone}CoolingDesiredSetpoint
 0x02,0x03,0x0024,zone_quick_veto_end_date,Quick veto end date,zone_quick_veto_end_date,,,,Zone{zone}QuickVetoEndDate
 0x02,0x03,0x0025,zone_holiday_abort,Abort Holiday,,,,,
 0x02,0x03,0x0026,zone_quick_veto_duration,Quick Veto set duration and start,,,,,Zone{zone}QuickVetoDuration
 0x02,0x03,0x0027,zone_manual_cooling_is_active_for_zone,Manual cooling is active for Zone,zone_manual_cooling_is_active_for_zone,,,,
-0x02,0x03,0x0028,zone_current_humidity,Current humidity,zone_current_humidity | zone_current_humidity_custom,zone_current_humidity,,currentRoomHumidity,Zone{zone}Humid
+0x02,0x03,0x0028,zone_current_humidity,Current humidity,zone_current_humidity,zone_current_humidity,,currentRoomHumidity,Zone{zone}Humid
 0x02,0x03,0x0029,zone_cooling_allowed,Cooling allowed for the zone,,,,,
 0x02,0x03,0x002A,zone_summer_cutoff_active,Summercutoff active,,,,,
 0x02,0x03,0x002B,zone_continuous_heating_active,Continuous heating active,,,,,
