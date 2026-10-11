@@ -32,7 +32,10 @@ from ..scanner.b524_parameter_writes import (
     recheck_parameter_write,
 )
 from ..scanner.browser_session import BrowserSession, BrowserTransportConfig
+from ..schema.b524_register_name_correspondence import b524_register_name_correspondence
 from ..schema.parameter_descriptions import description_profile, effective_parameter_description
+from .b524_operation_reads import OperationReadView, operation_read_views
+from .browse_detail import DetailSection, node_detail_sections, register_detail_sections
 from .browse_models import BrowseTab, RegisterRow, TreeNodeRef
 from .browse_store import BrowseStore
 from .emphasis import rich_star_bold_text
@@ -65,6 +68,18 @@ else:
 
 _ALLOWED_WATCH_INTERVALS: tuple[float, ...] = (0.25, 0.5, 1.0, 2.0, 5.0)
 _WRITE_MARK = "✎"
+
+# The Browser's register list carries only the operator's own naming scheme and
+# the current value; every other field (eBUSd name, raw bytes, unit, access,
+# descriptions, last update, age, change indicator) moved to the detail panel.
+# The change/write marker is folded into the Value cell so it stays visible
+# without a dedicated column (see RegisterRow.display_label for the name).
+BROWSE_TABLE_COLUMNS: tuple[str, ...] = ("Register", "Value")
+
+# Below this terminal width, three side-by-side panes (tree, list, detail) do
+# not fit; the detail pane is hidden by default and `d` swaps it with the
+# tree pane instead of trying a stacked layout (see the plan's section 3.2).
+_DETAIL_MIN_WIDTH = 110
 
 
 def _fmt_value_text(value: object) -> str:
@@ -173,6 +188,37 @@ def _build_identity_header_renderable(artifact: dict[str, object]) -> Group | No
     for label, value in rows:
         table.add_row(f"{label}:", rich_star_bold_text(value))
     return Group(Text("Scan Identity", style="bold"), table)
+
+
+def _render_detail_sections(sections: tuple[DetailSection, ...]) -> Group:
+    """Render the pure DetailSection model as a Rich Group for #detail-content.
+
+    Mirrors the Table.grid technique already used by
+    `_build_identity_header_renderable`. A section with an empty title (the
+    header / hint sections) renders without a heading line.
+    """
+
+    parts: list[Text | Table] = []
+    for section in sections:
+        if section.title:
+            parts.append(Text(section.title, style="bold cyan"))
+        grid = Table.grid(expand=True, padding=(0, 1))
+        grid.add_column(style="bold", ratio=2)
+        grid.add_column(ratio=3)
+        for row in section.rows:
+            value = row.value
+            if row.note:
+                value = f"{value} ({row.note})" if value else row.note
+            if row.label:
+                grid.add_row(f"{row.label}:", value)
+            else:
+                grid.add_row(value, "")
+        parts.append(grid)
+        if section.note:
+            parts.append(Text(section.note, style="italic"))
+    if not parts:
+        parts.append(Text("Select a register to see its details."))
+    return Group(*parts)
 
 
 @dataclass(slots=True)
@@ -357,6 +403,7 @@ if _TEXTUAL_IMPORT_ERROR is None:
                     "/ search (focused widget) | n/N next/prev match\n"
                     "W watch/unwatch | P pin/unpin | R poll rate\n"
                     "C connect/disconnect | E edit | V read-only write recheck\n"
+                    "D detail panel (narrow terminals: swaps with the tree)\n"
                     "? help | q quit. Offline edits never send to the regulator."
                 ),
             )
@@ -518,6 +565,7 @@ if _TEXTUAL_IMPORT_ERROR is None:
             Binding("e", "edit_selected", "Edit"),
             Binding("c", "connect", "Connect/Disconnect"),
             Binding("v", "recheck", "Recheck write"),
+            Binding("d", "toggle_detail", "Detail"),
             Binding("q", "quit", "Quit"),
             Binding("escape", "close_dialog", "Back"),
         ]
@@ -538,12 +586,20 @@ if _TEXTUAL_IMPORT_ERROR is None:
             height: 1fr;
         }
         #tree-pane {
-            width: 35%;
+            width: 24%;
             border: round #729fcf;
         }
         #right-pane {
-            width: 65%;
+            width: 1fr;
             border: round #729fcf;
+        }
+        #detail-pane {
+            width: 38;
+            min-width: 34;
+            border: round #729fcf;
+        }
+        #detail-pane:focus-within {
+            border: round #fce94f;
         }
         #watch-dock {
             height: 5;
@@ -570,8 +626,13 @@ if _TEXTUAL_IMPORT_ERROR is None:
             self._store = store if store is not None else _hydrate_browse_store(artifact)
             self._node_by_id = {node.node_id: node for node in self._store.tree_nodes}
             self._tree_node_by_ref: dict[str, Any] = {}
-            self._focus_order = ["tree", "tabs", "table", "watch"]
+            self._focus_order = ["tree", "tabs", "table", "detail", "watch"]
             self._focus_idx = 0
+            self._narrow = False
+            self._detail_visible = True
+            self._layout_initialized = False
+            self._detail_cache_key: object = None
+            self._operation_views_cache: list[OperationReadView] | None = None
             self._selected_node_id = "root"
             self._active_tab: BrowseTab = "config"
             self._table_rows: list[RegisterRow] = []
@@ -618,6 +679,8 @@ if _TEXTUAL_IMPORT_ERROR is None:
                         id="browse-tabs",
                     )
                     yield DataTable(id="browse-table")
+                with VerticalScroll(id="detail-pane"):
+                    yield Static("", id="detail-content")
             yield _FocusableStatic("Watchlist: reserved for P1 (watch/pin)", id="watch-dock")
             yield Static("", id="status")
             yield Footer()
@@ -626,26 +689,47 @@ if _TEXTUAL_IMPORT_ERROR is None:
             self._ui_thread_id = get_ident()
             table = self.query_one("#browse-table", DataTable)
             table.cursor_type = "row"
-            table.add_columns(
-                "Register",
-                "eBUSd",
-                "Value",
-                "Raw",
-                "Unit",
-                "FLAGS Access",
-                "Descriptions",
-                "Last Update",
-                "Age",
-                "Δ",
-            )
+            table.add_columns(*BROWSE_TABLE_COLUMNS)
             self._build_tree()
             self._refresh_table()
             self._render_watch_dock()
+            self._apply_layout_mode(self.size.width)
             self.set_interval(0.2, self._on_watch_tick)
             self._set_status("Ready")
             self._focus_tree()
             if self._connection_settings is not None:
                 self._begin_connect(self._connection_settings)
+
+        def on_resize(self, event: Any) -> None:
+            size = getattr(event, "size", None)
+            width = size.width if size is not None else self.size.width
+            self._apply_layout_mode(width)
+
+        def _apply_layout_mode(self, width: int) -> None:
+            self._narrow = width < _DETAIL_MIN_WIDTH
+            if not self._layout_initialized:
+                # First-ever layout pass: default the detail pane to visible
+                # in wide mode and hidden in narrow mode. After this, `d`
+                # (action_toggle_detail) owns _detail_visible exclusively;
+                # a later resize never silently overrides the operator's
+                # own toggle.
+                self._detail_visible = not self._narrow
+                self._layout_initialized = True
+            try:
+                detail_pane = self.query_one("#detail-pane")
+                tree_pane = self.query_one("#tree-pane")
+            except Exception:
+                return
+            if self._narrow:
+                detail_pane.display = self._detail_visible
+                tree_pane.display = not self._detail_visible
+            else:
+                detail_pane.display = self._detail_visible
+                tree_pane.display = True
+
+        def action_toggle_detail(self) -> None:
+            self._detail_visible = not self._detail_visible
+            self._apply_layout_mode(self.size.width)
 
         def on_key(self, event: Key) -> None:
             if event.key not in {"enter", "ctrl+j", "ctrl+m"}:
@@ -802,7 +886,6 @@ if _TEXTUAL_IMPORT_ERROR is None:
                 self._table_rows = self._store.rows_for_selection(selected, tab=self._active_tab)
             cursor = max(0, table.cursor_row)
             table.clear(columns=False)
-            now = monotonic()
             for row in self._table_rows:
                 watch = self._watch.get(row.row_id)
                 value_text = watch.current_value if watch else row.value_text
@@ -821,9 +904,6 @@ if _TEXTUAL_IMPORT_ERROR is None:
                     preview = entry.get("local_edit_preview")
                     if isinstance(preview, dict):
                         value_text += f" → {preview.get('value')} [offline preview]"
-                raw_hex = watch.current_raw if watch else row.raw_hex
-                last_update_text = watch.last_poll_text if watch else row.last_update_text
-                age_text = f"{max(0.0, now - watch.last_poll_at):.1f}s" if watch else row.age_text
                 change_indicator = watch.change_indicator if watch else row.change_indicator
                 if row.row_id in self._written_at:
                     if change_indicator.startswith(_WRITE_MARK):
@@ -832,17 +912,11 @@ if _TEXTUAL_IMPORT_ERROR is None:
                         change_indicator = _WRITE_MARK
                     else:
                         change_indicator = f"{_WRITE_MARK}{change_indicator}"
+                marker = "" if change_indicator == "-" else change_indicator
+                value_cell = f"{value_text} {marker}".rstrip()
                 table.add_row(
                     row.display_label,
-                    row.ebusd_name or "—",
-                    value_text,
-                    raw_hex,
-                    row.unit,
-                    row.access_flags,
-                    row.description_text,
-                    last_update_text,
-                    age_text,
-                    change_indicator,
+                    value_cell,
                     key=row.row_id,
                 )
             if self._table_rows:
@@ -852,6 +926,80 @@ if _TEXTUAL_IMPORT_ERROR is None:
                 f"Namespace: {self._selection_namespace_label(selected)} | Tab: {self._active_tab}"
             )
             self._set_status(status_text)
+            self._refresh_detail()
+
+        def _operation_views(self) -> list[OperationReadView]:
+            if self._operation_views_cache is None:
+                self._operation_views_cache = operation_read_views(self._artifact)
+            return self._operation_views_cache
+
+        def _operation_view_for_row(self, row: RegisterRow) -> OperationReadView | None:
+            if row.group_key is None or row.namespace_key is None:
+                return None
+            for view in self._operation_views():
+                selector_id = (
+                    f"b524:operation:{view.opcode_hex}:{view.request_payload_hex}:"
+                    f"{view.selector_key}"
+                )
+                if selector_id == row.group_key and view.opcode_hex == row.namespace_key:
+                    return view
+            return None
+
+        def _correspondence_for_row(self, row: RegisterRow) -> Any:
+            try:
+                opcode = int(row.address.read_opcode or "0", 0)
+                group = int(row.group_key or "0", 0)
+                register = int(row.register_key, 0)
+            except ValueError:
+                return None
+            return b524_register_name_correspondence(opcode=opcode, group=group, register=register)
+
+        def _safe_effective_description(self, row: RegisterRow) -> dict[str, Any] | None:
+            try:
+                return self._effective_description(row)
+            except ValueError:
+                return None
+
+        def _entry_for_detail(self, row: RegisterRow) -> dict[str, Any] | None:
+            # A just-read live edit context carries the freshest access,
+            # baseline and limits for the row currently being edited; render
+            # those instead of the stale entry so the panel matches what the
+            # modal is about to show (see _finish_live_edit_context).
+            if self._live_edit_context is not None and self._editing_row_id == row.row_id:
+                return self._live_edit_context.entry
+            return self._entry_for_row(row)
+
+        def _refresh_detail(self) -> None:
+            try:
+                content = self.query_one("#detail-content", Static)
+            except Exception:
+                return
+            row = self._selected_table_row()
+            if row is None:
+                row_count = len(self._table_rows)
+                sections = node_detail_sections(self._current_node(), row_count=row_count)
+            else:
+                operation_view = self._operation_view_for_row(row)
+                entry = self._entry_for_detail(row)
+                description = (
+                    None if operation_view is not None else self._safe_effective_description(row)
+                )
+                correspondence = (
+                    None if operation_view is not None else self._correspondence_for_row(row)
+                )
+                sections = register_detail_sections(
+                    row=row,
+                    entry=entry,
+                    description=description,
+                    correspondence=correspondence,
+                    operation_view=operation_view,
+                )
+            content.update(_render_detail_sections(sections))
+
+        def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+            if event.data_table.id != "browse-table":
+                return
+            self._refresh_detail()
 
         def _allowed_tabs_for_selection(self, node: TreeNodeRef | None) -> tuple[BrowseTab, ...]:
             if node is None:
@@ -940,19 +1088,23 @@ if _TEXTUAL_IMPORT_ERROR is None:
 
         def _focus_tree(self) -> None:
             self.query_one("#browse-tree", Tree).focus()
-            self._focus_idx = 0
+            self._focus_idx = self._focus_order.index("tree")
 
         def _focus_tabs(self) -> None:
             self.query_one("#browse-tabs", Tabs).focus()
-            self._focus_idx = 1
+            self._focus_idx = self._focus_order.index("tabs")
 
         def _focus_table(self) -> None:
             self.query_one("#browse-table", DataTable).focus()
-            self._focus_idx = 2
+            self._focus_idx = self._focus_order.index("table")
+
+        def _focus_detail(self) -> None:
+            self.query_one("#detail-pane").focus()
+            self._focus_idx = self._focus_order.index("detail")
 
         def _focus_watch(self) -> None:
             self.query_one("#watch-dock", Static).focus()
-            self._focus_idx = 3
+            self._focus_idx = self._focus_order.index("watch")
 
         def _focus_by_index(self) -> None:
             match self._focus_order[self._focus_idx]:
@@ -962,6 +1114,8 @@ if _TEXTUAL_IMPORT_ERROR is None:
                     self._focus_tabs()
                 case "table":
                     self._focus_table()
+                case "detail":
+                    self._focus_detail()
                 case _:
                     self._focus_watch()
 
@@ -2100,18 +2254,17 @@ if _TEXTUAL_IMPORT_ERROR is None:
 
         def _preview_operation_export(self, row: RegisterRow) -> None:
             from ..scanner.b524_operation_edit import build_operation_edit_preview
-            from .b524_operation_reads import operation_edit_export
+            from .b524_operation_reads import (
+                OPERATION_EXPORT_BY_SECTION,
+                operation_edit_export,
+            )
 
             reads = self._artifact.get("b524_operation_reads")
             if not isinstance(reads, list):
                 self._set_status("No operation reads available for offline export.")
                 return
             records = [record for record in reads if isinstance(record, dict)]
-            operation = {
-                "operation_03": "WriteTimer",
-                "operation_09": "SetEvent",
-                "operation_0b": "SetEventSetPoint",
-            }.get(row.section_key or "")
+            operation = OPERATION_EXPORT_BY_SECTION.get(row.section_key or "")
             if operation is None:
                 self._set_status("OP08 has no editable operation export.")
                 return
