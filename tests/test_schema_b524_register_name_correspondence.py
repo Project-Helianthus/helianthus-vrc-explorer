@@ -156,7 +156,22 @@ _MULTI_VALUED_CELLS = {
 
 
 def _cell_values(row: dict[str, str], column: str) -> tuple[str, ...]:
-    return tuple(part.strip() for part in (row.get(column) or "").split(" | ") if part.strip())
+    cell = row.get(column) or ""
+    return tuple(cell.split(" | ")) if cell else ()
+
+
+def test_cells_use_only_the_canonical_separator() -> None:
+    """Values are separated by exactly " | ", the only form the loader splits.
+
+    Any other use of the pipe character would make a multi-valued cell load as
+    one value and slip past the checks below, so it is rejected outright.
+    """
+    for row in _rows():
+        for column in _ANNOTATION_COLUMNS:
+            for value in _cell_values(row, column):
+                where = f"{row['opcode']}/{row['group']}/{row['register']} {column}"
+                assert "|" not in value, f"{where}: non-canonical separator in {row[column]!r}"
+                assert value and value == value.strip(), f"{where}: malformed value"
 
 
 def test_multi_valued_cells_are_exactly_the_pinned_set() -> None:
@@ -171,7 +186,11 @@ def test_multi_valued_cells_are_exactly_the_pinned_set() -> None:
 
 
 def test_values_are_not_repeated_within_a_cell() -> None:
-    """Spelling variants of one name are one name, not several."""
+    """Each name is recorded once, in one spelling.
+
+    Values that differ only in letter case, spacing or punctuation are the
+    same name, not separate values.
+    """
     for row in _rows():
         for column in _ANNOTATION_COLUMNS:
             values = _cell_values(row, column)
@@ -183,10 +202,14 @@ def test_values_are_not_repeated_within_a_cell() -> None:
 
 def test_vaillant_names_are_attached_to_one_register_per_family() -> None:
     for column in ("vaillant_name_vrc720", "vaillant_name_vrc700"):
-        seen: dict[str, tuple[str, str, str]] = {}
+        # Partitioned by opcode: OP02 and OP06 are independent namespaces, so
+        # the same name may be recorded once in each.
+        seen: dict[tuple[str, str], tuple[str, str]] = {}
         for row in _rows():
-            key = (row["opcode"], row["group"], row["register"])
+            here = (row["group"], row["register"])
             for value in _cell_values(row, column):
-                assert seen.setdefault(value, key) == key, (
-                    f"{column}: {value!r} is attached to both {seen[value]} and {key}"
+                key = (row["opcode"], value)
+                assert seen.setdefault(key, here) == here, (
+                    f"{column}: {value!r} (opcode {row['opcode']}) is attached to both "
+                    f"{seen[key]} and {here}"
                 )
