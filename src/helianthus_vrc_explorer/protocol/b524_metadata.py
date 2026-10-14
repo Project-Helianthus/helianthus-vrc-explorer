@@ -100,6 +100,7 @@ def decode_parameter_description(
     instance: int,
     register: int,
     type_spec: str,
+    codec_provenance: str = "selector_qualified",
 ) -> dict[str, Any]:
     """Decode a transport-normalized GG/RR16 + MIN/MAX/STEP response.
 
@@ -141,24 +142,33 @@ def decode_parameter_description(
         not isinstance(lower, (int, float)) or not isinstance(upper, (int, float)) or lower > upper
     ):
         raise ValueError("Description has inconsistent limits")
+    if codec_provenance not in {"selector_qualified", "length_inferred"}:
+        raise ValueError("Unsupported description codec provenance")
+    qualified = codec_provenance == "selector_qualified"
     return {
-        "qualification": "matched",
+        "qualification": "matched" if qualified else "unqualified",
         "description_opcode": f"0x{opcode:02x}",
         "read_opcode": "0x02" if opcode == 1 else "0x06",
         "group": f"0x{group:02x}",
         "instance": f"0x{instance:02x}",
         "register": f"0x{register:04x}",
         "type": normalized,
+        "codec_provenance": codec_provenance,
         "width": width,
         "min": lower,
         "max": upper,
         "step": step,
         "step_raw_hex": spans[2].hex(),
         "step_qualification": "unknown" if step is None else "decoded",
-        "validation_scope": "format_and_range" if step is None else "format_range_and_step",
+        "validation_scope": (
+            "raw_evidence_only"
+            if not qualified
+            else ("format_and_range" if step is None else "format_range_and_step")
+        ),
         "reply_hex": response.hex(),
         "source": "complete_description",
         "decoder_revision": "b524-description/v2",
+        **({"reason": "parameter codec was inferred from payload length"} if not qualified else {}),
     }
 
 
@@ -174,6 +184,8 @@ def validate_parameter_edit(
         "matched",
         "profile_qualified",
     }:
+        return "unvalidated"
+    if description.get("codec_provenance") != "selector_qualified":
         return "unvalidated"
     if description.get("type") != type_spec.strip().upper():
         return "Description format does not match the parameter codec"

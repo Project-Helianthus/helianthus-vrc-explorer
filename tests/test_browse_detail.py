@@ -165,6 +165,34 @@ def test_limits_section_shows_catalog_evidence_as_unqualified() -> None:
     assert "unqualified" in text.lower()
 
 
+def test_unknown_register_shows_fallback_name_flags_and_raw_unqualified_description() -> None:
+    row = _row(register_key="0x0075", myvaillant_name="")
+    entry = {
+        "type": "UCH",
+        "raw_hex": "00",
+        "flags": 0,
+        "flags_access": "read_only_not_visible",
+        "parameter_description": {
+            "qualification": "matched",
+            "codec_provenance": "length_inferred",
+            "reply_hex": "007500000101",
+            "type": "UCH",
+            "min": 0,
+            "max": 1,
+            "step": 1,
+        },
+    }
+    sections = register_detail_sections(row=row, entry=entry, description=None)
+    header = _section(sections, "")
+    limits = _section(sections, "LIMITS")
+    flags = _section(sections, "FLAGS")
+    gates = _section(sections, "GATES")
+    assert header is not None and header.rows[0].value == "0x0075"
+    assert limits is not None and "raw_description_evidence" in limits.rows[0].note
+    assert flags is not None and "0 → read_only_not_visible" in flags.rows[0].value
+    assert gates is not None and any(row.value == "unqualified" for row in gates.rows)
+
+
 def test_flags_section_splits_access_into_two_facets() -> None:
     row = _row()
     entry = {"type": "UCH", "raw_hex": "02", "flags": 3, "flags_access": "writable_visible"}

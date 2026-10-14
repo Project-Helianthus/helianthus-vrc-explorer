@@ -15,10 +15,11 @@ wire-qualified semantic contract.
 `src/helianthus_vrc_explorer/data/b524_parameter_descriptions.json` is the
 profile-qualified, read-only description baseline. Each entry is keyed by native
 read opcode, group, instance and register, so same-numbered OP02 and OP06 groups
-remain distinct. It stores only decoded type, width and limits plus the identity
-needed to qualify that prior observation; it never stores endpoints, serials or
-raw request/reply captures. Remote entries require their observed device class
-and firmware identity before they can be reused.
+remain distinct. It stores decoded type, width and limits, the raw sanitized
+Describe reply, codec provenance, and the identity needed to qualify that prior
+observation. It never stores endpoints, serials, current values, or full scan
+captures. Remote entries require their observed device class and firmware
+identity before they can be reused.
 
 `src/helianthus_vrc_explorer/data/b524_register_name_correspondence.csv` is a
 purely presentational cross-reference, keyed by `(opcode, group, register)`,

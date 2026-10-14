@@ -18,6 +18,7 @@ Nothing here writes to the artifact.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
@@ -538,6 +539,14 @@ def register_detail_sections(
 
     if operation_view is not None:
         return _operation_detail_sections(row, operation_view)
+
+    if description is None and isinstance(entry, dict):
+        observed = entry.get("parameter_description")
+        if isinstance(observed, dict):
+            description = deepcopy(observed)
+            if description.get("codec_provenance") != "selector_qualified":
+                description["qualification"] = "unqualified"
+                description["source"] = "raw_description_evidence"
 
     # A missing entry only signals an anomaly for a B524 row (every B524
     # register is supposed to resolve through the operations/groups/

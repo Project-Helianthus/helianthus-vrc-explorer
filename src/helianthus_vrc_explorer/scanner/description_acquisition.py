@@ -265,6 +265,7 @@ def acquire_descriptions(
                 instance=candidate.instance,
                 register=candidate.register,
                 type_spec=candidate.type_spec,
+                codec_provenance=candidate.codec_provenance,
             )
         except TransportRecoveryExhausted as exc:
             attempts = (

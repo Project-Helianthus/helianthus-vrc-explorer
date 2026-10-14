@@ -2532,7 +2532,8 @@ __ARTIFACT_JSON__
               if (description && typeof description === "object") {
                 const descriptionEl = document.createElement("div");
                 descriptionEl.className = "cell-raw";
-                if (description.qualification === "matched") {
+                const codecQualified = !description.codec_provenance || description.codec_provenance === "selector_qualified";
+                if (description.qualification === "matched" && codecQualified) {
                   const step = description.step_qualification === "unknown"
                     ? "unknown"
                     : formatValue(description.step);
@@ -2540,6 +2541,17 @@ __ARTIFACT_JSON__
                     ? description.type
                     : "unknown";
                   descriptionEl.textContent = `Describe: min=${formatValue(description.min)}, max=${formatValue(description.max)}, step=${step}, ${codec}`;
+                } else if (description.reply_hex) {
+                  const step = description.step_qualification === "unknown"
+                    ? "unknown"
+                    : formatValue(description.step);
+                  const codec = typeof description.type === "string" && description.type
+                    ? description.type
+                    : "unknown";
+                  const provenance = typeof description.codec_provenance === "string"
+                    ? description.codec_provenance
+                    : "legacy_unknown";
+                  descriptionEl.textContent = `Describe raw evidence (unqualified): min=${formatValue(description.min)}, max=${formatValue(description.max)}, step=${step}, ${codec}, provenance=${provenance}.`;
                 } else {
                   if (!(selectedType && selectedType.startsWith("STR:"))) {
                     const reason = typeof description.reason === "string" ? `: ${description.reason}` : "";

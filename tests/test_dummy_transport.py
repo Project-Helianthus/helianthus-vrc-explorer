@@ -602,7 +602,10 @@ def test_current_artifact_round_trip_preserves_writable_and_unavailable_metadata
     assert transport.send(0x15, build_register_read_payload(2, 0, 0, 3)) == b"\x00"
     artifact = scan_b524(transport, dst=0x15)
     regs = artifact["operations"]["0x02"]["groups"]["0x00"]["instances"]["0x00"]["registers"]
-    assert regs["0x0001"]["parameter_description"]["qualification"] == "matched"
+    observed = regs["0x0001"]["parameter_description"]
+    assert observed["qualification"] == "unqualified"
+    assert observed["codec_provenance"] == "length_inferred"
+    assert observed["reply_hex"] == reply.hex()
     assert regs["0x0001"]["flags"] == 3
     assert regs["0x0002"]["parameter_description"]["qualification"] == "unavailable"
     # A second generated artifact, including absent/status/timeout entries, also loads.

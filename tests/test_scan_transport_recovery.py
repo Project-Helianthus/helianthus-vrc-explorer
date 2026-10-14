@@ -81,11 +81,15 @@ def test_description_outage_retains_previous_description_and_remaining_candidate
     assert artifact["meta"]["incomplete_reason"] == "transport_recovery_exhausted"
     coverage = artifact["meta"]["parameter_description_coverage"]
     assert coverage["eligible"] == 3
-    assert coverage["matched"] == 1
+    assert coverage["matched"] == 0
+    assert coverage["unqualified"] == 1
     assert coverage["attempted"] == 2
     assert coverage["not_attempted"] == 1
     registers = artifact["operations"]["0x02"]["groups"]["0x00"]["instances"]["0x00"]["registers"]
-    assert registers["0x0000"]["parameter_description"]["qualification"] == "matched"
+    retained = registers["0x0000"]["parameter_description"]
+    assert retained["qualification"] == "unqualified"
+    assert retained["codec_provenance"] == "length_inferred"
+    assert retained["reply_hex"] == "000000000064000100"
     assert "socket_error" in registers["0x0001"]["parameter_description"]["reason"]
     assert registers["0x0002"]["parameter_description"]["request_attempted"] is False
 

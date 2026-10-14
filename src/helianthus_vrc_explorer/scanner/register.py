@@ -55,6 +55,7 @@ class RegisterEntry(TypedDict):
     candidate_name: NotRequired[str]
     candidate_evidence: NotRequired[str]
     codec_evidence: NotRequired[dict[str, object]]
+    codec_provenance: NotRequired[Literal["selector_qualified", "length_inferred"]]
     flags: int | None
     # Profile-scoped attribute hints; never role or persistence semantics.
     reply_kind: str | None
@@ -260,6 +261,21 @@ def namespace_availability_contract(
             probe_type_hint="UCH",
             positive_when="readable header provides inventory evidence only",
             description="No attached-device predicate is qualified for this namespace.",
+        )
+
+    if group == 0x09 and opcode == 0x02 and presence_profile == "basv0_sw0217_hw8803_api1":
+        return NamespaceAvailabilityContract(
+            source="heuristic_probe",
+            namespace_relationship=relationship,
+            probe_register=0x0001,
+            probe_type_hint="UIN",
+            positive_when=(
+                "no positive presence predicate is qualified for the observed two-byte value"
+            ),
+            description=(
+                "BASV0/SW0217 RR=0x0001 has a two-byte value. A decoded zero is "
+                "retained as unknown availability and does not establish an installed slot."
+            ),
         )
 
     if group in {0x09, 0x0A} and opcode == 0x02:
@@ -713,6 +729,7 @@ def read_register(
                 "myvaillant_name": None,
                 "raw_hex": raw_hex,
                 "type": type_hint,
+                "codec_provenance": "selector_qualified",
                 "value": value,
                 "error": None,
             }
@@ -737,6 +754,7 @@ def read_register(
                 "myvaillant_name": None,
                 "raw_hex": raw_hex,
                 "type": type_hint,
+                "codec_provenance": "selector_qualified",
                 "value": None,
                 "error": f"parse_error: {exc}",
             }
@@ -754,6 +772,7 @@ def read_register(
         "myvaillant_name": None,
         "raw_hex": raw_hex,
         "type": inferred_type,
+        "codec_provenance": "length_inferred",
         "value": inferred_value,
         "error": inferred_error,
     }
@@ -936,6 +955,12 @@ def probe_instance_availability(
             contract=contract,
             evidence=header_evidence,
         )
+
+    if group == 0x09 and opcode == 0x02 and presence_profile == "basv0_sw0217_hw8803_api1":
+        if entry.get("flags_access") == "absent":
+            return InstanceAvailabilityProbe(present=False, contract=contract, evidence=entry)
+        entry["availability_qualification"] = "unknown"
+        return InstanceAvailabilityProbe(present=False, contract=contract, evidence=entry)
 
     if group in {0x09, 0x0A} and opcode == 0x02:
         present = entry["error"] is None and entry.get("flags_access") != "absent"

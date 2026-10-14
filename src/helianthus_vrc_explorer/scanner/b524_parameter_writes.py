@@ -262,6 +262,8 @@ def _validate_description(
     result = _copy_mapping(description, name="description")
     if result.get("qualification") not in {"matched", "profile_qualified"}:
         raise ValueError("parameter description is not live or exact-profile qualified")
+    if result.get("codec_provenance") != "selector_qualified":
+        raise ValueError("parameter description codec is not selector-qualified")
     if result.get("qualification") == "profile_qualified" or result.get("source") == "profile":
         profile_id = profile.get("profile_id")
         if not isinstance(profile_id, str) or not profile_id.strip():

@@ -10,6 +10,12 @@ import pytest
 from helianthus_vrc_explorer.ui.html_report import render_html_report
 
 
+def test_html_labels_inferred_description_as_raw_unqualified_evidence() -> None:
+    html = render_html_report({})
+    assert "Describe raw evidence (unqualified)" in html
+    assert 'description.codec_provenance === "selector_qualified"' in html
+
+
 def test_generated_html_hti_override_decodes_numeric_bytes() -> None:
     node = shutil.which("node")
     if node is None:

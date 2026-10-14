@@ -49,6 +49,7 @@ TARGET = B524ParameterTarget(
 def _description(*, step: int | None = 1) -> dict[str, object]:
     return {
         "qualification": "matched",
+        "codec_provenance": "selector_qualified",
         "description_opcode": "0x01",
         "read_opcode": "0x02",
         "group": "0x02",

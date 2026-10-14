@@ -636,6 +636,7 @@ def probe_parameter_description(
     instance: int,
     register: int,
     type_spec: str | None,
+    codec_provenance: str = "selector_qualified",
 ) -> dict[str, Any]:
     if opcode not in {2, 6}:
         raise ValueError("Description read opcode must be 0x02 or 0x06")
@@ -699,6 +700,7 @@ def probe_parameter_description(
                 instance=instance,
                 register=register,
                 type_spec=normalized_type,
+                codec_provenance=codec_provenance,
             )
         )
     except TransportRecoveryExhausted as exc:

@@ -541,6 +541,11 @@ def _decode_register_read_entry(
     entry["raw_hex"] = raw_hex
     inferred_type, inferred_value, _ = _parse_inferred_value(value_bytes)
     entry["type"] = inferred_type
+    # Replay artifacts have only the observed payload width here.  Preserve
+    # that evidence boundary so a later Description reply cannot turn a
+    # length guess into a write-validation codec.
+    if inferred_type is not None:
+        entry["codec_provenance"] = "length_inferred"
     entry["value"] = inferred_value
     sentinel_display = _sentinel_value_display(
         value=inferred_value,
@@ -964,6 +969,7 @@ def replay_trace_to_artifact(trace_path: Path) -> dict[str, Any]:
                 instance=instance,
                 register=register,
                 type_spec=type_spec,
+                codec_provenance=str(target.get("codec_provenance", "length_inferred")),
             )
         except ValueError as exc:
             observation["reason"] = str(exc)
@@ -972,7 +978,7 @@ def replay_trace_to_artifact(trace_path: Path) -> dict[str, Any]:
         description["trace_seq"] = exchange.seq
         description["trace_reply_hex"] = response.hex()
         target["parameter_description"] = description
-        observation["qualification"] = "matched"
+        observation["qualification"] = description["qualification"]
         observation["type"] = description["type"]
         b524_operations["parameter_descriptions"].append(observation)
 

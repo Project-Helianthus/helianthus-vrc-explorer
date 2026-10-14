@@ -341,7 +341,7 @@ class DummyTransport(TransportInterface):
         opcodes: tuple[int, ...],
         register_value: dict[str, Any],
     ) -> None:
-        """Load a qualified normalized description from a fixture register."""
+        """Load an observed description reply from a fixture register."""
         raw_description = register_value.get("parameter_description")
         if not isinstance(raw_description, dict):
             # Older hand-authored fixtures nested the same normalized object.
@@ -352,7 +352,8 @@ class DummyTransport(TransportInterface):
         if not isinstance(raw_description, dict):
             return
 
-        if raw_description.get("qualification") != "matched":
+        qualification = raw_description.get("qualification")
+        if qualification not in {"matched", "unqualified"}:
             # Missing/unsupported/budget-limited metadata is normal in partial scans.
             # Keep the scalar evidence without inventing a description response.
             return
@@ -379,6 +380,22 @@ class DummyTransport(TransportInterface):
             instance=instance,
             register=register,
         )
+
+        if qualification == "unqualified":
+            # An imported scan may retain an exact Description reply while its
+            # scalar codec remains only length inferred. Replay those bytes as
+            # evidence; the next scan will keep the description unqualified.
+            reply_hex = raw_description.get("reply_hex")
+            if not isinstance(reply_hex, str):
+                return
+            try:
+                response = bytes.fromhex(reply_hex)
+            except ValueError as exc:
+                raise ValueError("Parameter description reply_hex must be hexadecimal") from exc
+            if response[:3] != bytes((group,)) + register.to_bytes(2, byteorder="little"):
+                raise ValueError("Parameter description reply_hex identity does not match fixture")
+            self._parameter_descriptions[(read_opcode, group, instance, register)] = response
+            return
 
         type_spec = raw_description.get("type")
         entry_type = register_value.get("type")

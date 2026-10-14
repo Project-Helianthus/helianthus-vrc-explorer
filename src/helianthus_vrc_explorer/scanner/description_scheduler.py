@@ -23,6 +23,7 @@ class DescriptionCandidate:
     instance: int
     register: int
     type_spec: str | None
+    codec_provenance: str = "selector_qualified"
 
     def __post_init__(self) -> None:
         if self.read_opcode not in _DESCRIPTION_FAMILIES:
@@ -35,6 +36,8 @@ class DescriptionCandidate:
             raise ValueError("register must be an unsigned 16-bit integer")
         if self.type_spec is not None and not self.type_spec.strip():
             raise ValueError("type_spec must be a non-empty string or None")
+        if self.codec_provenance not in {"selector_qualified", "length_inferred"}:
+            raise ValueError("codec_provenance must be selector_qualified or length_inferred")
 
     @property
     def native_identity(self) -> tuple[int, int, int, int]:
@@ -83,9 +86,13 @@ def _deduplicate_candidates(
         type_spec = (
             next(iter(known_codecs)) if len(known_codecs) == 1 and not has_unknown_codec else None
         )
+        provenances = {candidate.codec_provenance for candidate in duplicates}
+        codec_provenance = next(iter(provenances)) if len(provenances) == 1 else "length_inferred"
         read_opcode, group, instance, register = identity
         families[read_opcode].append(
-            DescriptionCandidate(read_opcode, group, instance, register, type_spec)
+            DescriptionCandidate(
+                read_opcode, group, instance, register, type_spec, codec_provenance
+            )
         )
     return families
 

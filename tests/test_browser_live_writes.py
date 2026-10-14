@@ -113,6 +113,7 @@ def _artifact(*, complete_limits: bool = True) -> dict:
     ]
     target["parameter_description"] = {
         "qualification": "matched",
+        "codec_provenance": "selector_qualified",
         "description_opcode": "0x01",
         **selector,
         "type": "UCH",
