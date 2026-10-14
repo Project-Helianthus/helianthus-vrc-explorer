@@ -1101,13 +1101,14 @@ def test_replay_trace_reconstructs_system_information_and_complete_descriptions(
         "registers"
     ]["0x0005"]
     assert system_entry["parameter_description"] == {
-        "qualification": "matched",
+        "qualification": "unqualified",
         "description_opcode": "0x01",
         "read_opcode": "0x02",
         "group": "0x02",
         "instance": "0x00",
         "register": "0x0005",
         "type": "UIN",
+        "codec_provenance": "length_inferred",
         "width": 2,
         "min": 0,
         "max": 10,
@@ -1117,7 +1118,8 @@ def test_replay_trace_reconstructs_system_information_and_complete_descriptions(
         "decoder_revision": "b524-description/v2",
         "step_raw_hex": "0200",
         "step_qualification": "decoded",
-        "validation_scope": "format_range_and_step",
+        "validation_scope": "raw_evidence_only",
+        "reason": "parameter codec was inferred from payload length",
         "trace_seq": 3,
         "trace_reply_hex": "02050000000a000200",
     }
@@ -1129,6 +1131,8 @@ def test_replay_trace_reconstructs_system_information_and_complete_descriptions(
     assert device_entry["parameter_description"]["read_opcode"] == "0x06"
     assert device_entry["parameter_description"]["type"] == "UCH"
     assert device_entry["parameter_description"]["max"] == 10
+    assert device_entry["parameter_description"]["qualification"] == "unqualified"
+    assert device_entry["parameter_description"]["codec_provenance"] == "length_inferred"
 
     legacy = artifact["b524_operations"]["register_constraints"]
     assert legacy == [

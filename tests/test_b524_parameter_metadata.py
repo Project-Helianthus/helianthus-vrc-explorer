@@ -315,7 +315,8 @@ def test_default_scan_keeps_system_information_separate_and_targets_writable_des
         "0x09",
     ]
     entry = group["instances"]["0x02"]["registers"]["0x0002"]
-    assert entry["parameter_description"]["qualification"] == "matched"
+    assert entry["parameter_description"]["qualification"] == "unqualified"
+    assert entry["parameter_description"]["codec_provenance"] == "length_inferred"
     assert entry["parameter_description"]["instance"] == "0x02"
     assert [p for p in bus.requests if p[0] in {1, 7}] == [
         bytes.fromhex("0102020200"),
@@ -352,7 +353,8 @@ def test_default_description_requests_cover_all_observed_writable_parameters() -
     assert artifact["meta"]["parameter_description_requests"] == 276
     assert artifact["meta"]["parameter_description_coverage"]["request_budget"] is None
     regs = artifact["operations"]["0x02"]["groups"]["0x00"]["instances"]["0x00"]["registers"]
-    assert regs["0x00ff"]["parameter_description"]["qualification"] == "matched"
+    assert regs["0x00ff"]["parameter_description"]["qualification"] == "unqualified"
+    assert regs["0x00ff"]["parameter_description"]["codec_provenance"] == ("length_inferred")
     assert regs["0x00ff"]["value"] == 1
 
 

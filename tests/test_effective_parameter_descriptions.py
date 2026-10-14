@@ -47,6 +47,7 @@ def _artifact() -> dict:
                                             "description_opcode": "0x01",
                                             **SELECTOR,
                                             "type": "EXP",
+                                            "codec_provenance": "selector_qualified",
                                             "width": 4,
                                             "min": 20.0,
                                             "max": 70.0,

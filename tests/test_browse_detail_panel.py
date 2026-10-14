@@ -9,6 +9,7 @@ from textual.widgets import DataTable, Static, Tree
 from helianthus_vrc_explorer.protocol.b524_metadata import decode_parameter_description
 from helianthus_vrc_explorer.schema.parameter_descriptions import (
     attach_bundled_descriptions,
+    effective_parameter_description,
     export_description_baseline,
 )
 from helianthus_vrc_explorer.ui import browse_textual
@@ -145,6 +146,45 @@ def test_detail_pane_shows_canonical_name_raw_limits_and_ebusd_name() -> None:
             assert "min=0" in text
             assert "max=5" in text
             assert "Hc1OperatingMode" in text
+
+    asyncio.run(exercise())
+
+
+def test_detail_fallback_does_not_promote_selector_codec_to_profile_qualification() -> None:
+    """An observed codec does not rescue a description rejected for profile mismatch."""
+    artifact = _artifact()
+    artifact["meta"]["identity"].update(eid="OTHER", sw="9999", hw="9999")  # type: ignore[index]
+    entry = artifact["operations"]["0x02"]["groups"]["0x09"]["instances"]["0x01"][  # type: ignore[index]
+        "registers"
+    ]["0x0002"]
+    entry["parameter_description"] = decode_parameter_description(
+        bytes.fromhex("090200000501"),
+        opcode=0x01,
+        group=0x09,
+        instance=0x01,
+        register=0x0002,
+        type_spec="UCH",
+    )
+    selector = {"read_opcode": "0x02", "group": "0x09", "instance": "0x01", "register": "0x0002"}
+    assert entry["parameter_description"]["codec_provenance"] == "selector_qualified"
+    assert effective_parameter_description(artifact, selector) is None
+
+    async def exercise() -> None:
+        app = browse_textual._BrowseApp(artifact, allow_write=False)
+        async with app.run_test(size=(140, 45)) as pilot:
+            await _select_local_instance(app, pilot)
+            table = app.query_one("#browse-table", DataTable)
+            table.focus()
+            row_index = next(
+                index for index, row in enumerate(app._table_rows) if row.register_key == "0x0002"
+            )
+            table.move_cursor(row=row_index)
+            await pilot.pause()
+            text = _detail_text(app)
+            assert "raw_description_evidence" in text
+            assert "Profile" in text
+            assert "unqualified" in text
+            assert "Profile                  exact" not in text
 
     asyncio.run(exercise())
 

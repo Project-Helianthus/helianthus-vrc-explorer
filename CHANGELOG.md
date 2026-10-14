@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.2
+
+- Add an exact `BASV0` / SW `0217` / HW `8803` / API 1 description profile. Its qualified local description rows preserve the observed raw description and supported min/max/step metadata, including the DHW bivalence maximum of 20 rather than the BASV2 profile's maximum of 50. The profile makes no circuit-index, installed-slot, or remote-device assumption.
+- Preserve scalar codec provenance through Describe acquisition. Payload-length inference remains raw, displayable evidence and cannot become a range/step validator or a reusable profile row. This quarantines the ambiguous solar II01 metadata and empty installer name/phone fields while retaining their raw descriptions.
+- Decode the BASV0 ventilation RR0001 presence probe as the observed two-byte `UIN` shape. A decoded zero remains unknown availability, and transport failures, status-only absence, and active presence remain distinct.
+- Add sanitized BASV0 description and scalar-observation fixtures. They retain every observed selector, access FLAGS, payload width, unknown name, description gap, and response class without current values, installation identity, endpoint, serial, contributor, or acquisition timestamp.
+
+Artifacts remain schema 2.3. Historical BASV2 bundled rows remain usable through their trusted exact-profile catalog provenance; imported legacy rows without codec provenance require same-profile selector support before they can validate an edit.
+
 ## 0.6.1
 
 - Correct the B516 energy read: yearly requests now carry the real calendar reference year, derived from the regulator's own echoed date on the total replies (or an injectable host clock when no plausible echo is available), instead of a fixed current/previous selector. A non-OK reply is a valid device answer, not a transport error; it is no longer shown as zero, and no longer counts toward error totals.

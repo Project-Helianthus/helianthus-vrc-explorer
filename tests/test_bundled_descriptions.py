@@ -86,6 +86,7 @@ def _artifact() -> dict:
                                             "instance": "0x01",
                                             "register": "0x0009",
                                             "type": "EXP",
+                                            "codec_provenance": "selector_qualified",
                                             "width": 4,
                                             "min": 20.0,
                                             "max": 70.0,

@@ -95,3 +95,17 @@ It contains separate `0x02` and `0x06` operation paths, retained active raw payl
 original fixture before it migrates a deep copy for compatibility and register-count preservation.
 The checker rejects field removal, operation collapse, response-state changes, loss of incomplete
 metadata, and loss of unknown-group identity or provenance.
+
+## Sanitized BASV0 metadata evidence
+
+`b524-basv0-description-profile-v1.json` retains all 2,093 observed Describe
+candidates for the exact BASV0/SW0217/HW8803/API1 context. Raw descriptions and
+missing limits remain explicit. Only codecs backed by a public exact-selector
+schema or local constraint codec are qualified; length-based interpretations
+remain raw evidence.
+
+`b524-basv0-register-observations-v1.json` retains all 6,585 scalar selector
+observations as names, access FLAGS, response class, payload width, presence
+state, and an optional reference to the description catalog. Current values and
+raw value payloads are intentionally omitted. In particular, an echoed payload
+with FLAGS `00` stays distinct from a status-only `00` response.

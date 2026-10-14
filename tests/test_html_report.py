@@ -10,6 +10,12 @@ import pytest
 from helianthus_vrc_explorer.ui.html_report import render_html_report
 
 
+def test_html_labels_inferred_description_as_raw_unqualified_evidence() -> None:
+    html = render_html_report({})
+    assert "Describe raw evidence (unqualified)" in html
+    assert 'description.codec_provenance === "selector_qualified"' in html
+
+
 def test_generated_html_hti_override_decodes_numeric_bytes() -> None:
     node = shutil.which("node")
     if node is None:
@@ -701,7 +707,11 @@ def test_html_report_browser_presentation_keeps_html_only_corrections() -> None:
     assert "transport_failure" in html
     assert 'statusKind !== "transport_failure" && errTxt' in html
     assert 'selectedType.startsWith("STR:")' in html
-    assert 'verification === "differs" || verification === "profile_mismatch"' in html
+    assert 'const isMismatch = verification === "differs";' in html
+    assert (
+        '!["matches", "profile_mismatch", "profile_unqualified"].includes(bundled.verification)'
+        in html
+    )
 
     status_start = html.index("function entryStatusKind(")
     status_end = html.index("function rowHasExplicitName(", status_start)
@@ -758,3 +768,38 @@ def test_b524_correspondence_secondary_text_formats_observed_vaillant_names() ->
     )
     text = json.loads(result.stdout)
     assert text.startswith("Observed Vaillant friendly name: Bivalence point for DHW")
+
+
+def test_cached_description_notice_distinguishes_profile_from_value_mismatch() -> None:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node is required for HTML notice regression")
+    html = render_html_report({"schema_version": "2.3", "operations": {}})
+    start = html.index('if (bundled && typeof bundled === "object"')
+    end = html.index('if (description && typeof description === "object")', start)
+    script = (
+        """
+const document = {createElement: () => ({})};
+const formatValue = String;
+function notice(verification) {
+  const bundled = {verification, type:"UIN", min:0, max:12, step:1};
+  const rows = [];
+  const td = {appendChild: el => rows.push(el.textContent)};
+"""
+        + html[start:end]
+        + """
+  return rows;
+}
+console.log(JSON.stringify(Object.fromEntries(
+  ["matches", "profile_mismatch", "profile_unqualified", "differs", "not_verified"]
+    .map(v => [v, notice(v)]))));
+"""
+    )
+    result = subprocess.run([node, "-e", script], capture_output=True, text=True, check=True)
+    notices = json.loads(result.stdout)
+    for status in ("matches", "profile_mismatch", "profile_unqualified"):
+        assert notices[status] == []
+    assert notices["differs"] == ["Description mismatch: UIN · min=0 · max=12 · step=1."]
+    assert notices["not_verified"] == [
+        "Cached description not_verified: UIN · min=0 · max=12 · step=1."
+    ]

@@ -1695,7 +1695,9 @@ def run_b524_scan(
                         identity = (int(task.opcode), task.group, task.instance, task.register)
                         observed_description_candidates.append(
                             DescriptionCandidate(
-                                *identity, type_spec if isinstance(type_spec, str) else None
+                                *identity,
+                                type_spec if isinstance(type_spec, str) else None,
+                                entry.get("codec_provenance", "length_inferred"),
                             )
                         )
                         observed_description_entries[identity] = cast(dict[str, Any], entry)

@@ -272,6 +272,27 @@ def _same_selector(description: dict[str, Any], selector: dict[str, str]) -> boo
     return all(description.get(key) == value for key, value in selector.items())
 
 
+def _selector_codec_supported(
+    selector: dict[str, str],
+    type_spec: object,
+    profile: dict[str, Any],
+    *,
+    bundle: dict[str, Any],
+) -> bool:
+    """Qualify a legacy omission only from the same exact native profile."""
+
+    if not isinstance(type_spec, str) or not _qualified_profile(profile):
+        return False
+    return any(
+        isinstance(candidate, dict)
+        and _same_selector(candidate, selector)
+        and candidate.get("type") == type_spec
+        and candidate.get("codec_provenance") == "selector_qualified"
+        and _compatible_profiles(candidate.get("profile", {}), profile)
+        for candidate in bundle.get("descriptions", [])
+    )
+
+
 def export_description_baseline(artifact: dict[str, Any]) -> dict[str, Any]:
     """Export decoded metadata, excluding serials, endpoints and raw captures.
 
@@ -285,6 +306,9 @@ def export_description_baseline(artifact: dict[str, Any]) -> dict[str, Any]:
         if _qualified_profile(profile):
             desc = entry.get("parameter_description")
             if not isinstance(desc, dict) or desc.get("qualification") != "matched":
+                continue
+            provenance = desc.get("codec_provenance", entry.get("codec_provenance"))
+            if provenance != "selector_qualified":
                 continue
             if not _same_selector(desc, selector):
                 continue
@@ -316,6 +340,7 @@ def export_description_baseline(artifact: dict[str, Any]) -> dict[str, Any]:
                     "decoder_revision": decoded["decoder_revision"],
                     "step_qualification": decoded["step_qualification"],
                     "validation_scope": decoded["validation_scope"],
+                    "codec_provenance": "selector_qualified",
                 }
             )
     coverage = artifact.get("meta", {}).get("parameter_description_coverage", {})
@@ -337,10 +362,12 @@ def load_description_baseline() -> dict[str, Any]:
         "b524_parameter_descriptions.json"
     )
     bundle = json.loads(path.read_text(encoding="utf-8"))
-    return _enrich_bundle_profiles(bundle)
+    return _enrich_bundle_profiles(bundle, trust_legacy_codec=True)
 
 
-def _enrich_bundle_profiles(bundle: dict[str, Any]) -> dict[str, Any]:
+def _enrich_bundle_profiles(
+    bundle: dict[str, Any], *, trust_legacy_codec: bool = False
+) -> dict[str, Any]:
     """Bind legacy bundled rows to one exact native identity manifest entry."""
 
     result = deepcopy(bundle)
@@ -350,6 +377,8 @@ def _enrich_bundle_profiles(bundle: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(description, dict) or not isinstance(description.get("profile"), dict):
             continue
         profile = description["profile"]
+        if trust_legacy_codec:
+            description.setdefault("codec_provenance", "selector_qualified")
         if all(_known_profile_value(profile.get(key)) for key in _CONTROLLER_PROFILE_KEYS):
             continue
         matches: list[dict[str, Any]] = []
@@ -445,18 +474,26 @@ def attach_bundled_descriptions(
     for selector, entry in _entries(artifact):
         profile = description_profile(artifact, selector)
         live = entry.get("parameter_description")
+        candidates = [
+            candidate
+            for candidate in bundle.get("descriptions", [])
+            if isinstance(candidate, dict) and _same_selector(candidate, selector)
+        ]
         if isinstance(live, dict):
+            provenance = live.get("codec_provenance", entry.get("codec_provenance"))
+            if provenance not in {"selector_qualified", "length_inferred"}:
+                provenance = (
+                    "selector_qualified"
+                    if _selector_codec_supported(selector, live.get("type"), profile, bundle=bundle)
+                    else "legacy_unknown"
+                )
+            live["codec_provenance"] = provenance
             live.setdefault("target_profile", deepcopy(profile))
             live["target_profile_match"] = (
                 _observed_native_profile(profile) and live["target_profile"] == profile
             )
         # Recompute after profile changes; stale annotations are never retained.
         entry.pop("bundled_parameter_description", None)
-        candidates = [
-            candidate
-            for candidate in bundle.get("descriptions", [])
-            if isinstance(candidate, dict) and _same_selector(candidate, selector)
-        ]
         exact = [candidate for candidate in candidates if candidate.get("profile") == profile]
         compatible = [
             candidate
@@ -528,6 +565,7 @@ def effective_parameter_description(
     if (
         isinstance(live, dict)
         and live.get("qualification") == "matched"
+        and live.get("codec_provenance") == "selector_qualified"
         and _observed_native_profile(profile)
         and _same_selector(live, selector)
         and live.get("target_profile") == profile
@@ -541,6 +579,8 @@ def effective_parameter_description(
     if not _qualified_profile(profile):
         return None
     if not isinstance(bundled, dict) or not _same_selector(bundled, selector):
+        return None
+    if bundled.get("type") != entry.get("type"):
         return None
     if (
         not _compatible_profiles(bundled.get("profile", {}), profile)
