@@ -2516,13 +2516,14 @@ __ARTIFACT_JSON__
 
               const description = entry.parameter_description;
               const bundled = entry.bundled_parameter_description;
-              if (bundled && typeof bundled === "object" && bundled.verification !== "matches") {
+              if (bundled && typeof bundled === "object"
+                  && !["matches", "profile_mismatch", "profile_unqualified"].includes(bundled.verification)) {
                 const bundledEl = document.createElement("div");
                 bundledEl.className = "cell-raw";
                 const verification = typeof bundled.verification === "string"
                   ? bundled.verification
                   : "not_verified";
-                const isMismatch = verification === "differs" || verification === "profile_mismatch";
+                const isMismatch = verification === "differs";
                 const comparison = isMismatch
                   ? "Description mismatch"
                   : `Cached description ${verification}`;

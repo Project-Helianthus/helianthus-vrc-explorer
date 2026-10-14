@@ -41,3 +41,8 @@ The scalar fixture distinguishes 5,335 echoed payloads, including FLAGS `00`,
 from 1,155 status-only replies and 95 transport failures. It contains no current
 scalar values, raw value payloads, endpoint, serial, contributor identity,
 acquisition timestamp, or installation topology claim.
+
+HTML reports reserve “Description mismatch” for differing descriptions compared
+within a compatible profile. Cached descriptions belonging to a different or
+unqualified profile are omitted from the compact value display; their qualification
+remains in the artifact and they cannot supply validated editing limits.
