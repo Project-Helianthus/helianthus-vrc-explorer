@@ -109,8 +109,12 @@ def test_checked_in_fixtures_are_versioned_and_register_count_preserved(
 ) -> None:
     artifact = _load_fixture(fixture_name)
 
-    assert artifact["schema_version"] == CURRENT_ARTIFACT_SCHEMA_VERSION
+    # #297 keeps committed legacy fixtures unchanged; #299 owns their refresh.
+    assert artifact["schema_version"] == "2.3"
     assert count_register_entries(artifact) == expected_register_count
+    migrated, _ = migrate_artifact_schema(artifact)
+    assert migrated["schema_version"] == CURRENT_ARTIFACT_SCHEMA_VERSION
+    assert count_register_entries(migrated) == expected_register_count
 
 
 @pytest.mark.parametrize(
@@ -349,3 +353,27 @@ def test_legacy_calendar_migration_requires_explorer_provenance_and_keeps_eviden
         assert report.changed
         twice, _ = migrate_artifact_schema(migrated)
         assert twice == migrated
+
+
+def test_validator_24_rejects_legacy_codec_even_when_decode_errors_are_retained() -> None:
+    artifact = {
+        "schema_version": "2.4",
+        "meta": {"producer": "helianthus-vrc-explorer"},
+        "operations": {
+            "0x02": {
+                "groups": {
+                    "0x00": {
+                        "instances": {
+                            "0x00": {"registers": {"0x0035": {"type": "HTI", "error": "legacy"}}}
+                        }
+                    }
+                }
+            }
+        },
+    }
+    errors, _, _ = _validate_scan_artifact(artifact, allow_legacy=True)
+    assert any("schema 2.4 requires an explicit neutral codec" in error for error in errors)
+    # An explicitly external unsupported BCD label stays raw error evidence.
+    artifact["meta"]["producer"] = "external"
+    errors, _, _ = _validate_scan_artifact(artifact, allow_legacy=True)
+    assert not errors

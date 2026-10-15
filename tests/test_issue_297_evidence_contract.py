@@ -165,7 +165,8 @@ def test_merging_migrated_baselines_requires_explicit_interpretation_export() ->
     bundle = export_description_baseline(_artifact())
     row = bundle["descriptions"][0]
     row["type"] = "HTI"
-    # v1 exporter provenance is retained unchanged while the label migrates on a copy.
+    # Explicit v1 input provenance is retained while the label migrates on a copy.
+    bundle["schema_version"] = 1
     row["decoder_revision"] = "b524-description/v2"
     row["source"] = "read_only_observed_baseline"
     before = deepcopy(bundle)
@@ -193,3 +194,35 @@ def test_legacy_override_labels_migrate_separately_and_retain_original_path() ->
     assert artifact == before
     twice, _ = migrate_artifact_schema(result)
     assert twice == result
+
+
+@pytest.mark.parametrize("version", [1, 2])
+def test_application_baseline_versions_are_readable_and_new_merge_is_v2(version):
+    from helianthus_vrc_explorer.schema.parameter_descriptions import merge_description_baselines
+
+    bundle = export_description_baseline(_artifact())
+    assert type(bundle["schema_version"]) is int and bundle["schema_version"] == 2
+    bundle["schema_version"] = version
+    adapted = _enrich_bundle_profiles(bundle)
+    assert adapted["descriptions"][0]["profile"]["api_revision_raw"] == "1"
+    merged = merge_description_baselines(bundle, {"schema_version": 2, "descriptions": []})
+    assert type(merged["schema_version"]) is int and merged["schema_version"] == 2
+
+
+@pytest.mark.parametrize("version", [0, 3, "2", True])
+def test_application_baseline_rejects_unknown_or_noninteger_version(version):
+    with pytest.raises(ValueError, match="baseline version"):
+        _enrich_bundle_profiles({"schema_version": version, "descriptions": []})
+
+
+def test_scan_24_version_boundary_and_23_copy_migration():
+    from helianthus_vrc_explorer.artifact_schema import ArtifactSchemaError
+
+    artifact = {"schema_version": "2.3", "operations": {}, "meta": {}}
+    adapted, report = migrate_artifact_schema(artifact)
+    assert adapted["schema_version"] == "2.4" and report.changed
+    assert artifact["schema_version"] == "2.3"
+    again, report = migrate_artifact_schema(adapted)
+    assert again == adapted and not report.changed
+    with pytest.raises(ArtifactSchemaError, match="Unsupported schema_version"):
+        migrate_artifact_schema({"schema_version": "2.5"})

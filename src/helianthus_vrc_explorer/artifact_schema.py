@@ -6,9 +6,12 @@ from typing import Any
 
 from .evidence_compat import has_explorer_provenance, interpret_legacy_codecs
 
-CURRENT_ARTIFACT_SCHEMA_VERSION = "2.3"
+# 2.4 retains the 2.3 operations-first structure. New output uses neutral
+# DATE_DMY_U8X3/TIME_HMS_U8X3 codecs and independent raw API version/revision
+# strings. Legacy Explorer interpretations carry copy-only migration provenance.
+CURRENT_ARTIFACT_SCHEMA_VERSION = "2.4"
 LEGACY_UNVERSIONED_SCHEMA = "legacy-unversioned"
-LEGACY_VERSIONED_SCHEMAS = frozenset({"2.0", "2.1", "2.2"})
+LEGACY_VERSIONED_SCHEMAS = frozenset({"2.0", "2.1", "2.2", "2.3"})
 
 
 class ArtifactSchemaError(ValueError):
@@ -387,7 +390,6 @@ def migrate_artifact_schema(
     register_count_before = count_register_entries(migrated)
     changed = False
     # This interpretation adapter is separate from the structural schema migration.
-    # The 2.4 output version is introduced with the part 2 exporter.
     if source_schema_version in {
         LEGACY_UNVERSIONED_SCHEMA,
         "2.0",
@@ -420,7 +422,11 @@ def migrate_artifact_schema(
     # Step 2: migrate 2.2 to 2.3 (groups-first to operations-first)
     if detect_schema_version(migrated) == "2.2":
         changed = _migrate_v22_to_v23(migrated) or changed
+        migrated["schema_version"] = "2.3"
+
+    if detect_schema_version(migrated) == "2.3":
         migrated["schema_version"] = CURRENT_ARTIFACT_SCHEMA_VERSION
+        changed = True
 
     for *_path, entry in iter_register_entries(migrated):
         if isinstance(entry, dict):

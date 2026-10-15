@@ -21,6 +21,8 @@ dev = [
   "pytest-cov>=5",
   "ruff>=0.6",
   "mypy>=1.5",
+  # Validate native exports against schemas from DOCS_EBUS_ROOT (never vendored).
+  "jsonschema>=4",
 ]
 
 [build-system]

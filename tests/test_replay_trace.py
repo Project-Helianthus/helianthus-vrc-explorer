@@ -79,7 +79,8 @@ def test_replay_trace_to_artifact_reconstructs_b524_register_reads(tmp_path: Pat
     )
 
     artifact = replay_trace_to_artifact(trace_path)
-    assert artifact["schema_version"] == "2.3"
+    # 2.4 output distinguishes the neutral codec/independent API identity contract.
+    assert artifact["schema_version"] == "2.4"
     assert artifact["meta"]["destination_address"] == "0x15"
     assert artifact["meta"]["replay_trace"]["format"] == "enhanced_v1"
 
@@ -287,7 +288,8 @@ def test_cli_replay_trace_generates_json_and_html(tmp_path: Path) -> None:
     assert html_path.exists()
 
     artifact = json.loads(json_path.read_text(encoding="utf-8"))
-    assert artifact["schema_version"] == "2.3"
+    # 2.4 output distinguishes the neutral codec/independent API identity contract.
+    assert artifact["schema_version"] == "2.4"
     assert artifact["meta"]["replay_trace"]["format"] == "enhanced_v1"
 
 
@@ -311,7 +313,8 @@ def test_replay_trace_accepts_truncated_hex_and_records_limitation(tmp_path: Pat
     )
 
     artifact = replay_trace_to_artifact(trace_path)
-    assert artifact["schema_version"] == "2.3"
+    # 2.4 output distinguishes the neutral codec/independent API identity contract.
+    assert artifact["schema_version"] == "2.4"
     limitations = artifact["meta"]["replay_trace"]["limitations"]
     assert any("truncated ('...')" in item for item in limitations)
 

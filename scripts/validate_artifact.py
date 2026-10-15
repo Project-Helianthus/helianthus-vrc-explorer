@@ -16,6 +16,7 @@ from helianthus_vrc_explorer.artifact_schema import (
     iter_register_entries,
     migrate_artifact_schema,
 )
+from helianthus_vrc_explorer.evidence_compat import has_explorer_provenance
 from helianthus_vrc_explorer.protocol.parser import ValueParseError, parse_typed_value
 
 
@@ -164,6 +165,17 @@ def validate_scan_artifact(
         type_spec = entry.get("type")
         value = entry.get("value")
         error = entry.get("error")
+
+        # Schema 2.4 introduces neutral plain-byte codec names. A new-version
+        # Explorer artifact must not silently publish a legacy interpretation;
+        # <=2.3 readers use the provenance-gated adapter before reaching here.
+        if (
+            source_schema_version == "2.4"
+            and has_explorer_provenance(artifact)
+            and isinstance(type_spec, str)
+            and type_spec in {"HDA:3", "HTI"}
+        ):
+            errors.append(f"{loc}: schema 2.4 requires an explicit neutral codec")
 
         if isinstance(reply_hex, str) and reply_hex:
             try:

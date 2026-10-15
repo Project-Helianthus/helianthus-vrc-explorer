@@ -196,6 +196,10 @@ def validate_parameter_edit(
         # Parsing above still enforces syntax, calendar validity and the 2000..2099 convention.
         if type_spec.strip().upper() in {"DATE_DMY_U8X3", "TIME_HMS_U8X3"}:
             return "unvalidated"
+        # Application overlays may display numeric candidates without granting
+        # range authority for an inactive/unknown current consumer instance.
+        if description.get("validation_scope") in {"display_only", "raw_evidence_only"}:
+            return "unvalidated"
         lower, upper, step = description["min"], description["max"], description["step"]
         if step is not None and (
             not isinstance(step, (int, float)) or not math.isfinite(step) or step < 0

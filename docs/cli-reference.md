@@ -18,7 +18,7 @@ This file is generated from the CLI's `--help` output. Refresh it with
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────────────────────────╮
 │ scan          Scan a regulator; configure coverage and output in the visual UI.                                      │
-│ replay-trace  Replay an ENH/ENS trace into a fresh schema-2.3 JSON artifact + HTML report.                           │
+│ replay-trace  Replay an ENH/ENS trace into a fresh schema-2.4 JSON artifact + HTML report.                           │
 │ discover      Discover eBUS devices via QueryExistence broadcast and per-address scan (0704).                        │
 │ browse        Open a scan JSON visually; connection and editing are Browser actions.                                 │
 │ b524          Read B524 operation tables, edit offline, or apply a qualified timer change.                           │
