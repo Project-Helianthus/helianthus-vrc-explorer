@@ -1,5 +1,7 @@
 # Fixtures
 
+[Shared evidence contract for 0.7](../docs/shared-evidence-contract.md)
+
 This directory contains **scan artifact fixtures** used for deterministic, offline tests and for
 `scan --dry-run` output.
 
