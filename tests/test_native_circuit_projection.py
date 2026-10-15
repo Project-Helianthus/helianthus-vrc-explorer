@@ -86,6 +86,9 @@ def test_generated_html_table_keeps_qualified_native_circuits(sw, exact, expecte
     html = render_html_report(artifact)
     start = html.index("function renderActiveGroup(")
     end = html.index("function renderB524Tab()", start)
+    docs_start = html.index("const B524_DOCS_CATALOG_NAMES")
+    docs_end = html.index("function b524CorrespondenceSecondaryText", docs_start)
+    docs_helper = html[docs_start:docs_end]
     minimum = re.search(r"const B524_CIRCUIT_II_MIN = [01];", html)
     harness = r"""
 class Node {
@@ -132,6 +135,14 @@ function b524CorrespondenceSecondaryText() {return "";}
 const mount = new Node("div");
 renderActiveGroup("0x02", "0x02", mount);
 const walk = (item) => [item, ...item.children.flatMap(walk)];
+const docsRows = walk(mount).filter(item => item.textContent.includes("docs-ebus catalog name:"));
+const visible = walk(mount).filter(item => item.tag === "th" && item.textContent.startsWith("0x"));
+for (const header of visible) {
+  const prefix = header.textContent + " · docs-ebus catalog name:";
+  if (!docsRows.some(item => item.textContent.startsWith(prefix))) {
+    throw new Error("Missing selector-bound docs correspondence for " + header.textContent);
+  }
+}
 console.log(JSON.stringify(walk(mount).filter((item) =>
   item.tag === "th" && item.textContent.startsWith("0x")
 ).map((item) => item.textContent)));
@@ -142,6 +153,7 @@ console.log(JSON.stringify(walk(mount).filter((item) =>
         + ";\n"
         + (minimum.group(0) if minimum else "")
         + harness
+        + docs_helper
         + html[start:end]
         + actions
     )

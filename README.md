@@ -194,9 +194,10 @@ for validation, missing-limit exceptions and evidence boundaries.
   Browser, then confirm each concrete value change.
 - Register list limited to `Register` and `Value` (the change/write marker
   folds into the Value cell); every other field -- eBUSd name, raw bytes,
-  unit, FLAGS access, described limits, write-admission gates, every
-  observed name (Explorer, Vaillant friendly/VRC720/VRC700, myVaillant,
-  eBUSd), ENUM candidate labels and raw evidence -- moves to a read-only
+  unit, FLAGS access, described limits, write-admission gates, the Explorer
+  display name, labelled docs-ebus catalog/previous names, observed
+  Vaillant/myVaillant family names, eBUSd annotations, ENUM candidate labels
+  and raw evidence -- moves to a read-only
   detail panel for the highlighted row. Toggle it with `d`; below 110
   columns it is hidden by default and swaps with the tree pane instead of
   stacking. The panel never writes to the artifact and does not change the
@@ -287,6 +288,31 @@ annotations in scan, replay, Browser and HTML output. OP06 uses the common names
 These naming annotations do not change codecs, attribute bytes, enrichment
 aliases, discovery limits or transport behavior. Browser and HTML apply them to
 a working copy of a saved artifact; the input file remains unchanged.
+
+`myvaillant_name` stores the Explorer canonical name where one exists,
+otherwise a myVaillant map leaf. It is not necessarily an observed app name.
+Observed app names live only in the correspondence columns
+`myvaillant_name_vrc720` and `myvaillant_name_vrc700` (VRC720/VRC700 families).
+All observed-name identifications are **Hypothesis**: their source is not
+published with the docs fixture; names establish neither codec, value range
+nor write access.
+
+Browser details and HTML show **docs-ebus catalog name** and, where present,
+**docs-ebus previous name** separately from the Explorer name. Provisional
+docs names retain their open question: `unknown_11` and previous name
+`system_off` are correspondence, not a correction to Explorer `system_off`.
+The docs catalog has no instance column. Its instance-independent naming
+templates are bound at render time to each full `(OP, GG, II, RR)` selector;
+instances and operation namespaces remain distinct. No artifact fields change.
+Regenerate the packaged catalog from a docs-ebus checkout with:
+
+```bash
+python3 scripts/generate_b524_docs_catalog_names.py /path/to/docs-ebus
+```
+
+The source is `protocols/vaillant/fixtures/b524-op02-register-names.csv`,
+under docs-ebus `architecture/naming.md`. The initial bridge uses docs-ebus
+`e32ad6761bbee990f7ff7ae2f4c12e055b425927`.
 
 ## Data Enrichment Sources (Optional)
 This tool can enrich raw scan output with human-readable names:

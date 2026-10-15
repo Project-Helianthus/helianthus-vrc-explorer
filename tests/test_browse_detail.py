@@ -448,6 +448,10 @@ def test_names_section_includes_correspondence_rows_with_explorer_name_first() -
     # The section carries names only: every row uses one of the fixed labels.
     allowed = {
         "Explorer",
+        "myvaillant_name provenance",
+        "Observed-name identification",
+        "docs-ebus catalog name",
+        "docs-ebus previous name",
         "Vaillant friendly name",
         "Vaillant name (VRC720)",
         "Vaillant name (VRC700)",
@@ -655,3 +659,44 @@ def test_operation_export_row_matches_what_the_edit_action_supports() -> None:
             assert export.value == "offline export available with e"
         else:
             assert export.value == "no offline export for this operation"
+
+
+def test_docs_catalog_names_are_labelled_secondary_provisional_annotations() -> None:
+    row = _row(
+        group_key="0x00", instance_key="0x01", register_key="0x0007", myvaillant_name="system_off"
+    )
+    sections = register_detail_sections(row=row, entry={}, description=None)
+    names = _section(sections, "NAMES")
+    assert names is not None
+    assert names.rows[0].value == "system_off"
+    labels = {item.label: item.value for item in names.rows}
+    assert labels["docs-ebus catalog name (provisional)"] == "unknown_11"
+    assert labels["docs-ebus previous name"] == "system_off"
+    assert "Polarity unresolved" in labels["docs-ebus open question"]
+    other = _row(read_opcode="0x06", group_key="0x00", register_key="0x0007")
+    names = _section(register_detail_sections(row=other, entry={}, description=None), "NAMES")
+    assert not any(item.label.startswith("docs-ebus") for item in names.rows)
+
+
+def test_imported_app_names_render_with_family_and_hypothesis_caveat() -> None:
+    from helianthus_vrc_explorer.schema.b524_register_name_correspondence import (
+        b524_register_name_correspondence,
+    )
+
+    for register, family, expected in (
+        (0x16, "VRC700", "operationModeVentilation"),
+        (0xA2, "VRC720", "smartPhotovoltaicBufferOffset"),
+    ):
+        row = _row(group_key="0x00", instance_key="0x00", register_key=f"0x{register:04x}")
+        correspondence = b524_register_name_correspondence(opcode=2, group=0, register=register)
+        sections = register_detail_sections(
+            row=row, entry={}, description=None, correspondence=correspondence
+        )
+        names = _section(sections, "NAMES")
+        assert names is not None
+        labels = {item.label: item.value for item in names.rows}
+        assert labels[f"myVaillant name ({family})"] == expected
+        assert "Hypothesis" in labels["Observed-name identification"]
+        assert (
+            "neither codec, value range nor write access" in labels["Observed-name identification"]
+        )

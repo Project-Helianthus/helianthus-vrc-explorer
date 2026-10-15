@@ -7,9 +7,13 @@ import re
 from html import escape as _escape_html
 from typing import Any
 
-from ..artifact_schema import migrate_artifact_schema
+from ..artifact_schema import iter_register_entries, migrate_artifact_schema
 from ..scanner.director import group_name_for_opcode
-from ..schema.b524_register_name_correspondence import bundled_b524_register_name_correspondence
+from ..schema.b524_register_name_correspondence import (
+    OBSERVED_NAME_CAVEAT,
+    b524_docs_catalog_correspondence,
+    bundled_b524_register_name_correspondence,
+)
 from ..schema.b524_register_names import apply_b524_canonical_register_names
 from ..schema.b524_value_labels import apply_b524_value_labels
 from ..schema.parameter_descriptions import attach_bundled_descriptions, description_profile
@@ -32,7 +36,35 @@ def _correspondence_json_map() -> dict[str, dict[str, dict[str, dict[str, list[s
             "vaillant_friendly_name": list(entry.vaillant_friendly_name),
             "vaillant_name": other_names,
             "ebusd_name": list(entry.ebusd_name),
+            "myvaillant_name_vrc720": list(entry.myvaillant_name_vrc720),
+            "myvaillant_name_vrc700": list(entry.myvaillant_name_vrc700),
         }
+    return table
+
+
+def _docs_catalog_json_map(artifact: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    table: dict[str, dict[str, Any]] = {}
+    for op, gg, ii, rr, _entry in iter_register_entries(artifact):
+        try:
+            selector = tuple(int(value, 0) for value in (op, gg, ii, rr))
+        except (ValueError, TypeError):
+            continue
+        entry = b524_docs_catalog_correspondence(
+            opcode=selector[0],
+            group=selector[1],
+            instance=selector[2],
+            register=selector[3],
+        )
+        if entry is not None:
+            key = "/".join(
+                f"0x{value:0{width}x}" for value, width in zip(selector, (2, 2, 2, 4), strict=True)
+            )
+            table[key] = {
+                "name": entry.name,
+                "previous_name": entry.previous_name,
+                "provisional": entry.provisional,
+                "open_question": entry.open_question,
+            }
     return table
 
 
@@ -547,6 +579,16 @@ __ARTIFACT_JSON__
       const B524_GROUP_NAMES = __B524_GROUP_NAMES__;
       const B524_REGISTER_NAME_CORRESPONDENCE = __B524_REGISTER_NAME_CORRESPONDENCE__;
 
+      const B524_DOCS_CATALOG_NAMES = __B524_DOCS_CATALOG_NAMES__;
+      function b524DocsCatalogText(op, gg, ii, rr) {
+        const entry = B524_DOCS_CATALOG_NAMES[[op, gg, ii, rr].join("/")];
+        if (!entry) return "";
+        const parts = ["docs-ebus catalog name" + (entry.provisional ? " (provisional)" : "") + ": " + entry.name];
+        if (entry.previous_name) parts.push("docs-ebus previous name: " + entry.previous_name);
+        if (entry.open_question) parts.push("docs-ebus open question: " + entry.open_question);
+        return parts.join(" · ");
+      }
+
       function b524CorrespondenceSecondaryText(opHex, groupHex, registerHex) {
         const byGroup = B524_REGISTER_NAME_CORRESPONDENCE && B524_REGISTER_NAME_CORRESPONDENCE[opHex];
         const entry = byGroup && byGroup[groupHex] && byGroup[groupHex][registerHex];
@@ -561,6 +603,11 @@ __ARTIFACT_JSON__
         if (Array.isArray(entry.ebusd_name) && entry.ebusd_name.length) {
           parts.push("eBUSd name: " + entry.ebusd_name.join(", "));
         }
+        for (const family of ["vrc720", "vrc700"]) {
+          const names = entry["myvaillant_name_" + family];
+          if (Array.isArray(names) && names.length) parts.push("Observed myVaillant name (" + family.toUpperCase() + "): " + names.join(", "));
+        }
+        if (parts.length) parts.push(__OBSERVED_NAME_CAVEAT__);
         return parts.join(" · ");
       }
 
@@ -2417,6 +2464,7 @@ __ARTIFACT_JSON__
               const nameEl = document.createElement("div");
               nameEl.className = "offset-name";
               nameEl.textContent = rowMyvaillantName;
+              nameEl.title = "Explorer canonical name where available; otherwise a myVaillant map leaf (myvaillant_name)";
               td0.appendChild(nameEl);
             }
             if (ebusdNameList.length) {
@@ -2440,6 +2488,15 @@ __ARTIFACT_JSON__
               corrEl.textContent = correspondenceText;
               corrEl.title = correspondenceText;
               td0.appendChild(corrEl);
+            }
+
+            for (const iiKey of instanceKeys) {
+              const docsText = b524DocsCatalogText(opKey, groupKey, iiKey, rrKey);
+              if (!docsText) continue;
+              const docsEl = document.createElement("div");
+              docsEl.className = "offset-name-secondary";
+              docsEl.textContent = iiKey + " · " + docsText;
+              td0.appendChild(docsEl);
             }
 
             if (candidates.length) {
@@ -2877,6 +2934,8 @@ def render_html_report(artifact: dict[str, Any], *, title: str | None = None) ->
                 "__ARTIFACT_JSON__": _json_for_html(artifact),
                 "__B524_GROUP_NAMES__": _json_for_html(group_name_map),
                 "__B524_REGISTER_NAME_CORRESPONDENCE__": _json_for_html(_correspondence_json_map()),
+                "__B524_DOCS_CATALOG_NAMES__": _json_for_html(_docs_catalog_json_map(artifact)),
+                "__OBSERVED_NAME_CAVEAT__": _json_for_html(OBSERVED_NAME_CAVEAT),
                 "__B524_CIRCUIT_II_MIN__": (
                     "0"
                     if description_profile(artifact).get("profile_id") == "basv2_sw0507_hw1704_api1"

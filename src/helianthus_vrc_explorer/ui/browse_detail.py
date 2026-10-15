@@ -25,7 +25,11 @@ from typing import Any
 from ..scanner.register import namespace_availability_contract
 from ..schema.b524_codec_labels import b524_codec_label
 from ..schema.b524_constraints import constraint_scope_metadata
-from ..schema.b524_register_name_correspondence import B524RegisterNameCorrespondence
+from ..schema.b524_register_name_correspondence import (
+    OBSERVED_NAME_CAVEAT,
+    B524RegisterNameCorrespondence,
+    b524_docs_catalog_correspondence,
+)
 from ..schema.myvaillant_map import MyvaillantRegisterName
 from .b524_operation_reads import OPERATION_EXPORT_BY_SECTION, OperationReadView
 from .browse_models import RegisterRow, TreeNodeRef
@@ -402,9 +406,37 @@ def _names_section(
     row: RegisterRow,
     correspondence: B524RegisterNameCorrespondence | None,
 ) -> DetailSection:
-    rows: list[DetailRow] = [DetailRow("Explorer", _explorer_name(row))]
+    rows: list[DetailRow] = [
+        DetailRow("Explorer", _explorer_name(row)),
+        DetailRow(
+            "myvaillant_name provenance",
+            "Explorer canonical name where available; otherwise a myVaillant map leaf",
+        ),
+    ]
+
+    try:
+        docs_name = (
+            b524_docs_catalog_correspondence(
+                opcode=int(row.address.read_opcode or "", 0),
+                group=int(row.group_key or "", 0),
+                instance=int(row.instance_key or "", 0),
+                register=int(row.register_key, 0),
+            )
+            if row.protocol == "b524"
+            else None
+        )
+    except ValueError:
+        docs_name = None
+    if docs_name is not None:
+        label = "docs-ebus catalog name" + (" (provisional)" if docs_name.provisional else "")
+        rows.append(DetailRow(label, docs_name.name))
+        if docs_name.previous_name:
+            rows.append(DetailRow("docs-ebus previous name", docs_name.previous_name))
+        if docs_name.open_question:
+            rows.append(DetailRow("docs-ebus open question", docs_name.open_question))
 
     if correspondence is not None:
+        rows.append(DetailRow("Observed-name identification", OBSERVED_NAME_CAVEAT))
         try:
             group_int = int(row.group_key, 0) if row.group_key is not None else None
             instance_int = int(row.instance_key, 0) if row.instance_key is not None else None

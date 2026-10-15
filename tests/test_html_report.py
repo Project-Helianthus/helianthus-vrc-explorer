@@ -803,3 +803,66 @@ console.log(JSON.stringify(Object.fromEntries(
     assert notices["not_verified"] == [
         "Cached description not_verified: UIN · min=0 · max=12 · step=1."
     ]
+
+
+def test_docs_catalog_rendering_keeps_full_selectors_and_primary_names() -> None:
+    from copy import deepcopy
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node is required for HTML rendering regression")
+    operations = {
+        op: {
+            "groups": {
+                "0x00": {
+                    "instances": {
+                        ii: {"registers": {"0x0007": {"value": value, "raw_hex": "00"}}}
+                        for ii, value in (("0x00", 0), ("0x01", 1))
+                    }
+                }
+            }
+        }
+        for op in ("0x02", "0x06")
+    }
+    artifact = {"schema_version": "2.3", "operations": operations}
+    original = deepcopy(artifact)
+    html = render_html_report(artifact)
+    assert artifact == original
+    match = re.search(r"const B524_DOCS_CATALOG_NAMES = (\{.*?\});\n", html, re.S)
+    table = json.loads(match.group(1))
+    assert set(table) == {"0x02/0x00/0x00/0x0007", "0x02/0x00/0x01/0x0007"}
+    start = html.index("const B524_REGISTER_NAME_CORRESPONDENCE")
+    end = html.index("\n      const metaDst", start)
+    script = (
+        html[start:end]
+        + """
+console.log(JSON.stringify([
+  b524DocsCatalogText("0x02", "0x00", "0x01", "0x0007"),
+  b524DocsCatalogText("0x06", "0x00", "0x01", "0x0007"),
+  b524DocsCatalogText("0x02", "0x00", "0x02", "0x0007"),
+  b524CorrespondenceSecondaryText("0x02", "0x00", "0x0016"),
+  b524CorrespondenceSecondaryText("0x02", "0x00", "0x00a2")
+]));"""
+    )
+    result = subprocess.run(
+        [node, "-e", script], check=True, text=True, capture_output=True, timeout=10
+    )
+    provisional, op06, absent, ventilation, pv = json.loads(result.stdout)
+    assert "docs-ebus catalog name (provisional): unknown_11" in provisional
+    assert "docs-ebus previous name: system_off" in provisional
+    assert "Polarity unresolved" in provisional
+    assert op06 == absent == ""
+    assert "Observed myVaillant name (VRC700): operationModeVentilation" in ventilation
+    assert "Observed myVaillant name (VRC720): smartPhotovoltaicBufferOffset" in pv
+    assert "Hypothesis" in ventilation and "Hypothesis" in pv
+    data = re.search(
+        r'<script id="artifact-data" type="application/json">(.*?)</script>', html, re.S
+    )
+    stored = json.loads(data.group(1))
+    for ii in ("0x00", "0x01"):
+        entry = stored["operations"]["0x02"]["groups"]["0x00"]["instances"][ii]["registers"][
+            "0x0007"
+        ]
+        assert entry["myvaillant_name"] == "system_off"
+        assert "docs" not in str(entry)
+    assert "otherwise a myVaillant map leaf" in html
