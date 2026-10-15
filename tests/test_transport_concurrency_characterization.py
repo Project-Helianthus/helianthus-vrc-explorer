@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import multiprocessing
 import threading
+import traceback
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
+from multiprocessing.connection import Connection
 
 import pytest
 
@@ -129,9 +132,44 @@ class _ScriptedSocket:
 
 @pytest.mark.parametrize("first", ["info", "proto", "timeout", "reset"])
 @pytest.mark.parametrize("contender", ["request", "close"])
-def test_request_owns_response_until_close_or_next_request(
-    monkeypatch: pytest.MonkeyPatch, first: str, contender: str
-) -> None:
+def test_request_owns_response_until_close_or_next_request(first: str, contender: str) -> None:
+    """Keep deadlocked transport workers inside a terminable child process."""
+    context = multiprocessing.get_context("spawn")
+    receiver, sender = context.Pipe(duplex=False)
+    process = context.Process(target=_run_schedule, args=(first, contender, sender))
+    try:
+        process.start()
+        sender.close()
+        process.join(6 * _WAIT)
+        assert not process.is_alive(), "Transport schedule exceeded process watchdog"
+        assert receiver.poll(), f"Transport schedule exited without a result: {process.exitcode}"
+        failure = receiver.recv()
+        assert failure is None, failure
+        assert process.exitcode == 0
+    finally:
+        if process.is_alive():
+            process.terminate()
+            process.join(_WAIT)
+            if process.is_alive():
+                process.kill()
+                process.join(_WAIT)
+        receiver.close()
+        sender.close()
+
+
+def _run_schedule(first: str, contender: str, sender: Connection) -> None:
+    try:
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            _exercise_schedule(monkeypatch, first, contender)
+    except BaseException:
+        sender.send(traceback.format_exc())
+    else:
+        sender.send(None)
+    finally:
+        sender.close()
+
+
+def _exercise_schedule(monkeypatch: pytest.MonkeyPatch, first: str, contender: str) -> None:
     """Pause a request at recv, probe contention, then finish before its successor."""
     entered = threading.Event()
     release = threading.Event()
@@ -182,14 +220,6 @@ def test_request_owns_response_until_close_or_next_request(
         return transport.request_info(0)
 
     def successor() -> bytes | None:
-        # A nonblocking probe proves the contender reached a held transaction
-        # lock while the first request was paused, without timing assertions or
-        # replacing/instrumenting the production RLock.
-        acquired = transport._lock.acquire(blocking=False)
-        if acquired:
-            transport._lock.release()
-        contended.set()
-        assert not acquired, "Public request released its lock before response completion"
         if contender == "close":
             transport.close()
             return None
@@ -199,6 +229,24 @@ def test_request_owns_response_until_close_or_next_request(
         threading.Thread(target=record, args=("first", first_request)),
         threading.Thread(target=record, args=("successor", successor)),
     ]
+    lock = transport._lock
+
+    class ObservedLock:
+        def __enter__(self) -> None:
+            if threading.current_thread() is threads[1]:
+                # This probe is inside the public operation's lock entry. A
+                # missing successor-side lock cannot signal contention.
+                acquired = lock.acquire(blocking=False)
+                if acquired:
+                    lock.release()
+                assert not acquired, "Public request released its lock before response completion"
+                contended.set()
+            lock.acquire()
+
+        def __exit__(self, *_args: object) -> None:
+            lock.release()
+
+    monkeypatch.setattr(transport, "_lock", ObservedLock())
     started: list[threading.Thread] = []
     try:
         threads[0].start()
@@ -206,7 +254,7 @@ def test_request_owns_response_until_close_or_next_request(
         assert entered.wait(_WAIT), "First request never reached scripted receive"
         threads[1].start()
         started.append(threads[1])
-        assert contended.wait(_WAIT), "Contender never probed the transaction lock"
+        assert contended.wait(_WAIT), "Public successor never attempted the held transaction lock"
         assert sockets[0].pending is not None
         assert not sockets[0].closed
     finally:
