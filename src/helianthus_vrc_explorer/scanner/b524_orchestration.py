@@ -375,7 +375,6 @@ def run_b524_scan(
             static_constraints
         )
     artifact["meta"]["constraint_scope"] = constraint_scope_metadata()
-    artifact["meta"]["constraint_scope"]["qualification"] = "legacy_unqualified"
 
     incomplete_reason: str | None = None
     observed_description_candidates: list[DescriptionCandidate] = []
@@ -1672,6 +1671,7 @@ def run_b524_scan(
                                 "constraint_type": constraint.kind,
                                 "constraint_source": constraint.source,
                                 "constraint_scope": constraint.scope,
+                                "constraint_qualified": False,
                                 "constraint_provenance": constraint.provenance,
                                 "constraint_probe_protocol": CONSTRAINT_SCOPE_PROTOCOL,
                                 "reason": mismatch_reason,

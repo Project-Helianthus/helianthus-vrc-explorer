@@ -216,9 +216,9 @@ def _limits_section(
         scope = constraint_scope_metadata()
         rows.append(
             DetailRow(
-                "Catalog evidence (unqualified)",
+                "Catalog evidence: unscoped_catalog (unqualified)",
                 f"{constraint_type} {constraint_min}..{constraint_max} step={constraint_step}",
-                note=scope["applies_to"],
+                note=str(scope["rationale"]),
             )
         )
     if not rows:

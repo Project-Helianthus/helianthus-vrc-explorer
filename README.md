@@ -79,6 +79,7 @@ Transport note:
 - Enhanced TCP sends and receives raw eBUS wire symbols. The client expands logical `0xA9` and `0xAA` bytes inside telegram data or CRC fields to `A9 00` and `A9 01`, decodes those pairs in responses, and keeps ACK, NACK, and the final SYN as raw structural symbols.
 - A malformed command ACK that persists after bounded retries and successful session reconnection is a per-read protocol failure. Discovery continues to later selectors and the planner. JSON retains the unexpected byte and attempt counts; failed availability probes have `present=null` and `availability_qualification="unknown"`. Unknown instances are excluded from the scan plan, and coverage reports incomplete instance qualification. This failure does not establish that an instance is absent or unsupported.
 - Legacy group-directory artifacts and old TT constraint interpretations remain viewable but are explicitly unqualified. They do not define group semantics, value codecs, or a complete parameter-description contract.
+
 - Discovery probes and coverage rows are ordered by operation, then ascending GG: OP02 first, OP06 second. Each row reports its own operation-specific RR limit. OP02/GG00 has RR_max=0x00FF in built-in presets; OP02/GG08 is labelled DeltaT.
 - The Browser tree follows the final planner selection and shows confirmed-present instances only; deselected groups are omitted and absent/unknown probes remain in the artifact. OP06 device selectors use II01..08. OP02 circuits use II01..09, with virtual native hot water at II09 after the eight heating circuits.
 - Replay JSON retains observed registers above a current scheduling ceiling. Browser and HTML apply current System RR bounds, so historical System RR above `0x00FF` remains in JSON and trace evidence only.
@@ -173,6 +174,31 @@ value opens the confirmation; it does not itself send a device write.
 
 See the AGPL [Browser write contract](https://github.com/Project-Helianthus/helianthus-docs-ebus/blob/main/development/ebus-vaillant-b524-browser-writes.md)
 for validation, missing-limit exceptions and evidence boundaries.
+
+### Static constraint hints
+
+The bundled static catalog uses explicit `(opcode, group, register)` keys, with
+OP=0x02 only and native little-endian register numbers (`RRlo | RRhi<<8`). OP06
+never inherits these ranges. Browser detail and help map historical
+`legacy_unqualified` annotations to **unscoped_catalog (unqualified)**: historical
+short-probe hints, not profile-scoped bounds or write-validation authority.
+New static-catalog annotations emit `constraint_qualified=false` and
+`constraint_scope="unscoped_catalog"`; archived artifacts remain viewable. Static
+hints do not enter reusable description baselines or validate edits.
+
+DHW bivalence (`OP02/GG00/RR0001`) is absent from both static catalog copies.
+Its `-20..20` step 1 bound comes only from the existing exact-description profile
+for EID `BASV0`, SW `0217`, HW `8803`, API version 1 and revision 1, at II00,
+with EXP codec and access FLAGS `03`. Retained description bytes are **Proven**;
+the EXP decoding is a **Hypothesis**. The historical BASV2 `-20..50` hint is
+unqualified **Hypothesis**, not a default bound. Unknown identities or missing
+exact description selectors have **Unknown** bounds; no static fallback fills
+them. See [BASV0 metadata](docs/basv0-metadata.md).
+
+Publish family-scoped protocol claims, not model-wide guarantees. Native identity
+strings may identify evidence; they do not establish a product model or installed
+topology. Keep **Proven**, **Hypothesis**, and **Unknown** grades distinct.
+
 
 ## Features
 - Session preface with regulator identity and transport endpoint.

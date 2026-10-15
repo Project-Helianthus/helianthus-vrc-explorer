@@ -11,8 +11,34 @@ The packaged baseline contains 34 reusable local descriptions for this profile:
 raw STEP meaning remains unknown. A codec is reusable only when it is supported
 by a public exact native selector schema or by the public local constraint codec.
 A matching datatype from the BASV2 catalog is not sufficient. The BASV0 DHW
-bivalence description therefore keeps its observed maximum of 20 independently
-of the BASV2 maximum of 50.
+bivalence description therefore keeps its decoded maximum of 20 independently
+of the unqualified historical BASV2 maximum of 50.
+
+The static constraint catalog is keyed explicitly by `(opcode, group, register)`
+with OP02 only, using native little-endian register numbers. OP06 inherits no
+local range. It contains no GG00/RR0001 DHW bivalence row. Every emitted static
+hint carries `constraint_qualified=false` and
+`constraint_scope="unscoped_catalog"`. Browser detail and help display
+`unscoped_catalog (unqualified)` for these historical short-probe hints; they are
+not profile-scoped bounds and cannot validate edits or populate description
+baselines. Archived `legacy_unqualified` annotations have the same meaning.
+
+Only the existing exact-profile description path supplies the BASV0 bound at
+`OP02/GG00/II00/RR0001`: min -20, max 20, step 1, EXP, access FLAGS `03`.
+All five native identity fields above must match. Unknown identities and absent
+exact selectors carry no bound; the static catalog never supplies a default.
+The retained raw description `0001000000A0C10000A0410000803F` is **Proven**
+within the retained bytes. Its EXP decoding is a **Hypothesis**, distinct from
+application reuse qualification. The historical BASV2 `-20..50` observation is
+unqualified **Hypothesis** and establishes no bound for an unknown identity.
+
+Public claims are scoped to controller families, not product models. Native
+identity strings are allowed as evidence identifiers. Preserve the tri-state
+grades **Proven**, **Hypothesis**, and **Unknown**; neither a codec label nor
+application qualification promotes a hypothesis to proven wire semantics.
+The [public BASV0 profile](https://github.com/Project-Helianthus/helianthus-docs-ebus/blob/main/protocols/vaillant/ebus-vaillant-b524-basv0-profile-v1.md)
+and [registry contract](https://github.com/Project-Helianthus/helianthus-docs-ebus/blob/main/architecture/b524-semantic-mapping.md#registry-contract-b524-extended-register-access)
+retain the evidence and its limits.
 
 Scalar reads record `codec_provenance` as either `selector_qualified` or
 `length_inferred`. A length-inferred codec may decode a value for display, but

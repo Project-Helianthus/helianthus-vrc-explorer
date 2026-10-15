@@ -162,7 +162,8 @@ def test_limits_section_shows_catalog_evidence_as_unqualified() -> None:
     assert limits is not None
     text = " ".join(f"{r.label} {r.value} {r.note}" for r in limits.rows)
     assert "catalog evidence" in text.lower()
-    assert "unqualified" in text.lower()
+    assert "unscoped_catalog (unqualified)" in text
+    assert "historical short-probe hints" in text
 
 
 def test_unknown_register_shows_fallback_name_flags_and_raw_unqualified_description() -> None:
