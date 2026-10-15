@@ -213,12 +213,21 @@ def _limits_section(
         constraint_min = entry.get("constraint_min")
         constraint_max = entry.get("constraint_max")
         constraint_step = entry.get("constraint_step")
-        scope = constraint_scope_metadata()
+        is_catalog = (
+            entry.get("constraint_source") == "static_catalog"
+            or entry.get("constraint_qualification") == "legacy_unqualified"
+        )
+        label = (
+            "Catalog evidence: unscoped_catalog (unqualified)"
+            if is_catalog
+            else f"Constraint evidence: {entry.get('constraint_scope') or 'unknown'}"
+        )
+        note = str(constraint_scope_metadata()["rationale"]) if is_catalog else None
         rows.append(
             DetailRow(
-                "Catalog evidence: unscoped_catalog (unqualified)",
+                label,
                 f"{constraint_type} {constraint_min}..{constraint_max} step={constraint_step}",
-                note=str(scope["rationale"]),
+                note=note,
             )
         )
     if not rows:

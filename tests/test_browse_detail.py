@@ -152,6 +152,7 @@ def test_limits_section_shows_catalog_evidence_as_unqualified() -> None:
         "type": "EXP",
         "raw_hex": "00000000",
         "flags_access": "writable_visible",
+        "constraint_source": "static_catalog",
         "constraint_type": "f32_range",
         "constraint_min": 0,
         "constraint_max": 40,
@@ -164,6 +165,23 @@ def test_limits_section_shows_catalog_evidence_as_unqualified() -> None:
     assert "catalog evidence" in text.lower()
     assert "unscoped_catalog (unqualified)" in text
     assert "historical short-probe hints" in text
+
+
+def test_limits_section_preserves_live_probe_scope() -> None:
+    entry = {
+        "constraint_type": "f32_range",
+        "constraint_min": 0,
+        "constraint_max": 40,
+        "constraint_step": 0.5,
+        "constraint_source": "probe",
+        "constraint_scope": "opcode_0x01_probe",
+    }
+    sections = register_detail_sections(row=_row(), entry=entry, description=None, correspondence=None)
+    limits = _section(sections, "LIMITS")
+    assert limits is not None
+    text = " ".join(f"{r.label} {r.value} {r.note}" for r in limits.rows)
+    assert "unscoped_catalog" not in text
+    assert "opcode_0x01_probe" in text
 
 
 def test_unknown_register_shows_fallback_name_flags_and_raw_unqualified_description() -> None:
