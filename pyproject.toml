@@ -39,6 +39,8 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Test this worktree even when a reused dev environment installs another checkout.
+pythonpath = ["src"]
 
 [tool.ruff]
 line-length = 100
