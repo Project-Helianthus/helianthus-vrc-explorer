@@ -59,16 +59,18 @@ scan, replay, Browser and HTML. See
 `b524_register_name_correspondence.py` in
 `src/helianthus_vrc_explorer/schema/` for the existing correspondence.
 
-Docs-ebus owns the D2 catalog names in
+Docs-ebus owns the OP02 catalog names in
 `protocols/vaillant/fixtures/b524-op02-register-names.csv` and their
 `previous_name` migration annotations, under `architecture/naming.md`.
 Carry those names and `previous_name` as labelled correspondence keyed by
 the full native selector `(OP, GG, II, RR)`; they never replace explorer
 names or merge identities across operations or instances.
 
-Today `myvaillant_name` holds the explorer display name unless an observed
-app name is recorded. Its label must state that provenance honestly; the
-field name alone does not prove an observed application name.
+Today `myvaillant_name` holds the explorer canonical name where one exists,
+otherwise a myVaillant map leaf; observed app names live only in the
+correspondence columns (`myvaillant_name_vrc720`, `myvaillant_name_vrc700`).
+Its label must state that provenance honestly; the field name alone does
+not prove an observed application name.
 
 ## Evidence grades and publication
 
