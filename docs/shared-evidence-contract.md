@@ -41,10 +41,14 @@ matching versioned schema and fixture filenames. Additive fields that are
 backward compatible stay `/v1`; update the docs-ebus schema first. Adding
 a required field is not automatically backward compatible.
 
-The explorer must never ship a `/v1` file that fails the docs-ebus validator
-`scripts/validate_b524_basv0_description_profile.py`. Refresh digests in the
-same coordinated change on both sides, and verify byte equality before
-release. A matching filename or suffix alone does not establish parity.
+The explorer must never ship a `/v1` file that fails the docs-ebus gates:
+the description profile is validated by
+`scripts/validate_b524_basv0_description_profile.py` together with the
+observation fixture (`--observations`) and the overlay (`--scopes`), and
+each native file is validated against its own JSON schema, as the docs-ebus
+tests do. Refresh digests in the same coordinated change on both sides, and
+verify byte equality before release. A matching filename or suffix alone
+does not establish parity.
 
 The parity work must account for separate `api_version_raw` and
 `api_revision_raw`, neutral `DATE_DMY_U8X3` and `TIME_HMS_U8X3` codec names,
