@@ -15,6 +15,7 @@ from copy import deepcopy
 from importlib import resources
 from typing import Any
 
+from ..evidence_compat import interpret_legacy_codecs, normalize_api_identity
 from ..protocol.b524_metadata import decode_parameter_description
 
 _FIELDS = ("type", "width", "min", "max", "step")
@@ -26,6 +27,8 @@ _OBSERVED_CONTROLLER_PROFILE_KEYS = (
     "hardware_raw_hex",
     "api_version",
     "api_revision",
+    "api_version_raw",
+    "api_revision_raw",
 )
 _CONTROLLER_PROFILE_KEYS = (*_OBSERVED_CONTROLLER_PROFILE_KEYS, "profile_id")
 _REMOTE_PROFILE_KEYS = ("device_class_raw", "device_firmware_raw")
@@ -70,20 +73,30 @@ def _controller_profile(artifact: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(identity, dict) or not isinstance(context, dict):
         return {}
     eid = identity.get("eid", identity.get("device_id"))
-    return {
-        "profile": context.get("profile"),
-        "eid": eid.strip().upper() if isinstance(eid, str) else None,
-        "software_raw_hex": _canonical_raw(identity.get("sw")),
-        "hardware_raw_hex": _canonical_raw(identity.get("hw")),
-        "api_version": context.get("api_version"),
-        "api_revision": context.get("api_revision"),
-        # Human-readable fields remain useful evidence, but never qualify reuse.
-        "model": identity.get("model"),
-        "firmware": identity.get("firmware"),
-    }
+    return normalize_api_identity(
+        {
+            "profile": context.get("profile"),
+            "eid": eid.strip().upper() if isinstance(eid, str) else None,
+            "software_raw_hex": _canonical_raw(identity.get("sw")),
+            "hardware_raw_hex": _canonical_raw(identity.get("hw")),
+            "api_version": context.get("api_version"),
+            "api_revision": context.get("api_revision"),
+            **{
+                key: context[key]
+                for key in ("api_version_raw", "api_revision_raw")
+                if key in context
+            },
+            # Human-readable fields remain useful evidence, but never qualify reuse.
+            "model": identity.get("model"),
+            "firmware": identity.get("firmware"),
+        }
+    )
 
 
 def _catalog_match(profile: dict[str, Any]) -> dict[str, Any] | None:
+    profile = normalize_api_identity(profile)
+    if profile.get("api_identity_conflicts"):
+        return None
     catalog = load_description_profile_catalog()
     if catalog.get("schema_version") != 1:
         raise ValueError("Unsupported B524 description profile catalog version")
@@ -91,7 +104,7 @@ def _catalog_match(profile: dict[str, Any]) -> dict[str, Any] | None:
     for candidate in catalog.get("profiles", []):
         if not isinstance(candidate, dict) or not isinstance(candidate.get("controller"), dict):
             continue
-        controller = candidate["controller"]
+        controller = normalize_api_identity(candidate["controller"])
         if (
             profile.get("profile") == candidate.get("profile")
             and profile.get("eid") == controller.get("eid")
@@ -99,6 +112,8 @@ def _catalog_match(profile: dict[str, Any]) -> dict[str, Any] | None:
             and profile.get("hardware_raw_hex") == controller.get("hardware_raw_hex")
             and profile.get("api_version") == controller.get("api_version")
             and profile.get("api_revision") == controller.get("api_revision")
+            and profile.get("api_version_raw") == controller.get("api_version_raw")
+            and profile.get("api_revision_raw") == controller.get("api_revision_raw")
         ):
             matches.append(candidate)
     return matches[0] if len(matches) == 1 else None
@@ -157,6 +172,9 @@ def description_profile(
 
 
 def _qualified_profile(profile: dict[str, Any]) -> bool:
+    profile = normalize_api_identity(profile)
+    if profile.get("api_identity_conflicts"):
+        return False
     keys = list(_CONTROLLER_PROFILE_KEYS)
     if profile.get("device_identity_required"):
         keys.extend(_REMOTE_PROFILE_KEYS)
@@ -172,6 +190,9 @@ def _observed_native_profile(profile: dict[str, Any]) -> bool:
     reuse continues to require ``_qualified_profile``.
     """
 
+    profile = normalize_api_identity(profile)
+    if profile.get("api_identity_conflicts"):
+        return False
     keys = list(_OBSERVED_CONTROLLER_PROFILE_KEYS)
     if profile.get("device_identity_required"):
         keys.extend(_REMOTE_PROFILE_KEYS)
@@ -187,6 +208,9 @@ def _known_profile_value(value: Any) -> bool:
 
 def _profiles_conflict(left: dict[str, Any], right: dict[str, Any]) -> bool:
     """Only contradictory authoritative native observations establish mismatch."""
+    left, right = normalize_api_identity(left), normalize_api_identity(right)
+    if left.get("api_identity_conflicts") or right.get("api_identity_conflicts"):
+        return True
     keys = set(_CONTROLLER_PROFILE_KEYS)
     if left.get("device_identity_required") or right.get("device_identity_required"):
         keys.update(_REMOTE_PROFILE_KEYS)
@@ -199,6 +223,7 @@ def _profiles_conflict(left: dict[str, Any], right: dict[str, Any]) -> bool:
 
 
 def _compatible_profiles(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    left, right = normalize_api_identity(left), normalize_api_identity(right)
     if not _qualified_profile(left) or not _qualified_profile(right):
         return False
     if bool(left.get("device_identity_required")) != bool(right.get("device_identity_required")):
@@ -293,7 +318,9 @@ def _selector_codec_supported(
     )
 
 
-def export_description_baseline(artifact: dict[str, Any]) -> dict[str, Any]:
+def export_description_baseline(
+    artifact: dict[str, Any], *, allow_legacy_interpretation: bool = False
+) -> dict[str, Any]:
     """Export decoded metadata, excluding serials, endpoints and raw captures.
 
     Only complete, correlated replies that reproduce the stored interpretation
@@ -307,12 +334,16 @@ def export_description_baseline(artifact: dict[str, Any]) -> dict[str, Any]:
             desc = entry.get("parameter_description")
             if not isinstance(desc, dict) or desc.get("qualification") != "matched":
                 continue
+            if not allow_legacy_interpretation and (
+                "codec_migration" in entry or "codec_migration" in desc
+            ):
+                raise ValueError("Exporting a legacy interpretation requires explicit opt-in")
             provenance = desc.get("codec_provenance", entry.get("codec_provenance"))
             if provenance != "selector_qualified":
                 continue
             if not _same_selector(desc, selector):
                 continue
-            if desc.get("target_profile", profile) != profile:
+            if normalize_api_identity(desc.get("target_profile", profile)) != profile:
                 continue
             expected_opcode = "0x01" if selector["read_opcode"] == "0x02" else "0x07"
             if desc.get("description_opcode") != expected_opcode:
@@ -337,6 +368,15 @@ def export_description_baseline(artifact: dict[str, Any]) -> dict[str, Any]:
                     "profile": deepcopy(profile),
                     **{key: decoded[key] for key in _FIELDS},
                     "source": "read_only_observed_baseline",
+                    **(
+                        {
+                            "codec_migration": deepcopy(
+                                desc.get("codec_migration", entry.get("codec_migration"))
+                            )
+                        }
+                        if "codec_migration" in desc or "codec_migration" in entry
+                        else {}
+                    ),
                     "decoder_revision": decoded["decoder_revision"],
                     "step_qualification": decoded["step_qualification"],
                     "validation_scope": decoded["validation_scope"],
@@ -376,7 +416,21 @@ def _enrich_bundle_profiles(
     for description in result.get("descriptions", []):
         if not isinstance(description, dict) or not isinstance(description.get("profile"), dict):
             continue
+        description["profile"] = normalize_api_identity(description["profile"])
         profile = description["profile"]
+        if result.get("schema_version") == 1 and (
+            trust_legacy_codec
+            or (
+                description.get("source") == "read_only_observed_baseline"
+                and description.get("decoder_revision")
+                in {"b524-description/v1", "b524-description/v2"}
+            )
+        ):
+            interpret_legacy_codecs(description, source_version=1)
+        if description.get("type") in {"DATE_DMY_U8X3", "TIME_HMS_U8X3"}:
+            description["validation_scope"] = "display_only"
+        if profile.get("api_identity_conflicts"):
+            continue
         if trust_legacy_codec:
             description.setdefault("codec_provenance", "selector_qualified")
         if all(_known_profile_value(profile.get(key)) for key in _CONTROLLER_PROFILE_KEYS):
@@ -387,18 +441,21 @@ def _enrich_bundle_profiles(
             controller = candidate.get("controller")
             if not isinstance(signature, dict) or not isinstance(controller, dict):
                 continue
+            controller = normalize_api_identity(controller)
             if (
                 profile.get("profile") == candidate.get("profile")
                 and profile.get("model") == signature.get("model")
                 and profile.get("firmware") == signature.get("firmware")
                 and profile.get("api_version") == controller.get("api_version")
                 and profile.get("api_revision") == controller.get("api_revision")
+                and profile.get("api_version_raw") == controller.get("api_version_raw")
+                and profile.get("api_revision_raw") == controller.get("api_revision_raw")
             ):
                 matches.append(candidate)
         if len(matches) != 1:
             continue
         matched = matches[0]
-        controller = matched["controller"]
+        controller = normalize_api_identity(matched["controller"])
         profile.update(
             profile_id=matched["id"],
             eid=controller["eid"],
@@ -406,12 +463,14 @@ def _enrich_bundle_profiles(
             hardware_raw_hex=controller["hardware_raw_hex"],
             api_version=controller["api_version"],
             api_revision=controller["api_revision"],
+            api_version_raw=controller["api_version_raw"],
+            api_revision_raw=controller["api_revision_raw"],
         )
     return result
 
 
 def merge_description_baselines(
-    previous: dict[str, Any], current: dict[str, Any]
+    previous: dict[str, Any], current: dict[str, Any], *, allow_legacy_interpretation: bool = False
 ) -> dict[str, Any]:
     """Update qualified rows additively; a partial scan cannot erase other rows.
 
@@ -421,6 +480,8 @@ def merge_description_baselines(
     """
     if any(bundle.get("schema_version") != 1 for bundle in (previous, current)):
         raise ValueError("Unsupported B524 description baseline version")
+    previous = _enrich_bundle_profiles(previous)
+    current = _enrich_bundle_profiles(current)
     rows = deepcopy(previous.get("descriptions", []))
     for incoming in current.get("descriptions", []):
         profile = incoming.get("profile", {})
@@ -450,6 +511,8 @@ def merge_description_baselines(
             json.dumps(row["profile"], sort_keys=True),
         )
     )
+    if not allow_legacy_interpretation and any("codec_migration" in row for row in rows):
+        raise ValueError("Exporting a legacy interpretation requires explicit opt-in")
     return {
         "schema_version": 1,
         "descriptions": rows,
@@ -488,7 +551,9 @@ def attach_bundled_descriptions(
                     else "legacy_unknown"
                 )
             live["codec_provenance"] = provenance
-            live.setdefault("target_profile", deepcopy(profile))
+            live["target_profile"] = normalize_api_identity(
+                live.get("target_profile", deepcopy(profile))
+            )
             live["target_profile_match"] = (
                 _observed_native_profile(profile) and live["target_profile"] == profile
             )

@@ -901,7 +901,7 @@
       "source": "read_only_observed_generic_description",
       "step": null,
       "step_qualification": "unknown",
-      "type": "HDA:3",
+      "type": "DATE_DMY_U8X3",
       "validation_scope": "class_metadata_only",
       "width": 3
     },
@@ -1017,7 +1017,7 @@
       "source": "read_only_observed_generic_description",
       "step": null,
       "step_qualification": "unknown",
-      "type": "HDA:3",
+      "type": "DATE_DMY_U8X3",
       "validation_scope": "class_metadata_only",
       "width": 3
     },
@@ -1046,7 +1046,7 @@
       "source": "read_only_observed_generic_description",
       "step": null,
       "step_qualification": "unknown",
-      "type": "HTI",
+      "type": "TIME_HMS_U8X3",
       "validation_scope": "class_metadata_only",
       "width": 3
     },
@@ -1394,7 +1394,7 @@
       "source": "read_only_observed_generic_description",
       "step": null,
       "step_qualification": "unknown",
-      "type": "HDA:3",
+      "type": "DATE_DMY_U8X3",
       "validation_scope": "class_metadata_only",
       "width": 3
     },
@@ -1423,7 +1423,7 @@
       "source": "read_only_observed_generic_description",
       "step": null,
       "step_qualification": "unknown",
-      "type": "HDA:3",
+      "type": "DATE_DMY_U8X3",
       "validation_scope": "class_metadata_only",
       "width": 3
     },
@@ -1481,7 +1481,7 @@
       "source": "read_only_observed_generic_description",
       "step": null,
       "step_qualification": "unknown",
-      "type": "HTI",
+      "type": "TIME_HMS_U8X3",
       "validation_scope": "class_metadata_only",
       "width": 3
     },
@@ -1510,7 +1510,7 @@
       "source": "read_only_observed_generic_description",
       "step": null,
       "step_qualification": "unknown",
-      "type": "HTI",
+      "type": "TIME_HMS_U8X3",
       "validation_scope": "class_metadata_only",
       "width": 3
     },
@@ -2235,7 +2235,7 @@
       "source": "read_only_observed_generic_description",
       "step": null,
       "step_qualification": "unknown",
-      "type": "HDA:3",
+      "type": "DATE_DMY_U8X3",
       "validation_scope": "class_metadata_only",
       "width": 3
     },
@@ -2264,7 +2264,7 @@
       "source": "read_only_observed_generic_description",
       "step": null,
       "step_qualification": "unknown",
-      "type": "HDA:3",
+      "type": "DATE_DMY_U8X3",
       "validation_scope": "class_metadata_only",
       "width": 3
     },
@@ -2525,7 +2525,7 @@
       "source": "read_only_observed_generic_description",
       "step": null,
       "step_qualification": "unknown",
-      "type": "HTI",
+      "type": "TIME_HMS_U8X3",
       "validation_scope": "class_metadata_only",
       "width": 3
     },
@@ -2554,7 +2554,7 @@
       "source": "read_only_observed_generic_description",
       "step": null,
       "step_qualification": "unknown",
-      "type": "HTI",
+      "type": "TIME_HMS_U8X3",
       "validation_scope": "class_metadata_only",
       "width": 3
     },
@@ -2583,7 +2583,7 @@
       "source": "read_only_observed_generic_description",
       "step": null,
       "step_qualification": "unknown",
-      "type": "HTI",
+      "type": "TIME_HMS_U8X3",
       "validation_scope": "class_metadata_only",
       "width": 3
     },
@@ -2670,7 +2670,7 @@
       "source": "read_only_observed_generic_description",
       "step": null,
       "step_qualification": "unknown",
-      "type": "HDA:3",
+      "type": "DATE_DMY_U8X3",
       "validation_scope": "class_metadata_only",
       "width": 3
     },
@@ -3163,7 +3163,7 @@
       "source": "read_only_observed_generic_description",
       "step": null,
       "step_qualification": "unknown",
-      "type": "HDA:3",
+      "type": "DATE_DMY_U8X3",
       "validation_scope": "class_metadata_only",
       "width": 3
     },
@@ -3192,7 +3192,7 @@
       "source": "read_only_observed_generic_description",
       "step": null,
       "step_qualification": "unknown",
-      "type": "HTI",
+      "type": "TIME_HMS_U8X3",
       "validation_scope": "class_metadata_only",
       "width": 3
     },
@@ -3221,7 +3221,7 @@
       "source": "read_only_observed_generic_description",
       "step": null,
       "step_qualification": "unknown",
-      "type": "HDA:3",
+      "type": "DATE_DMY_U8X3",
       "validation_scope": "class_metadata_only",
       "width": 3
     },
@@ -3250,7 +3250,7 @@
       "source": "read_only_observed_generic_description",
       "step": null,
       "step_qualification": "unknown",
-      "type": "HTI",
+      "type": "TIME_HMS_U8X3",
       "validation_scope": "class_metadata_only",
       "width": 3
     },

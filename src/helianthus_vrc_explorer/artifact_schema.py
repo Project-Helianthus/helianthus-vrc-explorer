@@ -4,6 +4,8 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
+from .evidence_compat import has_explorer_provenance, interpret_legacy_codecs
+
 CURRENT_ARTIFACT_SCHEMA_VERSION = "2.3"
 LEGACY_UNVERSIONED_SCHEMA = "legacy-unversioned"
 LEGACY_VERSIONED_SCHEMAS = frozenset({"2.0", "2.1", "2.2"})
@@ -384,6 +386,16 @@ def migrate_artifact_schema(
     migrated = deepcopy(artifact)
     register_count_before = count_register_entries(migrated)
     changed = False
+    # This interpretation adapter is separate from the structural schema migration.
+    # The 2.4 output version is introduced with the part 2 exporter.
+    if source_schema_version in {
+        LEGACY_UNVERSIONED_SCHEMA,
+        "2.0",
+        "2.1",
+        "2.2",
+        "2.3",
+    } and has_explorer_provenance(artifact):
+        changed = interpret_legacy_codecs(migrated, source_version=source_schema_version)
 
     # Step 1: migrate legacy unversioned / 2.0 / 2.1 to 2.2 shape first
     if source_schema_version in {LEGACY_UNVERSIONED_SCHEMA, "2.0", "2.1"}:

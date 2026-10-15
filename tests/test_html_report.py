@@ -1,3 +1,4 @@
+# Plain-byte calendar/clock tests use the neutral codecs; BCD labels are distinct.
 from __future__ import annotations
 
 import json
@@ -28,7 +29,7 @@ def test_generated_html_hti_override_decodes_numeric_bytes() -> None:
     script = html[start:end] + (
         "console.log(JSON.stringify("
         + json.dumps(cases + invalid)
-        + '.map(bytes => parseTypedValue("HTI", bytes))));'
+        + '.map(bytes => parseTypedValue("TIME_HMS_U8X3", bytes))));'
     )
     result = subprocess.run(
         [node, "-e", script], check=True, text=True, capture_output=True, timeout=10
@@ -803,3 +804,31 @@ console.log(JSON.stringify(Object.fromEntries(
     assert notices["not_verified"] == [
         "Cached description not_verified: UIN · min=0 · max=12 · step=1."
     ]
+
+
+def test_html_calendar_override_matches_python_date_validation() -> None:
+    from helianthus_vrc_explorer.protocol.parser import ValueParseError, parse_typed_value
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node is required for the generated HTML date decoder check")
+    html = render_html_report({})
+    start = html.index("function parseTypedValue(")
+    end = html.index("function formatValue(", start)
+    cases = [[31, 12, 99], [29, 2, 0], [29, 2, 1], [31, 2, 26], [1, 1, 100], [1, 0, 0], [1, 1]]
+    script = html[start:end] + (
+        "console.log(JSON.stringify("
+        + json.dumps(cases)
+        + '.map(bytes => parseTypedValue("DATE_DMY_U8X3", bytes))));'
+    )
+    result = subprocess.run([node, "-e", script], check=True, text=True, capture_output=True)
+    for raw, js in zip(cases, json.loads(result.stdout), strict=True):
+        try:
+            expected = parse_typed_value("DATE_DMY_U8X3", bytes(raw))
+        except ValueParseError:
+            assert js["error"] and js["value"] is None
+        else:
+            assert js == {"value": expected, "error": None}
+    assert "!entry.codec_migration && !hasQualifiedValueLabel" in html
+    assert "historical value retained" in html
+    assert "display-only; range unvalidated" in html

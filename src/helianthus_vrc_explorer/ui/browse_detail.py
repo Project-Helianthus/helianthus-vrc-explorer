@@ -166,10 +166,19 @@ def _type_section(entry: dict[str, Any] | None) -> DetailSection | None:
         return None
     label = b524_codec_label(type_spec)
     if label is not None:
-        rows = (
+        rows: tuple[DetailRow, ...] = (
             DetailRow("RAW codec", f"{type_spec} ({label.raw_shape})"),
             DetailRow("Interpreted", label.interpreted_shape),
         )
+        migration = entry.get("codec_migration")
+        if isinstance(migration, dict):
+            rows += (
+                DetailRow(
+                    "Legacy Explorer label",
+                    str(migration.get("source_label")),
+                    note="Historical value retained; overrides are separate interpretations.",
+                ),
+            )
         return DetailSection(title="TYPE", rows=rows)
     raw_hex = entry.get("raw_hex")
     byte_count = None
@@ -205,6 +214,8 @@ def _limits_section(
         if step_qualification:
             parts.append(f"(step {step_qualification})")
         note = f"source: {source}"
+        if description.get("type") in {"DATE_DMY_U8X3", "TIME_HMS_U8X3"}:
+            note += "; candidate calendar/clock limits: display-only; range unvalidated"
         if incomplete:
             note += " — incomplete"
         rows.append(DetailRow("Described", " ".join(parts), note=note))

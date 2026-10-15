@@ -308,3 +308,44 @@ def test_migrate_21_entries_derives_response_state_and_cleans_known_errors() -> 
     assert regs["0x0003"]["error"] == "nack"
     assert regs["0x0004"].get("response_state") is None
     assert regs["0x0004"]["error"] == "transport_error: broken framing"
+
+
+def test_legacy_calendar_migration_requires_explorer_provenance_and_keeps_evidence() -> None:
+    from helianthus_vrc_explorer.scanner.b524_artifact import _artifact_contract_metadata
+
+    for codec, effective in (("HDA:3", "DATE_DMY_U8X3"), ("HTI", "TIME_HMS_U8X3")):
+        entry = {
+            "type": codec,
+            "raw_hex": "101020",
+            "value": "historical interpretation",
+            "parameter_description": {"type": codec, "reply_hex": "000000101020"},
+        }
+        source = {
+            "schema_version": "2.3",
+            "meta": {},
+            "operations": {
+                "0x02": {
+                    "groups": {"0x00": {"instances": {"0x00": {"registers": {"0x0001": entry}}}}}
+                }
+            },
+        }
+        unchanged, _ = migrate_artifact_schema(source)
+        assert list(iter_register_entries(unchanged))[0][-1]["type"] == codec
+        source["meta"]["artifact_contract"] = _artifact_contract_metadata()
+        before = deepcopy(source)
+        migrated, report = migrate_artifact_schema(source)
+        result = list(iter_register_entries(migrated))[0][-1]
+        assert result["type"] == effective
+        assert result["codec_migration"] == {
+            "source_label": codec,
+            "source_version": "2.3",
+            "source": "helianthus-vrc-explorer",
+        }
+        assert result["parameter_description"]["type"] == effective
+        assert result["value"] == entry["value"]
+        assert result["raw_hex"] == entry["raw_hex"]
+        assert result["parameter_description"]["reply_hex"] == "000000101020"
+        assert source == before
+        assert report.changed
+        twice, _ = migrate_artifact_schema(migrated)
+        assert twice == migrated

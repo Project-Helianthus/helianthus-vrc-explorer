@@ -82,3 +82,12 @@ def test_unknown_remote_firmware_forces_only_remote_writable_describe() -> None:
     assert selected == [candidates[1]]
     assert list(selected_entries) == [candidates[1].native_identity]
     assert remote_statuses[0]["status"] == "unknown"
+
+
+def test_api1_label_cannot_fill_a_missing_revision_for_profile_policy() -> None:
+    from helianthus_vrc_explorer.schema.parameter_descriptions import description_catalog_status
+
+    artifact = _artifact()
+    artifact["meta"]["profile_context"].pop("api_revision")
+    artifact["meta"]["profile_context"]["api_label"] = "API1"
+    assert description_catalog_status(artifact)["status"] != "exact"

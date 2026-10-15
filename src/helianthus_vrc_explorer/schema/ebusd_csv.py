@@ -16,11 +16,25 @@ class EbusdRegisterSchemaEntry:
     type_spec: str | None
 
 
+# Preserve external packed-BCD tokens as unsupported raw evidence, never as aliases.
 def _looks_like_type_spec(value: str) -> bool:
     normalized = value.strip().upper()
     if not normalized:
         return False
-    if normalized in {"EXP", "UIN", "UCH", "HTI", "HDA:3", "I8", "I16", "U32", "I32", "BOOL"}:
+    if normalized in {
+        "EXP",
+        "UIN",
+        "UCH",
+        "TIME_HMS_U8X3",
+        "DATE_DMY_U8X3",
+        "HDA:3",
+        "HTI",
+        "I8",
+        "I16",
+        "U32",
+        "I32",
+        "BOOL",
+    }:
         return True
     return normalized.startswith(("STR:", "HEX:"))
 

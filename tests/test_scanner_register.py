@@ -1,3 +1,4 @@
+# Plain-byte calendar/clock tests use the neutral codecs; BCD labels are distinct.
 from __future__ import annotations
 
 import contextlib
@@ -458,7 +459,7 @@ def test_read_register_infers_numeric_time_with_invalid_date_month() -> None:
     assert entry["flags"] == 0x03
     assert entry["flags_access"] == "writable_visible"
     assert entry["raw_hex"] == "0e3803"
-    assert entry["type"] == "HTI"
+    assert entry["type"] == "TIME_HMS_U8X3"
     assert entry["value"] == "14:56:03"
     assert entry["error"] is None
 
@@ -1044,7 +1045,7 @@ def test_probe_instance_availability_group_04_local_uses_rr_0004(monkeypatch) ->
 def test_fw_not_added_to_inferred_type_selection() -> None:
     inferred_type, inferred_value, inferred_error = _parse_inferred_value(bytes.fromhex("0f021b"))
 
-    assert inferred_type == "HDA:3"
+    assert inferred_type == "DATE_DMY_U8X3"
     assert inferred_value == "2027-02-15"
     assert inferred_error is None
 
