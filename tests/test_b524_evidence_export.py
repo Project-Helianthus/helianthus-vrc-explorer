@@ -18,10 +18,12 @@ from helianthus_vrc_explorer.evidence_export import (
     write_native_evidence,
 )
 from helianthus_vrc_explorer.protocol.b524_metadata import validate_parameter_edit
+from helianthus_vrc_explorer.scanner.scan import scan_b524
 from helianthus_vrc_explorer.schema.parameter_descriptions import (
     attach_native_descriptions,
     effective_parameter_description,
 )
+from helianthus_vrc_explorer.transport.dummy import DummyTransport
 
 ROOT = Path(__file__).resolve().parents[1]
 DESCRIPTION = "b524-basv0-description-profile-v1.json"
@@ -114,14 +116,31 @@ def consumer():
             "identity": {"eid": "BASV0", "sw": "0217", "hw": "8803"},
             "profile_context": {"profile": "controller_b524", "api_version": 1, "api_revision": 1},
         },
-        "operations": {"0x02": {"groups": {"0x00": {"instances": {"0x00": instance}}}}},
+        "operations": {
+            "0x02": {
+                "groups": {
+                    "0x00": {
+                        "instances": {"0x00": instance},
+                        "availability_probes": {
+                            "0x00": {
+                                "present": True,
+                                "source": "heuristic_probe",
+                                "response_state": "active",
+                                "raw_hex": "01",
+                            }
+                        },
+                    }
+                }
+            }
+        },
     }
     return artifact, selector, instance
 
 
 def test_native_overlay_recomputes_current_presence_and_identity_each_time():
     documents = exported()
-    artifact, selector, instance = consumer()
+    artifact, selector, _ = consumer()
+    probe = artifact["operations"]["0x02"]["groups"]["0x00"]["availability_probes"]["0x00"]
     attach_native_descriptions(artifact, documents[DESCRIPTION], documents[OVERLAY])
     for present, scope in [
         (True, "format_range_and_step"),
@@ -129,7 +148,7 @@ def test_native_overlay_recomputes_current_presence_and_identity_each_time():
         (None, "display_only"),
         (True, "format_range_and_step"),
     ]:
-        instance["present"] = present
+        probe["present"] = present
         result = effective_parameter_description(artifact, selector)
         assert result["validation_scope"] == scope
         error = validate_parameter_edit(
@@ -254,6 +273,7 @@ def test_source_presence_is_never_inherited_from_the_overlay():
     documents = exported()
     artifact, selector, instance = consumer()
     instance.pop("present")
+    artifact["operations"]["0x02"]["groups"]["0x00"].pop("availability_probes")
     attach_native_descriptions(artifact, documents[DESCRIPTION], documents[OVERLAY])
     assert documents[OVERLAY]["records"][0]["validation_scope"] == "format_range_and_step"
     assert effective_parameter_description(artifact, selector)["validation_scope"] == "display_only"
@@ -284,8 +304,43 @@ def test_current_always_present_fallback_does_not_establish_observed_presence():
     artifact["operations"]["0x02"]["groups"]["0x00"]["availability_contract"] = {
         "source": "always_present"
     }
+    artifact["operations"]["0x02"]["groups"]["0x00"]["availability_probes"]["0x00"].pop("source")
     attach_native_descriptions(artifact, documents[DESCRIPTION], documents[OVERLAY])
     assert effective_parameter_description(artifact, selector)["validation_scope"] == "display_only"
+
+
+def test_scanner_scheduling_presence_does_not_authorize_native_ranges(tmp_path):
+    fixture = tmp_path / "scan.json"
+    fixture.write_text(
+        json.dumps(
+            {
+                "groups": {
+                    "0x00": {
+                        "instances": {"0x00": {"registers": {"0x0001": {"raw_hex": "00000000"}}}}
+                    }
+                }
+            }
+        )
+    )
+    artifact = scan_b524(DummyTransport(fixture), dst=0x15, probe_constraints=False)
+    qualified, selector, _ = consumer()
+    # Supply the independently matched identity; keep scanner presence untouched.
+    artifact["meta"].update(qualified["meta"])
+    group = artifact["operations"]["0x02"]["groups"]["0x00"]
+    assert group["instances"]["0x00"]["present"] is True
+    assert "availability_contract" not in group
+    assert "availability_probes" not in group
+    documents = exported()
+    attach_native_descriptions(artifact, documents[DESCRIPTION], documents[OVERLAY])
+    result = effective_parameter_description(artifact, selector)
+    assert result is not None
+    assert result["validation_scope"] == "display_only"
+    assert (
+        validate_parameter_edit(
+            result, type_spec="EXP", value=100, encoded=bytes.fromhex("0000c842")
+        )
+        == "unvalidated"
+    )
 
 
 def test_native_application_adapter_rejects_decoding_that_disagrees_with_bytes():
@@ -314,11 +369,13 @@ def test_native_import_requires_agreement_across_retained_instances(conflicting)
     artifact, selector, instance = consumer()
     instances = artifact["operations"]["0x02"]["groups"]["0x00"]["instances"]
     instances["0x01"] = deepcopy(instance)
+    probes = artifact["operations"]["0x02"]["groups"]["0x00"]["availability_probes"]
+    probes["0x01"] = deepcopy(probes["0x00"])
     attach_native_descriptions(artifact, native, overlay)
     for current_instance in ("0x00", "0x01"):
         selector["instance"] = current_instance
         for present in (True, False, True):
-            instances[current_instance]["present"] = present
+            probes[current_instance]["present"] = present
             result = effective_parameter_description(artifact, selector)
             assert result["validation_scope"] == (
                 "display_only" if conflicting or not present else "format_range_and_step"

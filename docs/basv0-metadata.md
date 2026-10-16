@@ -79,7 +79,9 @@ Native CC0 descriptions contain no policy field. The overlay joins one-to-one
 on operation/group/instance/register and describes source-installation policy;
 it never supplies current presence. `attach_native_descriptions` checks the
 join and complete local identity, then recomputes applicability from consumer
-presence. A later presence or identity change is checked again when resolving
+availability probes. An instance's scheduling-only `present` flag supplies no
+range or step authority when probe evidence is missing. A later presence or
+identity change is checked again when resolving
 effective metadata. Because retained replies do not echo the instance and no
 request is retained, local descriptions must agree across every retained
 described instance of the same operation/group/register before supplying range

@@ -607,7 +607,8 @@ def _native_current_scope(
     )
     instance = group.get("instances", {}).get(selector["instance"], {})
     probe = group.get("availability_probes", {}).get(selector["instance"], {})
-    present = probe.get("present", instance.get("present"))
+    # Instance presence may only schedule reads; require a current availability probe.
+    present = probe.get("present")
     if (
         probe.get("availability_qualification") == "unknown"
         or probe.get("source", group.get("availability_contract", {}).get("source"))
