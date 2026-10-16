@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from helianthus_vrc_explorer.schema.b524_register_name_correspondence import (
     B524RegisterNameCorrespondence,
 )
@@ -690,6 +692,34 @@ def test_docs_catalog_names_are_labelled_secondary_provisional_annotations() -> 
     other = _row(read_opcode="0x06", group_key="0x00", register_key="0x0007")
     names = _section(register_detail_sections(row=other, entry={}, description=None), "NAMES")
     assert not any(item.label.startswith("docs-ebus") for item in names.rows)
+
+
+@pytest.mark.parametrize("spelling", ["0x2", "0X02", " 0x02 "])
+def test_noncanonical_explicit_opcode_keeps_concrete_selector_and_names(spelling) -> None:
+    row = _row(
+        read_opcode=spelling,
+        group_key="0x00",
+        instance_key="0x01",
+        register_key="0x0007",
+        myvaillant_name="system_off",
+    )
+    assert row.effective_opcode == "0x02"
+    sections = register_detail_sections(row=row, entry={}, description=None)
+    gates = _section(sections, "GATES")
+    assert gates is not None
+    assert any(item.label == "Route" and item.value == "concrete selector" for item in gates.rows)
+    names = _section(sections, "NAMES")
+    assert names is not None
+    labels = {item.label: item.value for item in names.rows}
+    assert labels["docs-ebus catalog name (provisional)"] == "unknown_11"
+
+
+def test_invalid_explicit_opcode_does_not_fall_back_to_namespace() -> None:
+    from dataclasses import replace
+
+    row = _row(read_opcode="bogus", group_key="0x00", register_key="0x0007")
+    row = replace(row, namespace_key="0x02")
+    assert row.effective_opcode is None
 
 
 def test_docs_catalog_names_survive_legacy_migration_without_read_opcode() -> None:

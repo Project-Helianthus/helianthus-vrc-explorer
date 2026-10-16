@@ -95,7 +95,7 @@ def _explorer_name(row: RegisterRow) -> str:
 
 def _has_concrete_selector(row: RegisterRow) -> bool:
     return (
-        (row.address.read_opcode or row.namespace_key) in {"0x02", "0x06"}
+        row.effective_opcode in {"0x02", "0x06"}
         and row.group_key is not None
         and row.instance_key is not None
     )
@@ -122,7 +122,7 @@ def _interpreted_value_text(row: RegisterRow, entry: dict[str, Any] | None) -> s
 
     if entry is None:
         return row.value_text
-    opcode_key = row.address.read_opcode or row.namespace_key
+    opcode_key = row.effective_opcode
     if row.protocol == "b524" and opcode_key in {"0x02", "0x06"}:
         try:
             opcode = int(opcode_key, 0)
@@ -368,7 +368,7 @@ def _gates_section(
                 )
             )
 
-    namespace_opcode = row.address.read_opcode or row.namespace_key
+    namespace_opcode = row.effective_opcode
     if row.group_key is not None and namespace_opcode in {"0x02", "0x06"}:
         try:
             group_int = int(row.group_key, 0)
@@ -430,7 +430,7 @@ def _names_section(
     try:
         docs_name = (
             b524_docs_catalog_correspondence(
-                opcode=int(row.address.read_opcode or row.namespace_key or "", 0),
+                opcode=int(row.effective_opcode or "", 0),
                 group=int(row.group_key or "", 0),
                 instance=int(row.instance_key or "", 0),
                 register=int(row.register_key, 0),
@@ -499,7 +499,7 @@ def _enumeration_section(
     if not isinstance(type_spec, str) or not type_spec:
         return None
     try:
-        opcode = int(row.address.read_opcode or row.namespace_key or "0", 0)
+        opcode = int(row.effective_opcode or "0", 0)
         group = int(row.group_key or "0", 0)
         register = int(row.register_key, 0)
     except ValueError:
