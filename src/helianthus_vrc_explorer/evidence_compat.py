@@ -60,6 +60,8 @@ def has_explorer_provenance(artifact: dict[str, Any]) -> bool:
         and row_identity.get("dedupe_key_format") == "<group>:<operation>:<instance>:<register>"
     ):
         return True
+    if "artifact_contract" in meta:
+        return False
     replay = meta.get("replay_trace")
     sources = meta.get("schema_sources")
     return (

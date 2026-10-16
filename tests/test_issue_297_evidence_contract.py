@@ -159,6 +159,24 @@ def test_existing_explorer_replay_provenance_qualifies_legacy_labels() -> None:
     assert list(iter_register_entries(result))[0][-1]["type"] == "TIME_HMS_U8X3"
 
 
+@pytest.mark.parametrize("contract", [{}, {"producer": "external"}])
+@pytest.mark.parametrize("codec", ["HTI", "HDA:3"])
+def test_unrecognized_contract_prevents_replay_fallback_migration(contract, codec) -> None:
+    artifact = _artifact()
+    artifact["meta"].update(
+        artifact_contract=contract,
+        schema_sources=["replay_trace:enhanced_v1"],
+        replay_trace={"format": "enhanced_v1"},
+    )
+    list(iter_register_entries(artifact))[0][-1]["type"] = codec
+    before = deepcopy(artifact)
+    result, _ = migrate_artifact_schema(artifact)
+    entry = list(iter_register_entries(result))[0][-1]
+    assert entry["type"] == codec
+    assert "codec_migration" not in entry
+    assert artifact == before
+
+
 def test_merging_migrated_baselines_requires_explicit_interpretation_export() -> None:
     from helianthus_vrc_explorer.schema.parameter_descriptions import merge_description_baselines
 
