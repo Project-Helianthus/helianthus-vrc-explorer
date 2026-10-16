@@ -580,14 +580,16 @@ __ARTIFACT_JSON__
       const B524_REGISTER_NAME_CORRESPONDENCE = __B524_REGISTER_NAME_CORRESPONDENCE__;
 
       const B524_DOCS_CATALOG_NAMES = __B524_DOCS_CATALOG_NAMES__;
+      function b524CanonicalHexKey(key, width) {
+        if (typeof key !== "string" || !/^(0[xX][0-9a-fA-F]+|[0-9]+)$/.test(key.trim())) return null;
+        const value = Number(key.trim());
+        if (!Number.isSafeInteger(value) || value < 0) return null;
+        return "0x" + value.toString(16).padStart(width, "0");
+      }
+
       function b524DocsCatalogKey(op, gg, ii, rr) {
         const widths = [2, 2, 2, 4];
-        const parts = [op, gg, ii, rr].map((key, index) => {
-          if (typeof key !== "string" || !/^(0[xX][0-9a-fA-F]+|[0-9]+)$/.test(key.trim())) return null;
-          const value = Number(key.trim());
-          if (!Number.isSafeInteger(value) || value < 0) return null;
-          return "0x" + value.toString(16).padStart(widths[index], "0");
-        });
+        const parts = [op, gg, ii, rr].map((key, index) => b524CanonicalHexKey(key, widths[index]));
         return parts.includes(null) ? "" : parts.join("/");
       }
 
@@ -601,7 +603,11 @@ __ARTIFACT_JSON__
         return parts.join(" · ");
       }
 
-      function b524CorrespondenceSecondaryText(opHex, groupHex, registerHex) {
+      function b524CorrespondenceSecondaryText(opKey, groupKey, registerKey) {
+        const opHex = b524CanonicalHexKey(opKey, 2);
+        const groupHex = b524CanonicalHexKey(groupKey, 2);
+        const registerHex = b524CanonicalHexKey(registerKey, 4);
+        if (opHex === null || groupHex === null || registerHex === null) return "";
         const byGroup = B524_REGISTER_NAME_CORRESPONDENCE && B524_REGISTER_NAME_CORRESPONDENCE[opHex];
         const entry = byGroup && byGroup[groupHex] && byGroup[groupHex][registerHex];
         if (!entry) return "";
