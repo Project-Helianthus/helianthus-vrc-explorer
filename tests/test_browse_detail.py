@@ -178,7 +178,9 @@ def test_limits_section_preserves_live_probe_scope() -> None:
         "constraint_source": "probe",
         "constraint_scope": "opcode_0x01_probe",
     }
-    sections = register_detail_sections(row=_row(), entry=entry, description=None, correspondence=None)
+    sections = register_detail_sections(
+        row=_row(), entry=entry, description=None, correspondence=None
+    )
     limits = _section(sections, "LIMITS")
     assert limits is not None
     text = " ".join(f"{r.label} {r.value} {r.note}" for r in limits.rows)
