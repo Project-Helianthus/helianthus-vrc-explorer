@@ -7,9 +7,13 @@ import re
 from html import escape as _escape_html
 from typing import Any
 
-from ..artifact_schema import migrate_artifact_schema
+from ..artifact_schema import iter_register_entries, migrate_artifact_schema
 from ..scanner.director import group_name_for_opcode
-from ..schema.b524_register_name_correspondence import bundled_b524_register_name_correspondence
+from ..schema.b524_register_name_correspondence import (
+    OBSERVED_NAME_CAVEAT,
+    b524_docs_catalog_correspondence,
+    bundled_b524_register_name_correspondence,
+)
 from ..schema.b524_register_names import apply_b524_canonical_register_names
 from ..schema.b524_value_labels import apply_b524_value_labels
 from ..schema.parameter_descriptions import attach_bundled_descriptions, description_profile
@@ -32,7 +36,35 @@ def _correspondence_json_map() -> dict[str, dict[str, dict[str, dict[str, list[s
             "vaillant_friendly_name": list(entry.vaillant_friendly_name),
             "vaillant_name": other_names,
             "ebusd_name": list(entry.ebusd_name),
+            "myvaillant_name_vrc720": list(entry.myvaillant_name_vrc720),
+            "myvaillant_name_vrc700": list(entry.myvaillant_name_vrc700),
         }
+    return table
+
+
+def _docs_catalog_json_map(artifact: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    table: dict[str, dict[str, Any]] = {}
+    for op, gg, ii, rr, _entry in iter_register_entries(artifact):
+        try:
+            selector = tuple(int(value, 0) for value in (op, gg, ii, rr))
+        except (ValueError, TypeError):
+            continue
+        entry = b524_docs_catalog_correspondence(
+            opcode=selector[0],
+            group=selector[1],
+            instance=selector[2],
+            register=selector[3],
+        )
+        if entry is not None:
+            key = "/".join(
+                f"0x{value:0{width}x}" for value, width in zip(selector, (2, 2, 2, 4), strict=True)
+            )
+            table[key] = {
+                "name": entry.name,
+                "previous_name": entry.previous_name,
+                "provisional": entry.provisional,
+                "open_question": entry.open_question,
+            }
     return table
 
 
@@ -547,7 +579,37 @@ __ARTIFACT_JSON__
       const B524_GROUP_NAMES = __B524_GROUP_NAMES__;
       const B524_REGISTER_NAME_CORRESPONDENCE = __B524_REGISTER_NAME_CORRESPONDENCE__;
 
-      function b524CorrespondenceSecondaryText(opHex, groupHex, registerHex) {
+      const B524_DOCS_CATALOG_NAMES = __B524_DOCS_CATALOG_NAMES__;
+      function b524CanonicalHexKey(key, width) {
+        // Accept exactly the spellings Python's int(value, 0) accepts on the server side:
+        // hexadecimal with a 0x prefix, or decimal without leading zeros.
+        if (typeof key !== "string" || !/^(0[xX][0-9a-fA-F]+|0|[1-9][0-9]*)$/.test(key.trim())) return null;
+        const value = Number(key.trim());
+        if (!Number.isSafeInteger(value) || value < 0) return null;
+        return "0x" + value.toString(16).padStart(width, "0");
+      }
+
+      function b524DocsCatalogKey(op, gg, ii, rr) {
+        const widths = [2, 2, 2, 4];
+        const parts = [op, gg, ii, rr].map((key, index) => b524CanonicalHexKey(key, widths[index]));
+        return parts.includes(null) ? "" : parts.join("/");
+      }
+
+      function b524DocsCatalogText(op, gg, ii, rr) {
+        const key = b524DocsCatalogKey(op, gg, ii, rr);
+        const entry = key ? B524_DOCS_CATALOG_NAMES[key] : null;
+        if (!entry) return "";
+        const parts = ["docs-ebus catalog name" + (entry.provisional ? " (provisional)" : "") + ": " + entry.name];
+        if (entry.previous_name) parts.push("docs-ebus previous name: " + entry.previous_name);
+        if (entry.open_question) parts.push("docs-ebus open question: " + entry.open_question);
+        return parts.join(" · ");
+      }
+
+      function b524CorrespondenceSecondaryText(opKey, groupKey, registerKey) {
+        const opHex = b524CanonicalHexKey(opKey, 2);
+        const groupHex = b524CanonicalHexKey(groupKey, 2);
+        const registerHex = b524CanonicalHexKey(registerKey, 4);
+        if (opHex === null || groupHex === null || registerHex === null) return "";
         const byGroup = B524_REGISTER_NAME_CORRESPONDENCE && B524_REGISTER_NAME_CORRESPONDENCE[opHex];
         const entry = byGroup && byGroup[groupHex] && byGroup[groupHex][registerHex];
         if (!entry) return "";
@@ -561,6 +623,11 @@ __ARTIFACT_JSON__
         if (Array.isArray(entry.ebusd_name) && entry.ebusd_name.length) {
           parts.push("eBUSd name: " + entry.ebusd_name.join(", "));
         }
+        for (const family of ["vrc720", "vrc700"]) {
+          const names = entry["myvaillant_name_" + family];
+          if (Array.isArray(names) && names.length) parts.push("Observed myVaillant name (" + family.toUpperCase() + "): " + names.join(", "));
+        }
+        if (parts.length) parts.push(__OBSERVED_NAME_CAVEAT__);
         return parts.join(" · ");
       }
 
@@ -670,7 +737,7 @@ __ARTIFACT_JSON__
         if (!Number.isFinite(n) || n <= 0) return [];
         if (n === 1) return ["UCH", "I8", "BOOL", "HEX:1"];
         if (n === 2) return ["UIN", "I16", "HEX:2"];
-        if (n === 3) return ["HDA:3", "HTI", "FWU", "FW", "HEX:3"];
+        if (n === 3) return ["DATE_DMY_U8X3", "TIME_HMS_U8X3", "FWU", "FW", "HEX:3"];
         if (n === 4) return ["EXP", "U32", "I32", "HEX:4"];
         return [`HEX:${n}`, "STR:*"];
       }
@@ -766,7 +833,7 @@ __ARTIFACT_JSON__
               if (Number.isNaN(f)) return { value: null, error: null };
               return { value: f, error: null };
             }
-            case "HDA:3": {
+            case "DATE_DMY_U8X3": {
               expectLen(3);
               const dd = bytes[0];
               const mm = bytes[1];
@@ -775,12 +842,16 @@ __ARTIFACT_JSON__
               if (mm < 1 || mm > 12) throw new Error("month out of range");
               if (yy < 0 || yy > 99) throw new Error("year out of range");
               const yyyy = 2000 + yy;
+              const checked = new Date(Date.UTC(yyyy, mm - 1, dd));
+              if (checked.getUTCFullYear() !== yyyy || checked.getUTCMonth() !== mm - 1 || checked.getUTCDate() !== dd) {
+                throw new Error("invalid calendar date");
+              }
               const iso = `${yyyy.toString().padStart(4, "0")}-${mm.toString().padStart(2, "0")}-${dd
                 .toString()
                 .padStart(2, "0")}`;
               return { value: iso, error: null };
             }
-            case "HTI": {
+            case "TIME_HMS_U8X3": {
               expectLen(3);
               const hh = bytes[0];
               const mi = bytes[1];
@@ -2417,6 +2488,7 @@ __ARTIFACT_JSON__
               const nameEl = document.createElement("div");
               nameEl.className = "offset-name";
               nameEl.textContent = rowMyvaillantName;
+              nameEl.title = "Explorer canonical name where available; otherwise a myVaillant map leaf (myvaillant_name)";
               td0.appendChild(nameEl);
             }
             if (ebusdNameList.length) {
@@ -2440,6 +2512,15 @@ __ARTIFACT_JSON__
               corrEl.textContent = correspondenceText;
               corrEl.title = correspondenceText;
               td0.appendChild(corrEl);
+            }
+
+            for (const iiKey of instanceKeys) {
+              const docsText = b524DocsCatalogText(opKey, groupKey, iiKey, rrKey);
+              if (!docsText) continue;
+              const docsEl = document.createElement("div");
+              docsEl.className = "offset-name-secondary";
+              docsEl.textContent = iiKey + " · " + docsText;
+              td0.appendChild(docsEl);
             }
 
             if (candidates.length) {
@@ -2484,7 +2565,7 @@ __ARTIFACT_JSON__
               );
               const statusKind = entryStatusKind(entry);
               const statusLabel = entryStatusLabel(entry);
-              const decoded = (override || !hasQualifiedValueLabel) && selectedType && valueBytes
+              const decoded = (override || (!entry.codec_migration && !hasQualifiedValueLabel)) && selectedType && valueBytes
                 ? parseTypedValue(selectedType, valueBytes)
                 : { value: displayValue, error: null };
 
@@ -2514,6 +2595,12 @@ __ARTIFACT_JSON__
                 td.appendChild(candidateEl);
               }
 
+              if (entry.codec_migration) {
+                const legacyEl = document.createElement("div");
+                legacyEl.className = "cell-raw";
+                legacyEl.textContent = `Legacy Explorer label: ${entry.codec_migration.source_label}; historical value retained. Overrides are separate interpretations.`;
+                td.appendChild(legacyEl);
+              }
               const description = entry.parameter_description;
               const bundled = entry.bundled_parameter_description;
               if (bundled && typeof bundled === "object"
@@ -2558,6 +2645,12 @@ __ARTIFACT_JSON__
                     const reason = typeof description.reason === "string" ? `: ${description.reason}` : "";
                     descriptionEl.textContent = `Parameter description unavailable${reason}; offline edit confirmation remains unvalidated.`;
                   }
+                }
+                if (["DATE_DMY_U8X3", "TIME_HMS_U8X3"].includes(description.type)) {
+                  descriptionEl.textContent += " Candidate calendar/clock limits: display-only; range unvalidated.";
+                }
+                if (description.codec_migration) {
+                  descriptionEl.textContent += ` Legacy Explorer label: ${description.codec_migration.source_label}.`;
                 }
                 if (descriptionEl.textContent) td.appendChild(descriptionEl);
               }
@@ -2879,6 +2972,8 @@ def render_html_report(artifact: dict[str, Any], *, title: str | None = None) ->
                 "__ARTIFACT_JSON__": _json_for_html(artifact),
                 "__B524_GROUP_NAMES__": _json_for_html(group_name_map),
                 "__B524_REGISTER_NAME_CORRESPONDENCE__": _json_for_html(_correspondence_json_map()),
+                "__B524_DOCS_CATALOG_NAMES__": _json_for_html(_docs_catalog_json_map(artifact)),
+                "__OBSERVED_NAME_CAVEAT__": _json_for_html(OBSERVED_NAME_CAVEAT),
                 "__B524_CIRCUIT_II_MIN__": (
                     "0"
                     if description_profile(artifact).get("profile_id") == "basv2_sw0507_hw1704_api1"

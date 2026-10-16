@@ -14,6 +14,7 @@ from typing import Any, cast
 from rich.console import Console
 
 from ..artifact_schema import CURRENT_ARTIFACT_SCHEMA_VERSION
+from ..evidence_compat import api_identity_string
 from ..protocol.b524 import RegisterOpcode
 from ..protocol.b524_metadata import (
     CAPACITY_SYSTEM_INFORMATION_IDS,
@@ -460,6 +461,8 @@ def run_b524_scan(
         )
         artifact["meta"]["profile_context"] = {
             "profile": "controller_b524",
+            "api_version_raw": api_identity_string(information_values.get(6)),
+            "api_revision_raw": api_identity_string(information_values.get(7)),
             "api_version": information_values.get(6)
             if math.isfinite(information_values.get(6, float("nan")))
             else None,

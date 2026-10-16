@@ -465,7 +465,7 @@ def _parse_inferred_value(value_bytes: bytes) -> tuple[str | None, object | None
             return _hex_fallback()
 
     if len(value_bytes) == 3:
-        for spec in ("HDA:3", "HTI"):
+        for spec in ("DATE_DMY_U8X3", "TIME_HMS_U8X3"):
             try:
                 return spec, parse_typed_value(spec, value_bytes), None
             except ValueParseError:

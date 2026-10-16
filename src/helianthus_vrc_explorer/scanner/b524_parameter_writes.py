@@ -8,6 +8,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Literal
 
+from ..evidence_compat import api_identity_string, normalize_api_identity
 from ..protocol.b524 import (
     RegisterOpcode,
     build_directory_probe_payload,
@@ -40,6 +41,8 @@ type DescriptionResolver = Callable[
 _OPTIONAL_NATIVE_PROFILE_FIELDS = (
     "api_version",
     "api_revision",
+    "api_version_raw",
+    "api_revision_raw",
     "controller_class_raw",
     "controller_firmware_raw",
 )
@@ -189,10 +192,15 @@ def _validate_profile(profile: Mapping[str, object], *, remote: bool) -> dict[st
         raise ValueError(f"exact target profile is missing: {', '.join(missing)}")
     if remote and result.get("device_identity_required") is not True:
         raise ValueError("remote writes require separate concrete device identity")
+    if normalize_api_identity(result).get("api_identity_conflicts"):
+        raise ValueError("exact target profile has contradictory API identity")
     discriminator = result.get("profile")
     if not isinstance(discriminator, str) or not discriminator.strip():
         raise ValueError("exact target profile requires a profile discriminator")
     for field in ("api_version", "api_revision"):
+        raw_field = f"{field}_raw"
+        if result.get(raw_field) is not None:
+            result[raw_field] = api_identity_string(result[raw_field])
         value = result.get(field)
         if value is None:
             continue
@@ -514,10 +522,12 @@ def _fresh_profile(
 ) -> dict[str, object]:
     expected = _validate_profile(profile, remote=target.opcode == 0x06)
     live = dict(expected)
-    if expected.get("api_version") is not None:
-        live["api_version"] = _read_float_information(transport, target, 0x0006)
-    if expected.get("api_revision") is not None:
-        live["api_revision"] = _read_float_information(transport, target, 0x0007)
+    for field, identifier in (("api_version", 0x0006), ("api_revision", 0x0007)):
+        raw_field = f"{field}_raw"
+        if expected.get(field) is not None or expected.get(raw_field) is not None:
+            live[field] = _read_float_information(transport, target, identifier)
+            if expected.get(raw_field) is not None:
+                live[raw_field] = api_identity_string(live[field])
     if expected.get("controller_class_raw") is not None:
         live["controller_class_raw"] = _read_profile_value(
             transport, target, group=0x09, instance=0x01, register=0x0002

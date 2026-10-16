@@ -1045,7 +1045,7 @@ def replay_trace(
         ),
     ),
 ) -> None:
-    """Replay an ENH/ENS trace into a fresh schema-2.3 JSON artifact + HTML report.
+    """Replay an ENH/ENS trace into a fresh schema-2.4 JSON artifact + HTML report.
 
     Limitations (v1):
     - Supports only current enhanced/ENS trace lines emitted by EnhancedTcpTransport.

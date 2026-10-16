@@ -1,3 +1,4 @@
+# Plain-byte calendar/clock tests use the neutral codecs; BCD labels are distinct.
 from __future__ import annotations
 
 import json
@@ -28,7 +29,7 @@ def test_generated_html_hti_override_decodes_numeric_bytes() -> None:
     script = html[start:end] + (
         "console.log(JSON.stringify("
         + json.dumps(cases + invalid)
-        + '.map(bytes => parseTypedValue("HTI", bytes))));'
+        + '.map(bytes => parseTypedValue("TIME_HMS_U8X3", bytes))));'
     )
     result = subprocess.run(
         [node, "-e", script], check=True, text=True, capture_output=True, timeout=10
@@ -803,3 +804,113 @@ console.log(JSON.stringify(Object.fromEntries(
     assert notices["not_verified"] == [
         "Cached description not_verified: UIN · min=0 · max=12 · step=1."
     ]
+
+
+def test_html_calendar_override_matches_python_date_validation() -> None:
+    from helianthus_vrc_explorer.protocol.parser import ValueParseError, parse_typed_value
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node is required for the generated HTML date decoder check")
+    html = render_html_report({})
+    start = html.index("function parseTypedValue(")
+    end = html.index("function formatValue(", start)
+    cases = [[31, 12, 99], [29, 2, 0], [29, 2, 1], [31, 2, 26], [1, 1, 100], [1, 0, 0], [1, 1]]
+    script = html[start:end] + (
+        "console.log(JSON.stringify("
+        + json.dumps(cases)
+        + '.map(bytes => parseTypedValue("DATE_DMY_U8X3", bytes))));'
+    )
+    result = subprocess.run([node, "-e", script], check=True, text=True, capture_output=True)
+    for raw, js in zip(cases, json.loads(result.stdout), strict=True):
+        try:
+            expected = parse_typed_value("DATE_DMY_U8X3", bytes(raw))
+        except ValueParseError:
+            assert js["error"] and js["value"] is None
+        else:
+            assert js == {"value": expected, "error": None}
+    assert "!entry.codec_migration && !hasQualifiedValueLabel" in html
+    assert "historical value retained" in html
+    assert "display-only; range unvalidated" in html
+
+
+def test_docs_catalog_rendering_keeps_full_selectors_and_primary_names() -> None:
+    from copy import deepcopy
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node is required for HTML rendering regression")
+    operations = {
+        op: {
+            "groups": {
+                "0x00": {
+                    "instances": {
+                        ii: {"registers": {"0x0007": {"value": value, "raw_hex": "00"}}}
+                        for ii, value in (("0x00", 0), ("0x01", 1))
+                    }
+                }
+            }
+        }
+        for op in ("0x02", "0x06")
+    }
+    artifact = {"schema_version": "2.3", "operations": operations}
+    original = deepcopy(artifact)
+    html = render_html_report(artifact)
+    assert artifact == original
+    match = re.search(r"const B524_DOCS_CATALOG_NAMES = (\{.*?\});\n", html, re.S)
+    table = json.loads(match.group(1))
+    assert set(table) == {"0x02/0x00/0x00/0x0007", "0x02/0x00/0x01/0x0007"}
+    start = html.index("const B524_REGISTER_NAME_CORRESPONDENCE")
+    end = html.index("\n      const metaDst", start)
+    script = (
+        html[start:end]
+        + """
+console.log(JSON.stringify([
+  b524DocsCatalogText("0x02", "0x00", "0x01", "0x0007"),
+  b524DocsCatalogText("0x06", "0x00", "0x01", "0x0007"),
+  b524DocsCatalogText("0x02", "0x00", "0x02", "0x0007"),
+  b524DocsCatalogText("0X02", "0X0", "0x1", "0X0007"),
+  b524DocsCatalogText("0x02", "0x00", "0x01", "bogus"),
+  b524DocsCatalogText("0x02", "0x00", "01", "0007"),
+  b524CorrespondenceSecondaryText("0x02", "0x00", "0x0016"),
+  b524CorrespondenceSecondaryText("0x02", "0x00", "0x00a2"),
+  b524CorrespondenceSecondaryText("0X02", "0x0", "0X0016"),
+  b524CorrespondenceSecondaryText("0x02", "0x00", "bogus")
+]));"""
+    )
+    result = subprocess.run(
+        [node, "-e", script], check=True, text=True, capture_output=True, timeout=10
+    )
+    (
+        provisional,
+        op06,
+        absent,
+        variant,
+        bogus,
+        padded_decimal,
+        ventilation,
+        pv,
+        ventilation_variant,
+        bogus_correspondence,
+    ) = json.loads(result.stdout)
+    assert "docs-ebus catalog name (provisional): unknown_11" in provisional
+    assert "docs-ebus previous name: system_off" in provisional
+    assert "Polarity unresolved" in provisional
+    assert op06 == absent == bogus == padded_decimal == ""
+    assert variant == provisional
+    assert ventilation_variant == ventilation
+    assert bogus_correspondence == ""
+    assert "Observed myVaillant name (VRC700): operationModeVentilation" in ventilation
+    assert "Observed myVaillant name (VRC720): smartPhotovoltaicBufferOffset" in pv
+    assert "Hypothesis" in ventilation and "Hypothesis" in pv
+    data = re.search(
+        r'<script id="artifact-data" type="application/json">(.*?)</script>', html, re.S
+    )
+    stored = json.loads(data.group(1))
+    for ii in ("0x00", "0x01"):
+        entry = stored["operations"]["0x02"]["groups"]["0x00"]["instances"][ii]["registers"][
+            "0x0007"
+        ]
+        assert entry["myvaillant_name"] == "system_off"
+        assert "docs" not in str(entry)
+    assert "otherwise a myVaillant map leaf" in html

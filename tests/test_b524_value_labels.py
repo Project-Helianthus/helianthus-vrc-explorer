@@ -251,6 +251,9 @@ def test_html_dom_prefers_label_until_user_explicitly_overrides_codec() -> None:
     start = html.index("function renderActiveGroup(")
     end = html.index("function renderB524Tab()", start)
     render_function = html[start:end]
+    docs_start = html.index("const B524_DOCS_CATALOG_NAMES")
+    docs_end = html.index("function b524CorrespondenceSecondaryText", docs_start)
+    docs_helper = html[docs_start:docs_end]
     script = f"""
 class Node {{
   constructor(tag) {{
@@ -315,6 +318,7 @@ function statusChipClass() {{ return ""; }}
 function appendAccessBadges() {{}}
 function finalPlanForRoute() {{ return null; }}
 function b524CorrespondenceSecondaryText() {{ return ""; }}
+{docs_helper}
 {render_function}
 function valueCell(entry, opKey = "0x02", override = null) {{
   overrideValue = override;

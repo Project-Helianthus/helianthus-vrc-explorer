@@ -18,16 +18,27 @@ def main() -> None:
     parser.add_argument("artifact", type=Path)
     parser.add_argument("output", type=Path)
     parser.add_argument(
+        "--allow-legacy-interpretation",
+        action="store_true",
+        help="Explicitly export known Explorer legacy interpretations with provenance.",
+    )
+    parser.add_argument(
         "--merge",
         action="store_true",
         help="Update an existing baseline without removing other rows.",
     )
     args = parser.parse_args()
     artifact, _migration = migrate_artifact_schema(json.loads(args.artifact.read_text()))
-    bundle = export_description_baseline(artifact)
+    bundle = export_description_baseline(
+        artifact, allow_legacy_interpretation=args.allow_legacy_interpretation
+    )
     if args.merge and args.output.exists():
-        bundle = merge_description_baselines(json.loads(args.output.read_text()), bundle)
-    args.output.write_text(json.dumps(bundle, indent=2, sort_keys=True) + "\n")
+        bundle = merge_description_baselines(
+            json.loads(args.output.read_text(encoding="utf-8")),
+            bundle,
+            allow_legacy_interpretation=args.allow_legacy_interpretation,
+        )
+    args.output.write_text(json.dumps(bundle, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(f"Exported {len(bundle['descriptions'])} qualified descriptions")
 
 

@@ -1,3 +1,4 @@
+# Plain-byte calendar/clock tests use the neutral codecs; BCD labels are distinct.
 from __future__ import annotations
 
 import csv
@@ -141,7 +142,7 @@ def test_loader_accepts_seven_column_rows(tmp_path: Path) -> None:
         "\n".join(
             [
                 "group,instance,register,leaf,ebusd_name,register_class,type_hint",
-                "0x00,0x00,0x0034,system_date,,state,HDA:3",
+                "0x00,0x00,0x0034,system_date,,state,DATE_DMY_U8X3",
             ]
         )
         + "\n",
@@ -153,7 +154,7 @@ def test_loader_accepts_seven_column_rows(tmp_path: Path) -> None:
 
     assert entry is not None
     assert entry.leaf == "system_date"
-    assert entry.type_hint == "HDA:3"
+    assert entry.type_hint == "DATE_DMY_U8X3"
     assert entry.opcode is None
 
 
@@ -366,10 +367,10 @@ def test_namespace_owned_required_tuple_rows_are_resolvable() -> None:
     assert local_gg00_rr0074.type_hint == "UCH"
     assert local_gg00_rr00da is not None
     assert local_gg00_rr00da.leaf == "manual_cooling_date_start"
-    assert local_gg00_rr00da.type_hint == "HDA:3"
+    assert local_gg00_rr00da.type_hint == "DATE_DMY_U8X3"
     assert local_gg00_rr00db is not None
     assert local_gg00_rr00db.leaf == "manual_cooling_date_end"
-    assert local_gg00_rr00db.type_hint == "HDA:3"
+    assert local_gg00_rr00db.type_hint == "DATE_DMY_U8X3"
 
 
 def test_remote_namespace_maps_heat_source_rows_for_op06() -> None:
@@ -432,13 +433,13 @@ def test_op02_group00_holiday_date_and_time_registers_have_explicit_hints() -> N
     start_time = schema.lookup(group=0x00, instance=0x00, register=0x00F4, opcode=0x02)
     end_time = schema.lookup(group=0x00, instance=0x00, register=0x00F5, opcode=0x02)
 
-    assert start_date is not None and start_date.type_hint == "HDA:3"
+    assert start_date is not None and start_date.type_hint == "DATE_DMY_U8X3"
     assert start_date.leaf == "system_holiday_start_date"
-    assert end_date is not None and end_date.type_hint == "HDA:3"
+    assert end_date is not None and end_date.type_hint == "DATE_DMY_U8X3"
     assert end_date.leaf == "system_holiday_end_date"
-    assert start_time is not None and start_time.type_hint == "HTI"
+    assert start_time is not None and start_time.type_hint == "TIME_HMS_U8X3"
     assert start_time.leaf == "system_holiday_start_time"
-    assert end_time is not None and end_time.type_hint == "HTI"
+    assert end_time is not None and end_time.type_hint == "TIME_HMS_U8X3"
     assert end_time.leaf == "system_holiday_end_time"
 
 
@@ -492,10 +493,10 @@ def test_op02_group09_holiday_annotations_follow_the_canonical_start_and_end() -
 
     schema = MyvaillantRegisterMap.from_path(_CSV_PATH)
     expected = {
-        0x0007: ("end", "HDA:3"),
-        0x0008: ("end", "HTI"),
-        0x0009: ("start", "HDA:3"),
-        0x000A: ("start", "HTI"),
+        0x0007: ("end", "DATE_DMY_U8X3"),
+        0x0008: ("end", "TIME_HMS_U8X3"),
+        0x0009: ("start", "DATE_DMY_U8X3"),
+        0x000A: ("start", "TIME_HMS_U8X3"),
     }
     for register, (edge, type_hint) in expected.items():
         entry = schema.lookup(group=0x09, instance=0x00, register=register, opcode=0x02)

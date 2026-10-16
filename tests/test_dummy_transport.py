@@ -1,3 +1,4 @@
+# Plain-byte calendar/clock tests use the neutral codecs; BCD labels are distinct.
 from __future__ import annotations
 
 import json
@@ -516,9 +517,9 @@ def test_date_description_replays_day_step_separately_from_dates(
 
     reply = bytes.fromhex("03050001011a05011a020000")
     desc = decode_parameter_description(
-        reply, opcode=opcode, group=3, instance=1, register=5, type_spec="HDA:3"
+        reply, opcode=opcode, group=3, instance=1, register=5, type_spec="DATE_DMY_U8X3"
     )
-    entry = {"type": "HDA:3", "raw_hex": "03011a", "flags": 3}
+    entry = {"type": "DATE_DMY_U8X3", "raw_hex": "03011a", "flags": 3}
     entry["metadata" if nested else "parameter_description"] = (
         {"parameter_description": desc} if nested else desc
     )
@@ -683,3 +684,35 @@ def test_partial_system_information_keeps_valid_fixture_registers(
     assert replay_transport.send(0x15, build_register_read_payload(2, 2, 1, 0xF)).endswith(
         b"\x34\x12"
     )
+
+
+def test_loading_known_legacy_calendar_fixture_does_not_rewrite_source(tmp_path: Path) -> None:
+    fixture = {
+        "schema_version": "2.3",
+        "meta": {"producer": "helianthus-vrc-explorer"},
+        "operations": {
+            "0x02": {
+                "groups": {
+                    "0x00": {
+                        "instances": {
+                            "0x00": {
+                                "registers": {
+                                    "0x0035": {
+                                        "type": "HTI",
+                                        "raw_hex": "101020",
+                                        "value": "historical",
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+    }
+    path = tmp_path / "legacy.json"
+    path.write_text(json.dumps(fixture))
+    before = path.read_bytes()
+    transport = DummyTransport(path)
+    assert transport.send(0x15, bytes.fromhex("020000003500"))[-3:] == bytes.fromhex("101020")
+    assert path.read_bytes() == before
