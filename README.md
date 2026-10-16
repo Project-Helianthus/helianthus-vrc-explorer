@@ -55,6 +55,7 @@ hardware by following the [offline acceptance card](docs/offline-acceptance.md).
 
 Namespace contract for implementers:
 - [Shared evidence contract for 0.7](docs/shared-evidence-contract.md)
+- [Reading evidence grades in Explorer](docs/evidence-grades.md): distinguish Proven, Hypothesis and Unknown from codec qualification, profile matching and acquisition state.
 - Stable B524 namespace invariants (identity, discovery authority, constraint scope, artifact keys, fixture compatibility): [public B524 namespace invariants](https://github.com/Project-Helianthus/helianthus-docs-ebus/blob/main/architecture/b524-namespace-invariants.md)
 - VRC Explorer's BASV0 profile, codec-provenance rules and sanitized fixture layout: [BASV0 metadata in VRC Explorer 0.6.2](docs/basv0-metadata.md)
 - This README remains user-facing; invariant-level semantics are documented in the public eBUS documentation once implementation behavior is stable.
