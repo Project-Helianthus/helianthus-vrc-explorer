@@ -497,7 +497,7 @@ def _enumeration_section(
     if not isinstance(type_spec, str) or not type_spec:
         return None
     try:
-        opcode = int(row.address.read_opcode or "0", 0)
+        opcode = int(row.address.read_opcode or row.namespace_key or "0", 0)
         group = int(row.group_key or "0", 0)
         register = int(row.register_key, 0)
     except ValueError:

@@ -890,14 +890,11 @@ if _TEXTUAL_IMPORT_ERROR is None:
                 watch = self._watch.get(row.row_id)
                 value_text = watch.current_value if watch else row.value_text
                 entry = self._entry_for_row(row)
-                if (
-                    entry is not None
-                    and row.protocol == "b524"
-                    and row.address.read_opcode in {"0x02", "0x06"}
-                ):
+                opcode = row.address.read_opcode or row.namespace_key
+                if entry is not None and row.protocol == "b524" and opcode in {"0x02", "0x06"}:
                     value_text = parameter_value_display(
                         entry,
-                        opcode=int(row.address.read_opcode, 0),
+                        opcode=int(opcode, 0),
                         group=int(row.group_key or "0", 0),
                         register=int(row.register_key, 0),
                     )

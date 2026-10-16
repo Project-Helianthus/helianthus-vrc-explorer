@@ -713,6 +713,27 @@ def test_docs_catalog_names_survive_legacy_migration_without_read_opcode() -> No
     assert labels["docs-ebus previous name"] == "system_off"
 
 
+def test_enumeration_uses_migrated_namespace_without_read_opcode() -> None:
+    from helianthus_vrc_explorer.ui.browse_store import BrowseStore
+
+    entry = {"type": "UCH", "value": 2, "flags_access": "writable_visible"}
+    artifact = {"groups": {"0x09": {"instances": {"0x01": {"registers": {"0x0002": entry}}}}}}
+    store = BrowseStore.from_artifact(artifact)
+    row = next(row for row in store.rows if row.register_key == "0x0002")
+    assert row.address.read_opcode is None
+    assert row.namespace_key == "0x02"
+
+    enumeration = _section(
+        register_detail_sections(row=row, entry=entry, description=None), "ENUMERATION"
+    )
+    assert enumeration is not None
+    assert {item.label: item.value for item in enumeration.rows} == {
+        "1": "TIME_CONTROLLED (1)",
+        "2": "NORMAL (2)",
+        "3": "REDUCED (3)",
+    }
+
+
 def test_imported_app_names_render_with_family_and_hypothesis_caveat() -> None:
     from helianthus_vrc_explorer.schema.b524_register_name_correspondence import (
         b524_register_name_correspondence,

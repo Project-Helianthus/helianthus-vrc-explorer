@@ -10,6 +10,7 @@ from copy import deepcopy
 import pytest
 from textual.widgets import DataTable, OptionList, Static, Tree
 
+from helianthus_vrc_explorer.artifact_schema import migrate_artifact_schema
 from helianthus_vrc_explorer.scanner.b524_parameter_writes import (
     B524ParameterWriteResult,
 )
@@ -246,8 +247,14 @@ def test_completed_future_is_recorded_without_leaving_browser_busy() -> None:
     asyncio.run(exercise())
 
 
-def test_offline_preview_preserves_observation_and_persists(tmp_path) -> None:
+@pytest.mark.parametrize("legacy", [False, True])
+def test_offline_preview_preserves_observation_and_persists(tmp_path, legacy) -> None:
     artifact = _artifact()
+    if legacy:
+        del _target_entry(artifact)["read_opcode"]
+        artifact["groups"] = artifact.pop("operations")["0x02"]["groups"]
+        del artifact["schema_version"]
+        artifact, _ = migrate_artifact_schema(artifact)
     output = tmp_path / "scan.json"
 
     async def exercise() -> None:
@@ -258,12 +265,27 @@ def test_offline_preview_preserves_observation_and_persists(tmp_path) -> None:
         )
         async with app.run_test(size=(140, 45)) as pilot:
             await _select_target(app, pilot)
+            row = app._selected_table_row()
+            assert row is not None
+            if legacy:
+                assert row.address.read_opcode is None
+                assert row.namespace_key == "0x02"
             await pilot.press("e")
             await pilot.pause()
             await _choose_first_enum_value(app, pilot)
             assert isinstance(app.screen, browse_textual._ConfirmDialog)
+            if legacy:
+                # The groups-first conversion drops the OP06 controller identity, so the
+                # profile is unqualified and the incomplete-limits exception comes first.
+                assert app.screen._title == "Confirm incomplete limits exception"
+                await pilot.press("enter")
+                await pilot.pause()
+                assert isinstance(app.screen, browse_textual._ConfirmDialog)
+            assert app.screen._title == "Confirm offline preview"
             await pilot.press("enter")
             await pilot.pause()
+            table = app.query_one("#browse-table", DataTable)
+            assert "NORMAL (2) → 1 [offline preview]" in str(table.get_row(row.row_id)[1])
 
     asyncio.run(exercise())
     entry = _target_entry(artifact)
