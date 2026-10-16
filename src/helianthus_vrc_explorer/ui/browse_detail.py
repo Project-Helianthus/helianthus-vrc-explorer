@@ -95,7 +95,7 @@ def _explorer_name(row: RegisterRow) -> str:
 
 def _has_concrete_selector(row: RegisterRow) -> bool:
     return (
-        row.address.read_opcode in {"0x02", "0x06"}
+        (row.address.read_opcode or row.namespace_key) in {"0x02", "0x06"}
         and row.group_key is not None
         and row.instance_key is not None
     )
@@ -428,7 +428,7 @@ def _names_section(
     try:
         docs_name = (
             b524_docs_catalog_correspondence(
-                opcode=int(row.address.read_opcode or "", 0),
+                opcode=int(row.address.read_opcode or row.namespace_key or "", 0),
                 group=int(row.group_key or "", 0),
                 instance=int(row.instance_key or "", 0),
                 register=int(row.register_key, 0),

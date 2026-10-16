@@ -692,6 +692,27 @@ def test_docs_catalog_names_are_labelled_secondary_provisional_annotations() -> 
     assert not any(item.label.startswith("docs-ebus") for item in names.rows)
 
 
+def test_docs_catalog_names_survive_legacy_migration_without_read_opcode() -> None:
+    from helianthus_vrc_explorer.ui.browse_store import BrowseStore
+
+    entry = {"value": 0, "flags_access": "config_user"}
+    artifact = {"groups": {"0x00": {"instances": {"0x00": {"registers": {"0x0007": entry}}}}}}
+    store = BrowseStore.from_artifact(artifact)
+    row = next(row for row in store.rows if row.register_key == "0x0007")
+    assert row.address.read_opcode is None
+    assert row.namespace_key == "0x02"
+
+    sections = register_detail_sections(row=row, entry=entry, description=None)
+    gates = _section(sections, "GATES")
+    assert gates is not None
+    assert any(item.label == "Route" and item.value == "concrete selector" for item in gates.rows)
+    names = _section(sections, "NAMES")
+    assert names is not None
+    labels = {item.label: item.value for item in names.rows}
+    assert labels["docs-ebus catalog name (provisional)"] == "unknown_11"
+    assert labels["docs-ebus previous name"] == "system_off"
+
+
 def test_imported_app_names_render_with_family_and_hypothesis_caveat() -> None:
     from helianthus_vrc_explorer.schema.b524_register_name_correspondence import (
         b524_register_name_correspondence,
