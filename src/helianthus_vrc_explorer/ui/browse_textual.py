@@ -890,14 +890,11 @@ if _TEXTUAL_IMPORT_ERROR is None:
                 watch = self._watch.get(row.row_id)
                 value_text = watch.current_value if watch else row.value_text
                 entry = self._entry_for_row(row)
-                if (
-                    entry is not None
-                    and row.protocol == "b524"
-                    and row.address.read_opcode in {"0x02", "0x06"}
-                ):
+                opcode = row.effective_opcode
+                if entry is not None and row.protocol == "b524" and opcode in {"0x02", "0x06"}:
                     value_text = parameter_value_display(
                         entry,
-                        opcode=int(row.address.read_opcode, 0),
+                        opcode=int(opcode, 0),
                         group=int(row.group_key or "0", 0),
                         register=int(row.register_key, 0),
                     )
@@ -947,7 +944,7 @@ if _TEXTUAL_IMPORT_ERROR is None:
 
         def _correspondence_for_row(self, row: RegisterRow) -> Any:
             try:
-                opcode = int(row.address.read_opcode or "0", 0)
+                opcode = int(row.effective_opcode or "0", 0)
                 group = int(row.group_key or "0", 0)
                 register = int(row.register_key, 0)
             except ValueError:
@@ -1689,20 +1686,24 @@ if _TEXTUAL_IMPORT_ERROR is None:
                     break
 
         def _selector_for_row(self, row: RegisterRow) -> dict[str, str]:
-            if (
-                row.address.read_opcode not in {"0x02", "0x06"}
-                or row.group_key is None
-                or row.instance_key is None
-            ):
+            opcode = row.effective_opcode
+            if opcode not in {"0x02", "0x06"} or row.group_key is None or row.instance_key is None:
                 raise ValueError("selected row has no concrete OP02/OP06 selector")
             return {
-                "read_opcode": row.address.read_opcode,
+                "read_opcode": opcode,
                 "group": row.group_key,
                 "instance": row.instance_key,
                 "register": row.register_key,
             }
 
-        def _target_for_row(self, row: RegisterRow, *, destination: int) -> B524ParameterTarget:
+        def _target_for_row(
+            self, row: RegisterRow, *, destination: int, offline_preview: bool = False
+        ) -> B524ParameterTarget:
+            explicit_opcode = row.address.read_opcode
+            if not offline_preview and (
+                not isinstance(explicit_opcode, str) or not explicit_opcode.strip()
+            ):
+                raise ValueError("selected row has no explicit read opcode")
             selector = self._selector_for_row(row)
             opcode = int(selector["read_opcode"], 0)
             if opcode not in {0x02, 0x06}:
@@ -1767,7 +1768,7 @@ if _TEXTUAL_IMPORT_ERROR is None:
             live: bool,
         ) -> _PendingWrite | None:
             description = self._effective_description(row)
-            target = self._target_for_row(row, destination=destination)
+            target = self._target_for_row(row, destination=destination, offline_preview=not live)
             try:
                 preparation = prepare_parameter_write(
                     target=target,

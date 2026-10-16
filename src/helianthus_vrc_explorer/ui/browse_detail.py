@@ -25,7 +25,11 @@ from typing import Any
 from ..scanner.register import namespace_availability_contract
 from ..schema.b524_codec_labels import b524_codec_label
 from ..schema.b524_constraints import constraint_scope_metadata
-from ..schema.b524_register_name_correspondence import B524RegisterNameCorrespondence
+from ..schema.b524_register_name_correspondence import (
+    OBSERVED_NAME_CAVEAT,
+    B524RegisterNameCorrespondence,
+    b524_docs_catalog_correspondence,
+)
 from ..schema.myvaillant_map import MyvaillantRegisterName
 from .b524_operation_reads import OPERATION_EXPORT_BY_SECTION, OperationReadView
 from .browse_models import RegisterRow, TreeNodeRef
@@ -91,7 +95,7 @@ def _explorer_name(row: RegisterRow) -> str:
 
 def _has_concrete_selector(row: RegisterRow) -> bool:
     return (
-        row.address.read_opcode in {"0x02", "0x06"}
+        row.effective_opcode in {"0x02", "0x06"}
         and row.group_key is not None
         and row.instance_key is not None
     )
@@ -118,9 +122,10 @@ def _interpreted_value_text(row: RegisterRow, entry: dict[str, Any] | None) -> s
 
     if entry is None:
         return row.value_text
-    if row.protocol == "b524" and row.address.read_opcode in {"0x02", "0x06"}:
+    opcode_key = row.effective_opcode
+    if row.protocol == "b524" and opcode_key in {"0x02", "0x06"}:
         try:
-            opcode = int(row.address.read_opcode, 0)
+            opcode = int(opcode_key, 0)
             group = int(row.group_key or "0", 0)
             register = int(row.register_key, 0)
         except ValueError:
@@ -363,10 +368,11 @@ def _gates_section(
                 )
             )
 
-    if row.group_key is not None and row.address.read_opcode in {"0x02", "0x06"}:
+    namespace_opcode = row.effective_opcode
+    if row.group_key is not None and namespace_opcode in {"0x02", "0x06"}:
         try:
             group_int = int(row.group_key, 0)
-            opcode_int = int(row.address.read_opcode, 0)
+            opcode_int = int(namespace_opcode, 0)
             contract = namespace_availability_contract(group=group_int, opcode=opcode_int)  # type: ignore[arg-type]
         except (ValueError, KeyError):
             contract = None
@@ -413,9 +419,37 @@ def _names_section(
     row: RegisterRow,
     correspondence: B524RegisterNameCorrespondence | None,
 ) -> DetailSection:
-    rows: list[DetailRow] = [DetailRow("Explorer", _explorer_name(row))]
+    rows: list[DetailRow] = [
+        DetailRow("Explorer", _explorer_name(row)),
+        DetailRow(
+            "myvaillant_name provenance",
+            "Explorer canonical name where available; otherwise a myVaillant map leaf",
+        ),
+    ]
+
+    try:
+        docs_name = (
+            b524_docs_catalog_correspondence(
+                opcode=int(row.effective_opcode or "", 0),
+                group=int(row.group_key or "", 0),
+                instance=int(row.instance_key or "", 0),
+                register=int(row.register_key, 0),
+            )
+            if row.protocol == "b524"
+            else None
+        )
+    except ValueError:
+        docs_name = None
+    if docs_name is not None:
+        label = "docs-ebus catalog name" + (" (provisional)" if docs_name.provisional else "")
+        rows.append(DetailRow(label, docs_name.name))
+        if docs_name.previous_name:
+            rows.append(DetailRow("docs-ebus previous name", docs_name.previous_name))
+        if docs_name.open_question:
+            rows.append(DetailRow("docs-ebus open question", docs_name.open_question))
 
     if correspondence is not None:
+        rows.append(DetailRow("Observed-name identification", OBSERVED_NAME_CAVEAT))
         try:
             group_int = int(row.group_key, 0) if row.group_key is not None else None
             instance_int = int(row.instance_key, 0) if row.instance_key is not None else None
@@ -465,7 +499,7 @@ def _enumeration_section(
     if not isinstance(type_spec, str) or not type_spec:
         return None
     try:
-        opcode = int(row.address.read_opcode or "0", 0)
+        opcode = int(row.effective_opcode or "0", 0)
         group = int(row.group_key or "0", 0)
         register = int(row.register_key, 0)
     except ValueError:
