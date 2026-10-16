@@ -55,7 +55,9 @@ class _CircuitTransport(ScriptedLiveTransport):
 
 
 @pytest.mark.parametrize("key", ["e", "enter", "ctrl+j", "ctrl+m"])
-@pytest.mark.parametrize("live,legacy", [(False, False), (True, False), (False, True)])
+@pytest.mark.parametrize(
+    "live,legacy", [(False, False), (True, False), (False, True), (True, True)]
+)
 def test_numeric_editor_keeps_opening_key_out_of_submission(monkeypatch, key, live, legacy) -> None:
     artifact = _circuit_artifact()
     if legacy:
@@ -103,8 +105,26 @@ def test_numeric_editor_keeps_opening_key_out_of_submission(monkeypatch, key, li
                     assert row is not None
                     assert row.address.read_opcode is None
                     assert app._selector_for_row(row)["read_opcode"] == "0x02"
+                requests_before_edit = list(transport.requests)
                 await pilot.press(key)
                 await _settle(app, pilot)
+                if live and legacy:
+                    assert "identity verified" in str(
+                        app.query_one("#connection-state", Static).render()
+                    )
+                    assert "Live edit unavailable: selected row has no explicit read opcode" in str(
+                        app.query_one("#status", Static).render()
+                    )
+                    assert len(app.screen_stack) == 1
+                    assert app._pending_write is None
+                    assert app._live_edit_context is None
+                    assert transport.requests == requests_before_edit
+                    assert transport.writes == []
+                    with pytest.raises(
+                        ValueError, match="selected row has no explicit read opcode"
+                    ):
+                        app._target_for_row(row, destination=0x15)
+                    return
                 await pilot.pause(0.3)
                 assert isinstance(app.screen, browse_textual._InputDialog)
                 assert app.screen.query_one(Input).value == "20"
