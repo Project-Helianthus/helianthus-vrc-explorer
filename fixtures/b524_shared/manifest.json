@@ -1,0 +1,13 @@
+{
+  "digest_input": "complete published UTF-8 fixture bytes, including final newline",
+  "digest_source": "protocols/vaillant/ebus-vaillant-b524-basv0-profile-v1.md",
+  "digests_base64": {
+    "b524-basv0-description-profile-v1.json": "I/jzqVMVkgtHRrfX5wtkjnPB2ouyc0RQ6aw053tq4cs=",
+    "b524-basv0-register-observations-v1.json": "cKkZR4h3mn0eR+8FqD4dWDuDtyzIZDt0S0TuX1Vw24Y="
+  },
+  "evidence_grade": {
+    "retained_description_bytes": "Proven",
+    "codec_basis_and_presence": "Hypothesis",
+    "omitted_context": "Unknown"
+  }
+}
