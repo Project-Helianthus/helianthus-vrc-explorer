@@ -22,6 +22,12 @@ SPEC.loader.exec_module(checker)
 
 def test_public_copy_passes_without_sibling_checkout():
     checker.validate_bundle(checker.DEFAULT_ROOT)
+    manifest = json.loads((checker.DEFAULT_ROOT / "manifest.json").read_text())
+    assert manifest["evidence_grade"] == {
+        "retained_description_bytes": "Proven",
+        "codec_basis_and_presence": "Hypothesis",
+        "omitted_context": "Unknown",
+    }
     result = subprocess.run(
         [sys.executable, str(ROOT / "scripts/check_shared_b524_fixtures.py")],
         cwd=ROOT,
@@ -55,6 +61,36 @@ def test_semantic_corruptions_are_rejected(fault):
         missing["raw_description_hex"] = ""
     # Bypass byte authentication deliberately: semantic checks must reject independently.
     with pytest.raises(ValueError):
+        checker.validate_documents(checker.DEFAULT_ROOT, description, observations)
+
+
+@pytest.mark.parametrize(
+    ("fault", "message"),
+    [
+        ("missing_link", "drops its description link"),
+        ("missing_metadata", "available description lacks raw metadata"),
+    ],
+)
+def test_record_omission_relations_require_semantic_validator(monkeypatch, fault, message):
+    description, observations = checker.load_documents(checker.DEFAULT_ROOT)
+    validator = checker.load_validator(checker.DEFAULT_ROOT / checker.VALIDATOR)
+    monkeypatch.setattr(checker, "load_validator", lambda path: validator)
+    if fault == "missing_link":
+        matched = next(
+            row
+            for row in observations["records"]
+            if row["description"] and row["description"]["acquisition_state"] == "matched"
+        )
+        matched["description"] = None
+    else:
+        unavailable = next(
+            row
+            for row in observations["records"]
+            if row["description"] and row["description"]["acquisition_state"] == "unavailable"
+        )
+        unavailable["description"]["acquisition_state"] = "matched"
+    # These faults pass JSON schema; require the loaded semantic validator's error.
+    with pytest.raises(validator.ValidationError, match=message):
         checker.validate_documents(checker.DEFAULT_ROOT, description, observations)
 
 
