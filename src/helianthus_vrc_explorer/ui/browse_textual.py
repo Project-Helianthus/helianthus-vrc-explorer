@@ -1699,7 +1699,10 @@ if _TEXTUAL_IMPORT_ERROR is None:
         def _target_for_row(
             self, row: RegisterRow, *, destination: int, offline_preview: bool = False
         ) -> B524ParameterTarget:
-            if not offline_preview and row.address.read_opcode is None:
+            explicit_opcode = row.address.read_opcode
+            if not offline_preview and (
+                not isinstance(explicit_opcode, str) or not explicit_opcode.strip()
+            ):
                 raise ValueError("selected row has no explicit read opcode")
             selector = self._selector_for_row(row)
             opcode = int(selector["read_opcode"], 0)

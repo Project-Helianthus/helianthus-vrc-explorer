@@ -304,6 +304,22 @@ def test_offline_preview_preserves_observation_and_persists(tmp_path, legacy) ->
     )
 
 
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_live_target_rejects_blank_explicit_opcode(blank) -> None:
+    artifact = _artifact()
+    _target_entry(artifact)["read_opcode"] = blank
+    app = browse_textual._BrowseApp(artifact, allow_write=False)
+    row = next(
+        row
+        for row in app._store.rows
+        if row.register_key == "0x0002" and row.namespace_key == "0x02" and row.group_key == "0x09"
+    )
+    assert row.effective_opcode == "0x02"
+    with pytest.raises(ValueError, match="selected row has no explicit read opcode"):
+        app._target_for_row(row, destination=0x15)
+    assert app._target_for_row(row, destination=0x15, offline_preview=True).opcode == 0x02
+
+
 def test_incomplete_limits_need_exception_then_concrete_confirmation() -> None:
     artifact = _artifact(complete_limits=False)
 
