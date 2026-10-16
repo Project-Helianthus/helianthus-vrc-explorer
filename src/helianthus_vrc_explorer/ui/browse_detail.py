@@ -243,7 +243,7 @@ def _limits_section(
             if is_catalog
             else f"Constraint evidence: {entry.get('constraint_scope') or 'unknown'}"
         )
-        note = str(constraint_scope_metadata()["rationale"]) if is_catalog else None
+        note = str(constraint_scope_metadata()["rationale"]) if is_catalog else ""
         rows.append(
             DetailRow(
                 label,
