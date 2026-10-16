@@ -15,6 +15,8 @@ from copy import deepcopy
 from importlib import resources
 from typing import Any
 
+from ..evidence_compat import interpret_legacy_codecs, normalize_api_identity
+from ..evidence_export import validate_scope_overlay, validation_scope_for_record
 from ..protocol.b524_metadata import decode_parameter_description
 
 _FIELDS = ("type", "width", "min", "max", "step")
@@ -26,6 +28,8 @@ _OBSERVED_CONTROLLER_PROFILE_KEYS = (
     "hardware_raw_hex",
     "api_version",
     "api_revision",
+    "api_version_raw",
+    "api_revision_raw",
 )
 _CONTROLLER_PROFILE_KEYS = (*_OBSERVED_CONTROLLER_PROFILE_KEYS, "profile_id")
 _REMOTE_PROFILE_KEYS = ("device_class_raw", "device_firmware_raw")
@@ -70,20 +74,30 @@ def _controller_profile(artifact: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(identity, dict) or not isinstance(context, dict):
         return {}
     eid = identity.get("eid", identity.get("device_id"))
-    return {
-        "profile": context.get("profile"),
-        "eid": eid.strip().upper() if isinstance(eid, str) else None,
-        "software_raw_hex": _canonical_raw(identity.get("sw")),
-        "hardware_raw_hex": _canonical_raw(identity.get("hw")),
-        "api_version": context.get("api_version"),
-        "api_revision": context.get("api_revision"),
-        # Human-readable fields remain useful evidence, but never qualify reuse.
-        "model": identity.get("model"),
-        "firmware": identity.get("firmware"),
-    }
+    return normalize_api_identity(
+        {
+            "profile": context.get("profile"),
+            "eid": eid.strip().upper() if isinstance(eid, str) else None,
+            "software_raw_hex": _canonical_raw(identity.get("sw")),
+            "hardware_raw_hex": _canonical_raw(identity.get("hw")),
+            "api_version": context.get("api_version"),
+            "api_revision": context.get("api_revision"),
+            **{
+                key: context[key]
+                for key in ("api_version_raw", "api_revision_raw")
+                if key in context
+            },
+            # Human-readable fields remain useful evidence, but never qualify reuse.
+            "model": identity.get("model"),
+            "firmware": identity.get("firmware"),
+        }
+    )
 
 
 def _catalog_match(profile: dict[str, Any]) -> dict[str, Any] | None:
+    profile = normalize_api_identity(profile)
+    if profile.get("api_identity_conflicts"):
+        return None
     catalog = load_description_profile_catalog()
     if catalog.get("schema_version") != 1:
         raise ValueError("Unsupported B524 description profile catalog version")
@@ -91,7 +105,7 @@ def _catalog_match(profile: dict[str, Any]) -> dict[str, Any] | None:
     for candidate in catalog.get("profiles", []):
         if not isinstance(candidate, dict) or not isinstance(candidate.get("controller"), dict):
             continue
-        controller = candidate["controller"]
+        controller = normalize_api_identity(candidate["controller"])
         if (
             profile.get("profile") == candidate.get("profile")
             and profile.get("eid") == controller.get("eid")
@@ -99,6 +113,8 @@ def _catalog_match(profile: dict[str, Any]) -> dict[str, Any] | None:
             and profile.get("hardware_raw_hex") == controller.get("hardware_raw_hex")
             and profile.get("api_version") == controller.get("api_version")
             and profile.get("api_revision") == controller.get("api_revision")
+            and profile.get("api_version_raw") == controller.get("api_version_raw")
+            and profile.get("api_revision_raw") == controller.get("api_revision_raw")
         ):
             matches.append(candidate)
     return matches[0] if len(matches) == 1 else None
@@ -157,6 +173,9 @@ def description_profile(
 
 
 def _qualified_profile(profile: dict[str, Any]) -> bool:
+    profile = normalize_api_identity(profile)
+    if profile.get("api_identity_conflicts"):
+        return False
     keys = list(_CONTROLLER_PROFILE_KEYS)
     if profile.get("device_identity_required"):
         keys.extend(_REMOTE_PROFILE_KEYS)
@@ -172,6 +191,9 @@ def _observed_native_profile(profile: dict[str, Any]) -> bool:
     reuse continues to require ``_qualified_profile``.
     """
 
+    profile = normalize_api_identity(profile)
+    if profile.get("api_identity_conflicts"):
+        return False
     keys = list(_OBSERVED_CONTROLLER_PROFILE_KEYS)
     if profile.get("device_identity_required"):
         keys.extend(_REMOTE_PROFILE_KEYS)
@@ -187,6 +209,9 @@ def _known_profile_value(value: Any) -> bool:
 
 def _profiles_conflict(left: dict[str, Any], right: dict[str, Any]) -> bool:
     """Only contradictory authoritative native observations establish mismatch."""
+    left, right = normalize_api_identity(left), normalize_api_identity(right)
+    if left.get("api_identity_conflicts") or right.get("api_identity_conflicts"):
+        return True
     keys = set(_CONTROLLER_PROFILE_KEYS)
     if left.get("device_identity_required") or right.get("device_identity_required"):
         keys.update(_REMOTE_PROFILE_KEYS)
@@ -199,6 +224,7 @@ def _profiles_conflict(left: dict[str, Any], right: dict[str, Any]) -> bool:
 
 
 def _compatible_profiles(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    left, right = normalize_api_identity(left), normalize_api_identity(right)
     if not _qualified_profile(left) or not _qualified_profile(right):
         return False
     if bool(left.get("device_identity_required")) != bool(right.get("device_identity_required")):
@@ -293,7 +319,9 @@ def _selector_codec_supported(
     )
 
 
-def export_description_baseline(artifact: dict[str, Any]) -> dict[str, Any]:
+def export_description_baseline(
+    artifact: dict[str, Any], *, allow_legacy_interpretation: bool = False
+) -> dict[str, Any]:
     """Export decoded metadata, excluding serials, endpoints and raw captures.
 
     Only complete, correlated replies that reproduce the stored interpretation
@@ -307,12 +335,16 @@ def export_description_baseline(artifact: dict[str, Any]) -> dict[str, Any]:
             desc = entry.get("parameter_description")
             if not isinstance(desc, dict) or desc.get("qualification") != "matched":
                 continue
+            if not allow_legacy_interpretation and (
+                "codec_migration" in entry or "codec_migration" in desc
+            ):
+                raise ValueError("Exporting a legacy interpretation requires explicit opt-in")
             provenance = desc.get("codec_provenance", entry.get("codec_provenance"))
             if provenance != "selector_qualified":
                 continue
             if not _same_selector(desc, selector):
                 continue
-            if desc.get("target_profile", profile) != profile:
+            if normalize_api_identity(desc.get("target_profile", profile)) != profile:
                 continue
             expected_opcode = "0x01" if selector["read_opcode"] == "0x02" else "0x07"
             if desc.get("description_opcode") != expected_opcode:
@@ -337,6 +369,15 @@ def export_description_baseline(artifact: dict[str, Any]) -> dict[str, Any]:
                     "profile": deepcopy(profile),
                     **{key: decoded[key] for key in _FIELDS},
                     "source": "read_only_observed_baseline",
+                    **(
+                        {
+                            "codec_migration": deepcopy(
+                                desc.get("codec_migration", entry.get("codec_migration"))
+                            )
+                        }
+                        if "codec_migration" in desc or "codec_migration" in entry
+                        else {}
+                    ),
                     "decoder_revision": decoded["decoder_revision"],
                     "step_qualification": decoded["step_qualification"],
                     "validation_scope": decoded["validation_scope"],
@@ -345,7 +386,7 @@ def export_description_baseline(artifact: dict[str, Any]) -> dict[str, Any]:
             )
     coverage = artifact.get("meta", {}).get("parameter_description_coverage", {})
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "descriptions": descriptions,
         "coverage": {
             "complete_scan": artifact.get("meta", {}).get("incomplete") is False,
@@ -371,12 +412,28 @@ def _enrich_bundle_profiles(
     """Bind legacy bundled rows to one exact native identity manifest entry."""
 
     result = deepcopy(bundle)
+    if type(result.get("schema_version")) is not int or result["schema_version"] not in {1, 2}:
+        raise ValueError("Unsupported B524 description baseline version")
     catalog = load_description_profile_catalog()
     profiles = [row for row in catalog.get("profiles", []) if isinstance(row, dict)]
     for description in result.get("descriptions", []):
         if not isinstance(description, dict) or not isinstance(description.get("profile"), dict):
             continue
+        description["profile"] = normalize_api_identity(description["profile"])
         profile = description["profile"]
+        if result.get("schema_version") == 1 and (
+            trust_legacy_codec
+            or (
+                description.get("source") == "read_only_observed_baseline"
+                and description.get("decoder_revision")
+                in {"b524-description/v1", "b524-description/v2"}
+            )
+        ):
+            interpret_legacy_codecs(description, source_version=1)
+        if description.get("type") in {"DATE_DMY_U8X3", "TIME_HMS_U8X3"}:
+            description["validation_scope"] = "display_only"
+        if profile.get("api_identity_conflicts"):
+            continue
         if trust_legacy_codec:
             description.setdefault("codec_provenance", "selector_qualified")
         if all(_known_profile_value(profile.get(key)) for key in _CONTROLLER_PROFILE_KEYS):
@@ -387,18 +444,21 @@ def _enrich_bundle_profiles(
             controller = candidate.get("controller")
             if not isinstance(signature, dict) or not isinstance(controller, dict):
                 continue
+            controller = normalize_api_identity(controller)
             if (
                 profile.get("profile") == candidate.get("profile")
                 and profile.get("model") == signature.get("model")
                 and profile.get("firmware") == signature.get("firmware")
                 and profile.get("api_version") == controller.get("api_version")
                 and profile.get("api_revision") == controller.get("api_revision")
+                and profile.get("api_version_raw") == controller.get("api_version_raw")
+                and profile.get("api_revision_raw") == controller.get("api_revision_raw")
             ):
                 matches.append(candidate)
         if len(matches) != 1:
             continue
         matched = matches[0]
-        controller = matched["controller"]
+        controller = normalize_api_identity(matched["controller"])
         profile.update(
             profile_id=matched["id"],
             eid=controller["eid"],
@@ -406,12 +466,14 @@ def _enrich_bundle_profiles(
             hardware_raw_hex=controller["hardware_raw_hex"],
             api_version=controller["api_version"],
             api_revision=controller["api_revision"],
+            api_version_raw=controller["api_version_raw"],
+            api_revision_raw=controller["api_revision_raw"],
         )
     return result
 
 
 def merge_description_baselines(
-    previous: dict[str, Any], current: dict[str, Any]
+    previous: dict[str, Any], current: dict[str, Any], *, allow_legacy_interpretation: bool = False
 ) -> dict[str, Any]:
     """Update qualified rows additively; a partial scan cannot erase other rows.
 
@@ -419,8 +481,8 @@ def merge_description_baselines(
     observations. They are never inserted into current-target evidence. Distinct
     firmware or device profiles remain distinct baseline variants.
     """
-    if any(bundle.get("schema_version") != 1 for bundle in (previous, current)):
-        raise ValueError("Unsupported B524 description baseline version")
+    previous = _enrich_bundle_profiles(previous)
+    current = _enrich_bundle_profiles(current)
     rows = deepcopy(previous.get("descriptions", []))
     for incoming in current.get("descriptions", []):
         profile = incoming.get("profile", {})
@@ -450,8 +512,10 @@ def merge_description_baselines(
             json.dumps(row["profile"], sort_keys=True),
         )
     )
+    if not allow_legacy_interpretation and any("codec_migration" in row for row in rows):
+        raise ValueError("Exporting a legacy interpretation requires explicit opt-in")
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "descriptions": rows,
         "coverage": {
             "complete_scan": False,
@@ -469,8 +533,6 @@ def attach_bundled_descriptions(
 ) -> None:
     """Refresh baseline annotations without replacing current-target evidence."""
     bundle = load_description_baseline() if bundle is None else _enrich_bundle_profiles(bundle)
-    if bundle.get("schema_version") != 1:
-        raise ValueError("Unsupported B524 description baseline version")
     for selector, entry in _entries(artifact):
         profile = description_profile(artifact, selector)
         live = entry.get("parameter_description")
@@ -488,7 +550,9 @@ def attach_bundled_descriptions(
                     else "legacy_unknown"
                 )
             live["codec_provenance"] = provenance
-            live.setdefault("target_profile", deepcopy(profile))
+            live["target_profile"] = normalize_api_identity(
+                live.get("target_profile", deepcopy(profile))
+            )
             live["target_profile_match"] = (
                 _observed_native_profile(profile) and live["target_profile"] == profile
             )
@@ -529,6 +593,130 @@ def attach_bundled_descriptions(
                 else:
                     cached["verification"] = "unavailable"
         entry["bundled_parameter_description"] = cached
+
+
+def _native_current_scope(
+    artifact: dict[str, Any], selector: dict[str, str], record: dict[str, Any]
+) -> str:
+    """The overlay describes its source installation, never current presence."""
+    group = (
+        artifact.get("operations", {})
+        .get(selector["read_opcode"], {})
+        .get("groups", {})
+        .get(selector["group"], {})
+    )
+    instance = group.get("instances", {}).get(selector["instance"], {})
+    probe = group.get("availability_probes", {}).get(selector["instance"], {})
+    # Instance presence may only schedule reads; require a current availability probe.
+    present = probe.get("present")
+    if (
+        probe.get("availability_qualification") == "unknown"
+        or probe.get("source", group.get("availability_contract", {}).get("source"))
+        == "always_present"
+    ):
+        # A scheduling fallback is not a current observation of presence.
+        present = None
+    presence = (
+        "observed_present"
+        if present is True
+        else "observed_inactive"
+        if present is False
+        else "unknown"
+    )
+    entry = instance.get("registers", {}).get(selector["register"], {})
+    if entry.get("error") is not None or entry.get("response_state") in {
+        "timeout",
+        "nack",
+        "nack_or_crc",
+        "empty_reply",
+    }:
+        presence = "unknown"
+    return validation_scope_for_record(record, presence=presence)
+
+
+def attach_native_descriptions(
+    artifact: dict[str, Any], native: dict[str, Any], overlay: dict[str, Any]
+) -> None:
+    """Adapt the CC0 description plus AGPL policy overlay to application metadata.
+
+    Complete native local identity must match independently. Remote candidates
+    stay outside reuse: this publication supplies no qualified remote codecs.
+    Source scope is checked for consistency, then current applicability is derived
+    from consumer presence. No native record's validation_scope is read.
+    """
+    validate_scope_overlay(native, overlay)
+    if native.get("schema_version") != "b524-basv0-description-profile/v1":
+        raise ValueError("Unsupported native description profile")
+    identity = native["local_profile"]
+    current = description_profile(artifact)
+    matches = _qualified_profile(current) and all(
+        isinstance(identity.get(native_key), str) and identity[native_key] == current.get(app_key)
+        for native_key, app_key in (
+            ("eid", "eid"),
+            ("software_raw", "software_raw_hex"),
+            ("hardware_raw", "hardware_raw_hex"),
+            ("api_version_raw", "api_version_raw"),
+            ("api_revision_raw", "api_revision_raw"),
+        )
+    )
+    retained_descriptions: dict[tuple[str, ...], set[tuple[str, str | None]]] = {}
+    for record in native["records"] if matches else []:
+        if record.get("identity_scope") == "local" and record.get("raw_description_hex"):
+            key = tuple(record["selector"][field] for field in ("operation", "group", "register"))
+            decoded = record.get("decoded")
+            codec = decoded.get("codec") if isinstance(decoded, dict) else None
+            retained_descriptions.setdefault(key, set()).add(
+                (record["raw_description_hex"].lower(), codec)
+            )
+    rows = []
+    for record in native["records"] if matches else []:
+        decoded = record.get("decoded")
+        if (
+            record.get("identity_scope") != "local"
+            or not isinstance(decoded, dict)
+            or decoded.get("qualification") != "qualified"
+            or decoded.get("codec_provenance") != "selector_qualified"
+        ):
+            continue
+        selector = {
+            app_key: f"0x{record['selector'][native_key].lower()}"
+            for native_key, app_key in zip(
+                ("operation", "group", "instance", "register"), _SELECTORS, strict=True
+            )
+        }
+        # Decode the retained bytes on a copy. This preserves the native observation
+        # while keeping ordinary baseline identity and selector checks in force.
+        desc = decode_parameter_description(
+            bytes.fromhex(record["raw_description_hex"]),
+            opcode=1,
+            group=int(selector["group"], 0),
+            instance=int(selector["instance"], 0),
+            register=int(selector["register"], 0),
+            type_spec=decoded["codec"],
+        )
+        if any(desc[key] != decoded[key] for key in ("min", "max", "step")):
+            raise ValueError("Native decoded limits disagree with retained bytes")
+        # Replies do not echo the instance and requests were not retained. Only
+        # identical descriptions across all retained instances can supply limits.
+        key = tuple(record["selector"][field] for field in ("operation", "group", "register"))
+        instances_agree = len(retained_descriptions[key]) == 1
+        scope = _native_current_scope(artifact, selector, record)
+        if not instances_agree and scope == "format_range_and_step":
+            scope = "display_only"
+        rows.append(
+            {
+                **selector,
+                **{key: desc[key] for key in _FIELDS},
+                "profile": deepcopy(current),
+                "codec_provenance": "selector_qualified",
+                "validation_scope": scope,
+                "native_instances_agree": instances_agree,
+                "native_policy_record": deepcopy(record),
+                "step_qualification": desc["step_qualification"],
+                "source": "native_description_with_application_overlay",
+            }
+        )
+    attach_bundled_descriptions(artifact, bundle={"schema_version": 2, "descriptions": rows})
 
 
 def _entry_for_selector(
@@ -595,4 +783,13 @@ def effective_parameter_description(
     # Native compatibility above qualifies this target. Preserve the original
     # observation's profile, while binding validation to the current identity.
     result["target_profile"] = deepcopy(profile)
+    if isinstance(result.get("native_policy_record"), dict):
+        result["validation_scope"] = _native_current_scope(
+            artifact, selector, result["native_policy_record"]
+        )
+        if (
+            result.get("native_instances_agree") is not True
+            and result["validation_scope"] == "format_range_and_step"
+        ):
+            result["validation_scope"] = "display_only"
     return result

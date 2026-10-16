@@ -1646,8 +1646,8 @@ if _TEXTUAL_IMPORT_ERROR is None:
                     return None
                 return (raw, data)
             if (
-                normalized == "HDA:3"
-                or normalized == "HTI"
+                normalized == "DATE_DMY_U8X3"
+                or normalized == "TIME_HMS_U8X3"
                 or normalized == "FW"
                 or normalized == "FWU"
                 or normalized.startswith("HEX:")

@@ -100,7 +100,7 @@ Transport note:
 - Legacy artifacts that still carry mixed opcodes inside a single non-dual group are rendered per-namespace in browse/report surfaces to prevent local/remote intermixing and override bleed.
 - Persisted per-operation namespace topology is authoritative for consumers. Do not infer or rewrite namespace shape from descriptors.
 - B524 browse/report row identity is namespace-aware even for single-namespace groups: dedupe key `<group>:<namespace>:<instance>:<register>` and path format `B524/<section>/<operation>/<group-name>/<namespace-display>/<instance>/<register-name>` are round-trip stable.
-- Artifact schema contract is versioned (`schema_version: "2.3"` current, operations-first layout). Readers keep backward compatibility by migrating unversioned, `2.0`, `2.1`, and `2.2` artifacts in-memory.
+- Artifact schema contract is versioned (`schema_version: "2.4"` current, operations-first layout). Readers keep backward compatibility by migrating unversioned, `2.0`, `2.1`, `2.2`, and `2.3` artifacts in-memory.
 - CI enforces these rules with `python scripts/check_b524_namespace_guardrails.py`.
 
 Coverage and parameter-description note:
@@ -131,14 +131,14 @@ and incomplete-result accounting.
   observations without current values. They distinguish echoed FLAGS `00` payloads
   from status-only `00`, keep unknown names as `null`, and reference missing
   descriptions explicitly. These evidence fixtures do not assert installed topology.
-- `HTI` uses three numeric bytes in `HH MM SS` order, with ranges `0..23`, `0..59`, `0..59`. Python decoding, offline edit encoding and HTML type overrides use this same contract. The separate `BTI` datatype in the [ebusd type registry](https://github.com/john30/ebusd/blob/68f6336bad89607a4200ca9e86f9cd7860b31f86/src/lib/ebus/datatype.cpp) uses BCD. Existing artifact values are retained; replay a raw trace or apply an explicit type override to recompute an older decoded time.
+- `DATE_DMY_U8X3` and `TIME_HMS_U8X3` name the plain-byte `DD MM YY` and `HH MM SS` candidates (year 2000–2099). They are distinct from packed-BCD `HDA:3`/`HTI`. Python, offline editing and HTML overrides use the neutral names. Known legacy Explorer inputs migrate on a copy with provenance; stored values and raw bytes remain historical. Replay or an explicit override creates a separate interpretation.
 
 Output:
 - JSON artifact: `b524_scan_0x??_<timestamp>.json`
 - HTML report: `b524_scan_0x??_<timestamp>.html`
 - Interactive terminals: after scan, the new fullscreen browse UI opens automatically (`q` to exit back to summary).
 
-Replay an ENH/ENS trace (no live bus I/O) into a fresh schema-2.3 JSON artifact plus matching HTML:
+Replay an ENH/ENS trace (no live bus I/O) into a fresh schema-2.4 JSON artifact plus matching HTML:
 ```bash
 python -m helianthus_vrc_explorer replay-trace /path/to/captured.trace --output-dir .
 ```
@@ -368,13 +368,13 @@ GPL-3.0-or-later. See `LICENSE`.
 
 - Local circuit scans always include `GG02/II09` (`virtual_dhw` designation), independently of `circuit_count`. Acquisition does not confirm an active physical circuit; protocol role remains unknown.
 - OP06 connected-device discovery begins at II01. Known per-class OP00 counts guide candidates; only a correlated concrete RR0001 `device_connected` Boolean establishes a connected slot. With a positive count, recommended continues past disconnected slots until the positive quota or II08 bound is reached. A qualified zero mapped count omits ordinary candidates; when no usable count is available, recommended stops at the first qualified not-connected Boolean. Full/research audit the configured bound. Transport/decode unknowns and retained inventory remain separate.
-- Bundled parameter descriptions are displayed offline in HTML and browse, with exact model/firmware, namespace and instance qualification. Rechecks report `matches`, `differs`, `unavailable`, or `profile_mismatch`. Bundled metadata never substitutes for current-target validation.
+- Bundled parameter descriptions are displayed offline in HTML and browse, with exact native family identity, software/hardware, independent API version/revision, namespace and instance qualification. Rechecks report `matches`, `differs`, `unavailable`, or `profile_mismatch`. Bundled metadata never substitutes for current-target validation.
 - Observed OP06 scan windows now reach RR002F in GG01/02/03/05/06/07/08/0B/0C and RR0033 in GG0E/0F. They are scheduling ceilings, not exhaustive terminal maxima; readonly registers may extend beyond Describe coverage. These characterized class windows participate in recommended/full candidate admission. Recommended schedules scalar work only for concrete connected slots, while full audits II01..II08. Generic IIFF descriptions do not establish a concrete device. GG0D retains the common availability probe; its unknown RR maximum requires an explicit scope for scalar expansion.
 - The separate `b524_generic_parameter_descriptions.json` catalog retains 223 decoded class observations requested with II=FF. These observations have no verified slot/device identity and cannot validate an edit or fill a concrete instance baseline. Raw descriptions without a qualified codec remain excluded.
-- Numeric descriptions retain decoded min/max/step. Date/time limits can be interpreted while STEP remains unknown; edits outside known ranges are rejected, and unknown stepping leaves edits incompletely validated. Unsupported formats retain raw description evidence.
+- Numeric descriptions retain decoded min/max/step. Calendar/clock candidate ranges are display-only and STEP remains unknown. Syntactically valid dates/times outside those candidate bounds remain semantically unvalidated; incomplete live-write validation still requires the existing explicit exception. Unsupported formats retain raw evidence.
 - FLAGS provide profile-scoped visibility/writability hints. They establish no user/installer role, volatility, persistence or physical connected-device state. Old artifact labels remain historical, unqualified interpretations.
 
-See the [public discovery and description contract](https://github.com/Project-Helianthus/helianthus-docs-ebus/blob/main/protocols/vaillant/ebus-vaillant-b524-profile-discovery-and-descriptions.md).
+See the [AGPL application reuse contract](https://github.com/Project-Helianthus/helianthus-docs-ebus/blob/main/development/ebus-vaillant-b524-basv0-profile-reuse.md) for application behavior, overlay policy and current-presence requirements.
 
 Description acquisition displays a Describe progress bar with scheduled requests
 and adds actual retries to the count. Only active writable parameters generate
@@ -385,3 +385,40 @@ registers, while keeping full native addresses in artifacts.
 For OP06/GG08 (auroSTEP), `device_connected` at RR0001 controls connection
 presence. A Boolean false is not overridden by readable header registers;
 invalid or non-Boolean responses remain unknown.
+
+### Sanitized evidence export
+
+Three version domains are independent: scans emit string `2.4`; application
+baselines emit integer `2` (readers accept `1` and `2`); native evidence retains
+its `b524-basv0-…/v1` schemas. API `api_version_raw` and `api_revision_raw` are
+independent identity strings. An `API1` display label cannot supply either field.
+
+Export the retained sanitized BASV0 source pair with the independent identity
+manifest, without a device or docs checkout:
+
+```sh
+PYTHONPATH=src python3 scripts/export_b524_evidence.py \
+  --allow-legacy-interpretation --output-dir /path/to/new-native-export
+```
+
+The explicit flag publishes the known legacy Explorer plain-byte interpretation.
+The export retains every candidate, omits current values/native read headers/read
+payloads, and writes a separate selector-keyed application overlay. CC0 native
+descriptions contain no `validation_scope`. The AGPL overlay classifies the
+source installation; applications recompute applicability using current identity
+and presence. The application baseline retains scope as application policy.
+The small baseline alone cannot reconstruct the full native observation set.
+
+Evidence grades are separate from acquisition state and codec qualification:
+**Proven** covers retained byte structure; **Hypothesis** covers candidate codecs,
+decoded limits, derived widths and presence interpretation; **Unknown** covers
+missing request context and calendar STEP. A selector-qualified codec does not
+become Proven. Publication describes families; BASV0/BASV2 strings identify exact
+evidence contexts and do not establish model-wide support or write authority.
+
+Run the optional external gate with `DOCS_EBUS_ROOT=/path/to/docs-ebus` and
+`python3 -m pytest tests/test_b524_evidence_export.py`. The dev dependencies
+include JSON Schema validation. `bash scripts/pi_acceptance_297.sh /path/to/trace`
+replays stored evidence and retains its output; set `DOCS_EBUS_ROOT` to also
+validate and compare all three exported files. Committed native fixtures remain
+legacy inputs until the coordinated #299 refresh.

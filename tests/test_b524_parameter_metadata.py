@@ -1,3 +1,4 @@
+# Plain-byte calendar/clock tests use the neutral codecs; BCD labels are distinct.
 from __future__ import annotations
 
 import struct
@@ -155,7 +156,7 @@ def test_signed_description_limits(type_spec: str, spans: bytes) -> None:
     assert desc["max"] == 5
 
 
-def test_date_description_checks_range_without_inventing_day_step() -> None:
+def test_date_description_is_display_only_without_inventing_day_step() -> None:
     from helianthus_vrc_explorer.protocol.parser import encode_typed_value
 
     desc = decode_parameter_description(
@@ -164,24 +165,28 @@ def test_date_description_checks_range_without_inventing_day_step() -> None:
         group=3,
         instance=0,
         register=5,
-        type_spec="HDA:3",
+        type_spec="DATE_DMY_U8X3",
     )
     assert (
         validate_parameter_edit(
             desc,
-            type_spec="HDA:3",
+            type_spec="DATE_DMY_U8X3",
             value="2026-01-03",
-            encoded=encode_typed_value("HDA:3", "2026-01-03"),
+            encoded=encode_typed_value("DATE_DMY_U8X3", "2026-01-03"),
         )
         == "unvalidated"
     )
     assert desc["step"] is None
     assert desc["step_raw_hex"] == "020000"
-    assert "range" in validate_parameter_edit(
-        desc,
-        type_spec="HDA:3",
-        value="2026-01-06",
-        encoded=encode_typed_value("HDA:3", "2026-01-06"),
+    # Candidate fixture ranges do not authorize edit rejection.
+    assert (
+        validate_parameter_edit(
+            desc,
+            type_spec="DATE_DMY_U8X3",
+            value="2026-01-06",
+            encoded=encode_typed_value("DATE_DMY_U8X3", "2026-01-06"),
+        )
+        == "unvalidated"
     )
 
 
@@ -636,3 +641,22 @@ def test_remote_writable_capability_controls_edit_even_in_state_tab(
     monkeypatch.setattr(app, "push_screen", lambda dialog, callback: dialogs.append(dialog))
     app.action_edit_selected()
     assert bool(dialogs) is accepted
+
+
+@pytest.mark.parametrize("revision,expected", [(2.0, "2"), (float("nan"), None)])
+def test_scan_retains_independent_raw_api_dimensions(revision, expected) -> None:
+    from helianthus_vrc_explorer.scanner.scan import scan_b524
+    from helianthus_vrc_explorer.transport.base import TransportInterface
+
+    class IdentityBus(TransportInterface):
+        def send(self, dst, payload):
+            if payload[0] == 0:
+                identifier = int.from_bytes(payload[1:3], "little")
+                return struct.pack("<f", {6: 1.0, 7: revision}.get(identifier, float("nan")))
+            return b"\x00"
+
+    context = scan_b524(IdentityBus(), dst=0x15)["meta"]["profile_context"]
+    assert context["api_version"] == 1.0
+    assert context["api_version_raw"] == "1"
+    assert context["api_revision_raw"] == expected
+    assert context["api_revision"] == (revision if expected else None)

@@ -7,8 +7,8 @@ I16,2 signed bytes,integer
 U32,4 unsigned bytes,integer
 I32,4 signed bytes,integer
 EXP,4 bytes,decimal number
-HTI,3 bytes,time of day HH:MM:SS
-HDA:3,3 bytes,calendar date
+TIME_HMS_U8X3,3 plain numeric bytes,time of day HH:MM:SS
+DATE_DMY_U8X3,3 plain numeric bytes,calendar date
 FW,3 bytes,version text
 FWU,3 numeric bytes,version text
 STR:n,n bytes,text

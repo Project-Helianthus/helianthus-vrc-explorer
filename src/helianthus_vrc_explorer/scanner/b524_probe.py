@@ -60,7 +60,7 @@ _UNKNOWN_GROUP_RESEARCH_SELECTORS: tuple[tuple[int, int], ...] = (
     (0x01, 0x0001),
 )
 _QUALIFIED_DESCRIPTION_CODECS = frozenset(
-    {"UCH", "BOOL", "I8", "UIN", "I16", "U32", "I32", "EXP", "HDA:3", "HTI"}
+    {"UCH", "BOOL", "I8", "UIN", "I16", "U32", "I32", "EXP", "DATE_DMY_U8X3", "TIME_HMS_U8X3"}
 )
 
 

@@ -655,3 +655,17 @@ def test_operation_export_row_matches_what_the_edit_action_supports() -> None:
             assert export.value == "offline export available with e"
         else:
             assert export.value == "no offline export for this operation"
+
+
+def test_legacy_calendar_label_and_display_only_limits_are_visible() -> None:
+    entry = {
+        "type": "DATE_DMY_U8X3",
+        "raw_hex": "1f0c63",
+        "codec_migration": {"source_label": "HDA:3"},
+    }
+    description = {"type": "DATE_DMY_U8X3", "min": "2026-01-01", "max": "2026-01-05", "step": None}
+    sections = register_detail_sections(
+        row=_row(), entry=entry, description=description, correspondence=None
+    )
+    assert "HDA:3" in str(_section(sections, "TYPE"))
+    assert "display-only; range unvalidated" in str(_section(sections, "LIMITS"))

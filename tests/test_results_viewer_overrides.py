@@ -1,3 +1,4 @@
+# Plain-byte calendar/clock tests use the neutral codecs; BCD labels are distinct.
 from __future__ import annotations
 
 import io
@@ -16,7 +17,7 @@ from helianthus_vrc_explorer.ui.viewer import (
 def test_candidate_type_specs_and_cycle() -> None:
     c4 = candidate_type_specs_for_length(4)
     c3 = candidate_type_specs_for_length(3)
-    assert c3 == ("HDA:3", "HTI", "FWU", "FW", "HEX:3")
+    assert c3 == ("DATE_DMY_U8X3", "TIME_HMS_U8X3", "FWU", "FW", "HEX:3")
     assert c4 == ("EXP", "U32", "I32", "HEX:4")
     assert cycle_type_spec(None, c4) == "EXP"
     assert cycle_type_spec("EXP", c4) == "U32"
@@ -102,7 +103,7 @@ def test_apply_row_type_override_can_target_one_operation_only() -> None:
                                 "registers": {
                                     "0x0004": {
                                         "raw_hex": "051226",
-                                        "type": "HDA:3",
+                                        "type": "DATE_DMY_U8X3",
                                         "value": "2026-12-05",
                                         "error": None,
                                     }
@@ -121,7 +122,7 @@ def test_apply_row_type_override_can_target_one_operation_only() -> None:
                                 "registers": {
                                     "0x0004": {
                                         "raw_hex": "051226",
-                                        "type": "HDA:3",
+                                        "type": "DATE_DMY_U8X3",
                                         "value": "2026-12-05",
                                         "error": None,
                                     }
@@ -156,7 +157,7 @@ def test_apply_row_type_override_can_target_one_operation_only() -> None:
     remote_regs = artifact["operations"]["0x06"]["groups"]["0x09"]["instances"]["0x00"]["registers"]
     local_entry = local_regs["0x0004"]
     remote_entry = remote_regs["0x0004"]
-    assert local_entry["type"] == "HDA:3"
+    assert local_entry["type"] == "DATE_DMY_U8X3"
     assert local_entry["value"] == "2026-12-05"
     assert remote_entry["type"] == "HEX:3"
     assert remote_entry["value"] == "0x051226"

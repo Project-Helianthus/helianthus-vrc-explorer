@@ -670,7 +670,7 @@ __ARTIFACT_JSON__
         if (!Number.isFinite(n) || n <= 0) return [];
         if (n === 1) return ["UCH", "I8", "BOOL", "HEX:1"];
         if (n === 2) return ["UIN", "I16", "HEX:2"];
-        if (n === 3) return ["HDA:3", "HTI", "FWU", "FW", "HEX:3"];
+        if (n === 3) return ["DATE_DMY_U8X3", "TIME_HMS_U8X3", "FWU", "FW", "HEX:3"];
         if (n === 4) return ["EXP", "U32", "I32", "HEX:4"];
         return [`HEX:${n}`, "STR:*"];
       }
@@ -766,7 +766,7 @@ __ARTIFACT_JSON__
               if (Number.isNaN(f)) return { value: null, error: null };
               return { value: f, error: null };
             }
-            case "HDA:3": {
+            case "DATE_DMY_U8X3": {
               expectLen(3);
               const dd = bytes[0];
               const mm = bytes[1];
@@ -775,12 +775,16 @@ __ARTIFACT_JSON__
               if (mm < 1 || mm > 12) throw new Error("month out of range");
               if (yy < 0 || yy > 99) throw new Error("year out of range");
               const yyyy = 2000 + yy;
+              const checked = new Date(Date.UTC(yyyy, mm - 1, dd));
+              if (checked.getUTCFullYear() !== yyyy || checked.getUTCMonth() !== mm - 1 || checked.getUTCDate() !== dd) {
+                throw new Error("invalid calendar date");
+              }
               const iso = `${yyyy.toString().padStart(4, "0")}-${mm.toString().padStart(2, "0")}-${dd
                 .toString()
                 .padStart(2, "0")}`;
               return { value: iso, error: null };
             }
-            case "HTI": {
+            case "TIME_HMS_U8X3": {
               expectLen(3);
               const hh = bytes[0];
               const mi = bytes[1];
@@ -2484,7 +2488,7 @@ __ARTIFACT_JSON__
               );
               const statusKind = entryStatusKind(entry);
               const statusLabel = entryStatusLabel(entry);
-              const decoded = (override || !hasQualifiedValueLabel) && selectedType && valueBytes
+              const decoded = (override || (!entry.codec_migration && !hasQualifiedValueLabel)) && selectedType && valueBytes
                 ? parseTypedValue(selectedType, valueBytes)
                 : { value: displayValue, error: null };
 
@@ -2514,6 +2518,12 @@ __ARTIFACT_JSON__
                 td.appendChild(candidateEl);
               }
 
+              if (entry.codec_migration) {
+                const legacyEl = document.createElement("div");
+                legacyEl.className = "cell-raw";
+                legacyEl.textContent = `Legacy Explorer label: ${entry.codec_migration.source_label}; historical value retained. Overrides are separate interpretations.`;
+                td.appendChild(legacyEl);
+              }
               const description = entry.parameter_description;
               const bundled = entry.bundled_parameter_description;
               if (bundled && typeof bundled === "object"
@@ -2558,6 +2568,12 @@ __ARTIFACT_JSON__
                     const reason = typeof description.reason === "string" ? `: ${description.reason}` : "";
                     descriptionEl.textContent = `Parameter description unavailable${reason}; offline edit confirmation remains unvalidated.`;
                   }
+                }
+                if (["DATE_DMY_U8X3", "TIME_HMS_U8X3"].includes(description.type)) {
+                  descriptionEl.textContent += " Candidate calendar/clock limits: display-only; range unvalidated.";
+                }
+                if (description.codec_migration) {
+                  descriptionEl.textContent += ` Legacy Explorer label: ${description.codec_migration.source_label}.`;
                 }
                 if (descriptionEl.textContent) td.appendChild(descriptionEl);
               }
