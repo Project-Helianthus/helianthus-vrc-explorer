@@ -15,7 +15,7 @@ stays open.
 | --- | --- |
 | What does the evidence support? | **Proven** covers facts within retained bytes; **Hypothesis** covers supported interpretations; **Unknown** covers missing context. The crosswalk leaves some field classes, such as identity metadata and raw access flags, without a specified grade: do not invent one. |
 | Is the codec accepted? | `selector_qualified` and `qualified` describe validation acceptance, not an evidence grade. A qualified decoded limit can still rely on a Hypothesis codec basis. Width alone does not qualify a codec. |
-| Does the profile match? | EID, software raw, hardware raw, API version raw and API revision raw must all match for local reuse. Remote slots need their own identity qualification. A match cannot supply missing evidence, prove a codec or grant native admission or write authority. |
+| Does the profile match? | Explorer matches the profile identifier, EID, raw software and hardware fields, and decoded numeric `api_version` and `api_revision` for local reuse. It does not compare raw API bytes. Remote slots need their own identity qualification. A match cannot supply missing evidence, prove a codec or grant native admission or write authority. |
 | What happened during acquisition? | Retained `acquisition_state`, `response_state` and observed read widths describe derived session outcomes (**Hypothesis**). A retained unqualified description is raw evidence, not necessarily a failed read. It grants no codec or range. |
 
 These distinctions come from the [crosswalk][crosswalk] and
