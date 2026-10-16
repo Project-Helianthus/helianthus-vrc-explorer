@@ -229,9 +229,14 @@ def _limits_section(
         constraint_min = entry.get("constraint_min")
         constraint_max = entry.get("constraint_max")
         constraint_step = entry.get("constraint_step")
-        is_catalog = (
-            entry.get("constraint_source") == "static_catalog"
-            or entry.get("constraint_qualification") == "legacy_unqualified"
+        # Older artifacts marked live probe constraints "legacy_unqualified" too, so the
+        # marker alone only means catalog origin when no live-probe provenance is recorded.
+        live_probe = (
+            entry.get("constraint_source") in {"opcode_0x01", "probe"}
+            or entry.get("constraint_scope") == "opcode_0x01_probe"
+        )
+        is_catalog = entry.get("constraint_source") == "static_catalog" or (
+            entry.get("constraint_qualification") == "legacy_unqualified" and not live_probe
         )
         label = (
             "Catalog evidence: unscoped_catalog (unqualified)"
