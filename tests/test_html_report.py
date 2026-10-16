@@ -871,6 +871,7 @@ console.log(JSON.stringify([
   b524DocsCatalogText("0x02", "0x00", "0x02", "0x0007"),
   b524DocsCatalogText("0X02", "0X0", "0x1", "0X0007"),
   b524DocsCatalogText("0x02", "0x00", "0x01", "bogus"),
+  b524DocsCatalogText("0x02", "0x00", "01", "0007"),
   b524CorrespondenceSecondaryText("0x02", "0x00", "0x0016"),
   b524CorrespondenceSecondaryText("0x02", "0x00", "0x00a2"),
   b524CorrespondenceSecondaryText("0X02", "0x0", "0X0016"),
@@ -886,6 +887,7 @@ console.log(JSON.stringify([
         absent,
         variant,
         bogus,
+        padded_decimal,
         ventilation,
         pv,
         ventilation_variant,
@@ -894,7 +896,7 @@ console.log(JSON.stringify([
     assert "docs-ebus catalog name (provisional): unknown_11" in provisional
     assert "docs-ebus previous name: system_off" in provisional
     assert "Polarity unresolved" in provisional
-    assert op06 == absent == bogus == ""
+    assert op06 == absent == bogus == padded_decimal == ""
     assert variant == provisional
     assert ventilation_variant == ventilation
     assert bogus_correspondence == ""

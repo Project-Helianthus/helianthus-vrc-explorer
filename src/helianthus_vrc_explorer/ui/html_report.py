@@ -581,7 +581,9 @@ __ARTIFACT_JSON__
 
       const B524_DOCS_CATALOG_NAMES = __B524_DOCS_CATALOG_NAMES__;
       function b524CanonicalHexKey(key, width) {
-        if (typeof key !== "string" || !/^(0[xX][0-9a-fA-F]+|[0-9]+)$/.test(key.trim())) return null;
+        // Accept exactly the spellings Python's int(value, 0) accepts on the server side:
+        // hexadecimal with a 0x prefix, or decimal without leading zeros.
+        if (typeof key !== "string" || !/^(0[xX][0-9a-fA-F]+|0|[1-9][0-9]*)$/.test(key.trim())) return null;
         const value = Number(key.trim());
         if (!Number.isSafeInteger(value) || value < 0) return null;
         return "0x" + value.toString(16).padStart(width, "0");
