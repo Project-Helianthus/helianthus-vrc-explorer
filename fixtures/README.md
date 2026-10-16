@@ -126,6 +126,16 @@ migration-on-read mapping:
 | `HDA:3` | `DATE_DMY_U8X3` (`DD MM YY`, 2000–2099) |
 | `HTI` | `TIME_HMS_U8X3` (`HH MM SS`) |
 
+Pre-contract Explorer scans are recognized only through their complete historical
+scan envelope: timestamp, numeric duration, destination address, schema-source
+list, boolean incomplete flag, and the version-appropriate `groups`/`operations`
+container (unversioned through `2.3`). This fallback requires an absent
+`artifact_contract`; explicit external producers and unrecognized contracts are
+never overridden. Partial envelopes, codec labels and schema versions alone do
+not establish Explorer provenance. These are the only two legacy labels mapped.
+The demo clock value is `18:33:09`: its retained `12 21 09` hex bytes are numeric
+18, 33, 9, as in Explorer's historical plain-byte decoder.
+
 External packed-BCD labels remain distinct. Adapters copy input, retain original
 labels/source versions as application provenance, and leave raw bytes and stored
 values intact. Opening a file never rewrites it; exporting migrated meanings

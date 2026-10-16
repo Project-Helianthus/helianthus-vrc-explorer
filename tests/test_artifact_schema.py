@@ -377,3 +377,110 @@ def test_validator_24_rejects_legacy_codec_even_when_decode_errors_are_retained(
     artifact["meta"]["producer"] = "external"
     errors, _, _ = _validate_scan_artifact(artifact, allow_legacy=True)
     assert not errors
+
+
+def _legacy_explorer_calendar_artifact() -> dict[str, Any]:
+    return {
+        "schema_version": "2.3",
+        "meta": {
+            "scan_timestamp": "2026-02-12T00:00:00Z",
+            "scan_duration_seconds": 0.0,
+            "destination_address": "0x15",
+            "schema_sources": [],
+            "incomplete": False,
+        },
+        "operations": {
+            "0x02": {
+                "groups": {
+                    "0x00": {
+                        "instances": {
+                            "0x00": {
+                                "registers": {
+                                    "0x0035": {
+                                        "type": "HTI",
+                                        "raw_hex": "101020",
+                                        "value": "16:16:32",
+                                    },
+                                    "0x0034": {
+                                        "type": "HDA:3",
+                                        "raw_hex": "06021a",
+                                        "value": "2026-02-06",
+                                    },
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+    }
+
+
+def test_pre_contract_explorer_calendar_artifact_parses_and_renders() -> None:
+    from helianthus_vrc_explorer.protocol.parser import parse_typed_value
+    from helianthus_vrc_explorer.ui.browse_store import BrowseStore
+    from helianthus_vrc_explorer.ui.html_report import render_html_report
+
+    source = _legacy_explorer_calendar_artifact()
+    before = deepcopy(source)
+    errors, migrated, _ = _validate_scan_artifact(source, allow_legacy=True)
+    assert not errors
+    entries = [row[-1] for row in iter_register_entries(migrated)]
+    assert [entry["type"] for entry in entries] == ["TIME_HMS_U8X3", "DATE_DMY_U8X3"]
+    for entry in entries:
+        assert parse_typed_value(entry["type"], bytes.fromhex(entry["raw_hex"])) == entry["value"]
+        assert entry["codec_migration"]["source_version"] == "2.3"
+    store = BrowseStore.from_artifact(source)
+    assert {row.register_key for row in store.rows} == {"0x0034", "0x0035"}
+    html = render_html_report(source)
+    embedded = json.loads(
+        html.split('<script id="artifact-data" type="application/json">')[1].split("</script>")[0]
+    )
+    rendered_entries = [row[-1] for row in iter_register_entries(embedded)]
+    for entry, rendered in zip(entries, rendered_entries, strict=True):
+        for key in ("type", "value", "raw_hex", "codec_migration"):
+            assert rendered[key] == entry[key]
+    assert migrate_artifact_schema(migrated)[0] == migrated
+    assert source == before
+
+
+@pytest.mark.parametrize("version", [None, "2.0", "2.1", "2.2"])
+def test_pre_contract_groups_first_explorer_calendar_migration(version: str | None) -> None:
+    source = _legacy_explorer_calendar_artifact()
+    source["groups"] = source.pop("operations")["0x02"]["groups"]
+    if version is None:
+        del source["schema_version"]
+    else:
+        source["schema_version"] = version
+    errors, migrated, _ = _validate_scan_artifact(source, allow_legacy=True)
+    assert not errors
+    assert [row[-1]["type"] for row in iter_register_entries(migrated)] == [
+        "TIME_HMS_U8X3",
+        "DATE_DMY_U8X3",
+    ]
+
+
+@pytest.mark.parametrize("case", ["external", "partial", "contract", "current"])
+def test_legacy_calendar_does_not_infer_ambiguous_or_external_provenance(case: str) -> None:
+    source = _legacy_explorer_calendar_artifact()
+    if case == "external":
+        source["meta"]["producer"] = "external"
+    elif case == "partial":
+        del source["meta"]["scan_duration_seconds"]
+    elif case == "contract":
+        source["meta"]["artifact_contract"] = {"producer": "external"}
+    else:
+        source["schema_version"] = "2.4"
+    migrated, _ = migrate_artifact_schema(source)
+    assert [row[-1]["type"] for row in iter_register_entries(migrated)] == ["HTI", "HDA:3"]
+
+
+def test_demo_browse_calendar_values_match_retained_bytes() -> None:
+    errors, migrated, _ = _validate_scan_artifact(
+        _load_fixture("demo_browse.json"), allow_legacy=True
+    )
+    assert not errors
+    regs = migrated["operations"]["0x02"]["groups"]["0x00"]["instances"]["0x00"]["registers"]
+    assert regs["0x0035"]["raw_hex"] == "122109"
+    assert regs["0x0035"]["value"] == "18:33:09"
+    assert regs["0x00da"]["value"] == "2019-01-01"

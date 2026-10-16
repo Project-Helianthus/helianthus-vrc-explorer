@@ -20,7 +20,7 @@ def _interpret_overrides(overrides: dict[str, Any], path: tuple[str, ...] = ()) 
 
 
 def has_explorer_provenance(artifact: dict[str, Any]) -> bool:
-    """Recognize an explicit producer or the retained Explorer artifact contract.
+    """Recognize explicit provenance or the historical Explorer scan envelope.
 
     A schema number, controller family, or codec label alone is insufficient.
     Explicit external provenance takes precedence over a copied contract.
@@ -30,6 +30,25 @@ def has_explorer_provenance(artifact: dict[str, Any]) -> bool:
         return False
     if "producer" in meta:
         return meta["producer"] == "helianthus-vrc-explorer"
+    # Before artifact_contract existed, the scanner emitted this complete
+    # metadata envelope. Require all fields and the version-appropriate scan
+    # container; a bare schema/type/device match is deliberately insufficient.
+    # An explicit (even unrecognized) contract must not be overridden by this
+    # historical fallback, nor may new-schema artifacts use it.
+    version = artifact.get("schema_version")
+    if "artifact_contract" not in meta and version in (None, "2.0", "2.1", "2.2", "2.3"):
+        container = "operations" if version == "2.3" else "groups"
+        if (
+            isinstance(artifact.get(container), dict)
+            and isinstance(meta.get("scan_timestamp"), str)
+            and bool(meta["scan_timestamp"])
+            and type(meta.get("scan_duration_seconds")) in {int, float}
+            and isinstance(meta.get("destination_address"), str)
+            and bool(meta["destination_address"])
+            and isinstance(meta.get("schema_sources"), list)
+            and isinstance(meta.get("incomplete"), bool)
+        ):
+            return True
     contract = meta.get("artifact_contract", {})
     if not isinstance(contract, dict):
         return False
