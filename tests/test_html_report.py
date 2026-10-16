@@ -869,6 +869,8 @@ console.log(JSON.stringify([
   b524DocsCatalogText("0x02", "0x00", "0x01", "0x0007"),
   b524DocsCatalogText("0x06", "0x00", "0x01", "0x0007"),
   b524DocsCatalogText("0x02", "0x00", "0x02", "0x0007"),
+  b524DocsCatalogText("0X02", "0X0", "0x1", "0X0007"),
+  b524DocsCatalogText("0x02", "0x00", "0x01", "bogus"),
   b524CorrespondenceSecondaryText("0x02", "0x00", "0x0016"),
   b524CorrespondenceSecondaryText("0x02", "0x00", "0x00a2")
 ]));"""
@@ -876,11 +878,12 @@ console.log(JSON.stringify([
     result = subprocess.run(
         [node, "-e", script], check=True, text=True, capture_output=True, timeout=10
     )
-    provisional, op06, absent, ventilation, pv = json.loads(result.stdout)
+    provisional, op06, absent, variant, bogus, ventilation, pv = json.loads(result.stdout)
     assert "docs-ebus catalog name (provisional): unknown_11" in provisional
     assert "docs-ebus previous name: system_off" in provisional
     assert "Polarity unresolved" in provisional
-    assert op06 == absent == ""
+    assert op06 == absent == bogus == ""
+    assert variant == provisional
     assert "Observed myVaillant name (VRC700): operationModeVentilation" in ventilation
     assert "Observed myVaillant name (VRC720): smartPhotovoltaicBufferOffset" in pv
     assert "Hypothesis" in ventilation and "Hypothesis" in pv

@@ -580,8 +580,20 @@ __ARTIFACT_JSON__
       const B524_REGISTER_NAME_CORRESPONDENCE = __B524_REGISTER_NAME_CORRESPONDENCE__;
 
       const B524_DOCS_CATALOG_NAMES = __B524_DOCS_CATALOG_NAMES__;
+      function b524DocsCatalogKey(op, gg, ii, rr) {
+        const widths = [2, 2, 2, 4];
+        const parts = [op, gg, ii, rr].map((key, index) => {
+          if (typeof key !== "string" || !/^(0[xX][0-9a-fA-F]+|[0-9]+)$/.test(key.trim())) return null;
+          const value = Number(key.trim());
+          if (!Number.isSafeInteger(value) || value < 0) return null;
+          return "0x" + value.toString(16).padStart(widths[index], "0");
+        });
+        return parts.includes(null) ? "" : parts.join("/");
+      }
+
       function b524DocsCatalogText(op, gg, ii, rr) {
-        const entry = B524_DOCS_CATALOG_NAMES[[op, gg, ii, rr].join("/")];
+        const key = b524DocsCatalogKey(op, gg, ii, rr);
+        const entry = key ? B524_DOCS_CATALOG_NAMES[key] : null;
         if (!entry) return "";
         const parts = ["docs-ebus catalog name" + (entry.provisional ? " (provisional)" : "") + ": " + entry.name];
         if (entry.previous_name) parts.push("docs-ebus previous name: " + entry.previous_name);
