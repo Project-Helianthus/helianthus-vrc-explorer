@@ -6,6 +6,7 @@ import struct
 import pytest
 from textual.widgets import DataTable, Input, Static, Tree
 
+from helianthus_vrc_explorer.artifact_schema import migrate_artifact_schema
 from helianthus_vrc_explorer.scanner.browser_session import BrowserSession
 from helianthus_vrc_explorer.schema.parameter_descriptions import attach_bundled_descriptions
 from helianthus_vrc_explorer.ui import browse_textual
@@ -54,9 +55,14 @@ class _CircuitTransport(ScriptedLiveTransport):
 
 
 @pytest.mark.parametrize("key", ["e", "enter", "ctrl+j", "ctrl+m"])
-@pytest.mark.parametrize("live", [False, True])
-def test_numeric_editor_keeps_opening_key_out_of_submission(monkeypatch, key, live) -> None:
+@pytest.mark.parametrize("live,legacy", [(False, False), (True, False), (False, True)])
+def test_numeric_editor_keeps_opening_key_out_of_submission(monkeypatch, key, live, legacy) -> None:
     artifact = _circuit_artifact()
+    if legacy:
+        artifact["groups"] = artifact.pop("operations")["0x02"]["groups"]
+        del artifact["groups"]["0x02"]["instances"]["0x00"]["registers"]["0x0014"]["read_opcode"]
+        del artifact["schema_version"]
+        artifact, _ = migrate_artifact_schema(artifact)
     transport = _CircuitTransport()
     monkeypatch.setattr(
         browse_textual.BrowserSession, "from_config", lambda config: BrowserSession(transport)
@@ -92,6 +98,11 @@ def test_numeric_editor_keeps_opening_key_out_of_submission(monkeypatch, key, li
                 app.action_tab_config()
                 await pilot.pause()
                 app.query_one("#browse-table", DataTable).focus()
+                if legacy:
+                    row = app._selected_table_row()
+                    assert row is not None
+                    assert row.address.read_opcode is None
+                    assert app._selector_for_row(row)["read_opcode"] == "0x02"
                 await pilot.press(key)
                 await _settle(app, pilot)
                 await pilot.pause(0.3)

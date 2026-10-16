@@ -306,7 +306,9 @@ The docs catalog has no instance column. Its instance-independent naming
 templates are bound at render time to each full `(OP, GG, II, RR)` selector;
 instances and operation namespaces remain distinct. No artifact fields change.
 Browser details use the migrated operation namespace for legacy rows without
-an explicit read opcode, preserving their docs catalog annotations.
+an explicit read opcode, preserving their docs catalog annotations. The edit
+action uses the same namespace fallback, so writable, typed legacy rows can
+open the offline preview editor.
 Regenerate the packaged catalog from a docs-ebus checkout with:
 
 ```bash

@@ -1689,14 +1689,11 @@ if _TEXTUAL_IMPORT_ERROR is None:
                     break
 
         def _selector_for_row(self, row: RegisterRow) -> dict[str, str]:
-            if (
-                row.address.read_opcode not in {"0x02", "0x06"}
-                or row.group_key is None
-                or row.instance_key is None
-            ):
+            opcode = row.address.read_opcode or row.namespace_key
+            if opcode not in {"0x02", "0x06"} or row.group_key is None or row.instance_key is None:
                 raise ValueError("selected row has no concrete OP02/OP06 selector")
             return {
-                "read_opcode": row.address.read_opcode,
+                "read_opcode": opcode,
                 "group": row.group_key,
                 "instance": row.instance_key,
                 "register": row.register_key,
