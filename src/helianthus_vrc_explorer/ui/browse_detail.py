@@ -122,9 +122,10 @@ def _interpreted_value_text(row: RegisterRow, entry: dict[str, Any] | None) -> s
 
     if entry is None:
         return row.value_text
-    if row.protocol == "b524" and row.address.read_opcode in {"0x02", "0x06"}:
+    opcode_key = row.address.read_opcode or row.namespace_key
+    if row.protocol == "b524" and opcode_key in {"0x02", "0x06"}:
         try:
-            opcode = int(row.address.read_opcode, 0)
+            opcode = int(opcode_key, 0)
             group = int(row.group_key or "0", 0)
             register = int(row.register_key, 0)
         except ValueError:
@@ -367,10 +368,11 @@ def _gates_section(
                 )
             )
 
-    if row.group_key is not None and row.address.read_opcode in {"0x02", "0x06"}:
+    namespace_opcode = row.address.read_opcode or row.namespace_key
+    if row.group_key is not None and namespace_opcode in {"0x02", "0x06"}:
         try:
             group_int = int(row.group_key, 0)
-            opcode_int = int(row.address.read_opcode, 0)
+            opcode_int = int(namespace_opcode, 0)
             contract = namespace_availability_contract(group=group_int, opcode=opcode_int)  # type: ignore[arg-type]
         except (ValueError, KeyError):
             contract = None

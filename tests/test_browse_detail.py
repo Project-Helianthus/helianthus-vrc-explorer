@@ -732,6 +732,10 @@ def test_enumeration_uses_migrated_namespace_without_read_opcode() -> None:
         "2": "NORMAL (2)",
         "3": "REDUCED (3)",
     }
+    sections = register_detail_sections(row=row, entry=entry, description=None)
+    value = _section(sections, "VALUE")
+    assert value is not None
+    assert {item.label: item.value for item in value.rows}["Interpreted"] == "NORMAL (2)"
 
 
 def test_imported_app_names_render_with_family_and_hypothesis_caveat() -> None:
