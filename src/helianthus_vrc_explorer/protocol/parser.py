@@ -117,8 +117,8 @@ def parse_str_cstring(data: bytes) -> str:
     return data.split(b"\x00", 1)[0].decode("latin1")
 
 
-def parse_hda3_date(data: bytes) -> str:
-    """Parse an `HDA:3` value (u24le date encoded as raw DD MM YY bytes).
+def parse_date_dmy_u8x3(data: bytes) -> str:
+    """Parse a `DATE_DMY_U8X3` value (three plain DD MM YY bytes).
 
     Returns:
         ISO-ish date string: `YYYY-MM-DD`.
@@ -128,42 +128,42 @@ def parse_hda3_date(data: bytes) -> str:
         `09 03 1A` means `2026-03-09` and `01 01 0F` means `2015-01-01`.
     """
 
-    _expect_len("HDA:3", data, 3)
+    _expect_len("DATE_DMY_U8X3", data, 3)
     day = data[0]
     month = data[1]
     year_2digit = data[2]
     if not (1 <= day <= 31):
-        raise ValueParseError(f"HDA:3 day must be 1..31, got {day}")
+        raise ValueParseError(f"DATE_DMY_U8X3 day must be 1..31, got {day}")
     if not (1 <= month <= 12):
-        raise ValueParseError(f"HDA:3 month must be 1..12, got {month}")
+        raise ValueParseError(f"DATE_DMY_U8X3 month must be 1..12, got {month}")
     if not (0 <= year_2digit <= 99):
-        raise ValueParseError(f"HDA:3 year must be 0..99, got {year_2digit}")
+        raise ValueParseError(f"DATE_DMY_U8X3 year must be 0..99, got {year_2digit}")
 
     year = 2000 + year_2digit
     try:
         return date(year, month, day).isoformat()
     except ValueError as exc:
         raise ValueParseError(
-            f"HDA:3 invalid date DDMMYY={day:02d}{month:02d}{year_2digit:02d}"
+            f"DATE_DMY_U8X3 invalid date DDMMYY={day:02d}{month:02d}{year_2digit:02d}"
         ) from exc
 
 
-def parse_hti_time(data: bytes) -> str:
-    """Parse an `HTI` value (three numeric HH, MM, SS bytes).
+def parse_time_hms_u8x3(data: bytes) -> str:
+    """Parse a `TIME_HMS_U8X3` value (three numeric HH, MM, SS bytes).
 
     Returns:
         ISO-ish time string: `HH:MM:SS`.
     """
 
-    _expect_len("HTI", data, 3)
+    _expect_len("TIME_HMS_U8X3", data, 3)
     hour, minute, second = data
 
     if hour > 23:
-        raise ValueParseError(f"HTI hour must be 0..23, got {hour}")
+        raise ValueParseError(f"TIME_HMS_U8X3 hour must be 0..23, got {hour}")
     if minute > 59:
-        raise ValueParseError(f"HTI minute must be 0..59, got {minute}")
+        raise ValueParseError(f"TIME_HMS_U8X3 minute must be 0..59, got {minute}")
     if second > 59:
-        raise ValueParseError(f"HTI second must be 0..59, got {second}")
+        raise ValueParseError(f"TIME_HMS_U8X3 second must be 0..59, got {second}")
 
     return f"{hour:02d}:{minute:02d}:{second:02d}"
 
@@ -302,42 +302,46 @@ def encode_hex(type_spec: str, value: str, expected_len: int) -> bytes:
     return data
 
 
-def encode_hda3_date(value: str) -> bytes:
-    """Encode an `HDA:3` value from `YYYY-MM-DD`."""
+def encode_date_dmy_u8x3(value: str) -> bytes:
+    """Encode a `DATE_DMY_U8X3` value from `YYYY-MM-DD`."""
 
     if not isinstance(value, str):
-        raise ValueEncodeError(f"HDA:3 expects str, got {type(value).__name__}")
+        raise ValueEncodeError(f"DATE_DMY_U8X3 expects str, got {type(value).__name__}")
     try:
         yyyy_s, mm_s, dd_s = value.split("-", 2)
         yyyy = int(yyyy_s)
         mm = int(mm_s)
         dd = int(dd_s)
     except Exception as exc:
-        raise ValueEncodeError("HDA:3 expects YYYY-MM-DD") from exc
+        raise ValueEncodeError("DATE_DMY_U8X3 expects YYYY-MM-DD") from exc
     if not (2000 <= yyyy <= 2099):
-        raise ValueEncodeError(f"HDA:3 year must be 2000..2099, got {yyyy}")
+        raise ValueEncodeError(f"DATE_DMY_U8X3 year must be 2000..2099, got {yyyy}")
+    try:
+        date(yyyy, mm, dd)
+    except ValueError as exc:
+        raise ValueEncodeError("DATE_DMY_U8X3 expects a valid calendar date") from exc
     yy = yyyy - 2000
     return bytes((dd, mm, yy))
 
 
-def encode_hti_time(value: str) -> bytes:
-    """Encode an `HTI` value from `HH:MM:SS`."""
+def encode_time_hms_u8x3(value: str) -> bytes:
+    """Encode a `TIME_HMS_U8X3` value from `HH:MM:SS`."""
 
     if not isinstance(value, str):
-        raise ValueEncodeError(f"HTI expects str, got {type(value).__name__}")
+        raise ValueEncodeError(f"TIME_HMS_U8X3 expects str, got {type(value).__name__}")
     try:
         hh_s, mm_s, ss_s = value.split(":", 2)
         hh = int(hh_s)
         mm = int(mm_s)
         ss = int(ss_s)
     except Exception as exc:
-        raise ValueEncodeError("HTI expects HH:MM:SS") from exc
+        raise ValueEncodeError("TIME_HMS_U8X3 expects HH:MM:SS") from exc
     if not (0 <= hh <= 23):
-        raise ValueEncodeError(f"HTI hour must be 0..23, got {hh}")
+        raise ValueEncodeError(f"TIME_HMS_U8X3 hour must be 0..23, got {hh}")
     if not (0 <= mm <= 59):
-        raise ValueEncodeError(f"HTI minute must be 0..59, got {mm}")
+        raise ValueEncodeError(f"TIME_HMS_U8X3 minute must be 0..59, got {mm}")
     if not (0 <= ss <= 59):
-        raise ValueEncodeError(f"HTI second must be 0..59, got {ss}")
+        raise ValueEncodeError(f"TIME_HMS_U8X3 second must be 0..59, got {ss}")
     return bytes((hh, mm, ss))
 
 
@@ -409,10 +413,10 @@ def encode_typed_value(type_spec: str, value: object) -> bytes:
             return encode_i32(value)  # type: ignore[arg-type]
         case "BOOL":
             return encode_bool(value)  # type: ignore[arg-type]
-        case "HDA:3":
-            return encode_hda3_date(value)  # type: ignore[arg-type]
-        case "HTI":
-            return encode_hti_time(value)  # type: ignore[arg-type]
+        case "DATE_DMY_U8X3":
+            return encode_date_dmy_u8x3(value)  # type: ignore[arg-type]
+        case "TIME_HMS_U8X3":
+            return encode_time_hms_u8x3(value)  # type: ignore[arg-type]
         case "FW":
             return encode_fw(value)  # type: ignore[arg-type]
         case "FWU":
@@ -431,8 +435,8 @@ def parse_typed_value(type_spec: str, data: bytes) -> object:
     - `UIN`: u16le
     - `UCH`: u8
     - `STR:*`: cstring (latin1, trailing NULs stripped)
-    - `HDA:3`: u24le date encoded as raw DD MM YY bytes (`YYYY-MM-DD`)
-    - `HTI`: three numeric HH, MM, SS bytes, displayed as `HH:MM:SS`
+    - `DATE_DMY_U8X3`: three plain DD MM YY bytes (`YYYY-MM-DD`)
+    - `TIME_HMS_U8X3`: three numeric HH, MM, SS bytes, displayed as `HH:MM:SS`
     - `FW`: 3-byte firmware version encoded as BCD bytes (`MM.mm.pp`)
     - `FWU`: profile-qualified numeric u8 firmware triplet, not SemVer
 
@@ -476,10 +480,10 @@ def parse_typed_value(type_spec: str, data: bytes) -> object:
             return parse_i32(data)
         case "BOOL":
             return parse_bool(data)
-        case "HDA:3":
-            return parse_hda3_date(data)
-        case "HTI":
-            return parse_hti_time(data)
+        case "DATE_DMY_U8X3":
+            return parse_date_dmy_u8x3(data)
+        case "TIME_HMS_U8X3":
+            return parse_time_hms_u8x3(data)
         case "FW":
             return parse_fw(data)
         case "FWU":

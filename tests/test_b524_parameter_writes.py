@@ -501,3 +501,31 @@ def test_noop_has_zero_writes() -> None:
     assert result.outcome == "no_op"
     assert result.write_attempts == 0
     assert transport.requests == []
+
+
+@pytest.mark.parametrize("dimension", ["api_version", "api_revision"])
+def test_separate_raw_api_identity_is_rechecked_from_its_own_information(dimension) -> None:
+    from helianthus_vrc_explorer.scanner.b524_parameter_writes import _fresh_profile
+
+    profile = {**PROFILE, "api_version_raw": "1", "api_revision_raw": "1"}
+    transport = ScriptedTransport([])
+    assert _fresh_profile(transport, TARGET, profile) == profile
+    assert bytes.fromhex("000600") in transport.requests
+    assert bytes.fromhex("000700") in transport.requests
+    profile[f"{dimension}_raw"] = "2"
+    with pytest.raises(ValueError, match="contradictory API identity"):
+        _fresh_profile(transport, TARGET, profile)
+
+
+def test_fresh_revision_change_is_not_reconstructed_from_version() -> None:
+    from helianthus_vrc_explorer.scanner.b524_parameter_writes import _fresh_profile
+
+    class ChangedRevision(ScriptedTransport):
+        def send(self, dst, payload):
+            if payload == bytes.fromhex("000700"):
+                return struct.pack("<f", 2.0)
+            return super().send(dst, payload)
+
+    profile = {**PROFILE, "api_version_raw": "1", "api_revision_raw": "1"}
+    with pytest.raises(ValueError, match="api_revision"):
+        _fresh_profile(ChangedRevision([]), TARGET, profile)

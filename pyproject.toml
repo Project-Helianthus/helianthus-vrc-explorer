@@ -21,6 +21,8 @@ dev = [
   "pytest-cov>=5",
   "ruff>=0.6",
   "mypy>=1.5",
+  # Validate native exports against schemas from DOCS_EBUS_ROOT (never vendored).
+  "jsonschema>=4",
 ]
 
 [build-system]
@@ -39,6 +41,8 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Test this worktree even when a reused dev environment installs another checkout.
+pythonpath = ["src"]
 
 [tool.ruff]
 line-length = 100

@@ -1,3 +1,4 @@
+# Plain-byte calendar/clock tests use the neutral codecs; BCD labels are distinct.
 import pytest
 
 from helianthus_vrc_explorer.protocol.parser import ValueParseError, parse_typed_value
@@ -51,8 +52,8 @@ def test_parse_str_cstring_stops_at_first_nul() -> None:
 
 
 def test_parse_hda3_date_u24le_raw_ddmmyy() -> None:
-    assert parse_typed_value("HDA:3", bytes.fromhex("06021a")) == "2026-02-06"
-    assert parse_typed_value("HDA:3", bytes.fromhex("01010f")) == "2015-01-01"
+    assert parse_typed_value("DATE_DMY_U8X3", bytes.fromhex("06021a")) == "2026-02-06"
+    assert parse_typed_value("DATE_DMY_U8X3", bytes.fromhex("01010f")) == "2015-01-01"
 
 
 @pytest.mark.parametrize(
@@ -65,7 +66,7 @@ def test_parse_hda3_date_u24le_raw_ddmmyy() -> None:
     ],
 )
 def test_parse_hti_time_numeric_hhmmss(data_hex: str, expected: str) -> None:
-    assert parse_typed_value("HTI", bytes.fromhex(data_hex)) == expected
+    assert parse_typed_value("TIME_HMS_U8X3", bytes.fromhex(data_hex)) == expected
 
 
 def test_parse_fw_valid() -> None:
@@ -84,11 +85,11 @@ def test_parse_fw_valid() -> None:
         ("UIN", "000000"),
         ("UCH", ""),
         ("UCH", "0000"),
-        ("HDA:3", ""),
-        ("HDA:3", "01020304"),
-        ("HTI", ""),
-        ("HTI", "0102"),
-        ("HTI", "01020304"),
+        ("DATE_DMY_U8X3", ""),
+        ("DATE_DMY_U8X3", "01020304"),
+        ("TIME_HMS_U8X3", ""),
+        ("TIME_HMS_U8X3", "0102"),
+        ("TIME_HMS_U8X3", "01020304"),
         ("FW", "0805"),
         ("FW", "08050000"),
         ("HEX:2", "00"),
@@ -105,14 +106,14 @@ def test_parse_wrong_lengths_raise(type_spec: str, data_hex: str) -> None:
 @pytest.mark.parametrize(
     ("type_spec", "data_hex"),
     [
-        ("HDA:3", "320226"),  # day=32
-        ("HDA:3", "310226"),  # day=31 in Feb
-        ("HDA:3", "063b1a"),  # month=59
-        ("HTI", "180000"),  # hour=24
-        ("HTI", "003c00"),  # minute=60
-        ("HTI", "00003c"),  # second=60
-        ("HTI", "235958"),  # BCD bytes are not valid numeric HH/MM/SS
-        ("HTI", "ffffff"),  # unavailable time must not become a valid time
+        ("DATE_DMY_U8X3", "320226"),  # day=32
+        ("DATE_DMY_U8X3", "310226"),  # day=31 in Feb
+        ("DATE_DMY_U8X3", "063b1a"),  # month=59
+        ("TIME_HMS_U8X3", "180000"),  # hour=24
+        ("TIME_HMS_U8X3", "003c00"),  # minute=60
+        ("TIME_HMS_U8X3", "00003c"),  # second=60
+        ("TIME_HMS_U8X3", "235958"),  # BCD bytes are not valid numeric HH/MM/SS
+        ("TIME_HMS_U8X3", "ffffff"),  # unavailable time must not become a valid time
         ("FW", "aa0000"),  # invalid BCD major (0xAA)
     ],
 )

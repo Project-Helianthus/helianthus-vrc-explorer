@@ -79,7 +79,8 @@ def test_replay_trace_to_artifact_reconstructs_b524_register_reads(tmp_path: Pat
     )
 
     artifact = replay_trace_to_artifact(trace_path)
-    assert artifact["schema_version"] == "2.3"
+    # 2.4 output distinguishes the neutral codec/independent API identity contract.
+    assert artifact["schema_version"] == "2.4"
     assert artifact["meta"]["destination_address"] == "0x15"
     assert artifact["meta"]["replay_trace"]["format"] == "enhanced_v1"
 
@@ -287,7 +288,8 @@ def test_cli_replay_trace_generates_json_and_html(tmp_path: Path) -> None:
     assert html_path.exists()
 
     artifact = json.loads(json_path.read_text(encoding="utf-8"))
-    assert artifact["schema_version"] == "2.3"
+    # 2.4 output distinguishes the neutral codec/independent API identity contract.
+    assert artifact["schema_version"] == "2.4"
     assert artifact["meta"]["replay_trace"]["format"] == "enhanced_v1"
 
 
@@ -311,7 +313,8 @@ def test_replay_trace_accepts_truncated_hex_and_records_limitation(tmp_path: Pat
     )
 
     artifact = replay_trace_to_artifact(trace_path)
-    assert artifact["schema_version"] == "2.3"
+    # 2.4 output distinguishes the neutral codec/independent API identity contract.
+    assert artifact["schema_version"] == "2.4"
     limitations = artifact["meta"]["replay_trace"]["limitations"]
     assert any("truncated ('...')" in item for item in limitations)
 
@@ -1183,3 +1186,36 @@ def test_mixed_targets_cannot_cross_attach_descriptions_information_or_registers
     assert "parameter_description" not in entry
     assert "0x06" not in artifact["operations"]
     assert artifact["b524_operations"]["parameter_descriptions"] == []
+
+
+@pytest.mark.parametrize(
+    "register,payload,codec,value",
+    [
+        ("0034", "1f0c63", "DATE_DMY_U8X3", "2099-12-31"),
+        ("0035", "173b3b", "TIME_HMS_U8X3", "23:59:59"),
+    ],
+)
+def test_replay_uses_neutral_plain_byte_calendar_codecs(tmp_path, register, payload, codec, value):
+    rr = bytes.fromhex(register)[::-1].hex()
+    trace = _write_trace(
+        tmp_path,
+        "calendar.trace",
+        "\n".join(
+            [
+                "2026-04-06T10:00:00.000000Z INIT features=0x01",
+                (
+                    "2026-04-06T10:00:00.100000Z #1 SEND_PROTO src=0xF7 dst=0x15 "
+                    f"primary=0xB5 secondary=0x24 payload=02000000{rr}"
+                ),
+                f"2026-04-06T10:00:00.200000Z #1 PARSED_PROTO len=7 hex=0100{rr}{payload}",
+            ]
+        )
+        + "\n",
+    )
+    artifact = replay_trace_to_artifact(trace)
+    entry = artifact["operations"]["0x02"]["groups"]["0x00"]["instances"]["0x00"]["registers"][
+        f"0x{register}"
+    ]
+    assert entry["type"] == codec
+    assert entry["value"] == value
+    assert entry["raw_hex"] == payload

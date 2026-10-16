@@ -1,4 +1,4 @@
-# BASV0 metadata in VRC Explorer 0.6.2
+# BASV0 metadata in VRC Explorer
 
 VRC Explorer recognises the exact local description profile identified by EID
 `BASV0`, software field `0217`, hardware field `8803`, API version 1 and API
@@ -7,7 +7,8 @@ an installation, assign zone or circuit indexes, or prove an attached remote
 device.
 
 The packaged baseline contains 34 reusable local descriptions for this profile:
-21 numeric rows with complete min/max/step validation and 13 date/time rows whose
+21 numeric rows eligible for min/max/step validation after current applicability
+checks and 13 display-only date/time rows whose
 raw STEP meaning remains unknown. A codec is reusable only when it is supported
 by a public exact native selector schema or by the public local constraint codec.
 A matching datatype from the BASV2 catalog is not sufficient. The BASV0 DHW
@@ -46,3 +47,52 @@ HTML reports reserve “Description mismatch” for differing descriptions compa
 within a compatible profile. Cached descriptions belonging to a different or
 unqualified profile are omitted from the compact value display; their qualification
 remains in the artifact and they cannot supply validated editing limits.
+
+## Evidence grades, identity and application policy
+
+Retained reply structure and raw limit spans are **Proven** within those bytes.
+Codec bases, decoded limits, derived read widths and presence interpretation are
+**Hypothesis**. Calendar STEP and missing request-instance context are **Unknown**.
+These grades are independent of `qualified`, `selector_qualified`, profile match
+and acquisition state. A codec accepted for a selector does not become Proven.
+Descriptions do not echo the instance byte and no request is retained in the
+native profile, so usable decoded ranges must agree across all described
+instances of a selector family. Derived widths and presence cannot be rederived
+from omitted native headers/read payloads.
+
+`DATE_DMY_U8X3` and `TIME_HMS_U8X3` are neutral plain-byte calendar/clock
+candidates, distinct from packed-BCD `HDA:3`/`HTI`. Their min/max candidates are
+display-only and STEP stays unknown. Valid dates/times outside candidate bounds
+remain semantically unvalidated after syntax and encoded-width checks. The
+explicit incomplete-validation exception still applies to a live write.
+
+Both `api_version_raw` and `api_revision_raw` are independently retained strings.
+Never infer one from the other or from the display identifier `API1`. The three
+version domains are scan schema string `2.4`, application baseline integer `2`
+(readers accept `1` and `2`), and native evidence `/v1`. Legacy known Explorer
+inputs migrate on copies with source labels/version retained; external BCD
+meanings are not guessed and historical decoded values are not replaced.
+
+The native exporter writes the complete sanitized description and scalar
+observation catalogs plus a separate application `validation_scope` overlay.
+Native CC0 descriptions contain no policy field. The overlay joins one-to-one
+on operation/group/instance/register and describes source-installation policy;
+it never supplies current presence. `attach_native_descriptions` checks the
+join and complete local identity, then recomputes applicability from consumer
+availability probes. An instance's scheduling-only `present` flag supplies no
+range or step authority when probe evidence is missing. A later presence or
+identity change is checked again when resolving
+effective metadata. Because retained replies do not echo the instance and no
+request is retained, local descriptions must agree across every retained
+described instance of the same operation/group/register before supplying range
+validation. Conflicting descriptions remain display-only even after presence
+changes; the native evidence and source overlay are preserved.
+Numeric candidates with inactive/unknown presence remain
+display-only. Application baselines may keep scope as application policy.
+
+Application behavior follows the [AGPL reuse contract](https://github.com/Project-Helianthus/helianthus-docs-ebus/blob/main/development/ebus-vaillant-b524-basv0-profile-reuse.md).
+Publication uses family-level statements. BASV0/BASV2 native identity strings
+identify evidence contexts; they do not prove model-wide support. The exporter
+uses Explorer's retained source pair and independent manifest, not the docs
+fixtures as generation inputs. #299 owns the committed native fixture refresh
+and overlay packaging/licensing decision; no BASV2 raw evidence is invented.

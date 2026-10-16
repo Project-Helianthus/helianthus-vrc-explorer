@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any
 
 from helianthus_vrc_explorer.artifact_schema import (
-    CURRENT_ARTIFACT_SCHEMA_VERSION,
     ArtifactSchemaError,
     migrate_artifact_schema,
 )
@@ -95,8 +94,9 @@ def _get_entry(
 def validate_offline_acceptance_evidence(artifact: dict[str, Any]) -> list[str]:
     """Return canonical-fixture invariant violations before compatibility migration."""
     errors: list[str] = []
-    if artifact.get("schema_version") != CURRENT_ARTIFACT_SCHEMA_VERSION:
-        errors.append(f"schema_version must be {CURRENT_ARTIFACT_SCHEMA_VERSION}")
+    # The committed synthetic source stays at 2.3; readers migrate a copy to 2.4.
+    if artifact.get("schema_version") != "2.3":
+        errors.append("schema_version must be 2.3")
     meta = artifact.get("meta")
     if not isinstance(meta, dict):
         return ["meta must be an object"]

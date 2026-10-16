@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from copy import deepcopy
@@ -68,8 +69,12 @@ def test_offline_acceptance_evidence_checker_rejects_incomplete_metadata_removal
 
 
 def test_offline_acceptance_evidence_checker_cli_accepts_canonical_fixture() -> None:
+    original = _FIXTURE_PATH.read_bytes()
     result = subprocess.run(
         [sys.executable, str(_CHECKER_PATH), str(_FIXTURE_PATH)],
+        # pytest's pythonpath setting does not propagate into CLI subprocesses;
+        # a reused dev venv may have another worktree installed at schema 2.3.
+        env={**os.environ, "PYTHONPATH": str(_REPO_ROOT / "src")},
         check=False,
         capture_output=True,
         text=True,
@@ -77,7 +82,9 @@ def test_offline_acceptance_evidence_checker_cli_accepts_canonical_fixture() -> 
 
     assert result.returncode == 0
     assert result.stderr == ""
-    assert result.stdout == "offline acceptance evidence passed: 5 entries, schema 2.3\n"
+    assert result.stdout == "offline acceptance evidence passed: 5 entries, schema 2.4\n"
+    assert json.loads(original)["schema_version"] == "2.3"
+    assert _FIXTURE_PATH.read_bytes() == original
 
 
 def _delete_path_field(
@@ -191,6 +198,7 @@ def test_offline_acceptance_evidence_checker_cli_rejects_missing_canonical_evide
 
     result = subprocess.run(
         [sys.executable, str(_CHECKER_PATH), str(fixture_path)],
+        env={**os.environ, "PYTHONPATH": str(_REPO_ROOT / "src")},
         check=False,
         capture_output=True,
         text=True,

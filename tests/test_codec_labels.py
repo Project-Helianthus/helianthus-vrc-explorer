@@ -1,3 +1,4 @@
+# Plain-byte calendar/clock tests use the neutral codecs; BCD labels are distinct.
 from __future__ import annotations
 
 from helianthus_vrc_explorer.protocol.parser import parse_typed_value
@@ -18,8 +19,8 @@ _KNOWN_CODECS = (
     "U32",
     "I32",
     "EXP",
-    "HDA:3",
-    "HTI",
+    "DATE_DMY_U8X3",
+    "TIME_HMS_U8X3",
     "FW",
     "FWU",
 )
@@ -64,8 +65,8 @@ def test_parser_actually_accepts_every_fixed_codec_in_the_table() -> None:
         "U32": bytes(4),
         "I32": bytes(4),
         "EXP": bytes(4),
-        "HDA:3": bytes((1, 1, 0)),
-        "HTI": bytes(3),
+        "DATE_DMY_U8X3": bytes((1, 1, 0)),
+        "TIME_HMS_U8X3": bytes(3),
         "FW": bytes(3),
         "FWU": bytes(3),
     }

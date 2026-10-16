@@ -385,3 +385,26 @@ def test_packaged_remote_baselines_require_device_identity() -> None:
         assert profile["device_identity_required"] is True
         assert profile["device_class_raw"]
         assert profile["device_firmware_raw"]
+
+
+def test_api_dimensions_are_independent_raw_strings() -> None:
+    from helianthus_vrc_explorer.schema.parameter_descriptions import description_profile
+
+    artifact = _artifact()
+    profile = description_profile(artifact)
+    assert profile["api_version_raw"] == "1"
+    assert profile["api_revision_raw"] == "1"
+    artifact["meta"]["profile_context"].pop("api_revision")
+    profile = description_profile(artifact)
+    assert profile["api_revision_raw"] is None
+    assert profile["profile_id"] is None
+    assert export_description_baseline(artifact)["descriptions"] == []
+
+
+def test_contradictory_api_dimension_does_not_qualify() -> None:
+    from helianthus_vrc_explorer.schema.parameter_descriptions import description_profile
+
+    artifact = _artifact()
+    artifact["meta"]["profile_context"]["api_revision_raw"] = "2"
+    assert description_profile(artifact)["profile_id"] is None
+    assert export_description_baseline(artifact)["descriptions"] == []

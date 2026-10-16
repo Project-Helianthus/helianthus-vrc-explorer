@@ -406,11 +406,11 @@ class DummyTransport(TransportInterface):
         try:
             minimum = encode_typed_value(type_spec, raw_description["min"])
             maximum = encode_typed_value(type_spec, raw_description["max"])
-            if type_spec.strip().upper() in {"HDA:3", "HTI"} and isinstance(
+            if type_spec.strip().upper() in {"DATE_DMY_U8X3", "TIME_HMS_U8X3"} and isinstance(
                 raw_description.get("step_raw_hex"), str
             ):
                 step = bytes.fromhex(raw_description["step_raw_hex"])
-            elif type_spec.strip().upper() == "HDA:3":
+            elif type_spec.strip().upper() == "DATE_DMY_U8X3":
                 days = raw_description["step"]
                 if not isinstance(days, int) or isinstance(days, bool) or not 0 <= days <= 65535:
                     raise ValueEncodeError("Date description step must be unsigned 16-bit days")

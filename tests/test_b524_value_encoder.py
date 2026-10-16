@@ -1,3 +1,4 @@
+# Plain-byte calendar/clock tests use the neutral codecs; BCD labels are distinct.
 import pytest
 
 from helianthus_vrc_explorer.protocol.parser import (
@@ -38,19 +39,19 @@ def test_encode_str_roundtrips() -> None:
 
 
 def test_encode_hda3_roundtrips() -> None:
-    data = encode_typed_value("HDA:3", "2026-02-06")
+    data = encode_typed_value("DATE_DMY_U8X3", "2026-02-06")
     assert data.hex() == "06021a"
-    assert parse_typed_value("HDA:3", data) == "2026-02-06"
+    assert parse_typed_value("DATE_DMY_U8X3", data) == "2026-02-06"
 
 
 def test_encode_hti_roundtrips() -> None:
-    data = encode_typed_value("HTI", "23:59:58")
+    data = encode_typed_value("TIME_HMS_U8X3", "23:59:58")
     assert data.hex() == "173b3a"
-    assert parse_typed_value("HTI", data) == "23:59:58"
+    assert parse_typed_value("TIME_HMS_U8X3", data) == "23:59:58"
 
 
 def test_encode_hti_uses_numeric_bytes_when_bcd_would_silently_differ() -> None:
-    assert encode_typed_value("HTI", "16:16:32").hex() == "101020"
+    assert encode_typed_value("TIME_HMS_U8X3", "16:16:32").hex() == "101020"
 
 
 def test_encode_fw_roundtrips() -> None:
@@ -74,3 +75,22 @@ def test_encode_hex_enforces_length() -> None:
 def test_encode_unknown_type_raises() -> None:
     with pytest.raises(ValueEncodeError, match=r"Unknown type spec"):
         encode_typed_value("NOPE", 1)
+
+
+@pytest.mark.parametrize(
+    "codec,value",
+    [
+        ("DATE_DMY_U8X3", "2026-02-31"),
+        ("DATE_DMY_U8X3", "2001-02-29"),
+        ("DATE_DMY_U8X3", "1999-12-31"),
+        ("DATE_DMY_U8X3", "2100-01-01"),
+        ("TIME_HMS_U8X3", "24:00:00"),
+        ("TIME_HMS_U8X3", "00:60:00"),
+        ("TIME_HMS_U8X3", "00:00:60"),
+        ("HDA:3", "2026-02-06"),
+        ("HTI", "16:16:32"),
+    ],
+)
+def test_calendar_encoder_rejects_invalid_syntax_and_bcd_aliases(codec, value) -> None:
+    with pytest.raises(ValueEncodeError):
+        encode_typed_value(codec, value)
