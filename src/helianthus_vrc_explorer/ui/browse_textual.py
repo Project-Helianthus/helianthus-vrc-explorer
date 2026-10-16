@@ -404,7 +404,9 @@ if _TEXTUAL_IMPORT_ERROR is None:
                     "W watch/unwatch | P pin/unpin | R poll rate\n"
                     "C connect/disconnect | E edit | V read-only write recheck\n"
                     "D detail panel (narrow terminals: swaps with the tree)\n"
-                    "? help | q quit. Offline edits never send to the regulator."
+                    "? help | q quit. Offline edits never send to the regulator.\n"
+                    "unscoped_catalog (unqualified): historical short-probe hints,\n"
+                    "not profile-scoped bounds or write-validation authority."
                 ),
             )
 

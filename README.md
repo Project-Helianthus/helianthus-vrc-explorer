@@ -175,6 +175,31 @@ value opens the confirmation; it does not itself send a device write.
 See the AGPL [Browser write contract](https://github.com/Project-Helianthus/helianthus-docs-ebus/blob/main/development/ebus-vaillant-b524-browser-writes.md)
 for validation, missing-limit exceptions and evidence boundaries.
 
+### Static constraint hints
+
+The bundled static catalog uses explicit `(opcode, group, register)` keys, with
+OP=0x02 only and native little-endian register numbers (`RRlo | RRhi<<8`). OP06
+never inherits these ranges. Browser detail and help map historical
+`legacy_unqualified` annotations to **unscoped_catalog (unqualified)**: historical
+short-probe hints, not profile-scoped bounds or write-validation authority.
+New static-catalog annotations emit `constraint_qualified=false` and
+`constraint_scope="unscoped_catalog"`; archived artifacts remain viewable. Static
+hints do not enter reusable description baselines or validate edits.
+
+DHW bivalence (`OP02/GG00/RR0001`) is absent from both static catalog copies.
+Its `-20..20` step 1 bound comes only from the existing exact-description profile
+for EID `BASV0`, SW `0217`, HW `8803`, API version 1 and revision 1, at II00,
+with EXP codec and access FLAGS `03`. Retained description bytes are **Proven**;
+the EXP decoding is a **Hypothesis**. The historical BASV2 `-20..50` hint is
+unqualified **Hypothesis**, not a default bound. Unknown identities or missing
+exact description selectors have **Unknown** bounds; no static fallback fills
+them. See [BASV0 metadata](docs/basv0-metadata.md).
+
+Publish family-scoped protocol claims, not model-wide guarantees. Native identity
+strings may identify evidence; they do not establish a product model or installed
+topology. Keep **Proven**, **Hypothesis**, and **Unknown** grades distinct.
+
+
 ## Features
 - Session preface with regulator identity and transport endpoint.
 - Phased scanner progress: Group Discovery, Instance Discovery, Register Scan.

@@ -2689,6 +2689,9 @@ __ARTIFACT_JSON__
               if (entry.enum_raw_name) tipParts.push(`enum_raw_name=${entry.enum_raw_name}`);
               if (entry.enum_resolved_name) tipParts.push(`enum_resolved_name=${entry.enum_resolved_name}`);
               if (entry.value_label_qualification) tipParts.push(`value_label_qualification=${entry.value_label_qualification} (presentation only; no write authority)`);
+              const constraintLiveProbe = entry.constraint_source === "opcode_0x01" || entry.constraint_source === "probe" || entry.constraint_scope === "opcode_0x01_probe";
+              if (entry.constraint_type && (entry.constraint_source === "static_catalog" || (entry.constraint_qualification === "legacy_unqualified" && !constraintLiveProbe))) tipParts.push("unscoped_catalog (unqualified): historical short-probe hints, not profile-scoped bounds or write-validation authority");
+              if (typeof entry.constraint_qualified === "boolean") tipParts.push(`constraint_qualified=${entry.constraint_qualified}`);
               if (entry.constraint_type) tipParts.push(`constraint_type=${entry.constraint_type}`);
               if (typeof entry.constraint_min !== "undefined") tipParts.push(`constraint_min=${formatValue(entry.constraint_min)}`);
               if (typeof entry.constraint_max !== "undefined") tipParts.push(`constraint_max=${formatValue(entry.constraint_max)}`);
