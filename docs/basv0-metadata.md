@@ -28,8 +28,9 @@ Only the existing exact-profile description path supplies the BASV0 bound at
 `OP02/GG00/II00/RR0001`: min -20, max 20, step 1, EXP, access FLAGS `03`.
 All five native identity fields above must match. Unknown identities and absent
 exact selectors carry no bound; the static catalog never supplies a default.
-The retained raw description `0001000000A0C10000A0410000803F` is **Proven**
-within the retained bytes. Its EXP decoding is a **Hypothesis**, distinct from
+The retained raw description in
+`fixtures/b524-basv0-description-profile-v1.json` is **Proven** within the
+retained bytes. Its EXP decoding is a **Hypothesis**, distinct from
 application reuse qualification. The historical BASV2 `-20..50` observation is
 unqualified **Hypothesis** and establishes no bound for an unknown identity.
 
