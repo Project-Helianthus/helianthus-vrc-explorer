@@ -294,3 +294,40 @@ def test_native_application_adapter_rejects_decoding_that_disagrees_with_bytes()
     documents[DESCRIPTION]["records"][0]["decoded"]["max"] = 50.0
     with pytest.raises(ValueError, match="retained bytes"):
         attach_native_descriptions(artifact, documents[DESCRIPTION], documents[OVERLAY])
+
+
+@pytest.mark.parametrize("conflicting", [False, True])
+def test_native_import_requires_agreement_across_retained_instances(conflicting):
+    documents = exported()
+    native, overlay = documents[DESCRIPTION], documents[OVERLAY]
+    record = deepcopy(native["records"][0])
+    record["selector"]["instance"] = "01"
+    if conflicting:
+        record["raw_description_hex"] = "0001000000A0C1000048420000803F"
+        record["raw_limits"]["max_hex"] = "00004842"
+        record["decoded"]["max"] = 50.0
+    native["records"].append(record)
+    scope = deepcopy(overlay["records"][0])
+    scope["selector"]["instance"] = "01"
+    overlay["records"].append(scope)
+    before = deepcopy(documents)
+    artifact, selector, instance = consumer()
+    instances = artifact["operations"]["0x02"]["groups"]["0x00"]["instances"]
+    instances["0x01"] = deepcopy(instance)
+    attach_native_descriptions(artifact, native, overlay)
+    for current_instance in ("0x00", "0x01"):
+        selector["instance"] = current_instance
+        for present in (True, False, True):
+            instances[current_instance]["present"] = present
+            result = effective_parameter_description(artifact, selector)
+            assert result["validation_scope"] == (
+                "display_only" if conflicting or not present else "format_range_and_step"
+            )
+            assert validate_parameter_edit(
+                result, type_spec="EXP", value=100, encoded=bytes.fromhex("0000c842")
+            ) == (
+                "unvalidated"
+                if conflicting or not present
+                else "Value is outside the described range"
+            )
+    assert documents == before

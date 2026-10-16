@@ -658,6 +658,15 @@ def attach_native_descriptions(
             ("api_revision_raw", "api_revision_raw"),
         )
     )
+    retained_descriptions: dict[tuple[str, ...], set[tuple[str, str | None]]] = {}
+    for record in native["records"] if matches else []:
+        if record.get("identity_scope") == "local" and record.get("raw_description_hex"):
+            key = tuple(record["selector"][field] for field in ("operation", "group", "register"))
+            decoded = record.get("decoded")
+            codec = decoded.get("codec") if isinstance(decoded, dict) else None
+            retained_descriptions.setdefault(key, set()).add(
+                (record["raw_description_hex"].lower(), codec)
+            )
     rows = []
     for record in native["records"] if matches else []:
         decoded = record.get("decoded")
@@ -686,13 +695,21 @@ def attach_native_descriptions(
         )
         if any(desc[key] != decoded[key] for key in ("min", "max", "step")):
             raise ValueError("Native decoded limits disagree with retained bytes")
+        # Replies do not echo the instance and requests were not retained. Only
+        # identical descriptions across all retained instances can supply limits.
+        key = tuple(record["selector"][field] for field in ("operation", "group", "register"))
+        instances_agree = len(retained_descriptions[key]) == 1
+        scope = _native_current_scope(artifact, selector, record)
+        if not instances_agree and scope == "format_range_and_step":
+            scope = "display_only"
         rows.append(
             {
                 **selector,
                 **{key: desc[key] for key in _FIELDS},
                 "profile": deepcopy(current),
                 "codec_provenance": "selector_qualified",
-                "validation_scope": _native_current_scope(artifact, selector, record),
+                "validation_scope": scope,
+                "native_instances_agree": instances_agree,
                 "native_policy_record": deepcopy(record),
                 "step_qualification": desc["step_qualification"],
                 "source": "native_description_with_application_overlay",
@@ -769,4 +786,9 @@ def effective_parameter_description(
         result["validation_scope"] = _native_current_scope(
             artifact, selector, result["native_policy_record"]
         )
+        if (
+            result.get("native_instances_agree") is not True
+            and result["validation_scope"] == "format_range_and_step"
+        ):
+            result["validation_scope"] = "display_only"
     return result

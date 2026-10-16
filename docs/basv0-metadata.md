@@ -80,7 +80,12 @@ on operation/group/instance/register and describes source-installation policy;
 it never supplies current presence. `attach_native_descriptions` checks the
 join and complete local identity, then recomputes applicability from consumer
 presence. A later presence or identity change is checked again when resolving
-effective metadata. Numeric candidates with inactive/unknown presence remain
+effective metadata. Because retained replies do not echo the instance and no
+request is retained, local descriptions must agree across every retained
+described instance of the same operation/group/register before supplying range
+validation. Conflicting descriptions remain display-only even after presence
+changes; the native evidence and source overlay are preserved.
+Numeric candidates with inactive/unknown presence remain
 display-only. Application baselines may keep scope as application policy.
 
 Application behavior follows the [AGPL reuse contract](https://github.com/Project-Helianthus/helianthus-docs-ebus/blob/main/development/ebus-vaillant-b524-basv0-profile-reuse.md).
