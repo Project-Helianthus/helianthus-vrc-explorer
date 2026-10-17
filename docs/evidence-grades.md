@@ -3,9 +3,10 @@
 A decoded description is an interpretation of evidence, not proof of a current
 value or permission to write. This guide applies the published
 [native field crosswalk][crosswalk] to Explorer's existing descriptions, limits,
-widths and missing context. It follows the [shared evidence contract](shared-evidence-contract.md).
-Current Browser and HTML displays may not yet expose all grade labels; this page
-adds no UI behavior, stored fields or artifact changes. The remaining grade UI
+widths and missing context. It follows the [shared evidence contract][shared].
+Today the Browser and HTML displays do not display grade labels, and no artifact
+or export field named `evidence_grade` exists; this page adds no UI behavior,
+stored fields or artifact changes. The remaining grade UI
 work in [#302](https://github.com/Project-Helianthus/helianthus-vrc-explorer/issues/302)
 stays open.
 
@@ -18,6 +19,13 @@ must not acquire a blanket `Proven` label. If an entry contains retained bytes
 and a decoded interpretation, identify the graded claim: proof of the retained
 structure does not grade its codec, decoded value or presence interpretation.
 Keep those claims distinguishable as the [native crosswalk][crosswalk] requires.
+
+The three grades are unordered labels, not a confidence scale. A record that
+carries several claims is split into one entry per claim, with no rollup grade.
+Crosswalk fields marked "not specified" (identity fields, raw access flags)
+carry no grade: they are absent, per the absent-versus-Unknown rule below. Where
+this page means the presence case rather than the grade, it writes
+`presence_state: unknown`.
 
 This section specifies a contract, not a new stored field in existing artifacts.
 The [shared evidence contract][shared] governs coordinated native schema changes;
@@ -41,7 +49,7 @@ other stated dimensions are held fixed, not that the claims are interchangeable.
 | Comparison | Claim A | Claim B | Required conclusion |
 | --- | --- | --- | --- |
 | Same qualification, different grade | Retained equal-width description spans: `Proven`. | Decoded limit using those spans: `Hypothesis`. Both use the same selector-qualified candidate context. | Codec qualification cannot promote the decoded claim to Proven. |
-| Same grade, different acquisition | Prior decoded-limit claim: `Hypothesis`; its acquisition completed. | The same retained prior claim: `Hypothesis`; a later recheck failed with `transport_error`. | Preserve the prior claim and record the failed attempt separately; failure supplies no fresh current value. |
+| Same grade, different acquisition | Prior decoded-limit claim: `Hypothesis`; its acquisition completed. | The same retained prior claim: `Hypothesis`; a later recheck's `response_state` is `transport_error` (acquisition unavailable). | Preserve the prior claim and record the failed attempt separately; failure supplies no fresh current value. |
 | Absent versus explicit grade | Legacy entry with no `evidence_grade`. | Entry explicitly graded `Unknown` because supporting context is missing. | Both lack proof, but the exported provenance must retain which grade was actually supplied. |
 
 | Event | Grade handling | Other evidence handling |
@@ -54,22 +62,24 @@ other stated dimensions are held fixed, not that the claims are interchangeable.
 ## Export interpretation contract (pending implementation)
 
 Exporters must distinguish the following interpretation vocabulary without
-replacing native acquisition or response states. These are required meanings for
-the follow-up exporter, not a claim that today's exporter emits these labels or
-that they are new wire response codes. They are independent of `evidence_grade`
+replacing native acquisition or response states. Three of the four labels
+already exist as scan, replay and observation state values with narrower current
+meanings; only `profile_observed` is new as an observation interpretation. The
+pending exporter must map them without changing the existing meanings. They are
+not wire response codes. They are independent of `evidence_grade`
 and need not be mutually exclusive: a legacy-incomplete entry can also retain a
 transport error. Do not guess a single successful state to hide either fact.
 
-| Interpretation | Required supporting evidence | Must not imply |
-| --- | --- | --- |
-| `transport_error` | A retained attempted operation failed at transport level; keep the original error and available partial evidence. | A register value, device absence, unsupported selector or loss of prior evidence. Missing response bytes alone do not establish a transport error. |
-| `unattempted` | Explicit evidence that the operation was not attempted. | A failed read, successful empty reply or absence. Missing legacy attempt information alone is insufficient. |
-| `profile_observed` | Controller/profile identity was observed, with its retained provenance and omissions. | A qualified native description profile, matched baseline, supported codec or admitted target. Observations must not manufacture a native profile. |
-| `legacy_incomplete` | Legacy material lacks context required to interpret the entry, such as request, attempt or response evidence. Keep omissions explicit. | Reconstructed native bytes, an inferred successful acquisition or an implicit Proven grade. Retain any independently supported facts. |
+| Interpretation | Today | Required supporting evidence | Must not imply |
+| --- | --- | --- | --- |
+| `transport_error` | Already a `response_state` and `error_state` value in today's observation export, copied through unchanged. | A retained attempted operation failed at transport level; keep the original error and available partial evidence. | A register value, device absence, unsupported selector or loss of prior evidence. Missing response bytes alone do not establish a transport error. |
+| `unattempted` | Already a `response_state` value, set when a scan stops before issuing a read (for example an exhausted request budget). | Explicit evidence that the operation was not attempted. | A failed read, successful empty reply or absence. Missing legacy attempt information alone is insufficient. |
+| `profile_observed` | Not an observation state today; the scanner uses the same word only as a codec-evidence qualification, with a narrower meaning. | Controller/profile identity was observed, with its retained provenance and omissions. | A qualified native description profile, matched baseline, supported codec or admitted target. Observations must not manufacture a native profile. |
+| `legacy_incomplete` | Already a replay `qualification` value for an OP01 selector with no instance or RR16 identity, and a decoder flag for that case; narrower than the meaning required here. | Legacy material lacks context required to interpret the entry, such as request, attempt or response evidence. Keep omissions explicit. | Reconstructed native bytes, an inferred successful acquisition or an implicit Proven grade. Retain any independently supported facts. |
 
 ### Sanitized observation export and remaining work
 
-The pending `export_controller_observations.py` work is tracked by #316/K29.
+The pending `export_controller_observations.py` work is tracked by [#316](https://github.com/Project-Helianthus/helianthus-vrc-explorer/pull/316).
 It must export sanitized observations with entry-level claim provenance, explicit
 omissions and the distinctions above. Preserve namespace-aware native selector
 identity, including operation, group, instance and register; never merge entries
@@ -85,11 +95,15 @@ missing context with guessed bytes, defaults or a successful state.
 
 The existing `scripts/export_b524_evidence.py` handles retained sanitized source
 evidence and a separate application overlay; its existence does not establish
-the pending controller-observation behavior. This page is only the docs portion
-of FU23. Exporter alignment remains #316/K29 and viewer work remains #315/K28;
-#302 and #303 retain their remaining acceptance. No runtime, transport, MCP envelope, GraphQL
-parity, hardware or release success follows from this documentation. No Pi hold
-is needed for this documentation slice. Nothing here declares a stable contract
+the pending controller-observation behavior. This page covers documentation only.
+Exporter alignment remains in
+[#316](https://github.com/Project-Helianthus/helianthus-vrc-explorer/pull/316),
+viewer work remains in
+[#315](https://github.com/Project-Helianthus/helianthus-vrc-explorer/pull/315),
+and [#302](https://github.com/Project-Helianthus/helianthus-vrc-explorer/issues/302)
+and [#303](https://github.com/Project-Helianthus/helianthus-vrc-explorer/issues/303)
+remain open for their own work. No runtime, transport, MCP envelope, GraphQL
+parity, hardware or release success follows from this documentation. Nothing here declares a stable contract
 before Helianthus 1.0 or introduces an authorization gate before 0.9.
 
 ## Read four separate things
@@ -98,7 +112,7 @@ before Helianthus 1.0 or introduces an authorization gate before 0.9.
 | --- | --- |
 | What does the evidence support? | **Proven** covers facts within retained bytes; **Hypothesis** covers supported interpretations; **Unknown** covers missing context. The crosswalk leaves some field classes, such as identity metadata and raw access flags, without a specified grade: do not invent one. |
 | Is the codec accepted? | `selector_qualified` and `qualified` describe validation acceptance, not an evidence grade. A qualified decoded limit can still rely on a Hypothesis codec basis. Width alone does not qualify a codec. |
-| Does the profile match? | Explorer matches the profile identifier, EID, raw software and hardware fields, and decoded numeric `api_version` and `api_revision` for local reuse. It does not compare raw API bytes. Remote slots need their own identity qualification. A match cannot supply missing evidence, prove a codec or grant native admission or write authority. |
+| Does the profile match? | Explorer matches the profile identifier, EID, raw software and hardware fields, and `api_version`/`api_revision` plus `api_version_raw`/`api_revision_raw`, compared as normalized decimal strings, for local reuse; a raw/numeric conflict prevents a match. Remote slots need their own identity qualification. A match cannot supply missing evidence, prove a codec or grant native admission or write authority. |
 | What happened during acquisition? | Retained `acquisition_state`, `response_state` and observed read widths describe derived session outcomes (**Hypothesis**). A retained unqualified description is raw evidence, not necessarily a failed read. It grants no codec or range. |
 
 These distinctions come from the [crosswalk][crosswalk] and
@@ -160,7 +174,7 @@ baseline cannot verify the current target. See [reuse scope][scope] and
 [baseline rechecking][baseline]. None of these grades authorizes a write.
 
 [crosswalk]: https://github.com/Project-Helianthus/helianthus-docs-ebus/blob/main/development/b524-evidence-grade-crosswalk.md
-[shared]: https://github.com/Project-Helianthus/helianthus-vrc-explorer/blob/main/docs/shared-evidence-contract.md
+[shared]: shared-evidence-contract.md
 [reuse]: https://github.com/Project-Helianthus/helianthus-docs-ebus/blob/main/development/ebus-vaillant-b524-basv0-profile-reuse.md
 [format]: https://github.com/Project-Helianthus/helianthus-docs-ebus/blob/main/protocols/vaillant/ebus-vaillant-b524-basv0-profile-v1.md#native-description-format
 [basis]: https://github.com/Project-Helianthus/helianthus-docs-ebus/blob/main/protocols/vaillant/ebus-vaillant-b524-basv0-profile-v1.md#basis-of-the-codec-labels
