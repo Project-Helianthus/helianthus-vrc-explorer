@@ -6,6 +6,9 @@ target's native identity was observed and is in the bundled catalog.
 class/firmware identity was not observed; a Full scan reads that identity.
 ``unknown`` covers the rest: the controller profile is not in the catalog, or the
 target's identity was observed and the catalog has no matching row.
+``absent`` marks a remote slot whose own presence probe found no connected device:
+there is no identity to observe, so the slot is stored but never counted, never named
+in the reminder and never given the Full advice.
 
 The functions here only turn those statuses into text and counts. They read nothing
 beyond their arguments and never modify the artifact or the stored status rows.
@@ -19,6 +22,8 @@ from typing import Any
 _EXACT = "exact"
 _NOT_OBSERVED = "unqualified"
 _NOT_IN_CATALOG = "unknown"
+ABSENT = "absent"
+_NOT_CONNECTED = "not_connected"
 
 
 def controller_profile_known(controller_status: Mapping[str, Any] | None) -> bool:
@@ -29,16 +34,32 @@ def controller_profile_known(controller_status: Mapping[str, Any] | None) -> boo
     return controller_status.get("status") == _EXACT or bool(controller_status.get("profile_id"))
 
 
-def remote_exact_counts(rows: Iterable[object]) -> tuple[int, int]:
-    """Return ``(exact, total)`` over the well-formed remote status rows."""
+def present_remote_rows(rows: Iterable[object]) -> list[Mapping[str, Any]]:
+    """Return the well-formed remote status rows that are not ``absent`` slots."""
 
-    exact = total = 0
-    for row in rows:
-        if not isinstance(row, Mapping):
-            continue
-        total += 1
-        exact += row.get("status") == _EXACT
-    return exact, total
+    return [row for row in rows if isinstance(row, Mapping) and row.get("status") != ABSENT]
+
+
+def remote_exact_counts(rows: Iterable[object]) -> tuple[int, int]:
+    """Return ``(exact, total)`` over the well-formed remote rows of present devices.
+
+    ``absent`` slots hold no device, so they are in neither number.
+    """
+
+    present = present_remote_rows(rows)
+    return sum(row.get("status") == _EXACT for row in present), len(present)
+
+
+def remote_absent_count(rows: Iterable[object]) -> int:
+    """Return how many well-formed remote rows are ``absent`` slots."""
+
+    return sum(isinstance(row, Mapping) and row.get("status") == ABSENT for row in rows)
+
+
+def remote_rows_need_reminder(rows: Iterable[object]) -> bool:
+    """Return whether a present remote device is not exact (``absent`` slots never are)."""
+
+    return any(row.get("status") != _EXACT for row in present_remote_rows(rows))
 
 
 def _lookup(mapping: object, key: str) -> object:
@@ -64,6 +85,46 @@ def _group_name(group_obj: object) -> str | None:
 
     name = _clean_text(_lookup(group_obj, "name"))
     return None if name is None or name.lower() == "unknown" else name
+
+
+def remote_slot_not_connected(artifact: Mapping[str, Any], group: str, instance: str) -> bool:
+    """Return whether this scan's own presence probe found no device in the remote slot.
+
+    The probe is the ``device_connected`` read stored under ``availability_probes``; only
+    a clean "not connected" answer counts. A probe that was not run, or whose reply was
+    unreadable, leaves the slot undecided and the function returns ``False``.
+    """
+
+    groups = _lookup(_lookup(artifact.get("operations"), "0x06"), "groups")
+    probe = _lookup(_lookup(_lookup(groups, group), "availability_probes"), instance)
+    return (
+        isinstance(probe, Mapping)
+        and probe.get("connection_state") == _NOT_CONNECTED
+        and probe.get("present") is not True
+    )
+
+
+def remote_rows_with_presence(
+    artifact: Mapping[str, Any], rows: Iterable[object]
+) -> list[dict[str, Any]]:
+    """Return copies of the status rows, with ``absent`` for slots that hold no device.
+
+    Artifacts written before the ``absent`` status stored an empty slot as ``unqualified``.
+    Their presence probes are still in the artifact, so a row that is not exact and whose
+    slot was probed as not connected is relabelled here. The stored rows are not modified.
+    """
+
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        item = dict(row)
+        if item.get("status") not in {_EXACT, ABSENT} and remote_slot_not_connected(
+            artifact, str(item.get("group", "")), str(item.get("instance", ""))
+        ):
+            item["status"] = ABSENT
+        result.append(item)
+    return result
 
 
 def remote_rows_with_designation(
@@ -116,12 +177,15 @@ def _row_reason(status: object, *, controller_known: bool) -> str:
 def describe_non_exact_remote_rows(
     controller_status: Mapping[str, Any] | None, remote_rows: Iterable[object]
 ) -> list[str]:
-    """Describe every non-exact remote row: group, instance, designation, status, reason."""
+    """Describe every non-exact remote row: group, instance, designation, status, reason.
+
+    ``absent`` slots hold no device and are not described.
+    """
 
     known = controller_profile_known(controller_status)
     descriptions: list[str] = []
-    for row in remote_rows:
-        if not isinstance(row, Mapping) or row.get("status") == _EXACT:
+    for row in present_remote_rows(remote_rows):
+        if row.get("status") == _EXACT:
             continue
         status = row.get("status")
         descriptions.append(
@@ -137,17 +201,19 @@ def compose_description_profile_reminder(
     """Compose the reminder text, or ``None`` when nothing needs a reminder.
 
     The text states whether the controller profile is in the catalog and names each
-    remote row that is not exact. The Full advice is given only when a Full scan can
-    observe what is missing: a remote identity that was not observed, or an unknown
-    controller profile (the controller-level advice). A row whose identity was
-    observed but is not in the catalog keeps only the save/share advice.
+    present remote device that is not exact. Rows of ``absent`` slots (no device
+    connected) are ignored: they are not counted, named or given advice. The Full advice
+    is given only when a Full scan can observe what is missing: a remote identity that
+    was not observed, or an unknown controller profile (the controller-level advice). A
+    row whose identity was observed but is not in the catalog keeps only the save/share
+    advice.
     """
 
     known = controller_profile_known(controller_status)
     controller_exact = isinstance(controller_status, Mapping) and (
         controller_status.get("status", _EXACT) == _EXACT
     )
-    rows = [row for row in remote_rows if isinstance(row, Mapping)]
+    rows = present_remote_rows(remote_rows)
     non_exact = [row for row in rows if row.get("status") != _EXACT]
     if known and controller_exact and not non_exact:
         return None

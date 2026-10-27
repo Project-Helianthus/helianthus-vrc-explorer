@@ -33,11 +33,15 @@ from ..schema.b524_constraints import (
 from ..schema.b524_register_names import b524_register_name
 from ..schema.description_profile_reminder import (
     compose_description_profile_reminder,
+    remote_rows_need_reminder,
     remote_rows_with_designation,
 )
 from ..schema.ebusd_csv import EbusdCsvSchema
 from ..schema.myvaillant_map import MyvaillantRegisterMap
-from ..schema.parameter_descriptions import description_catalog_status
+from ..schema.parameter_descriptions import (
+    description_catalog_status,
+    remote_description_reusable,
+)
 from ..transport.base import TransportInterface, TransportRecoveryExhausted, emit_trace_label
 from ..transport.instrumented import CountingTransport, ScanRequestBudgetExceeded
 from ..ui.planner import PlannerGroup, PlannerPreset, build_plan_from_preset
@@ -191,9 +195,16 @@ def _select_live_description_candidates(
             }
             status = description_catalog_status(artifact, selector)
             status_cache[device_key] = status
+        selector = {
+            "read_opcode": f"0x{candidate.read_opcode:02x}",
+            "group": f"0x{candidate.group:02x}",
+            "instance": f"0x{candidate.instance:02x}",
+            "register": f"0x{candidate.register:04x}",
+        }
         if not (
             description_probe_required(policy, opcode=candidate.read_opcode)
             or status.get("status") != "exact"
+            or not remote_description_reusable(artifact, selector)
         ):
             continue
         identity = (
@@ -392,7 +403,7 @@ def run_b524_scan(
 
     def record_description_profile_reminder(remote_rows: list[dict[str, Any]]) -> None:
         nonlocal description_reminder_logged
-        if not any(row.get("status") != "exact" for row in remote_rows):
+        if not remote_rows_need_reminder(remote_rows):
             return
         reminder_text = compose_description_profile_reminder(
             profile_status, remote_rows_with_designation(artifact, remote_rows)
@@ -909,6 +920,13 @@ def run_b524_scan(
                 else None
             )
 
+            # A bundled installation observation documents one reference installation, not a
+            # layout invariant: another installation may occupy a slot beyond the first
+            # `capacity` instance numbers. It therefore never bounds, shrinks or widens the
+            # probe window; an unreadable live capacity keeps the profile default and a live
+            # zero keeps skipping the group. A bundled population is context only.
+            probe_expected_count = expected_count if planner_preset == "recommended" else None
+
             def retain_probe(
                 ii: int,
                 probe: InstanceAvailabilityProbe,
@@ -937,7 +955,7 @@ def run_b524_scan(
                 probe_instance_availability_fn=probe_instance_availability_fn,
                 stop_at_first_absence=planner_preset == "recommended" and opcode == 6,
                 on_probe=retain_probe,
-                expected_count=expected_count if planner_preset == "recommended" else None,
+                expected_count=probe_expected_count,
                 capacity=capacity if planner_preset == "recommended" else None,
                 presence_profile=profile_id,
             )
@@ -1046,6 +1064,8 @@ def run_b524_scan(
                     "mismatch": expected is not None and expected != observed,
                     "capacity_exceeded": supported is not None and observed > supported,
                     "probed_instances": len(probes),
+                    "discovery_complete": not uncertain_instances
+                    and not any(probe.connection_state == "unknown" for probe in probes.values()),
                 }
             _mark_present_instances(instances_obj, instances=present_instances)
             slot_capacity = (

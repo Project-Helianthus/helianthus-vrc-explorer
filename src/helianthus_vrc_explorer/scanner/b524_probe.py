@@ -328,6 +328,8 @@ def _probe_present_instances(
     on_probe: Any = None,
     presence_profile: str | None = None,
 ) -> dict[int, InstanceAvailabilityProbe]:
+    """Probe the candidate slots of one group and return one probe per slot tried."""
+
     probes: dict[int, InstanceAvailabilityProbe] = {}
     present_count = 0
     if expected_count == 0 and (opcode, group) != (0x02, 0x02):
