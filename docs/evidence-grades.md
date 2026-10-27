@@ -122,7 +122,7 @@ not a native grade or reusable installation-presence authority.
 
 Description profiles are reported per device, not per scan: the Browser identity
 header's `remote descriptions: N of M exact` line counts the remote OP06 devices
-whose identity is in the bundled catalog, and the scan warning names each device
+with scanned writable registers (devices without any are not counted) whose identity is in the bundled catalog, and the scan warning names each device
 that is not exact as either identity not observed (a Full scan can observe it) or
 identity observed but not in the catalog, separately from the controller profile.
 

@@ -228,8 +228,9 @@ _BROWSE_HELP_TEXT = (
     "not profile-scoped bounds or write-validation authority."
 )
 _REMOTE_DESCRIPTIONS_HELP = (
-    "remote descriptions: N of M exact counts the remote devices whose identity is in "
-    "the bundled catalog; it says nothing about the controller profile."
+    "remote descriptions: N of M exact counts the remote devices with scanned writable "
+    "registers whose identity is in the bundled catalog; remote devices without any are "
+    "not counted, and it says nothing about the controller profile."
 )
 _HELP_MAX_NON_EXACT_ROWS = 6
 

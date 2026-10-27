@@ -333,8 +333,9 @@ def test_help_explains_the_line_in_one_sentence_and_lists_non_exact_rows() -> No
     help_text = _browse_help_text(artifact)
 
     assert (
-        "remote descriptions: N of M exact counts the remote devices whose identity is in the "
-        "bundled catalog; it says nothing about the controller profile." in help_text
+        "remote descriptions: N of M exact counts the remote devices with scanned writable "
+        "registers whose identity is in the bundled catalog; remote devices without any are "
+        "not counted, and it says nothing about the controller profile." in help_text
     )
     assert "Not exact:" in help_text
     assert (
@@ -410,7 +411,18 @@ class LogObserver(NullScanObserver):
             self.warnings.append(message)
 
 
-def _scan(plan: dict, identity: dict[str, str]) -> tuple[dict[str, Any], list[str]]:
+class InterruptingRegulator(SyntheticRegulator):
+    def send(self, dst: int, payload: bytes) -> bytes:
+        if payload[0] in (0x02, 0x06) and payload[2] == 0x0A:
+            raise KeyboardInterrupt
+        return super().send(dst, payload)
+
+
+def _scan(
+    plan: dict,
+    identity: dict[str, str],
+    transport: TransportInterface | None = None,
+) -> tuple[dict[str, Any], list[str]]:
     resource = resources.files("helianthus_vrc_explorer.data").joinpath(
         "myvaillant_register_map.csv"
     )
@@ -418,7 +430,7 @@ def _scan(plan: dict, identity: dict[str, str]) -> tuple[dict[str, Any], list[st
         myvaillant_map = MyvaillantRegisterMap.from_path(path)
     observer = LogObserver()
     artifact = scan_b524(
-        SyntheticRegulator(),
+        transport or SyntheticRegulator(),
         dst=0x15,
         planner_preset="custom",
         explicit_plan=plan,
@@ -502,4 +514,16 @@ def test_scan_with_unknown_controller_logs_one_controller_level_reminder() -> No
         "Use Full for live writable descriptions within known bounds, "
         "then save/share JSON manually if useful."
     )
+    assert artifact["meta"]["description_profile_reminder"]["summary"] == reminders[0]
+
+
+def test_interrupted_scan_still_composes_the_named_reminder_once() -> None:
+    artifact, reminders = _scan(
+        _remote_plan((0x09, (1,)), (0x0A, (1,))), IDENTITY, InterruptingRegulator()
+    )
+
+    statuses = artifact["meta"]["description_remote_profile_statuses"]
+    assert any(r["status"] != "exact" for r in statuses)
+    assert len(reminders) == 1
+    assert "GG 0x09 II 0x01 status unqualified, remote identity not observed" in reminders[0]
     assert artifact["meta"]["description_profile_reminder"]["summary"] == reminders[0]

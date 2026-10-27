@@ -389,6 +389,28 @@ def run_b524_scan(
     description_policy: DescriptionPolicySelection | None = None
     description_candidates_prepared = False
     description_reminder_logged = False
+
+    def record_description_profile_reminder(remote_rows: list[dict[str, Any]]) -> None:
+        nonlocal description_reminder_logged
+        if not any(row.get("status") != "exact" for row in remote_rows):
+            return
+        reminder_text = compose_description_profile_reminder(
+            profile_status, remote_rows_with_designation(artifact, remote_rows)
+        )
+        artifact["meta"].setdefault(
+            "description_profile_reminder",
+            {
+                "shown_once": True,
+                "recommendation": "full_within_known_scope",
+                "sharing": "save_and_share_json_manually",
+                "automatic_upload": False,
+                **({"summary": reminder_text} if reminder_text else {}),
+            },
+        )
+        if observer is not None and not description_reminder_logged and reminder_text:
+            observer.log(reminder_text, level="warn")
+            description_reminder_logged = True
+
     description_coverage: dict[str, Any] = {}
     if explicit_plan is not None:
         artifact["meta"]["scan_plan"] = {
@@ -1779,24 +1801,7 @@ def run_b524_scan(
             description_candidates_prepared = True
             if remote_profile_statuses:
                 artifact["meta"]["description_remote_profile_statuses"] = remote_profile_statuses
-            if any(row.get("status") != "exact" for row in remote_profile_statuses):
-                reminder_text = compose_description_profile_reminder(
-                    profile_status,
-                    remote_rows_with_designation(artifact, remote_profile_statuses),
-                )
-                artifact["meta"].setdefault(
-                    "description_profile_reminder",
-                    {
-                        "shown_once": True,
-                        "recommendation": "full_within_known_scope",
-                        "sharing": "save_and_share_json_manually",
-                        "automatic_upload": False,
-                        **({"summary": reminder_text} if reminder_text else {}),
-                    },
-                )
-                if observer is not None and not description_reminder_logged and reminder_text:
-                    observer.log(reminder_text, level="warn")
-                    description_reminder_logged = True
+            record_description_profile_reminder(remote_profile_statuses)
             for candidate in description_candidates:
                 identity = (
                     candidate.read_opcode,
@@ -1912,6 +1917,7 @@ def run_b524_scan(
             )
             if remote_profile_statuses:
                 artifact["meta"]["description_remote_profile_statuses"] = remote_profile_statuses
+            record_description_profile_reminder(remote_profile_statuses)
         finish_description_coverage(
             description_candidates,
             description_entries,
