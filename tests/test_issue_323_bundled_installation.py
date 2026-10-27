@@ -505,30 +505,42 @@ def test_a_live_zero_capacity_is_not_widened_by_the_bundled_one() -> None:
     assert "planning_basis" not in artifact["meta"]["instance_counts"]["0x02:0x03"]
 
 
-def test_bundled_counts_stand_in_only_for_a_missing_live_count(
+def test_bundled_population_is_never_a_probe_quota(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # Live DeltaT (0x000b) and ventilation (0x0010) counts are unreadable.
+    # Live DeltaT (0x000b) and ventilation (0x0010) counts are unreadable. The bundled
+    # population of the reference installation (zero) must not skip or cap the group.
     unreadable = {k: v for k, v in SYSTEM_INFORMATION.items() if k not in (11, 16)}
 
     artifact, regulator = scan("recommended", Regulator(system_information=unreadable))
 
     delta_t = artifact["meta"]["instance_counts"]["0x02:0x08"]
-    assert delta_t["planning_basis"] == "bundled_installation_observation"
-    assert delta_t["probed_instances"] == 0  # the bundled population is zero
-    assert regulator.probed(artifact, "0x02", "0x08") == set()
+    assert "planning_basis" not in delta_t
+    assert regulator.probed(artifact, "0x02", "0x08") == set(range(11))
 
-    # A live count wins over the bundled population: one DeltaT slot is now expected.
+    # A live count still drives the probe: one DeltaT slot is now expected.
     live = {**SYSTEM_INFORMATION, 11: 1.0}
     artifact, regulator = scan("recommended", Regulator(system_information=live))
     assert "planning_basis" not in artifact["meta"]["instance_counts"]["0x02:0x08"]
     assert regulator.probed(artifact, "0x02", "0x08") != set()
 
-    from helianthus_vrc_explorer.scanner import b524_orchestration
 
-    monkeypatch.setattr(b524_orchestration, "bundled_instance_observation", lambda *a, **k: None)
-    artifact, regulator = scan("recommended", Regulator(system_information=unreadable))
-    assert regulator.probed(artifact, "0x02", "0x08") == set(range(11))
+def test_merge_keeps_last_known_capacity_when_the_new_read_is_unavailable() -> None:
+    catalog = load_description_profile_catalog()
+    observations = export_installation_observations(scan("recommended")[0])
+    unreadable = deepcopy(observations)
+    for row in unreadable["instance_observations"]["groups"]:
+        if (row["read_opcode"], row["group"]) == ("0x02", "0x02"):
+            row["capacity"] = row["expected"] = None
+    unreadable["instance_observations"]["groups"] = [
+        row
+        for row in unreadable["instance_observations"]["groups"]
+        if (row["read_opcode"], row["group"]) == ("0x02", "0x02")
+    ]
+
+    merged = merge_installation_observations(catalog, unreadable)
+
+    assert _profile(merged)["instance_observations"] == _profile(catalog)["instance_observations"]
 
 
 def test_remote_devices_are_exact_on_the_next_scan_from_the_bundle_alone() -> None:

@@ -751,7 +751,14 @@ def merge_installation_observations(
             tuple(row[field] for field in identity): row for row in existing.get(collection, [])
         }
         for row in observations[key][collection]:
-            rows[tuple(row[field] for field in identity)] = deepcopy(row)
+            merged_row = deepcopy(row)
+            previous = rows.get(tuple(row[field] for field in identity))
+            if key == _INSTANCE_OBSERVATIONS and isinstance(previous, dict):
+                # An unreadable OP00 count must not erase what an earlier scan recorded.
+                for field in ("identifier", "capacity", "expected"):
+                    if merged_row.get(field) is None and previous.get(field) is not None:
+                        merged_row[field] = previous[field]
+            rows[tuple(row[field] for field in identity)] = merged_row
         profile[key] = {
             "observed_instance_qualification": INSTALLATION_OBSERVATION_QUALIFICATION,
             collection: [

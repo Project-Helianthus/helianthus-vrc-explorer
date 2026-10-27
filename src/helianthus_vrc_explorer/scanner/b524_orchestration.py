@@ -914,9 +914,11 @@ def run_b524_scan(
             )
 
             # An exact profile may bundle what a reference installation showed. In the
-            # recommended preset it replaces blind probing of every declared local slot: a
-            # live OP00 capacity or count still wins, and a live zero keeps skipping the
-            # group. Remote groups already stop at the first absent device.
+            # recommended preset a bundled capacity replaces blind probing of every declared
+            # local slot: a live OP00 capacity still wins, and a live zero keeps skipping the
+            # group. A bundled population is context only and never a probe quota, because
+            # another installation may carry more devices. Remote groups already stop at the
+            # first absent device.
             bundled = (
                 bundled_instance_observation(profile_id, read_opcode=int(opcode), group=group.group)
                 if planner_preset == "recommended" and opcode == 0x02
@@ -925,17 +927,14 @@ def run_b524_scan(
             probe_expected_count = expected_count if planner_preset == "recommended" else None
             slot_window: int | None = None
             planning_basis: str | None = None
-            if bundled is not None and capacity != 0:
-                if bundled["semantics"] == "capacity" and bundled["capacity"] is not None:
-                    slot_window = max(bundled["capacity"], capacity or 0)
-                    planning_basis = "bundled_installation_observation"
-                elif (
-                    bundled["semantics"] == "expected_population"
-                    and expected_count is None
-                    and bundled["expected"] is not None
-                ):
-                    probe_expected_count = bundled["expected"]
-                    planning_basis = "bundled_installation_observation"
+            if (
+                bundled is not None
+                and capacity != 0
+                and bundled["semantics"] == "capacity"
+                and bundled["capacity"] is not None
+            ):
+                slot_window = max(bundled["capacity"], capacity or 0)
+                planning_basis = "bundled_installation_observation"
 
             def retain_probe(
                 ii: int,
