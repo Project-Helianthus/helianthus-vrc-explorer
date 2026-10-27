@@ -35,8 +35,10 @@ from ..scanner.browser_session import BrowserSession, BrowserTransportConfig
 from ..schema.b524_register_name_correspondence import b524_register_name_correspondence
 from ..schema.description_profile_reminder import (
     describe_non_exact_remote_rows,
+    remote_absent_count,
     remote_exact_counts,
     remote_rows_with_designation,
+    remote_rows_with_presence,
 )
 from ..schema.parameter_descriptions import (
     description_catalog_status,
@@ -188,7 +190,7 @@ def _build_identity_header_renderable(artifact: dict[str, object]) -> Group | No
             continue
         rows.append((label, text))
 
-    remote_line = _remote_descriptions_line(meta)
+    remote_line = _remote_descriptions_line(artifact, meta)
     if not rows and remote_line is None:
         return None
 
@@ -205,13 +207,18 @@ def _build_identity_header_renderable(artifact: dict[str, object]) -> Group | No
     return Group(*parts)
 
 
-def _remote_descriptions_line(meta: dict[str, object]) -> Text | None:
-    """Return `remote descriptions: N of M exact` when the scan stored remote rows."""
+def _remote_descriptions_line(artifact: dict[str, object], meta: dict[str, object]) -> Text | None:
+    """Return `remote descriptions: N of M exact` for the present remote devices.
+
+    Slots whose presence probe found no device (`absent`) are stored with the rows but
+    hold no device, so they are neither exact nor part of M. Rows stored before the
+    `absent` status existed are relabelled from the artifact's own presence probes.
+    """
 
     status_rows = meta.get("description_remote_profile_statuses")
     if not isinstance(status_rows, list):
         return None
-    exact, total = remote_exact_counts(status_rows)
+    exact, total = remote_exact_counts(remote_rows_with_presence(artifact, status_rows))
     if total == 0:
         return None
     return Text.assemble(("remote descriptions:", "bold cyan"), f" {exact} of {total} exact")
@@ -244,9 +251,16 @@ def _browse_help_text(artifact: dict[str, object] | None = None) -> str:
         meta.get("description_remote_profile_statuses") if isinstance(meta, dict) else None
     )
     if isinstance(artifact, dict) and isinstance(status_rows, list):
+        rows = remote_rows_with_presence(artifact, status_rows)
+        absent = remote_absent_count(rows)
+        if absent:
+            lines.append(
+                f"{absent} empty remote slot(s), with no device connected, are stored as "
+                "absent and not counted."
+            )
         described = describe_non_exact_remote_rows(
             description_catalog_status(artifact),
-            remote_rows_with_designation(artifact, status_rows),
+            remote_rows_with_designation(artifact, rows),
         )
         shown = described[:_HELP_MAX_NON_EXACT_ROWS]
         if described:

@@ -41,6 +41,169 @@
         "virtual_dhw_instance": 9,
         "presence_register": 2,
         "visible_zero_is_present": false
+      },
+      "instance_observations": {
+        "observed_instance_qualification": "installation_observation_not_profile_limit",
+        "groups": [
+          {
+            "read_opcode": "0x02",
+            "group": "0x02",
+            "identifier": "0x0000",
+            "semantics": "capacity",
+            "capacity": 3,
+            "expected": null,
+            "observed": 2
+          },
+          {
+            "read_opcode": "0x02",
+            "group": "0x03",
+            "identifier": "0x0001",
+            "semantics": "capacity",
+            "capacity": 3,
+            "expected": null,
+            "observed": 2
+          },
+          {
+            "read_opcode": "0x02",
+            "group": "0x04",
+            "identifier": "0x0002",
+            "semantics": "expected_population",
+            "capacity": null,
+            "expected": 1,
+            "observed": 1
+          },
+          {
+            "read_opcode": "0x02",
+            "group": "0x05",
+            "identifier": "0x0003",
+            "semantics": "expected_population",
+            "capacity": null,
+            "expected": 1,
+            "observed": 1
+          },
+          {
+            "read_opcode": "0x02",
+            "group": "0x08",
+            "identifier": "0x000b",
+            "semantics": "expected_population",
+            "capacity": null,
+            "expected": 0,
+            "observed": 0
+          },
+          {
+            "read_opcode": "0x02",
+            "group": "0x09",
+            "identifier": "0x0010",
+            "semantics": "expected_population",
+            "capacity": null,
+            "expected": 0,
+            "observed": 0
+          },
+          {
+            "read_opcode": "0x06",
+            "group": "0x01",
+            "identifier": "0x000c",
+            "semantics": "expected_population",
+            "capacity": null,
+            "expected": 1,
+            "observed": 1
+          },
+          {
+            "read_opcode": "0x06",
+            "group": "0x02",
+            "identifier": "0x000d",
+            "semantics": "expected_population",
+            "capacity": null,
+            "expected": 0,
+            "observed": 0
+          },
+          {
+            "read_opcode": "0x06",
+            "group": "0x06",
+            "identifier": "0x000f",
+            "semantics": "expected_population",
+            "capacity": null,
+            "expected": 0,
+            "observed": 0
+          },
+          {
+            "read_opcode": "0x06",
+            "group": "0x07",
+            "identifier": "0x000e",
+            "semantics": "expected_population",
+            "capacity": null,
+            "expected": 0,
+            "observed": 0
+          },
+          {
+            "read_opcode": "0x06",
+            "group": "0x09",
+            "identifier": "0x000a",
+            "semantics": "expected_population",
+            "capacity": null,
+            "expected": 1,
+            "observed": 1
+          },
+          {
+            "read_opcode": "0x06",
+            "group": "0x0b",
+            "identifier": "0x0008",
+            "semantics": "expected_population",
+            "capacity": null,
+            "expected": 0,
+            "observed": 0
+          },
+          {
+            "read_opcode": "0x06",
+            "group": "0x0c",
+            "identifier": "0x0009",
+            "semantics": "expected_population",
+            "capacity": null,
+            "expected": 1,
+            "observed": 1
+          }
+        ]
+      },
+      "remote_device_observations": {
+        "observed_instance_qualification": "installation_observation_not_profile_limit",
+        "devices": [
+          {
+            "group": "0x01",
+            "instance": "0x01",
+            "device_class_raw": "08",
+            "device_firmware_raw": "0c0100"
+          },
+          {
+            "group": "0x09",
+            "instance": "0x01",
+            "device_class_raw": "15",
+            "device_firmware_raw": "080500"
+          },
+          {
+            "group": "0x0a",
+            "instance": "0x01",
+            "device_class_raw": "35",
+            "device_firmware_raw": "021100"
+          },
+          {
+            "group": "0x0c",
+            "instance": "0x01",
+            "device_class_raw": "26",
+            "device_firmware_raw": "010000"
+          },
+          {
+            "group": "0x0e",
+            "instance": "0x01",
+            "device_class_raw": "0f",
+            "device_firmware_raw": "010f00"
+          },
+          {
+            "group": "0x0f",
+            "instance": "0x01",
+            "device_class_raw": "15",
+            "device_firmware_raw": "050700"
+          }
+        ]
       }
     }
   ]

@@ -33,11 +33,15 @@ from ..schema.b524_constraints import (
 from ..schema.b524_register_names import b524_register_name
 from ..schema.description_profile_reminder import (
     compose_description_profile_reminder,
+    remote_rows_need_reminder,
     remote_rows_with_designation,
 )
 from ..schema.ebusd_csv import EbusdCsvSchema
 from ..schema.myvaillant_map import MyvaillantRegisterMap
-from ..schema.parameter_descriptions import description_catalog_status
+from ..schema.parameter_descriptions import (
+    bundled_instance_observation,
+    description_catalog_status,
+)
 from ..transport.base import TransportInterface, TransportRecoveryExhausted, emit_trace_label
 from ..transport.instrumented import CountingTransport, ScanRequestBudgetExceeded
 from ..ui.planner import PlannerGroup, PlannerPreset, build_plan_from_preset
@@ -392,7 +396,7 @@ def run_b524_scan(
 
     def record_description_profile_reminder(remote_rows: list[dict[str, Any]]) -> None:
         nonlocal description_reminder_logged
-        if not any(row.get("status") != "exact" for row in remote_rows):
+        if not remote_rows_need_reminder(remote_rows):
             return
         reminder_text = compose_description_profile_reminder(
             profile_status, remote_rows_with_designation(artifact, remote_rows)
@@ -909,6 +913,30 @@ def run_b524_scan(
                 else None
             )
 
+            # An exact profile may bundle what a reference installation showed. In the
+            # recommended preset it replaces blind probing of every declared local slot: a
+            # live OP00 capacity or count still wins, and a live zero keeps skipping the
+            # group. Remote groups already stop at the first absent device.
+            bundled = (
+                bundled_instance_observation(profile_id, read_opcode=int(opcode), group=group.group)
+                if planner_preset == "recommended" and opcode == 0x02
+                else None
+            )
+            probe_expected_count = expected_count if planner_preset == "recommended" else None
+            slot_window: int | None = None
+            planning_basis: str | None = None
+            if bundled is not None and capacity != 0:
+                if bundled["semantics"] == "capacity" and bundled["capacity"] is not None:
+                    slot_window = max(bundled["capacity"], capacity or 0)
+                    planning_basis = "bundled_installation_observation"
+                elif (
+                    bundled["semantics"] == "expected_population"
+                    and expected_count is None
+                    and bundled["expected"] is not None
+                ):
+                    probe_expected_count = bundled["expected"]
+                    planning_basis = "bundled_installation_observation"
+
             def retain_probe(
                 ii: int,
                 probe: InstanceAvailabilityProbe,
@@ -937,9 +965,10 @@ def run_b524_scan(
                 probe_instance_availability_fn=probe_instance_availability_fn,
                 stop_at_first_absence=planner_preset == "recommended" and opcode == 6,
                 on_probe=retain_probe,
-                expected_count=expected_count if planner_preset == "recommended" else None,
+                expected_count=probe_expected_count,
                 capacity=capacity if planner_preset == "recommended" else None,
                 presence_profile=profile_id,
+                slot_window=slot_window,
             )
             _record_availability_probes(
                 artifact,
@@ -1046,6 +1075,11 @@ def run_b524_scan(
                     "mismatch": expected is not None and expected != observed,
                     "capacity_exceeded": supported is not None and observed > supported,
                     "probed_instances": len(probes),
+                    **(
+                        {"planning_basis": planning_basis, "slot_window": slot_window}
+                        if planning_basis is not None
+                        else {}
+                    ),
                 }
             _mark_present_instances(instances_obj, instances=present_instances)
             slot_capacity = (

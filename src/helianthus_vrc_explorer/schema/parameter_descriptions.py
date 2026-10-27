@@ -10,6 +10,7 @@ evidence plus explicit UI confirmation.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterator
 from copy import deepcopy
 from importlib import resources
@@ -18,6 +19,7 @@ from typing import Any
 from ..evidence_compat import interpret_legacy_codecs, normalize_api_identity
 from ..evidence_export import validate_scope_overlay, validation_scope_for_record
 from ..protocol.b524_metadata import decode_parameter_description
+from .description_profile_reminder import ABSENT, remote_slot_not_connected
 
 _FIELDS = ("type", "width", "min", "max", "step")
 _SELECTORS = ("read_opcode", "group", "instance", "register")
@@ -33,6 +35,13 @@ _OBSERVED_CONTROLLER_PROFILE_KEYS = (
 )
 _CONTROLLER_PROFILE_KEYS = (*_OBSERVED_CONTROLLER_PROFILE_KEYS, "profile_id")
 _REMOTE_PROFILE_KEYS = ("device_class_raw", "device_firmware_raw")
+# Catalogue blocks that record what a reference installation showed. They plan scans and
+# recognise remote devices; they are never a profile limit.
+INSTALLATION_OBSERVATION_QUALIFICATION = "installation_observation_not_profile_limit"
+_INSTANCE_OBSERVATIONS = "instance_observations"
+_REMOTE_DEVICE_OBSERVATIONS = "remote_device_observations"
+_INSTANCE_SEMANTICS = frozenset({"capacity", "expected_population"})
+_DEVICE_ROW_KEYS = ("group", "instance", "device_class_raw", "device_firmware_raw")
 
 
 def load_generic_description_catalog() -> dict[str, Any]:
@@ -56,6 +65,63 @@ def load_description_profile_catalog() -> dict[str, Any]:
         .joinpath("b524_description_profiles.json")
         .read_text(encoding="utf-8")
     )
+
+
+def _installation_block(profile_id: object, key: str) -> dict[str, Any] | None:
+    """Return one installation-observation block of a catalogue profile, or ``None``.
+
+    A block counts only when it carries the installation-observation qualification, so a
+    malformed or unqualified block is ignored rather than trusted.
+    """
+
+    if not isinstance(profile_id, str):
+        return None
+    for candidate in load_description_profile_catalog().get("profiles", []):
+        if isinstance(candidate, dict) and candidate.get("id") == profile_id:
+            block = candidate.get(key)
+            if (
+                isinstance(block, dict)
+                and block.get("observed_instance_qualification")
+                == INSTALLATION_OBSERVATION_QUALIFICATION
+            ):
+                return block
+    return None
+
+
+def _count_field(value: object) -> int | None:
+    return value if type(value) is int and 0 <= value <= 0xFF else None
+
+
+def bundled_instance_observation(
+    profile_id: str | None, *, read_opcode: int, group: int
+) -> dict[str, Any] | None:
+    """Return the catalogue's installation observation for one OP/GG, or ``None``.
+
+    The result has ``semantics`` (``capacity`` for the OP00 supported-capacity groups,
+    ``expected_population`` for the count groups) plus ``capacity``, ``expected`` and
+    ``observed`` as small integers or ``None``. It describes the installation that was
+    scanned. Planners may use it as scan context, but it is not a profile limit: the RR
+    bounds come from the profile tables and each slot still needs its own presence
+    predicate.
+    """
+
+    block = _installation_block(profile_id, _INSTANCE_OBSERVATIONS)
+    if block is None:
+        return None
+    for row in block.get("groups", []):
+        if (
+            isinstance(row, dict)
+            and row.get("read_opcode") == f"0x{read_opcode:02x}"
+            and row.get("group") == f"0x{group:02x}"
+            and row.get("semantics") in _INSTANCE_SEMANTICS
+        ):
+            return {
+                "semantics": row["semantics"],
+                "capacity": _count_field(row.get("capacity")),
+                "expected": _count_field(row.get("expected")),
+                "observed": _count_field(row.get("observed")),
+            }
+    return None
 
 
 def _canonical_raw(value: Any) -> str | None:
@@ -240,6 +306,21 @@ def description_catalog_status(
 ) -> dict[str, Any]:
     """Return exact catalog qualification for planner policy and UI labels."""
 
+    if (
+        selector is not None
+        and selector.get("read_opcode") == "0x06"
+        and remote_slot_not_connected(
+            artifact, str(selector.get("group", "")), str(selector.get("instance", ""))
+        )
+    ):
+        # No device answered the presence probe: there is no identity to qualify.
+        controller = _controller_profile(artifact)
+        candidate = _catalog_match(controller) if controller else None
+        return {
+            "status": ABSENT,
+            "profile_id": candidate.get("id") if candidate is not None else None,
+            "device_class": "remote",
+        }
     profile = description_profile(artifact, selector)
     if _qualified_profile(profile) and (
         not profile.get("device_identity_required")
@@ -275,12 +356,37 @@ def _remote_identity_in_catalog(profile: dict[str, Any], selector: dict[str, str
 
     if selector is None or selector.get("read_opcode") != "0x06":
         return False
+    if _remote_device_in_catalog(profile, selector):
+        return True
     return any(
         isinstance(row, dict)
         and row.get("read_opcode") == "0x06"
         and row.get("group") == selector.get("group")
         and _compatible_profiles(row.get("profile", {}), profile)
         for row in load_description_baseline().get("descriptions", [])
+    )
+
+
+def _remote_device_in_catalog(profile: dict[str, Any], selector: dict[str, str]) -> bool:
+    """Match a remote class/firmware tuple against the devices a reference scan observed.
+
+    The catalogue records which remote devices were present, with their class and
+    firmware, under the controller profile they were seen with. A tuple in the same group
+    is recognised on any instance; a different class or firmware stays unknown.
+    """
+
+    block = _installation_block(profile.get("profile_id"), _REMOTE_DEVICE_OBSERVATIONS)
+    device_class = _canonical_raw(profile.get("device_class_raw"))
+    firmware = _canonical_raw(profile.get("device_firmware_raw"))
+    group = str(selector.get("group", "")).lower()
+    if block is None or device_class is None or firmware is None:
+        return False
+    return any(
+        isinstance(row, dict)
+        and str(row.get("group", "")).lower() == group
+        and _canonical_raw(row.get("device_class_raw")) == device_class
+        and _canonical_raw(row.get("device_firmware_raw")) == firmware
+        for row in block.get("devices", [])
     )
 
 
@@ -526,6 +632,134 @@ def merge_description_baselines(
             "merged_observations": True,
         },
     }
+
+
+def _hex_key(value: object, digits: int) -> str | None:
+    if isinstance(value, str) and re.fullmatch(rf"0[xX][0-9a-fA-F]{{{digits}}}", value):
+        return f"0x{int(value, 16):0{digits}x}"
+    return None
+
+
+def export_installation_observations(artifact: dict[str, Any]) -> dict[str, Any]:
+    """Project the installation a scan observed into the two catalogue blocks.
+
+    Only small integers, fixed enumerations, hex selectors and the remote class/firmware
+    identity are retained: no serial, no free text, no clock and no raw reply bytes.
+    The scan needs an exact catalogued controller profile, because the blocks are
+    recorded under that profile. A remote device without a readable class or firmware
+    keeps ``None`` for it and therefore never makes a row exact.
+    """
+
+    status = description_catalog_status(artifact)
+    profile_id = status.get("profile_id")
+    if status.get("status") != "exact" or not isinstance(profile_id, str):
+        raise ValueError("Installation observations need an exact catalogued controller profile")
+    meta = artifact.get("meta")
+    counts = meta.get("instance_counts") if isinstance(meta, dict) else None
+    groups: list[dict[str, Any]] = []
+    for key, row in counts.items() if isinstance(counts, dict) else ():
+        match = re.fullmatch(r"(0x[0-9a-f]{2}):(0x[0-9a-f]{2})", str(key).lower())
+        if match is None or not isinstance(row, dict):
+            continue
+        read_opcode, group = match.groups()
+        observed = _count_field(row.get("observed"))
+        if read_opcode not in {"0x02", "0x06"} or observed is None:
+            continue
+        if row.get("semantics") not in _INSTANCE_SEMANTICS:
+            continue
+        groups.append(
+            {
+                "read_opcode": read_opcode,
+                "group": group,
+                "identifier": _hex_key(row.get("identifier"), 4),
+                "semantics": row["semantics"],
+                "capacity": _count_field(row.get("capacity")),
+                "expected": _count_field(row.get("expected")),
+                "observed": observed,
+            }
+        )
+    devices: list[dict[str, Any]] = []
+    remote_groups = artifact.get("operations", {}).get("0x06", {}).get("groups", {})
+    for group_key, group_obj in remote_groups.items() if isinstance(remote_groups, dict) else ():
+        probes = group_obj.get("availability_probes") if isinstance(group_obj, dict) else None
+        for instance_key, probe in probes.items() if isinstance(probes, dict) else ():
+            group, instance = _hex_key(group_key, 2), _hex_key(instance_key, 2)
+            if (
+                group is None
+                or instance is None
+                or not isinstance(probe, dict)
+                or probe.get("present") is not True
+                or probe.get("connection_state") != "connected"
+            ):
+                continue
+            identity = _device_identity(artifact, group_key, instance_key)
+            devices.append(
+                {
+                    "group": group,
+                    "instance": instance,
+                    "device_class_raw": identity["class_raw"],
+                    "device_firmware_raw": identity["firmware_raw"],
+                }
+            )
+    return {
+        "profile_id": profile_id,
+        _INSTANCE_OBSERVATIONS: {
+            "observed_instance_qualification": INSTALLATION_OBSERVATION_QUALIFICATION,
+            "groups": sorted(groups, key=lambda row: (row["read_opcode"], row["group"])),
+        },
+        _REMOTE_DEVICE_OBSERVATIONS: {
+            "observed_instance_qualification": INSTALLATION_OBSERVATION_QUALIFICATION,
+            "devices": sorted(devices, key=lambda row: (row["group"], row["instance"])),
+        },
+    }
+
+
+def merge_installation_observations(
+    catalog: dict[str, Any], observations: dict[str, Any]
+) -> dict[str, Any]:
+    """Add scan observations to one catalogue profile without removing other rows.
+
+    A group row is replaced by the newer observation of the same OP/GG. A remote device
+    row is keyed by group, instance, class and firmware, so a device seen again with
+    other firmware adds a row instead of erasing the earlier one. Nothing else in the
+    profile entry is touched, and an unknown profile id is refused.
+    """
+
+    result = deepcopy(catalog)
+    profile = next(
+        (
+            row
+            for row in result.get("profiles", [])
+            if isinstance(row, dict) and row.get("id") == observations.get("profile_id")
+        ),
+        None,
+    )
+    if profile is None:
+        raise ValueError("The scan's controller profile is not in the description profile catalog")
+    for key, collection, identity in (
+        (_INSTANCE_OBSERVATIONS, "groups", ("read_opcode", "group")),
+        (_REMOTE_DEVICE_OBSERVATIONS, "devices", _DEVICE_ROW_KEYS),
+    ):
+        existing = profile.get(key, {})
+        if existing and (
+            not isinstance(existing, dict)
+            or existing.get("observed_instance_qualification")
+            != INSTALLATION_OBSERVATION_QUALIFICATION
+        ):
+            raise ValueError("Existing installation observations are not qualified as observations")
+        rows = {
+            tuple(row[field] for field in identity): row for row in existing.get(collection, [])
+        }
+        for row in observations[key][collection]:
+            rows[tuple(row[field] for field in identity)] = deepcopy(row)
+        profile[key] = {
+            "observed_instance_qualification": INSTALLATION_OBSERVATION_QUALIFICATION,
+            collection: [
+                rows[row_key]
+                for row_key in sorted(rows, key=lambda row_key: tuple(map(str, row_key)))
+            ],
+        }
+    return result
 
 
 def attach_bundled_descriptions(
