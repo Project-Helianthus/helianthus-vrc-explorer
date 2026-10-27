@@ -1,0 +1,211 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "B524 BASV0 parameter-description profile v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "evidence_class",
+    "observation_id",
+    "local_profile",
+    "records",
+    "nonclaims"
+  ],
+  "properties": {
+    "schema_version": { "const": "b524-basv0-description-profile/v1" },
+    "evidence_class": { "const": "sanitized_read_only_metadata_observation" },
+    "observation_id": { "const": "basv0_sw0217_hw8803_api1" },
+    "local_profile": {
+      "type": "object",
+      "required": ["eid", "software_raw", "hardware_raw", "api_version_raw", "api_revision_raw"],
+      "properties": {
+        "eid": { "const": "BASV0" },
+        "software_raw": { "const": "0217" },
+        "hardware_raw": { "const": "8803" },
+        "api_version_raw": { "type": "string", "const": "1" },
+        "api_revision_raw": { "type": "string", "const": "1" }
+      },
+      "additionalProperties": false
+    },
+    "records": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/record" }
+    },
+    "nonclaims": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "selector": {
+      "type": "object",
+      "required": ["operation", "group", "instance", "register"],
+      "properties": {
+        "operation": { "enum": ["02", "06"] },
+        "group": { "type": "string", "pattern": "^[0-9A-F]{2}$" },
+        "instance": { "type": "string", "pattern": "^[0-9A-F]{2}$" },
+        "register": { "type": "string", "pattern": "^[0-9A-F]{4}$" }
+      },
+      "additionalProperties": false
+    },
+    "rawLimits": {
+      "type": "object",
+      "required": ["min_hex", "max_hex", "step_hex"],
+      "properties": {
+        "min_hex": { "type": "string", "pattern": "^(?:[0-9A-F]{2})+$" },
+        "max_hex": { "type": "string", "pattern": "^(?:[0-9A-F]{2})+$" },
+        "step_hex": { "type": "string", "pattern": "^(?:[0-9A-F]{2})+$" }
+      },
+      "additionalProperties": false
+    },
+    "decoded": {
+      "type": "object",
+      "required": ["codec", "codec_provenance", "codec_basis", "qualification", "min", "max", "step"],
+      "properties": {
+        "codec": { "enum": ["UCH", "UIN", "U32", "EXP",
+          "DATE_DMY_U8X3", "TIME_HMS_U8X3"] },
+        "codec_provenance": { "enum": ["selector_qualified", "length_inferred"] },
+        "codec_basis": { "enum": ["public_exact_selector_schema", "public_local_constraint_codec", "payload_length_inferred"] },
+        "qualification": { "enum": ["qualified", "unqualified"] },
+        "min": { "type": ["number", "integer", "string", "null"] },
+        "max": { "type": ["number", "integer", "string", "null"] },
+        "step": { "type": ["number", "integer", "string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "record": {
+      "type": "object",
+      "required": [
+        "selector",
+        "identity_scope",
+        "name",
+        "access_flags",
+        "presence_state",
+        "response_state",
+        "raw_description_hex",
+        "description_payload_length",
+        "raw_limits",
+        "decoded",
+        "observed_read_payload_width",
+        "remote_identity"
+      ],
+      "properties": {
+        "selector": { "$ref": "#/$defs/selector" },
+        "identity_scope": { "enum": ["local", "remote"] },
+        "name": { "type": ["string", "null"] },
+        "access_flags": { "type": ["string", "null"], "pattern": "^[0-9A-F]{2}$" },
+        "presence_state": { "enum": ["observed_present", "observed_inactive", "unknown", "remote_identity_unqualified", "error"] },
+        "response_state": { "enum": ["describe_matched", "describe_unavailable", "read_observed", "transport_error"] },
+        "raw_description_hex": { "type": ["string", "null"], "pattern": "^(?:[0-9A-F]{2})*$", "minLength": 12 },
+        "description_payload_length": { "type": ["integer", "null"], "minimum": 3 },
+        "raw_limits": { "oneOf": [{ "$ref": "#/$defs/rawLimits" }, { "type": "null" }] },
+        "decoded": { "oneOf": [{ "$ref": "#/$defs/decoded" }, { "type": "null" }] },
+        "observed_read_payload_width": { "type": ["integer", "null"], "minimum": 0 },
+        "remote_identity": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["qualification"],
+              "properties": {
+                "group": { "type": "string", "pattern": "^[0-9A-F]{2}$" },
+                "address_raw": { "type": "string", "pattern": "^[0-9A-F]{2}$" },
+                "firmware_raw": { "type": "string", "pattern": "^(?:[0-9A-F]{2})*$" },
+                "qualification": { "enum": ["observed_remote_header", "unqualified"] }
+              },
+              "if": { "properties": { "qualification": { "const": "observed_remote_header" } }, "required": ["qualification"] },
+              "then": {
+                "required": ["group", "address_raw", "firmware_raw"],
+                "properties": { "firmware_raw": { "pattern": "^[0-9A-F]{6}$" } }
+              },
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "$comment": "Published DHW pin: ebus-vaillant-b524-basv0-profile-v1.md, Observed local bound.",
+          "if": {
+            "properties": {
+              "selector": {
+                "const": { "operation": "02", "group": "00", "instance": "00", "register": "0001" }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "raw_description_hex": { "const": "0001000000A0C10000A0410000803F" },
+              "access_flags": { "const": "03" },
+              "raw_limits": {
+                "const": { "min_hex": "0000A0C1", "max_hex": "0000A041", "step_hex": "0000803F" }
+              },
+              "decoded": {
+                "const": {
+                  "codec": "EXP", "codec_provenance": "selector_qualified",
+                  "codec_basis": "public_local_constraint_codec", "qualification": "qualified",
+                  "min": -20, "max": 20, "step": 1
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "selector": {
+                "properties": {
+                  "operation": {
+                    "const": "02"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "identity_scope": {
+                "const": "local"
+              },
+              "remote_identity": {
+                "type": "null"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "identity_scope": {
+                "const": "remote"
+              },
+              "remote_identity": {
+                "type": "object"
+              },
+              "decoded": {
+                "properties": {
+                  "qualification": { "not": { "const": "qualified" } }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "if": {
+        "required": ["decoded"],
+        "properties": {
+          "decoded": {
+            "type": "object",
+            "required": ["qualification"],
+            "properties": { "qualification": { "const": "qualified" } }
+          }
+        }
+      },
+      "then": {
+        "required": ["observed_read_payload_width"],
+        "properties": { "observed_read_payload_width": { "type": "integer", "minimum": 1 } }
+      },
+      "additionalProperties": false
+    }
+  }
+}
