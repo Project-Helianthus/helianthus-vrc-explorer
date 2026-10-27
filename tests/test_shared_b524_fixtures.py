@@ -3,6 +3,7 @@
 import importlib.util
 import json
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -182,3 +183,103 @@ def test_refresh_copy_failure_leaves_last_known_good_bundle(tmp_path, monkeypatc
         checker.refresh(source, target)
     assert (target / "manifest.json").read_text() == "last-known-good"
     assert sorted(path.name for path in tmp_path.iterdir()) == ["source", "target"]
+
+
+@pytest.mark.parametrize("interruption", [OSError, KeyboardInterrupt])
+@pytest.mark.parametrize("after_exchange", [False, True])
+def test_publish_interruption_keeps_configured_bundle(
+    tmp_path, monkeypatch, interruption, after_exchange
+):
+    target = tmp_path / "target"
+    staged = tmp_path / "staged"
+    target.mkdir()
+    staged.mkdir()
+    (target / "manifest.json").write_text("old")
+    (staged / "manifest.json").write_text("new")
+    exchange = checker.exchange_directories
+
+    def interrupted(left, right):
+        assert (target / "manifest.json").read_text() == "old"
+        if after_exchange:
+            exchange(left, right)
+            assert (target / "manifest.json").read_text() == "new"
+        raise interruption("publication interrupted")
+
+    monkeypatch.setattr(checker, "exchange_directories", interrupted)
+    with pytest.raises(interruption):
+        checker.publish(staged, target)
+    assert (target / "manifest.json").read_text() == ("new" if after_exchange else "old")
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["staged", "target"]
+
+
+def test_publish_exchanges_existing_bundle(tmp_path, monkeypatch):
+    target = tmp_path / "target"
+    staged = tmp_path / "staged"
+    target.mkdir()
+    staged.mkdir()
+    (target / "manifest.json").write_text("old")
+    (target / "retained.txt").write_text("retained")
+    (staged / "manifest.json").write_text("new")
+
+    def no_rename(*args, **kwargs):
+        pytest.fail("existing bundles must use atomic exchange")
+
+    monkeypatch.setattr(Path, "rename", no_rename)
+    checker.publish(staged, target)
+    assert (target / "manifest.json").read_text() == "new"
+    assert (target / "retained.txt").read_text() == "retained"
+
+
+@pytest.mark.parametrize("after_exchange", [False, True])
+def test_publish_sigterm_keeps_configured_bundle(tmp_path, after_exchange):
+    target = tmp_path / "target"
+    staged = tmp_path / "staged"
+    target.mkdir()
+    staged.mkdir()
+    (target / "manifest.json").write_text("old")
+    (staged / "manifest.json").write_text("new")
+    script = """
+import os
+import runpy
+import signal
+import sys
+from pathlib import Path
+
+checker = runpy.run_path(sys.argv[1])
+exchange = checker["exchange_directories"]
+def interrupted(left, right):
+    if sys.argv[4] == "True":
+        exchange(left, right)
+    os.kill(os.getpid(), signal.SIGTERM)
+checker["publish"].__globals__["exchange_directories"] = interrupted
+checker["publish"](Path(sys.argv[2]), Path(sys.argv[3]))
+"""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            script,
+            str(SPEC.origin),
+            str(staged),
+            str(target),
+            str(after_exchange),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == -signal.SIGTERM, result.stderr
+    assert (target / "manifest.json").read_text() == ("new" if after_exchange else "old")
+
+
+def test_publish_unsupported_exchange_preserves_bundle(tmp_path, monkeypatch):
+    target = tmp_path / "target"
+    staged = tmp_path / "staged"
+    target.mkdir()
+    staged.mkdir()
+    (target / "manifest.json").write_text("old")
+    (staged / "manifest.json").write_text("new")
+    monkeypatch.setattr(checker.sys, "platform", "unsupported")
+    with pytest.raises(OSError, match="atomic directory exchange is unavailable"):
+        checker.publish(staged, target)
+    assert (target / "manifest.json").read_text() == "old"

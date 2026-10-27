@@ -6,12 +6,16 @@ from __future__ import annotations
 import argparse
 import base64
 import csv
+import ctypes
+import errno
 import importlib.machinery
 import importlib.util
 import io
 import json
+import os
 import re
 import shutil
+import sys
 import tempfile
 from hashlib import sha256
 from pathlib import Path
@@ -142,12 +146,36 @@ def refresh(source, target=DEFAULT_ROOT):
         publish(staged, target)
 
 
+def exchange_directories(left, right):
+    """Atomically exchange existing directories, or fail without moving either."""
+    libc = ctypes.CDLL(None, use_errno=True)
+    if sys.platform == "darwin" and hasattr(libc, "renamex_np"):
+        exchange = libc.renamex_np
+        exchange.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
+        args = (os.fsencode(left), os.fsencode(right), 2)  # RENAME_SWAP
+    elif sys.platform == "linux" and hasattr(libc, "renameat2"):
+        exchange = libc.renameat2
+        exchange.argtypes = [
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_uint,
+        ]
+        args = (-100, os.fsencode(left), -100, os.fsencode(right), 2)  # AT_FDCWD, RENAME_EXCHANGE
+    else:
+        raise OSError(errno.ENOTSUP, "atomic directory exchange is unavailable")
+    exchange.restype = ctypes.c_int
+    if exchange(*args) != 0:
+        code = ctypes.get_errno()
+        raise OSError(code, os.strerror(code), str(right))
+
+
 def publish(staged, target):
-    """Replace target in one rename so a mid-copy failure keeps the last-known-good bundle."""
+    """Publish with one atomic rename/exchange; cleanup never removes the configured path."""
     target = target.resolve()
     target.parent.mkdir(parents=True, exist_ok=True)
     fresh = Path(tempfile.mkdtemp(prefix=f".{target.name}-new-", dir=target.parent))
-    backup = fresh.with_name(fresh.name + "-old")
     try:
         if target.exists():
             shutil.copytree(target, fresh, dirs_exist_ok=True)
@@ -157,16 +185,11 @@ def publish(staged, target):
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(file, destination)
         if target.exists():
-            target.rename(backup)
-        try:
+            exchange_directories(fresh, target)
+        else:
             fresh.rename(target)
-        except OSError:
-            if backup.exists():
-                backup.rename(target)
-            raise
     finally:
         shutil.rmtree(fresh, ignore_errors=True)
-        shutil.rmtree(backup, ignore_errors=True)
 
 
 def main():

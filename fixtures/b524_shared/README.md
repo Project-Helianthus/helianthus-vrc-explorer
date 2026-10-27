@@ -8,7 +8,13 @@ Ordinary tests require only this checkout and the declared development
 `jsonschema` dependency. Refresh explicitly with
 `python3 scripts/check_shared_b524_fixtures.py --source-root /path/to/docs-ebus`.
 The source is read-only; refresh stages and validates all required inputs before
-copying them into this directory. Missing or inconsistent inputs fail closed.
+publishing a complete replacement. Existing bundles use atomic directory exchange
+on macOS and Linux; unsupported platforms or filesystems fail without moving the
+current bundle. The configured path remains reachable across interruption, with
+either the old or new bundle. Abrupt termination may leave a hidden staging
+directory beside it. Readers opening multiple files should avoid concurrent
+refreshes when they require a single generation across all reads.
+Missing or inconsistent inputs fail closed.
 A refresh validates evidence and does not admit any device operation.
 
 Provenance is the public
