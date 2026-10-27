@@ -4,6 +4,19 @@ This file is generated from the CLI's `--help` output. Refresh it with
 `python3 scripts/docs_sync_help.py` and verify it with
 `python3 scripts/check_docs_sync.py`.
 
+The offline `python3 scripts/export_controller_observations.py ARTIFACT` helper
+accepts register observations only in the `0x02` and `0x06` operation namespaces.
+Other operation opcodes make the artifact invalid, including operations with
+empty groups; export fails without producing an inventory.
+Explicit `evidence_grade` values on exported register and decoded-description
+claims must be `Proven`, `Hypothesis` or `Unknown` (case-sensitive strings).
+Invalid values fail export without producing an inventory; absent grades remain
+`unspecified`, distinct from explicit `Unknown`.
+When no recognized response state is present, an entry's `transport_error:`
+error marker exports as `response_state: "transport_error"`. Explicit recognized
+states take precedence; error text is omitted and prior decoded observations
+and evidence grades are retained.
+
 ## Root command
 
 <!-- BEGIN CLI HELP:root -->
