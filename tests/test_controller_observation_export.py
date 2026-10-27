@@ -120,7 +120,6 @@ def test_privacy_allowlists_at_every_level():
         "0x0009"
     ]
     entry["response_state"] = "PRIVATE_SENTINEL"
-    entry["evidence_grade"] = {"serial": "PRIVATE_SENTINEL"}
     entry["parameter_description"]["type"] = "PRIVATE_SENTINEL"
     entry["parameter_description"]["qualification"] = "PRIVATE_SENTINEL"
     entry["parameter_description"]["min"] = "PRIVATE_SENTINEL"
@@ -238,6 +237,31 @@ def test_explicit_unknown_grade_differs_from_absent_grade():
     record = export(source)["observations"][0]
     assert record["evidence_grade"] == "Unknown"
     assert record["decoded_observation"]["evidence_grade"] == "unspecified"
+
+
+@pytest.mark.parametrize("decoded", [False, True])
+@pytest.mark.parametrize(
+    "grade", ["PRIVATE_SENTINEL", "proven", "", None, True, 1, [], {"serial": "PRIVATE_SENTINEL"}]
+)
+def test_invalid_explicit_grades_are_rejected_without_disclosure(tmp_path, decoded, grade):
+    source = artifact()
+    entry = source["operations"]["0x02"]["groups"]["0x02"]["instances"]["0x00"]["registers"][
+        "0x0009"
+    ]
+    claim = entry["parameter_description"] if decoded else entry
+    claim["evidence_grade"] = grade
+    before = deepcopy(source)
+    with pytest.raises(ValueError, match="Invalid evidence grade"):
+        export(source)
+    assert source == before
+    path = tmp_path / "input.json"
+    path.write_text(json.dumps(source), encoding="utf-8")
+    original = path.read_bytes()
+    result = subprocess.run([sys.executable, str(SCRIPT), str(path)], capture_output=True)
+    assert result.returncode == 2
+    assert result.stdout == b""
+    assert result.stderr == b"Observation export failed: unreadable or malformed artifact\n"
+    assert path.read_bytes() == original
 
 
 def test_transport_error_response_state_is_retained():

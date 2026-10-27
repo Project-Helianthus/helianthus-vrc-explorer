@@ -45,6 +45,15 @@ def _choice(value: object, allowed: frozenset[str], unknown: str = "unknown") ->
     return value if isinstance(value, str) and value in allowed else unknown
 
 
+def _evidence_grade(entry: dict) -> str:
+    if "evidence_grade" not in entry:
+        return "unspecified"
+    grade = entry["evidence_grade"]
+    if not isinstance(grade, str) or grade not in GRADES:
+        raise ValueError("Invalid evidence grade")
+    return grade
+
+
 def _selector(value: object, digits: int) -> str:
     if not isinstance(value, str) or not re.fullmatch(rf"0[xX][0-9a-fA-F]{{{digits}}}", value):
         raise ValueError("Invalid selector encoding")
@@ -95,7 +104,7 @@ def _decoded(entry: dict, selector: tuple[str, str, str, str]) -> tuple[dict, st
             description.get("codec_provenance"),
             frozenset({"selector_qualified", "length_inferred"}),
         ),
-        "evidence_grade": _choice(description.get("evidence_grade"), GRADES, "unspecified"),
+        "evidence_grade": _evidence_grade(description),
     }, raw
 
 
@@ -135,9 +144,7 @@ def export_observations(artifact: object) -> dict:
                                     strict=True,
                                 )
                             ),
-                            "evidence_grade": _choice(
-                                entry.get("evidence_grade"), GRADES, "unspecified"
-                            ),
+                            "evidence_grade": _evidence_grade(entry),
                             "response_state": _choice(entry.get("response_state"), STATES),
                             "raw_description": raw,
                             "decoded_observation": decoded,

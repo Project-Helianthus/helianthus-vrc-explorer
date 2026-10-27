@@ -8,6 +8,10 @@ The offline `python3 scripts/export_controller_observations.py ARTIFACT` helper
 accepts register observations only in the `0x02` and `0x06` operation namespaces.
 Other operation opcodes make the artifact invalid, including operations with
 empty groups; export fails without producing an inventory.
+Explicit `evidence_grade` values on exported register and decoded-description
+claims must be `Proven`, `Hypothesis` or `Unknown` (case-sensitive strings).
+Invalid values fail export without producing an inventory; absent grades remain
+`unspecified`, distinct from explicit `Unknown`.
 
 ## Root command
 
