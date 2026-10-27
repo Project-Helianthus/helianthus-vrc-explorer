@@ -47,7 +47,7 @@ def _artifact(selected: dict[tuple[str, str, str, str], dict[str, Any]]) -> dict
     return {"schema_version": "2.3", "operations": operations}
 
 
-def _embedded_rows(html: str) -> list[list[str]]:
+def _embedded_rows(html: str) -> list[list[Any]]:
     match = re.search(r"const B524_ENTRY_EVIDENCE = new Map\((\[.*?\])\.map\(", html, re.S)
     assert match is not None
     return json.loads(match.group(1))  # type: ignore[no-any-return]
@@ -111,11 +111,11 @@ def test_embedded_table_resolves_each_entry_by_its_full_selector() -> None:
 
     assert sorted(rows) == sorted(
         [
-            [*BASE, "Proven", "selector_qualified", "Hypothesis"],
-            [*NEIGHBOURS["operation"], "Hypothesis", "length_inferred", "Hypothesis"],
-            [*NEIGHBOURS["group"], "Unknown", "group_provenance", "Hypothesis"],
-            [*NEIGHBOURS["instance"], "Proven", "instance_provenance", "Hypothesis"],
-            [*NEIGHBOURS["register"], "Hypothesis", "register_provenance", "Hypothesis"],
+            [*BASE, "Proven", "selector_qualified", "Hypothesis", True],
+            [*NEIGHBOURS["operation"], "Hypothesis", "length_inferred", "Hypothesis", True],
+            [*NEIGHBOURS["group"], "Unknown", "group_provenance", "Hypothesis", False],
+            [*NEIGHBOURS["instance"], "Proven", "instance_provenance", "Hypothesis", True],
+            [*NEIGHBOURS["register"], "Hypothesis", "register_provenance", "Hypothesis", True],
         ]
     )
 
@@ -133,14 +133,14 @@ def test_an_entry_with_only_a_decoded_value_reads_hypothesis_for_the_decoded_val
     del entry["parameter_description"]
     html = render_html_report(_artifact({BASE: entry}))
 
-    assert _embedded_rows(html) == [[*BASE, "Unknown", "Unknown", "Hypothesis"]]
+    assert _embedded_rows(html) == [[*BASE, "Unknown", "Unknown", "Hypothesis", False]]
 
 
 def test_an_undecoded_entry_keeps_its_retained_grade_and_reads_unknown_for_the_decode() -> None:
     entry = _entry(evidence_grade="Proven", value=None, error="parse_error: short payload")
     html = render_html_report(_artifact({BASE: entry}))
 
-    assert _embedded_rows(html) == [[*BASE, "Proven", "selector_qualified", "Unknown"]]
+    assert _embedded_rows(html) == [[*BASE, "Proven", "selector_qualified", "Unknown", True]]
 
 
 def test_entry_level_provenance_fallback_is_embedded_without_a_description() -> None:
@@ -148,7 +148,7 @@ def test_entry_level_provenance_fallback_is_embedded_without_a_description() -> 
     del entry["parameter_description"]
     html = render_html_report(_artifact({BASE: entry}))
 
-    assert _embedded_rows(html) == [[*BASE, "Unknown", "length_inferred", "Hypothesis"]]
+    assert _embedded_rows(html) == [[*BASE, "Unknown", "length_inferred", "Hypothesis", False]]
 
 
 def test_invalid_grades_are_not_embedded_as_grades() -> None:
@@ -364,7 +364,9 @@ def test_embedded_provenance_is_the_retained_value_not_the_display_normalisation
     entry = _entry(parameter_description={"codec_provenance": "not_a_known_provenance"})
     html = render_html_report(_artifact({BASE: entry}))
 
-    assert _embedded_rows(html) == [[*BASE, "Unknown", "not_a_known_provenance", "Hypothesis"]]
+    assert _embedded_rows(html) == [
+        [*BASE, "Unknown", "not_a_known_provenance", "Hypothesis", False]
+    ]
     match = re.search(
         r'<script id="artifact-data" type="application/json">(.*?)</script>', html, re.S
     )
@@ -586,3 +588,29 @@ def test_cell_does_not_claim_an_override_that_parses_to_no_value() -> None:
             "Codec provenance: selector_qualified",
         }
     ]
+
+
+def test_explicit_unknown_grade_is_visible_in_the_cell_but_a_missing_one_is_not() -> None:
+    explicit = render_html_report(_artifact({BASE: _entry(evidence_grade="Unknown")}))
+    assert _embedded_rows(explicit)[0][-1] is True
+    shown = _run(_cell_script(explicit, entry="{}", override="null"))
+    assert shown["appended"] == [
+        {
+            "className": "cell-raw",
+            "text": "Entry evidence: Unknown · Decoded value: Hypothesis · "
+            "Codec provenance: selector_qualified",
+        }
+    ]
+
+    bare = _entry()
+    del bare["parameter_description"]
+    bare_value = {**bare, "value": None, "error": "parse_error: short payload"}
+    explicit_bare = render_html_report(
+        _artifact({BASE: {**bare_value, "evidence_grade": "Unknown"}})
+    )
+    assert _embedded_rows(explicit_bare) == [[*BASE, "Unknown", "Unknown", "Unknown", True]]
+    shown_bare = _run(_cell_script(explicit_bare, entry="{}", override="null"))
+    assert len(shown_bare["appended"]) == 1
+
+    missing = render_html_report(_artifact({BASE: _entry()}))
+    assert _run(_cell_script(missing, entry="{}", override="null"))["appended"] == []

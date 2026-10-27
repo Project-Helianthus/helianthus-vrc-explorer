@@ -22,6 +22,7 @@ from .evidence_display import (
     DECODED_GRADE,
     DECODED_LABEL,
     ENTRY_LABEL,
+    EVIDENCE_GRADES,
     OVERRIDE_TEXT,
     PROVENANCE_LABEL,
     UNKNOWN,
@@ -77,20 +78,24 @@ def _docs_catalog_json_map(artifact: dict[str, Any]) -> dict[str, dict[str, Any]
     return table
 
 
-def _entry_evidence_rows(artifact: dict[str, Any]) -> list[list[str]]:
+def _entry_evidence_rows(artifact: dict[str, Any]) -> list[list[Any]]:
     """Resolve the shared evidence rules once per entry for client-side lookup.
 
     Rows are ``[op, group, instance, register, entry_evidence, codec_provenance,
-    decoded_value]`` using the artifact's own selector keys. Entries for which all
-    three are Unknown are left out and read back as Unknown. Purely presentational,
+    decoded_value, explicit]`` using the artifact's own selector keys; ``explicit`` is
+    whether the entry retains one of the three valid grades (so an explicit ``Unknown``
+    is told apart from no grade). Entries that are neither explicit nor have any
+    non-Unknown value are left out and read back as Unknown. Purely presentational,
     resolved for this render only -- never written into the scan artifact.
     """
-    rows: list[list[str]] = []
+    rows: list[list[Any]] = []
     for op, gg, ii, rr, entry in iter_register_entries(artifact):
         display = entry_evidence_display(entry)
         values = (display.grade, display.codec_provenance, display.decoded_value)
-        if any(value != UNKNOWN for value in values):
-            rows.append([op, gg, ii, rr, *values])
+        grade = entry.get("evidence_grade") if isinstance(entry, dict) else None
+        explicit = isinstance(grade, str) and grade in EVIDENCE_GRADES
+        if explicit or any(value != UNKNOWN for value in values):
+            rows.append([op, gg, ii, rr, *values, explicit])
     return rows
 
 
@@ -648,9 +653,9 @@ __ARTIFACT_JSON__
       // reads back as Unknown.
       const B524_ENTRY_EVIDENCE_LABELS = __B524_ENTRY_EVIDENCE_LABELS__;
       const B524_ENTRY_EVIDENCE = new Map(__B524_ENTRY_EVIDENCE__.map(
-        ([op, gg, ii, rr, grade, provenance, decoded]) => [
+        ([op, gg, ii, rr, grade, provenance, decoded, explicit]) => [
           JSON.stringify([op, gg, ii, rr]),
-          {grade, provenance, decoded},
+          {grade, provenance, decoded, explicit},
         ]
       ));
 
@@ -667,7 +672,8 @@ __ARTIFACT_JSON__
           `${labels.decoded}: ${overridden ? labels.override_text : decoded}`,
           `${labels.provenance}: ${provenance}`,
         ];
-        return { grade, decoded, provenance, overridden, lines };
+        const explicit = !!known && known.explicit === true;
+        return { grade, decoded, provenance, overridden, explicit, lines };
       }
 
       function b524CorrespondenceSecondaryText(opKey, groupKey, registerKey) {
@@ -2732,7 +2738,7 @@ __ARTIFACT_JSON__
                 (override && valueBytes && !decoded.error && decoded.value !== null && decoded.value !== undefined)
                   ? override : null
               );
-              if (evidence.grade !== B524_ENTRY_EVIDENCE_LABELS.unknown || evidence.overridden) {
+              if (evidence.explicit || evidence.overridden) {
                 // An explicit grade or an override is always visible; the full lines, including
                 // Unknown, are in the cell's hover details below.
                 const evidenceEl = document.createElement("div");
