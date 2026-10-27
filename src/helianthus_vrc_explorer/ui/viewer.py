@@ -409,9 +409,9 @@ def _render(
 
     # Rough layout budget:
     # - header panel: ~5 lines
-    # - details panel: ~6 lines
+    # - details panel: ~9 lines
     # Remaining goes to table rows. Each RR row renders as a single row (cells are 2-line).
-    max_rows = max(3, (term_h - 14))
+    max_rows = max(3, (term_h - 17))
     max_cols = max(1, min(len(sheet.instance_keys), (term_w - 12) // 18))
 
     row_scroll = max(0, min(state.row_scroll, max(0, len(sheet.rr_keys) - max_rows)))
@@ -477,6 +477,27 @@ def _render(
     details_lines.append(
         f"type={selected_entry.get('type') if selected_entry else None} override={override}"
     )
+    # Qualification and profile matching never supply a missing evidence grade.
+    grade = selected_entry.get("evidence_grade") if selected_entry else None
+    if not isinstance(grade, str) or grade not in {"Proven", "Hypothesis", "Unknown"}:
+        grade = "Unknown"
+    details_lines.append(f"Decoded evidence: {grade}")
+    if override is not None and selected_entry:
+        # The override reinterprets this cell's bytes in the view only; the retained grade stays.
+        details_lines.append("Decoded interpretation: Hypothesis (manual type override; view only)")
+    description = selected_entry.get("parameter_description") if selected_entry else None
+    if not isinstance(description, dict):
+        description = {}
+    codec_provenance = description.get("codec_provenance")
+    if codec_provenance is None and selected_entry:
+        codec_provenance = selected_entry.get("codec_provenance")
+    details_lines.append(
+        f"Codec acceptance: {description.get('qualification', 'Unknown')} "
+        f"(codec_provenance={codec_provenance if codec_provenance is not None else 'Unknown'})"
+    )
+    profile_match = description.get("target_profile_match")
+    profile_label = str(profile_match) if isinstance(profile_match, bool) else "Unknown"
+    details_lines.append(f"Controller-profile match: {profile_label}")
     details_lines.append(f"raw_len={raw_len} raw_hex={raw_hex}")
     details_lines.append(f"status={entry_status_label(selected_entry)}")
     details_lines.append(f"error={selected_entry.get('error') if selected_entry else None}")
@@ -605,7 +626,7 @@ def run_results_viewer(console: Console, artifact: dict[str, Any]) -> bool:
             # Recompute viewport extents for scroll adjustments.
             term_w = console.size.width
             term_h = console.size.height
-            max_rows = max(3, (term_h - 14))
+            max_rows = max(3, (term_h - 17))
             max_cols = max(
                 1, min(len(state.sheets[state.sheet_idx].instance_keys), (term_w - 12) // 18)
             )
