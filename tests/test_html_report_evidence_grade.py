@@ -263,6 +263,7 @@ def _cell_script(
     override: str,
     value_bytes: str = "[1, 0]",
     decode_error: str = "null",
+    decoded_value: str = "1",
 ) -> str:
     start = html.index("const evidence = b524EntryEvidence(")
     end = html.index('if (typeof entry.flags_access === "string"', start)
@@ -282,7 +283,9 @@ const override = """
 const valueBytes = """
         + value_bytes
         + """;
-const decoded = {error: """
+const decoded = {value: """
+        + decoded_value
+        + """, error: """
         + decode_error
         + """};
 """
@@ -533,3 +536,21 @@ def test_cell_does_not_claim_an_override_that_produced_no_value() -> None:
                 "Codec provenance: selector_qualified",
             }
         ]
+
+
+def test_cell_does_not_claim_an_override_that_parses_to_no_value() -> None:
+    html = render_html_report(_keyed_artifact())
+
+    result = _run(
+        _cell_script(
+            html, entry="{}", override='"EXP"', value_bytes="[0, 0, 192, 127]", decoded_value="null"
+        )
+    )
+
+    assert result["appended"] == [
+        {
+            "className": "cell-raw",
+            "text": "Entry evidence: Proven · Decoded value: Hypothesis · "
+            "Codec provenance: selector_qualified",
+        }
+    ]

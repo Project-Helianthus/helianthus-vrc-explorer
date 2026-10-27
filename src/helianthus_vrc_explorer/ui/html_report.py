@@ -2722,7 +2722,8 @@ __ARTIFACT_JSON__
 
               const evidence = b524EntryEvidence(
                 opKey, groupKey, iiKey, rrKey, entry,
-                (override && valueBytes && !decoded.error) ? override : null
+                (override && valueBytes && !decoded.error && decoded.value !== null && decoded.value !== undefined)
+                  ? override : null
               );
               if (evidence.grade !== B524_ENTRY_EVIDENCE_LABELS.unknown || evidence.overridden) {
                 // An explicit grade or an override is always visible; the full lines, including

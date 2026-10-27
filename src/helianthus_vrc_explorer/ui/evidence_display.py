@@ -119,10 +119,11 @@ def manual_override_applies(entry: Mapping[str, Any] | None, type_override: str 
     if not isinstance(raw_hex, str) or not raw_hex:
         return False
     try:
-        parse_typed_value(type_override, bytes.fromhex(raw_hex))
+        parsed = parse_typed_value(type_override, bytes.fromhex(raw_hex))
     except (ValueError, ValueParseError):
         return False
-    return True
+    # A parse that yields no value (an EXP NaN) is not an interpretation either.
+    return parsed is not None
 
 
 @dataclass(frozen=True, slots=True)

@@ -459,3 +459,10 @@ def test_override_needs_retained_bytes_that_decode_under_it() -> None:
     assert manual_override_applies(_entry(raw_hex="01"), "HEX:2") is False
     display = entry_evidence_display(timeout, type_override="HEX:2")
     assert (display.override_applies, display.decoded_text) == (False, "Unknown")
+
+
+def test_override_that_parses_to_no_value_is_not_claimed() -> None:
+    nan_entry = _entry(raw_hex="0000c07f", value=None)
+    assert manual_override_applies(nan_entry, "EXP") is False
+    display = entry_evidence_display(nan_entry, type_override="EXP")
+    assert (display.override_applies, display.decoded_text) == (False, "Unknown")
