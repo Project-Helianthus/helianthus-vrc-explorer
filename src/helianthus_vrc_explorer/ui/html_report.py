@@ -1007,8 +1007,9 @@ __ARTIFACT_JSON__
         const g = state.overrides && state.overrides[groupKey];
         if (!g || typeof g !== "object") return null;
         if (namespaceKey) {
-          if (g.namespaces && typeof g.namespaces === "object") {
-            const ns = g.namespaces[namespaceKey];
+          const opsTree = g.operations && typeof g.operations === "object" ? g.operations : g.namespaces;
+          if (opsTree && typeof opsTree === "object") {
+            const ns = opsTree[namespaceKey];
             if (ns && typeof ns === "object" && typeof ns[rrKey] === "string") return ns[rrKey];
           }
           return null;

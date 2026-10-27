@@ -538,6 +538,24 @@ def test_cell_does_not_claim_an_override_that_produced_no_value() -> None:
         ]
 
 
+def test_page_override_lookup_honors_operation_keyed_overrides() -> None:
+    html = render_html_report(_keyed_artifact())
+    start = html.index("function getRowOverride(")
+    end = html.index("function setRowOverride(", start)
+    script = (
+        "const state = {overrides: {"
+        '"0x09": {operations: {"0x02": {"0x0002": "HEX:2"}}},'
+        '"0x0a": {namespaces: {"0x02": {"0x0002": "UIN"}}}'
+        "}};"
+        + html[start:end]
+        + 'console.log(JSON.stringify([getRowOverride("0x09", "0x0002", "0x02"),'
+        ' getRowOverride("0x09", "0x0002", "0x06"),'
+        ' getRowOverride("0x0a", "0x0002", "0x02")]));'
+    )
+
+    assert _run(script) == ["HEX:2", None, "UIN"]
+
+
 def test_cell_does_not_claim_an_override_that_parses_to_no_value() -> None:
     html = render_html_report(_keyed_artifact())
 
