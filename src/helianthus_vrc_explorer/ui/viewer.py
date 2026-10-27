@@ -15,6 +15,13 @@ from rich.text import Text
 
 from ..protocol.parser import ValueParseError, parse_typed_value
 from ..scanner.director import operation_group_display_name
+from .evidence_display import (
+    DECODED_LABEL,
+    ENTRY_LABEL,
+    entry_evidence_display,
+    get_row_type_override,
+    observed_description,
+)
 from .register_semantics import entry_status_kind, entry_status_label, visible_rr_keys
 
 
@@ -68,34 +75,6 @@ def _ensure_type_overrides_dict(meta: dict[str, Any]) -> dict[str, Any]:
         overrides = {}
         meta["type_overrides"] = overrides
     return overrides
-
-
-def get_row_type_override(
-    artifact: dict[str, Any],
-    *,
-    group_key: str,
-    rr_key: str,
-    op_key: str | None = None,
-) -> str | None:
-    meta = artifact.get("meta")
-    if not isinstance(meta, dict):
-        return None
-    overrides = meta.get("type_overrides")
-    if not isinstance(overrides, dict):
-        return None
-    group_overrides = overrides.get(group_key)
-    if not isinstance(group_overrides, dict):
-        return None
-    if op_key is not None:
-        ops = group_overrides.get("operations", group_overrides.get("namespaces"))
-        if isinstance(ops, dict):
-            op_overrides = ops.get(op_key)
-            if isinstance(op_overrides, dict):
-                value = op_overrides.get(rr_key)
-                if isinstance(value, str):
-                    return value
-    value = group_overrides.get(rr_key)
-    return value if isinstance(value, str) else None
 
 
 def set_row_type_override(
@@ -478,22 +457,15 @@ def _render(
         f"type={selected_entry.get('type') if selected_entry else None} override={override}"
     )
     # Qualification and profile matching never supply a missing evidence grade.
-    grade = selected_entry.get("evidence_grade") if selected_entry else None
-    if not isinstance(grade, str) or grade not in {"Proven", "Hypothesis", "Unknown"}:
-        grade = "Unknown"
-    details_lines.append(f"Decoded evidence: {grade}")
-    if override is not None and selected_entry:
-        # The override reinterprets this cell's bytes in the view only; the retained grade stays.
-        details_lines.append("Decoded interpretation: Hypothesis (manual type override; view only)")
-    description = selected_entry.get("parameter_description") if selected_entry else None
-    if not isinstance(description, dict):
-        description = {}
-    codec_provenance = description.get("codec_provenance")
-    if codec_provenance is None and selected_entry:
-        codec_provenance = selected_entry.get("codec_provenance")
+    evidence = entry_evidence_display(selected_entry, type_override=override)
+    details_lines.append(f"{ENTRY_LABEL}: {evidence.grade}")
+    # The decoded value is an interpretation of the retained bytes: at most Hypothesis, and a
+    # manual override reinterprets this cell's bytes in the view only.
+    details_lines.append(f"{DECODED_LABEL}: {evidence.decoded_text}")
+    description = observed_description(selected_entry)
     details_lines.append(
         f"Codec acceptance: {description.get('qualification', 'Unknown')} "
-        f"(codec_provenance={codec_provenance if codec_provenance is not None else 'Unknown'})"
+        f"(codec_provenance={evidence.codec_provenance})"
     )
     profile_match = description.get("target_profile_match")
     profile_label = str(profile_match) if isinstance(profile_match, bool) else "Unknown"

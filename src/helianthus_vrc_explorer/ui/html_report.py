@@ -18,6 +18,15 @@ from ..schema.b524_register_names import apply_b524_canonical_register_names
 from ..schema.b524_value_labels import apply_b524_value_labels
 from ..schema.parameter_descriptions import attach_bundled_descriptions, description_profile
 from .emphasis import html_star_bold
+from .evidence_display import (
+    DECODED_GRADE,
+    DECODED_LABEL,
+    ENTRY_LABEL,
+    OVERRIDE_TEXT,
+    PROVENANCE_LABEL,
+    UNKNOWN,
+    entry_evidence_display,
+)
 
 
 def _correspondence_json_map() -> dict[str, dict[str, dict[str, dict[str, list[str]]]]]:
@@ -66,6 +75,34 @@ def _docs_catalog_json_map(artifact: dict[str, Any]) -> dict[str, dict[str, Any]
                 "open_question": entry.open_question,
             }
     return table
+
+
+def _entry_evidence_rows(artifact: dict[str, Any]) -> list[list[str]]:
+    """Resolve the shared evidence rules once per entry for client-side lookup.
+
+    Rows are ``[op, group, instance, register, entry_evidence, codec_provenance,
+    decoded_value]`` using the artifact's own selector keys. Entries for which all
+    three are Unknown are left out and read back as Unknown. Purely presentational,
+    resolved for this render only -- never written into the scan artifact.
+    """
+    rows: list[list[str]] = []
+    for op, gg, ii, rr, entry in iter_register_entries(artifact):
+        display = entry_evidence_display(entry)
+        values = (display.grade, display.codec_provenance, display.decoded_value)
+        if any(value != UNKNOWN for value in values):
+            rows.append([op, gg, ii, rr, *values])
+    return rows
+
+
+def _entry_evidence_labels() -> dict[str, str]:
+    return {
+        "entry": ENTRY_LABEL,
+        "decoded": DECODED_LABEL,
+        "decoded_grade": DECODED_GRADE,
+        "override_text": OVERRIDE_TEXT,
+        "provenance": PROVENANCE_LABEL,
+        "unknown": UNKNOWN,
+    }
 
 
 def _json_for_html(obj: Any) -> str:
@@ -603,6 +640,34 @@ __ARTIFACT_JSON__
         if (entry.previous_name) parts.push("docs-ebus previous name: " + entry.previous_name);
         if (entry.open_question) parts.push("docs-ebus open question: " + entry.open_question);
         return parts.join(" · ");
+      }
+
+      // The entry evidence, decoded-value grade and codec provenance of each entry are resolved
+      // server-side by the shared rules in ui/evidence_display.py. Only the interactive row
+      // override is applied here, and only to a cell that holds an entry; a cell without one
+      // reads back as Unknown.
+      const B524_ENTRY_EVIDENCE_LABELS = __B524_ENTRY_EVIDENCE_LABELS__;
+      const B524_ENTRY_EVIDENCE = new Map(__B524_ENTRY_EVIDENCE__.map(
+        ([op, gg, ii, rr, grade, provenance, decoded]) => [
+          JSON.stringify([op, gg, ii, rr]),
+          {grade, provenance, decoded},
+        ]
+      ));
+
+      function b524EntryEvidence(op, gg, ii, rr, entry, override) {
+        const labels = B524_ENTRY_EVIDENCE_LABELS;
+        const hasEntry = !!entry && typeof entry === "object";
+        const known = hasEntry ? B524_ENTRY_EVIDENCE.get(JSON.stringify([op, gg, ii, rr])) : null;
+        const grade = known ? known.grade : labels.unknown;
+        const provenance = known ? known.provenance : labels.unknown;
+        const overridden = hasEntry && typeof override === "string";
+        const decoded = overridden ? labels.decoded_grade : (known ? known.decoded : labels.unknown);
+        const lines = [
+          `${labels.entry}: ${grade}`,
+          `${labels.decoded}: ${overridden ? labels.override_text : decoded}`,
+          `${labels.provenance}: ${provenance}`,
+        ];
+        return { grade, decoded, provenance, overridden, lines };
       }
 
       function b524CorrespondenceSecondaryText(opKey, groupKey, registerKey) {
@@ -2655,6 +2720,16 @@ __ARTIFACT_JSON__
                 if (descriptionEl.textContent) td.appendChild(descriptionEl);
               }
 
+              const evidence = b524EntryEvidence(opKey, groupKey, iiKey, rrKey, entry, override);
+              if (evidence.grade !== B524_ENTRY_EVIDENCE_LABELS.unknown || evidence.overridden) {
+                // An explicit grade or an override is always visible; the full lines, including
+                // Unknown, are in the cell's hover details below.
+                const evidenceEl = document.createElement("div");
+                evidenceEl.className = "cell-raw";
+                evidenceEl.textContent = evidence.lines.join(" · ");
+                td.appendChild(evidenceEl);
+              }
+
               if (typeof entry.flags_access === "string" && entry.flags_access && statusKind === "ok") {
                 const flagsEl = document.createElement("div");
                 flagsEl.className = "cell-flags";
@@ -2701,6 +2776,7 @@ __ARTIFACT_JSON__
               if (entry.constraint_provenance) tipParts.push(`constraint_provenance=${entry.constraint_provenance}`);
               if (entry.candidate_name) tipParts.push(`candidate_name=${entry.candidate_name}`);
               if (description && typeof description === "object") tipParts.push(`parameter_description_qualification=${description.qualification || "unknown"}`);
+              tipParts.push(...evidence.lines);
               if (tipParts.length) td.title = tipParts.join("\\n");
 
               tr.appendChild(td);
@@ -2890,6 +2966,9 @@ __ARTIFACT_JSON__
 def render_html_report(artifact: dict[str, Any], *, title: str | None = None) -> str:
     # Ensure operations-first structure for consistent JS traversal.
     artifact, _migration = migrate_artifact_schema(artifact)
+    # Grade and provenance are what the artifact retains: resolve them before the display passes
+    # below normalise or annotate descriptions.
+    entry_evidence = _entry_evidence_rows(artifact)
     apply_b524_value_labels(artifact)
     operations = artifact.get("operations")
     if isinstance(operations, dict):
@@ -2974,6 +3053,8 @@ def render_html_report(artifact: dict[str, Any], *, title: str | None = None) ->
                 "__B524_GROUP_NAMES__": _json_for_html(group_name_map),
                 "__B524_REGISTER_NAME_CORRESPONDENCE__": _json_for_html(_correspondence_json_map()),
                 "__B524_DOCS_CATALOG_NAMES__": _json_for_html(_docs_catalog_json_map(artifact)),
+                "__B524_ENTRY_EVIDENCE__": _json_for_html(entry_evidence),
+                "__B524_ENTRY_EVIDENCE_LABELS__": _json_for_html(_entry_evidence_labels()),
                 "__OBSERVED_NAME_CAVEAT__": _json_for_html(OBSERVED_NAME_CAVEAT),
                 "__B524_CIRCUIT_II_MIN__": (
                     "0"
