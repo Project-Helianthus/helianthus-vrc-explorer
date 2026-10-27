@@ -232,3 +232,23 @@ def test_recognized_codec_and_nonfinite_limits_without_qualification_promotion()
     entry["read_opcode"] = "0x06"
     with pytest.raises(ValueError, match="Conflicting register opcode"):
         export(source)
+
+
+@pytest.mark.parametrize(
+    ("key", "other"),
+    [("read_opcode", "0x06"), ("group", "0x03"), ("instance", "0x01"), ("register", "0x000a")],
+)
+def test_misplaced_description_selector_is_not_bound_to_enclosing_entry(key, other):
+    source = artifact()
+    entry = source["operations"]["0x02"]["groups"]["0x02"]["instances"]["0x00"]["registers"][
+        "0x0009"
+    ]
+    entry["parameter_description"].update(
+        {"read_opcode": "0x02", "group": "0x02", "instance": "0x00", "register": "0x0009"}
+    )
+    assert export(deepcopy(source))["observations"][0]["decoded_observation"]["min"] == 10.0
+    entry["parameter_description"][key] = other
+    record = export(source)["observations"][0]
+    assert record["raw_description"] == "unknown"
+    assert record["decoded_observation"]["min"] == "unknown"
+    assert record["decoded_observation"]["qualification"] == "unknown"

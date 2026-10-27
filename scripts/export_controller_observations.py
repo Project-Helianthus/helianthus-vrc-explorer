@@ -59,8 +59,20 @@ def _numeric(value: object) -> int | float | str:
     return "unknown"
 
 
-def _decoded(entry: dict) -> tuple[dict, str]:
+def _decoded(entry: dict, selector: tuple[str, str, str, str]) -> tuple[dict, str]:
     description = _object(entry.get("parameter_description", {}))
+    for key, expected, digits in zip(
+        ("read_opcode", "group", "instance", "register"), selector, (2, 2, 2, 4), strict=True
+    ):
+        # A description naming another selector is not evidence for this one.
+        if key in description:
+            try:
+                matches = _selector(description[key], digits) == expected
+            except ValueError:
+                matches = False
+            if not matches:
+                description = {}
+                break
     raw = (
         "omitted"
         if description.get("reply_hex") or description.get("raw_description_hex")
@@ -108,7 +120,7 @@ def export_observations(artifact: object) -> dict:
                     entry = _object(value)
                     if "read_opcode" in entry and _selector(entry["read_opcode"], 2) != opcode:
                         raise ValueError("Conflicting register opcode")
-                    decoded, raw = _decoded(entry)
+                    decoded, raw = _decoded(entry, selector)
                     observations.append(
                         {
                             "selector": dict(
