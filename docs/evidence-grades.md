@@ -125,6 +125,14 @@ header's `remote descriptions: N of M exact` line counts the remote OP06 devices
 whose identity is in the bundled catalog, and the scan warning names each device
 that is not exact as either identity not observed (a Full scan can observe it) or
 identity observed but not in the catalog, separately from the controller profile.
+A remote slot whose own presence probe found no connected device is stored with the
+status `absent`: it holds no device, so it is neither counted in that line nor named in
+the warning, and it never prompts for a Full scan. A slot whose probe could not be read
+is not `absent`. Scans stored before this status are relabelled from their own presence
+probes when displayed. The catalog's remote devices and instance capacities are
+installation observations from a reference scan (`installation_observation_not_profile_limit`):
+they recognise a device's class and firmware and bound a Recommended scan's candidate
+slots, but they are not profile limits, native evidence or write authority.
 
 ## Examples: structure, interpretation and missing context
 
