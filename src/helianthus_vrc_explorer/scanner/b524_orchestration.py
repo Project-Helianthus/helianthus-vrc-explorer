@@ -921,12 +921,15 @@ def run_b524_scan(
                 else None
             )
 
-            # An exact profile may bundle what a reference installation showed. In the
-            # recommended preset a bundled capacity replaces blind probing of every declared
-            # local slot: a live OP00 capacity still wins, and a live zero keeps skipping the
-            # group. A bundled population is context only and never a probe quota, because
-            # another installation may carry more devices. Remote groups already stop at the
-            # first absent device.
+            # An exact profile may bundle what a reference installation showed: there, the
+            # occupied circuit and zone slots lay within the first `capacity` slots. That
+            # observation only lets a readable live OP00 capacity bound the candidate slots
+            # of this recommended scan; the bundled number itself never sets or widens the
+            # window. An unreadable live capacity keeps the profile default (every declared
+            # slot), a live zero keeps skipping the group, and `full` ignores the window. A
+            # bundled population is context only and never a probe quota, because another
+            # installation may carry more devices. Remote groups already stop at the first
+            # absent device.
             bundled = (
                 bundled_instance_observation(profile_id, read_opcode=int(opcode), group=group.group)
                 if planner_preset == "recommended" and opcode == 0x02
@@ -937,12 +940,13 @@ def run_b524_scan(
             planning_basis: str | None = None
             if (
                 bundled is not None
-                and capacity != 0
                 and bundled["semantics"] == "capacity"
                 and bundled["capacity"] is not None
+                and capacity is not None
+                and capacity > 0
             ):
-                slot_window = max(bundled["capacity"], capacity or 0)
-                planning_basis = "bundled_installation_observation"
+                slot_window = capacity
+                planning_basis = "live_capacity_confirmed_by_bundled_observation"
 
             def retain_probe(
                 ii: int,

@@ -3,7 +3,8 @@
 The catalogue entry of `basv2_sw0507_hw1704_api1` records what one reference installation
 showed in a Full scan: per-group instance capacities and observed counts, and the present
 remote devices with their class and firmware. They are installation observations, never
-profile limits. A Recommended scan plans from them, and a remote device in them is exact.
+profile limits. They let a Recommended scan bound circuit and zone slots by the live
+capacity, and a remote device in them is exact.
 
 Keys under test and the production mutation each variation catches:
 
@@ -14,6 +15,14 @@ Observation lookup (`bundled_instance_observation`):
   the same number, and vice versa. Catches a lookup that ignores the namespace.
 - qualification: a block without the installation-observation qualification is ignored.
   Catches trusting an unqualified block as a plan.
+
+Planner window (`run_b524_scan`, recommended preset):
+- live capacity: readable and positive, it alone sets the circuit/zone window when the
+  bundle records a capacity for the group; zero skips; unreadable, non-integer or negative
+  keeps every declared slot. Catches letting a bundled number set, widen or zero a window.
+- bundled capacity (0, 2, 3 or none): never changes the window when the live value is
+  unreadable. Catches `max(bundled, live or 0)`.
+- preset: Full audits every slot whatever the live and bundled capacity.
 
 Remote device rows (`_remote_device_in_catalog`, via `description_catalog_status`):
 - profile id: the same tuple under another controller profile is not recognised.
@@ -437,7 +446,7 @@ def test_the_importer_cli_leaves_the_checked_in_catalogue_unchanged(tmp_path: Pa
     assert json.loads(baseline.read_text(encoding="utf-8"))["descriptions"] == []
 
 
-# --- the planner uses the bundled capacities ---------------------------------------------
+# --- the planner window ------------------------------------------------------------------
 
 
 def test_the_fixture_exposes_the_blind_slots_a_recommended_scan_used_to_probe() -> None:
@@ -445,14 +454,14 @@ def test_the_fixture_exposes_the_blind_slots_a_recommended_scan_used_to_probe() 
     assert local_slots("0x03") == set(range(11))
 
 
-def test_recommended_probes_the_bundled_capacity_instead_of_every_slot(
+def test_recommended_bounds_the_slots_by_the_live_capacity_the_bundle_backs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     artifact, regulator = scan("recommended")
 
     circuits = artifact["operations"]["0x02"]["groups"]["0x02"]
     zones = artifact["operations"]["0x02"]["groups"]["0x03"]
-    # Slots 0..2 are the bundled capacity of 3; slot 9 is the independent virtual circuit.
+    # Slots 0..2 are the live capacity of 3; slot 9 is the independent virtual circuit.
     assert regulator.probed(artifact, "0x02", "0x02") == {0, 1, 2, 9}
     assert regulator.probed(artifact, "0x02", "0x03") == {0, 1, 2}
     # What the slots hold is still decided by each slot's own presence predicate.
@@ -466,7 +475,7 @@ def test_recommended_probes_the_bundled_capacity_instead_of_every_slot(
         "0x01",
     }
     counts = artifact["meta"]["instance_counts"]
-    assert counts["0x02:0x02"]["planning_basis"] == "bundled_installation_observation"
+    assert counts["0x02:0x02"]["planning_basis"] == "live_capacity_confirmed_by_bundled_observation"
     assert counts["0x02:0x02"]["slot_window"] == 3
     assert (counts["0x02:0x02"]["probed_instances"], counts["0x02:0x03"]["probed_instances"]) == (
         4,
@@ -496,13 +505,12 @@ def test_the_full_preset_still_audits_every_declared_slot() -> None:
 @pytest.mark.parametrize(
     ("live_capacity", "circuits", "zones"),
     [
-        # A live capacity above the bundled one widens the window.
+        # A readable live capacity wins outright, above or below the bundled one of 3.
         (5.0, {0, 1, 2, 3, 4, 9}, {0, 1, 2, 3, 4}),
-        # A smaller live capacity never narrows below what was observed.
-        (2.0, {0, 1, 2, 9}, {0, 1, 2}),
+        (2.0, {0, 1, 9}, {0, 1}),
     ],
 )
-def test_live_capacity_is_never_overruled_by_the_bundled_one(
+def test_a_readable_live_capacity_wins_outright_over_the_bundled_one(
     live_capacity: float, circuits: set[int], zones: set[int]
 ) -> None:
     information = {**SYSTEM_INFORMATION, 0: live_capacity, 1: live_capacity}
@@ -511,6 +519,74 @@ def test_live_capacity_is_never_overruled_by_the_bundled_one(
 
     assert regulator.probed(artifact, "0x02", "0x02") == circuits
     assert regulator.probed(artifact, "0x02", "0x03") == zones
+    counts = artifact["meta"]["instance_counts"]
+    assert counts["0x02:0x03"]["slot_window"] == int(live_capacity)
+
+
+def _bundle_with_capacity(capacity: int | None):
+    """A stand-in catalogue lookup that records `capacity` for circuits and zones only."""
+
+    def lookup(profile_id: object, *, read_opcode: int, group: int) -> dict | None:
+        if capacity is None or (read_opcode, group) not in {(2, 0x02), (2, 0x03)}:
+            return None
+        return {"semantics": "capacity", "capacity": capacity, "expected": None, "observed": 2}
+
+    return lookup
+
+
+@pytest.mark.parametrize(
+    ("live_capacity", "bundled", "circuits", "zones", "windowed"),
+    [
+        # Live unreadable + bundled 0: never an empty window; every declared slot.
+        (None, 0, set(range(10)), set(range(11)), False),
+        # Live unreadable + bundled 2: the bundled number is not a limit for this scan.
+        (None, 2, set(range(10)), set(range(11)), False),
+        # Live unreadable + no bundle: the profile default, as before this change.
+        (None, None, set(range(10)), set(range(11)), False),
+        # Live 2 + bundled 0: the readable live value wins outright.
+        (2.0, 0, {0, 1, 9}, {0, 1}, True),
+        # An unreadable value of another kind (not an integer, negative) is unreadable too.
+        (2.5, 2, set(range(10)), set(range(11)), False),
+        (-1.0, 2, set(range(10)), set(range(11)), False),
+        # Live readable + no bundle: no window, as before this change.
+        (2.0, None, set(range(10)), set(range(11)), False),
+    ],
+)
+def test_a_bundled_capacity_never_becomes_an_empty_or_smaller_window_without_a_live_one(
+    monkeypatch: pytest.MonkeyPatch,
+    live_capacity: float | None,
+    bundled: int | None,
+    circuits: set[int],
+    zones: set[int],
+    windowed: bool,
+) -> None:
+    from helianthus_vrc_explorer.scanner import b524_orchestration
+
+    monkeypatch.setattr(
+        b524_orchestration, "bundled_instance_observation", _bundle_with_capacity(bundled)
+    )
+    information = {k: v for k, v in SYSTEM_INFORMATION.items() if k not in (0, 1)}
+    if live_capacity is not None:
+        information |= {0: live_capacity, 1: live_capacity}
+
+    artifact, regulator = scan("recommended", Regulator(system_information=information))
+
+    assert regulator.probed(artifact, "0x02", "0x02") == circuits
+    assert regulator.probed(artifact, "0x02", "0x03") == zones
+    counts = artifact["meta"]["instance_counts"]
+    for key in ("0x02:0x02", "0x02:0x03"):
+        assert ("planning_basis" in counts[key]) is windowed
+        assert ("slot_window" in counts[key]) is windowed
+
+
+def test_the_full_preset_audits_every_slot_whatever_the_live_and_bundled_capacity() -> None:
+    information = {**SYSTEM_INFORMATION, 0: 2.0, 1: 2.0}
+
+    artifact, regulator = scan("full", Regulator(system_information=information))
+
+    assert regulator.probed(artifact, "0x02", "0x02") == set(range(10))
+    assert regulator.probed(artifact, "0x02", "0x03") == set(range(11))
+    assert "slot_window" not in artifact["meta"]["instance_counts"]["0x02:0x02"]
 
 
 def test_a_live_zero_capacity_is_not_widened_by_the_bundled_one() -> None:
@@ -519,7 +595,7 @@ def test_a_live_zero_capacity_is_not_widened_by_the_bundled_one() -> None:
     artifact, regulator = scan("recommended", Regulator(system_information=information))
 
     # No ordinary zone candidate; the circuits keep only what a zero capacity always kept
-    # (the independent virtual slot), never the bundled window of three.
+    # (the independent virtual slot), never a window from the bundled capacity of three.
     assert regulator.probed(artifact, "0x02", "0x03") == set()
     assert regulator.probed(artifact, "0x02", "0x02") <= {0, 9}
     assert "planning_basis" not in artifact["meta"]["instance_counts"]["0x02:0x03"]

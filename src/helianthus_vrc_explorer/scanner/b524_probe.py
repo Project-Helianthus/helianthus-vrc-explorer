@@ -332,9 +332,10 @@ def _probe_present_instances(
     """Probe the candidate slots of one group and return one probe per slot tried.
 
     ``slot_window`` limits the ordinary candidates to that many slots counted from the
-    group's first slot. It is planning context from a bundled installation observation,
-    not a protocol limit: each slot inside the window still needs its own presence
-    predicate, and the independent virtual-circuit slot is probed regardless.
+    group's first slot. The caller passes a readable live OP00 capacity here only when a
+    bundled installation observation backs the assumption that occupied slots lie within
+    it; it is never a protocol limit. Each slot inside the window still needs its own
+    presence predicate, and the independent virtual-circuit slot is probed regardless.
     """
 
     probes: dict[int, InstanceAvailabilityProbe] = {}
