@@ -120,6 +120,12 @@ These distinctions come from the [crosswalk][crosswalk] and
 validation policy remain separate. An overlay's `validation_scope` is policy,
 not a native grade or reusable installation-presence authority.
 
+Description profiles are reported per device, not per scan: the Browser identity
+header's `remote descriptions: N of M exact` line counts the remote OP06 devices
+whose identity is in the bundled catalog, and the scan warning names each device
+that is not exact as either identity not observed (a Full scan can observe it) or
+identity observed but not in the catalog, separately from the controller profile.
+
 ## Examples: structure, interpretation and missing context
 
 - **Proven retained structure:** a description echoes GG/RR and contains
