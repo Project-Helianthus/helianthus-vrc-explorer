@@ -691,6 +691,9 @@ def export_installation_observations(artifact: dict[str, Any]) -> dict[str, Any]
             continue
         if row.get("semantics") not in _INSTANCE_SEMANTICS:
             continue
+        if row.get("discovery_complete") is False:
+            # An undecided presence probe makes the count a lower bound, not an observation.
+            continue
         groups.append(
             {
                 "read_opcode": read_opcode,

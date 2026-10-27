@@ -232,6 +232,26 @@ def test_exporting_requires_an_exact_catalogued_controller() -> None:
         export_installation_observations(artifact)
 
 
+def test_export_skips_groups_whose_discovery_was_incomplete() -> None:
+    artifact, _ = scan("recommended")
+    artifact["meta"]["instance_counts"]["0x02:0x04"]["discovery_complete"] = False
+    artifact["meta"]["instance_counts"]["0x02:0x04"]["observed"] = 0
+
+    observations = export_installation_observations(artifact)
+
+    keys = {
+        (row["read_opcode"], row["group"])
+        for row in observations["instance_observations"]["groups"]
+    }
+    assert ("0x02", "0x04") not in keys
+    assert ("0x02", "0x05") in keys
+    merged = merge_installation_observations(load_description_profile_catalog(), observations)
+    assert (
+        _profile(merged)["instance_observations"]
+        == _profile(load_description_profile_catalog())["instance_observations"]
+    )
+
+
 def test_export_keeps_nothing_it_does_not_allowlist() -> None:
     artifact, _ = scan("recommended")
     sentinel = "PRIVATE_SENTINEL"

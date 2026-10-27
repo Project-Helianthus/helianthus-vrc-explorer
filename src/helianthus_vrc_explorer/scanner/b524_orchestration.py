@@ -1082,6 +1082,8 @@ def run_b524_scan(
                     "mismatch": expected is not None and expected != observed,
                     "capacity_exceeded": supported is not None and observed > supported,
                     "probed_instances": len(probes),
+                    "discovery_complete": not uncertain_instances
+                    and not any(probe.connection_state == "unknown" for probe in probes.values()),
                     **(
                         {"planning_basis": planning_basis, "slot_window": slot_window}
                         if planning_basis is not None
