@@ -75,6 +75,25 @@ class RegisterRow:
     value_label_qualification: str = ""
 
     @property
+    def effective_opcode(self) -> str | None:
+        """Canonical B524 opcode key: the explicit read opcode, else the namespace key.
+
+        An explicit read opcode wins even when it is spelled non-canonically
+        (``0x2``, ``0X02``). An explicit value that is not a valid opcode yields
+        ``None`` instead of falling back to the namespace.
+        """
+
+        for raw in (self.address.read_opcode, self.namespace_key):
+            if not isinstance(raw, str) or not raw.strip():
+                continue
+            try:
+                value = int(raw.strip(), 0)
+            except ValueError:
+                return None
+            return f"0x{value:02x}" if 0 <= value <= 0xFF else None
+        return None
+
+    @property
     def display_label(self) -> str:
         """Compact user-facing register label while retaining native address metadata."""
 

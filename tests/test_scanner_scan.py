@@ -753,12 +753,12 @@ def test_scan_b524_skips_constraint_dictionary_by_default(tmp_path: Path) -> Non
     assert transport.constraint_requests == []
     assert artifact["meta"]["constraint_probe_enabled"] is False
     assert artifact["meta"]["constraint_dictionary"] == {}
-    assert artifact["meta"]["constraint_scope"]["decision"] == "opcode_0x02_default"
+    assert artifact["meta"]["constraint_scope"]["decision"] == "opcode_0x02_only"
     assert artifact["meta"]["constraint_scope"]["protocol"] == "opcode_0x01"
     regs = artifact_op_group(artifact, op="0x02", group="0x02")["instances"]["0x01"]["registers"]
     entry = regs["0x0002"]
     assert entry["constraint_source"] == "static_catalog"
-    assert entry["constraint_scope"] == "opcode_0x02_default"
+    assert entry["constraint_scope"] == "unscoped_catalog"
     assert entry["constraint_provenance"] == "catalog_seeded_from_opcode_0x01"
     assert entry["constraint_type"] == "u16_range"
     assert entry["constraint_min"] == 0
@@ -796,7 +796,9 @@ def test_scan_b524_does_not_use_unqualified_seeded_hints_for_validation(tmp_path
     entry = regs["0x0002"]
     assert entry["value"] == 5
     assert entry["constraint_source"] == "static_catalog"
-    assert entry["constraint_qualification"] == "legacy_unqualified"
+    assert entry["constraint_qualified"] is False
+    assert entry["constraint_scope"] == "unscoped_catalog"
+    assert "constraint_qualification" not in entry
     assert "constraint_mismatch_reason" not in entry
     assert "constraint_mismatches" not in artifact["meta"]
 
