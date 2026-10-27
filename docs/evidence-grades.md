@@ -131,8 +131,10 @@ the warning, and it never prompts for a Full scan. A slot whose probe could not 
 is not `absent`. Scans stored before this status are relabelled from their own presence
 probes when displayed. The catalog's remote devices and instance capacities are
 installation observations from a reference scan (`installation_observation_not_profile_limit`):
-they recognise a device's class and firmware and bound a Recommended scan's candidate
-slots, but they are not profile limits, native evidence or write authority.
+the remote devices let a scan recognise a device's class and firmware, and the
+capacities and counts are context only: they never set, bound, widen or shrink a
+Recommended scan's probe window, which follows the live values and each slot's own
+presence predicate. None of them is a profile limit, native evidence or write authority.
 
 ## Examples: structure, interpretation and missing context
 
