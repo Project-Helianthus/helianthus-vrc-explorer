@@ -39,6 +39,7 @@ from .evidence_display import (
     OVERRIDE_NOTE,
     PROVENANCE_LABEL,
     entry_evidence_display,
+    manual_override_value,
 )
 from .parameter_editor import parameter_enum_choices, parameter_value_display
 from .register_semantics import entry_display_value_text, entry_status_kind, entry_status_label
@@ -161,8 +162,10 @@ def _evidence_grade_rows(
 def _value_section(
     row: RegisterRow, entry: dict[str, Any] | None, type_override: str | None = None
 ) -> DetailSection:
+    overridden = manual_override_value(entry, type_override)
+    interpreted = str(overridden) if overridden is not None else _interpreted_value_text(row, entry)
     rows: list[DetailRow] = [
-        DetailRow("Interpreted", _interpreted_value_text(row, entry)),
+        DetailRow("Interpreted", interpreted),
         DetailRow("RAW", (entry.get("raw_hex") if entry else None) or row.raw_hex or "—"),
     ]
     if entry is not None:

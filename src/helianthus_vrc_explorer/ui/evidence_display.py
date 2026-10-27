@@ -106,24 +106,29 @@ def entry_has_decoded_value(entry: Mapping[str, Any] | None) -> bool:
     return entry is not None and entry.get("value") is not None
 
 
-def manual_override_applies(entry: Mapping[str, Any] | None, type_override: str | None) -> bool:
-    """A row override is shown only when it yields a value from the entry's retained bytes.
+def manual_override_value(entry: Mapping[str, Any] | None, type_override: str | None) -> Any:
+    """The value a row override yields from the entry's retained bytes, else ``None``.
 
     An entry without usable ``raw_hex`` (timeout, empty response, invalid hex) or whose
-    bytes do not parse under the override has no overridden interpretation to claim.
+    bytes do not parse under the override has no overridden interpretation to claim, and
+    neither has a parse that yields no value (an EXP NaN).
     """
 
     if type_override is None or not entry:
-        return False
+        return None
     raw_hex = entry.get("raw_hex")
     if not isinstance(raw_hex, str) or not raw_hex:
-        return False
+        return None
     try:
-        parsed = parse_typed_value(type_override, bytes.fromhex(raw_hex))
+        return parse_typed_value(type_override, bytes.fromhex(raw_hex))
     except (ValueError, ValueParseError):
-        return False
-    # A parse that yields no value (an EXP NaN) is not an interpretation either.
-    return parsed is not None
+        return None
+
+
+def manual_override_applies(entry: Mapping[str, Any] | None, type_override: str | None) -> bool:
+    """A row override is shown only when it yields a value from the entry's retained bytes."""
+
+    return manual_override_value(entry, type_override) is not None
 
 
 @dataclass(frozen=True, slots=True)
