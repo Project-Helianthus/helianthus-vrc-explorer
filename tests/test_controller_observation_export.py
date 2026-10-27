@@ -274,6 +274,35 @@ def test_transport_error_response_state_is_retained():
 
 
 @pytest.mark.parametrize(
+    ("state", "error", "expected"),
+    [
+        (None, "transport_error: PRIVATE_SENTINEL", "transport_error"),
+        (None, "PRIVATE_SENTINEL transport_error:", "unknown"),
+        (None, "PRIVATE_SENTINEL", "unknown"),
+        (None, None, "unknown"),
+        (None, {"error": "transport_error: PRIVATE_SENTINEL"}, "unknown"),
+        ("timeout", "transport_error: PRIVATE_SENTINEL", "timeout"),
+        ("nack", "transport_error: PRIVATE_SENTINEL", "nack"),
+    ],
+)
+def test_live_transport_failure_marker_is_sanitized(state, error, expected):
+    source = artifact()
+    entry = source["operations"]["0x02"]["groups"]["0x02"]["instances"]["0x00"]["registers"][
+        "0x0009"
+    ]
+    entry.update(response_state=state, error=error)
+    before = deepcopy(source)
+    result = export(source)
+    record = result["observations"][0]
+    assert record["response_state"] == expected
+    assert record["decoded_observation"]["max"] == 70.0
+    assert record["evidence_grade"] == "Proven"
+    assert "error" not in record
+    assert "PRIVATE_SENTINEL" not in json.dumps(result)
+    assert source == before
+
+
+@pytest.mark.parametrize(
     "text",
     [
         '{"schema_version":"2.4","operations":{},"operations":{}}',

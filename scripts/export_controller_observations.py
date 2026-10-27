@@ -45,6 +45,15 @@ def _choice(value: object, allowed: frozenset[str], unknown: str = "unknown") ->
     return value if isinstance(value, str) and value in allowed else unknown
 
 
+def _response_state(entry: dict) -> str:
+    state = _choice(entry.get("response_state"), STATES)
+    error = entry.get("error")
+    # Live scanner failures can have no state; retain only the fixed error category.
+    if state == "unknown" and isinstance(error, str) and error.startswith("transport_error:"):
+        return "transport_error"
+    return state
+
+
 def _evidence_grade(entry: dict) -> str:
     if "evidence_grade" not in entry:
         return "unspecified"
@@ -145,7 +154,7 @@ def export_observations(artifact: object) -> dict:
                                 )
                             ),
                             "evidence_grade": _evidence_grade(entry),
-                            "response_state": _choice(entry.get("response_state"), STATES),
+                            "response_state": _response_state(entry),
                             "raw_description": raw,
                             "decoded_observation": decoded,
                         }
