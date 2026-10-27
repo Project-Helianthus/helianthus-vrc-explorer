@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "B524 BASV0 register observations v1",
+  "type": "object",
+  "required": ["schema_version", "evidence_class", "observation_id", "current_values", "native_headers", "response_payloads", "description_catalog", "records", "nonclaims"],
+  "properties": {
+    "schema_version": { "const": "b524-basv0-register-observations/v1" },
+    "evidence_class": { "const": "sanitized_read_only_register_observation" },
+    "observation_id": { "const": "basv0_sw0217_hw8803_api1" },
+    "current_values": { "const": "omitted" },
+    "native_headers": { "const": "omitted" },
+    "response_payloads": { "const": "omitted" },
+    "description_catalog": { "const": "b524-basv0-description-profile-v1.json" },
+    "records": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/record" } },
+    "nonclaims": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "selector": { "type": "object", "required": ["operation", "group", "instance", "register"], "properties": { "operation": { "enum": ["02", "06"] }, "group": { "type": "string", "pattern": "^[0-9A-F]{2}$" }, "instance": { "type": "string", "pattern": "^[0-9A-F]{2}$" }, "register": { "type": "string", "pattern": "^[0-9A-F]{4}$" } }, "additionalProperties": false },
+    "description": { "oneOf": [ { "type": "null" }, { "type": "object", "required": ["record_index", "acquisition_state"], "properties": { "record_index": { "type": "integer", "minimum": 0 }, "acquisition_state": { "enum": ["matched", "unqualified", "unavailable"] } }, "additionalProperties": false } ] },
+    "record": { "type": "object", "required": ["selector", "identity_scope", "name", "access_flags", "presence_state", "response_state", "observed_payload_width", "error_state", "description"], "properties": { "selector": { "$ref": "#/$defs/selector" }, "identity_scope": { "enum": ["local", "remote"] }, "name": { "type": ["string", "null"] }, "access_flags": { "type": ["string", "null"], "pattern": "^[0-9A-F]{2}$" }, "presence_state": { "enum": ["observed_present", "observed_inactive", "unknown", "remote_identity_unqualified"] }, "response_state": { "enum": ["echo_payload", "status_only", "transport_error"] }, "observed_payload_width": { "type": ["integer", "null"], "minimum": 0 }, "error_state": { "enum": [null, "parse_error", "transport_error"] }, "description": { "$ref": "#/$defs/description" } }, "allOf": [ {"if": {"properties": {"selector": {"properties": {"operation": {"const": "02"}}}}}, "then": {"properties": {"identity_scope": {"const": "local"}}}, "else": {"properties": {"identity_scope": {"const": "remote"}}}}, { "if": { "properties": { "response_state": { "const": "echo_payload" } } }, "then": { "properties": { "access_flags": { "enum": ["00", "01", "02", "03"] }, "observed_payload_width": { "type": "integer", "minimum": 1 }, "error_state": { "enum": [null, "parse_error"] } } } }, { "if": { "properties": { "response_state": { "const": "status_only" } } }, "then": { "properties": { "access_flags": { "const": "00" }, "observed_payload_width": { "type": "null" }, "error_state": { "type": "null" } } } }, { "if": { "properties": { "response_state": { "const": "transport_error" } } }, "then": { "properties": { "access_flags": { "type": "null" }, "observed_payload_width": { "type": "null" }, "error_state": { "const": "transport_error" } } } } ], "additionalProperties": false }
+  }
+}
