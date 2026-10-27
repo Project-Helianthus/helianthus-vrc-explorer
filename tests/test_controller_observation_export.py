@@ -224,8 +224,29 @@ def test_partial_last_known_observation_and_unknown_grade_are_retained():
     record = export(source)["observations"][0]
     assert record["response_state"] == "timeout"
     assert record["decoded_observation"]["max"] == 70.0
-    assert record["evidence_grade"] == "Unknown"
+    assert record["evidence_grade"] == "unspecified"
     assert source == before
+
+
+def test_explicit_unknown_grade_differs_from_absent_grade():
+    source = artifact()
+    entry = source["operations"]["0x02"]["groups"]["0x02"]["instances"]["0x00"]["registers"][
+        "0x0009"
+    ]
+    entry["evidence_grade"] = "Unknown"
+    entry["parameter_description"].pop("evidence_grade", None)
+    record = export(source)["observations"][0]
+    assert record["evidence_grade"] == "Unknown"
+    assert record["decoded_observation"]["evidence_grade"] == "unspecified"
+
+
+def test_transport_error_response_state_is_retained():
+    source = artifact()
+    entry = source["operations"]["0x02"]["groups"]["0x02"]["instances"]["0x00"]["registers"][
+        "0x0009"
+    ]
+    entry["response_state"] = "transport_error"
+    assert export(source)["observations"][0]["response_state"] == "transport_error"
 
 
 @pytest.mark.parametrize(

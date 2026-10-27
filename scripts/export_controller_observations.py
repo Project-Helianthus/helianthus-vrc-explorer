@@ -5,7 +5,8 @@ Usage: python3 scripts/export_controller_observations.py ARTIFACT > inventory.js
 Only family, full selectors, evidence grades, response states and numeric decoded
 parameter-description observations are retained. Current values (including text,
 clocks and identifiers), raw bytes, names and arbitrary metadata are omitted.
-Missing qualifiers and absent raw descriptions are unknown. Qualifiers and grades
+Missing qualifiers and absent raw descriptions are unknown; an absent grade is
+"unspecified", distinct from an explicit Unknown grade. Qualifiers and grades
 are source claims, never qualification by this tool. This is not native profile
 input or write-bound evidence; decoded limits cannot authorize writes. The source
 is never modified. Legacy groups-first artifacts must be handled separately.
@@ -31,7 +32,7 @@ QUALIFICATIONS = frozenset(
 CODECS = frozenset(
     {"UCH", "BOOL", "I8", "UIN", "I16", "U32", "I32", "EXP", "DATE_DMY_U8X3", "TIME_HMS_U8X3"}
 )
-STATES = frozenset({"active", "empty_reply", "nack", "nack_or_crc", "timeout"})
+STATES = frozenset({"active", "empty_reply", "nack", "nack_or_crc", "timeout", "transport_error"})
 
 
 def _object(value: object) -> dict:
@@ -94,7 +95,7 @@ def _decoded(entry: dict, selector: tuple[str, str, str, str]) -> tuple[dict, st
             description.get("codec_provenance"),
             frozenset({"selector_qualified", "length_inferred"}),
         ),
-        "evidence_grade": _choice(description.get("evidence_grade"), GRADES, "Unknown"),
+        "evidence_grade": _choice(description.get("evidence_grade"), GRADES, "unspecified"),
     }, raw
 
 
@@ -135,7 +136,7 @@ def export_observations(artifact: object) -> dict:
                                 )
                             ),
                             "evidence_grade": _choice(
-                                entry.get("evidence_grade"), GRADES, "Unknown"
+                                entry.get("evidence_grade"), GRADES, "unspecified"
                             ),
                             "response_state": _choice(entry.get("response_state"), STATES),
                             "raw_description": raw,
