@@ -152,3 +152,33 @@ def test_refresh_and_semantic_failure_preserve_public_bytes(tmp_path):
             for file in target.rglob("*")
             if file.is_file()
         }
+
+
+def test_refresh_copy_failure_leaves_last_known_good_bundle(tmp_path, monkeypatch):
+    source = tmp_path / "source"
+    shutil.copytree(checker.DEFAULT_ROOT, source)
+    (source / str(checker.VALIDATOR).removesuffix(".txt")).write_bytes(
+        (source / checker.VALIDATOR).read_bytes()
+    )
+    (source / "protocols/LICENSE").write_bytes((source / "LICENSE-CC0").read_bytes())
+    (source / "LICENSE").write_bytes((source / "LICENSE-AGPL").read_bytes())
+    pins = [
+        sha256((source / checker.NATIVE / name).read_bytes()).hexdigest()
+        for name in (checker.DESCRIPTION, checker.OBSERVATIONS)
+    ]
+    (source / checker.PROFILE_PAGE).write_text("\n".join(f"`{pin}`" for pin in pins))
+    target = tmp_path / "target"
+    target.mkdir()
+    (target / "manifest.json").write_text("last-known-good")
+    real = shutil.copyfile
+
+    def failing(src, dst, *args, **kwargs):
+        if Path(dst).name == checker.OBSERVATIONS and ".target-new-" in str(dst):
+            raise OSError("disk full")
+        return real(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(shutil, "copyfile", failing)
+    with pytest.raises(OSError):
+        checker.refresh(source, target)
+    assert (target / "manifest.json").read_text() == "last-known-good"
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["source", "target"]

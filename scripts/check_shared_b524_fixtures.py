@@ -139,12 +139,34 @@ def refresh(source, target=DEFAULT_ROOT):
         }
         (staged / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
         validate_bundle(staged)
-        target.mkdir(parents=True, exist_ok=True)
+        publish(staged, target)
+
+
+def publish(staged, target):
+    """Replace target in one rename so a mid-copy failure keeps the last-known-good bundle."""
+    target = target.resolve()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fresh = Path(tempfile.mkdtemp(prefix=f".{target.name}-new-", dir=target.parent))
+    backup = fresh.with_name(fresh.name + "-old")
+    try:
+        if target.exists():
+            shutil.copytree(target, fresh, dirs_exist_ok=True)
         for file in sorted(staged.rglob("*")):
             if file.is_file():
-                destination = target / file.relative_to(staged)
+                destination = fresh / file.relative_to(staged)
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(file, destination)
+        if target.exists():
+            target.rename(backup)
+        try:
+            fresh.rename(target)
+        except OSError:
+            if backup.exists():
+                backup.rename(target)
+            raise
+    finally:
+        shutil.rmtree(fresh, ignore_errors=True)
+        shutil.rmtree(backup, ignore_errors=True)
 
 
 def main():
