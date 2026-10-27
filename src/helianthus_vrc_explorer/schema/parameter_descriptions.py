@@ -664,6 +664,32 @@ def _hex_key(value: object, digits: int) -> str | None:
     return None
 
 
+def _discovery_complete(
+    artifact: dict[str, Any], row: dict[str, Any], *, read_opcode: str, group: str
+) -> bool:
+    """Whether a count row stands for a decided discovery.
+
+    A stored flag decides. A row from before the flag existed is judged from the presence
+    probes the artifact retained for its group: any probe without a clean answer, or a
+    group with no retained probe, leaves the count a lower bound.
+    """
+
+    flag = row.get("discovery_complete")
+    if isinstance(flag, bool):
+        return flag
+    groups = artifact.get("operations", {}).get(read_opcode, {}).get("groups", {})
+    group_obj = groups.get(group) if isinstance(groups, dict) else None
+    probes = group_obj.get("availability_probes") if isinstance(group_obj, dict) else None
+    if not isinstance(probes, dict) or not probes:
+        return False
+    return all(
+        isinstance(probe, dict)
+        and probe.get("connection_state") != "unknown"
+        and isinstance(probe.get("present"), bool)
+        for probe in probes.values()
+    )
+
+
 def export_installation_observations(artifact: dict[str, Any]) -> dict[str, Any]:
     """Project the installation a scan observed into the two catalogue blocks.
 
@@ -691,7 +717,7 @@ def export_installation_observations(artifact: dict[str, Any]) -> dict[str, Any]
             continue
         if row.get("semantics") not in _INSTANCE_SEMANTICS:
             continue
-        if row.get("discovery_complete") is False:
+        if not _discovery_complete(artifact, row, read_opcode=read_opcode, group=group):
             # An undecided presence probe makes the count a lower bound, not an observation.
             continue
         groups.append(

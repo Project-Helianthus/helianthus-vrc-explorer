@@ -327,16 +327,8 @@ def _probe_present_instances(
     stop_at_first_absence: bool = False,
     on_probe: Any = None,
     presence_profile: str | None = None,
-    slot_window: int | None = None,
 ) -> dict[int, InstanceAvailabilityProbe]:
-    """Probe the candidate slots of one group and return one probe per slot tried.
-
-    ``slot_window`` limits the ordinary candidates to that many slots counted from the
-    group's first slot. The caller passes a readable live OP00 capacity here only when a
-    bundled installation observation backs the assumption that occupied slots lie within
-    it; it is never a protocol limit. Each slot inside the window still needs its own
-    presence predicate, and the independent virtual-circuit slot is probed regardless.
-    """
+    """Probe the candidate slots of one group and return one probe per slot tried."""
 
     probes: dict[int, InstanceAvailabilityProbe] = {}
     present_count = 0
@@ -352,8 +344,6 @@ def _probe_present_instances(
         else 0
     )
     ordinary_ii_max = ii_max
-    if slot_window is not None:
-        ordinary_ii_max = min(ordinary_ii_max, first_ii + slot_window - 1)
     if capacity == 0:
         if (opcode, group) != (0x02, 0x02):
             return probes
