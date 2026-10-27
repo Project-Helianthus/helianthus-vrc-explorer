@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from copy import deepcopy
 from io import StringIO
 from typing import Any
@@ -54,8 +55,8 @@ def test_explicit_grade_is_separate_from_acceptance_and_profile(grade: str) -> N
 
     view = _view(artifact)
 
-    shown = "Hypothesis" if grade == "Proven" else grade
-    assert f"Decoded evidence: {shown}" in view
+    assert f"Decoded evidence: {grade}" in view
+    assert "Decoded interpretation" not in view
     assert "Codec acceptance: matched (codec_provenance=selector_qualified)" in view
     assert "Controller-profile match: True" in view
     assert "raw_hex=0100" in view
@@ -110,7 +111,9 @@ def test_override_is_view_hypothesis_without_regrading_native_evidence(grade: st
 
     view = _view(artifact)
 
-    assert "Decoded evidence: Hypothesis (manual type override; view only)" in view
+    shown = grade if grade is not None else "Unknown"
+    assert re.search(rf"Decoded evidence: {shown}\s*│", view)
+    assert "Decoded interpretation: Hypothesis (manual type override; view only)" in view
     assert entry["raw_hex"] == "0100"
     assert entry["value"] == "0x0100"
     assert entry.get("evidence_grade") == grade
@@ -128,8 +131,7 @@ def test_grade_does_not_imply_accepted_codec_or_matching_profile() -> None:
 
     view = _view(_artifact(entry))
 
-    assert "Decoded evidence: Hypothesis" in view
-    assert "Decoded evidence: Proven" not in view
+    assert "Decoded evidence: Proven" in view
     assert "Codec acceptance: unqualified (codec_provenance=length_inferred)" in view
     assert "Controller-profile match: False" in view
 
@@ -151,9 +153,29 @@ def test_saved_override_is_hypothesis_without_altering_retained_entry(
 
     view = _view(artifact)
 
-    assert "Decoded evidence: Hypothesis (manual type override; view only)" in view
+    assert re.search(r"Decoded evidence: Proven\s*│", view)
+    assert "Decoded interpretation: Hypothesis (manual type override; view only)" in view
     assert "raw_hex=0100" in view
     assert artifact == before
+
+
+def test_row_override_does_not_grade_instance_without_entry() -> None:
+    artifact = _artifact(_entry())
+    instances = artifact["operations"]["0x02"]["groups"]["0x01"]["instances"]
+    instances["0x01"] = {"registers": {}}
+    apply_row_type_override(
+        artifact, group_key="0x01", rr_key="0x0005", type_spec="HEX:2", op_key="0x02"
+    )
+    output = StringIO()
+    console = Console(file=output, width=140, height=40, color_system=None)
+    state = _State(sheets=_build_sheets(artifact))
+    state.col_idx = 1
+    console.print(_render(console, artifact, state))
+    view = output.getvalue()
+
+    assert "II=0x01" in view
+    assert "Decoded evidence: Unknown" in view
+    assert "Decoded interpretation" not in view
 
 
 def test_entry_level_codec_provenance_is_used_without_description() -> None:

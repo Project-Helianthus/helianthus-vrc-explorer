@@ -481,12 +481,10 @@ def _render(
     grade = selected_entry.get("evidence_grade") if selected_entry else None
     if not isinstance(grade, str) or grade not in {"Proven", "Hypothesis", "Unknown"}:
         grade = "Unknown"
-    if grade == "Proven":
-        # Decoded values are interpretations of retained bytes, never Proven.
-        grade = "Hypothesis"
-    if override is not None:
-        grade = "Hypothesis (manual type override; view only)"
     details_lines.append(f"Decoded evidence: {grade}")
+    if override is not None and selected_entry:
+        # The override reinterprets this cell's bytes in the view only; the retained grade stays.
+        details_lines.append("Decoded interpretation: Hypothesis (manual type override; view only)")
     description = selected_entry.get("parameter_description") if selected_entry else None
     if not isinstance(description, dict):
         description = {}
