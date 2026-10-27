@@ -54,7 +54,8 @@ def test_explicit_grade_is_separate_from_acceptance_and_profile(grade: str) -> N
 
     view = _view(artifact)
 
-    assert f"Decoded evidence: {grade}" in view
+    shown = "Hypothesis" if grade == "Proven" else grade
+    assert f"Decoded evidence: {shown}" in view
     assert "Codec acceptance: matched (codec_provenance=selector_qualified)" in view
     assert "Controller-profile match: True" in view
     assert "raw_hex=0100" in view
@@ -127,7 +128,8 @@ def test_grade_does_not_imply_accepted_codec_or_matching_profile() -> None:
 
     view = _view(_artifact(entry))
 
-    assert "Decoded evidence: Proven" in view
+    assert "Decoded evidence: Hypothesis" in view
+    assert "Decoded evidence: Proven" not in view
     assert "Codec acceptance: unqualified (codec_provenance=length_inferred)" in view
     assert "Controller-profile match: False" in view
 
@@ -152,3 +154,13 @@ def test_saved_override_is_hypothesis_without_altering_retained_entry(
     assert "Decoded evidence: Hypothesis (manual type override; view only)" in view
     assert "raw_hex=0100" in view
     assert artifact == before
+
+
+def test_entry_level_codec_provenance_is_used_without_description() -> None:
+    entry = _entry()
+    del entry["parameter_description"]
+    entry["codec_provenance"] = "length_inferred"
+
+    view = _view(_artifact(entry))
+
+    assert "(codec_provenance=length_inferred)" in view

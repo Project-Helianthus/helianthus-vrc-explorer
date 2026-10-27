@@ -481,15 +481,21 @@ def _render(
     grade = selected_entry.get("evidence_grade") if selected_entry else None
     if not isinstance(grade, str) or grade not in {"Proven", "Hypothesis", "Unknown"}:
         grade = "Unknown"
+    if grade == "Proven":
+        # Decoded values are interpretations of retained bytes, never Proven.
+        grade = "Hypothesis"
     if override is not None:
         grade = "Hypothesis (manual type override; view only)"
     details_lines.append(f"Decoded evidence: {grade}")
     description = selected_entry.get("parameter_description") if selected_entry else None
     if not isinstance(description, dict):
         description = {}
+    codec_provenance = description.get("codec_provenance")
+    if codec_provenance is None and selected_entry:
+        codec_provenance = selected_entry.get("codec_provenance")
     details_lines.append(
         f"Codec acceptance: {description.get('qualification', 'Unknown')} "
-        f"(codec_provenance={description.get('codec_provenance', 'Unknown')})"
+        f"(codec_provenance={codec_provenance if codec_provenance is not None else 'Unknown'})"
     )
     profile_match = description.get("target_profile_match")
     profile_label = str(profile_match) if isinstance(profile_match, bool) else "Unknown"
