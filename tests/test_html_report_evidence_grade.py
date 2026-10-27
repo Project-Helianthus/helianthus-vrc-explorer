@@ -556,6 +556,20 @@ def test_page_override_lookup_honors_operation_keyed_overrides() -> None:
     assert _run(script) == ["HEX:2", None, "UIN"]
 
 
+def test_page_set_row_override_is_seen_by_get_with_operation_keyed_overrides() -> None:
+    html = render_html_report(_keyed_artifact())
+    start = html.index("function getRowOverride(")
+    end = html.index("function normalizeOpcodeKey(", start)
+    script = (
+        'const state = {overrides: {"0x09": {operations: {"0x02": {"0x0002": "UIN"}}}}};'
+        + html[start:end]
+        + 'setRowOverride("0x09", "0x0002", "HEX:2", "0x02");'
+        + 'console.log(JSON.stringify(getRowOverride("0x09", "0x0002", "0x02")));'
+    )
+
+    assert _run(script) == "HEX:2"
+
+
 def test_cell_does_not_claim_an_override_that_parses_to_no_value() -> None:
     html = render_html_report(_keyed_artifact())
 

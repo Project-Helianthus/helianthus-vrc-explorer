@@ -1028,6 +1028,12 @@ __ARTIFACT_JSON__
             state.overrides[groupKey].namespaces[namespaceKey] = {};
           }
           state.overrides[groupKey].namespaces[namespaceKey][rrKey] = typeSpec;
+          // getRowOverride prefers the operation-keyed tree when one was saved, so keep it in step.
+          const opsTree = state.overrides[groupKey].operations;
+          if (opsTree && typeof opsTree === "object") {
+            if (!opsTree[namespaceKey] || typeof opsTree[namespaceKey] !== "object") opsTree[namespaceKey] = {};
+            opsTree[namespaceKey][rrKey] = typeSpec;
+          }
           return;
         }
         state.overrides[groupKey][rrKey] = typeSpec;
