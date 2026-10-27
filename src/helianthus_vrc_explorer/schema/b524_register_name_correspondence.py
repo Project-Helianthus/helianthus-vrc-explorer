@@ -5,6 +5,9 @@ Explorer name and the observed Vaillant and eBUSd names for the same
 register. It never changes a register's codec, class, write authority, or
 the canonical Explorer name used everywhere else -- it is secondary
 information, resolved at render time, never written into scan artifacts.
+Observed-name identifications are Hypothesis, not wire observations. The
+docs-owned catalog is a separate labelled correspondence; its templates are
+bound to a full native selector for each render.
 """
 
 from __future__ import annotations
@@ -96,3 +99,65 @@ def b524_register_name_correspondence(
     """Resolve one register's observed name cross-reference, if the catalog has one."""
 
     return bundled_b524_register_name_correspondence().get((opcode, group, register))
+
+
+@dataclass(frozen=True, slots=True)
+class B524DocsCatalogCorrespondence:
+    """Docs naming annotation bound to one full native selector, never authority."""
+
+    selector: tuple[int, int, int, int]
+    name: str
+    previous_name: str
+    open_question: str
+
+    @property
+    def provisional(self) -> bool:
+        return self.name.startswith("unknown_") or bool(self.open_question)
+
+
+@cache
+def _docs_catalog_templates() -> dict[tuple[int, int, int], tuple[str, str, str]]:
+    resource = resources.files("helianthus_vrc_explorer.data").joinpath(
+        "b524_docs_catalog_names.csv"
+    )
+    mapping: dict[tuple[int, int, int], tuple[str, str, str]] = {}
+    with resource.open("r", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        if tuple(reader.fieldnames or ()) != (
+            "opcode",
+            "group",
+            "register",
+            "name",
+            "previous_name",
+            "open_question",
+        ):
+            raise ValueError("Unexpected docs-ebus catalog header")
+        for row in reader:
+            key = (int(row["opcode"], 0), int(row["group"], 0), int(row["register"], 0))
+            if key in mapping:
+                raise ValueError(f"Duplicate docs-ebus catalog selector: {key}")
+            mapping[key] = (row["name"], row["previous_name"], row["open_question"])
+    return mapping
+
+
+def b524_docs_catalog_correspondence(
+    *, opcode: int, group: int, instance: int, register: int
+) -> B524DocsCatalogCorrespondence | None:
+    """Bind an instance-independent docs catalog label to exactly OP/GG/II/RR.
+
+    The source catalog has no II column. Reusing a naming template for an II
+    makes no claim about that instance's presence, values or protocol support.
+    Each returned annotation retains its full selector; identities never merge.
+    """
+    if not (0 <= instance <= 255):
+        return None
+    template = _docs_catalog_templates().get((opcode, group, register))
+    if template is None:
+        return None
+    return B524DocsCatalogCorrespondence((opcode, group, instance, register), *template)
+
+
+OBSERVED_NAME_CAVEAT = (
+    "Hypothesis: observed-name identification; source not published with the fixture. "
+    "Names establish neither codec, value range nor write access."
+)

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import io
+from dataclasses import replace
 
+import pytest
 from rich.console import Console
 from textual.widgets import DataTable, Static, Tree
 
@@ -13,6 +15,27 @@ from helianthus_vrc_explorer.schema.parameter_descriptions import (
     export_description_baseline,
 )
 from helianthus_vrc_explorer.ui import browse_textual
+from helianthus_vrc_explorer.ui.browse_store import BrowseStore
+
+
+@pytest.mark.parametrize("register", ["0x0007", "0x0016", "0x00A2"])
+def test_legacy_rows_keep_observed_name_correspondence(register) -> None:
+    artifact = {
+        "groups": {"0x00": {"instances": {"0x00": {"registers": {register: {"value": 0}}}}}}
+    }
+    row = next(
+        row for row in BrowseStore.from_artifact(artifact).rows if row.register_key == register
+    )
+    assert row.address.read_opcode is None
+    assert row.namespace_key == "0x02"
+    app = browse_textual._BrowseApp(artifact, allow_write=False)
+    explicit_row = replace(row, address=replace(row.address, read_opcode="0x02"))
+    expected = app._correspondence_for_row(explicit_row)
+    assert expected is not None
+    assert app._correspondence_for_row(row) == expected
+    # Explicit opcodes take precedence over a fallback namespace.
+    other_opcode = replace(row, address=replace(row.address, read_opcode="0x06"))
+    assert app._correspondence_for_row(other_opcode) is None
 
 
 def _detail_text(app) -> str:

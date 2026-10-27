@@ -75,7 +75,8 @@ class RegisterEntry(TypedDict):
     # Sanitized diagnostics for failed reads or terminal adapter outages.
     transport_diagnostic: NotRequired[dict[str, str | int | None]]
     # Optional constraint dictionary annotation sourced from opcode 0x01 (01 GG RR).
-    constraint_qualification: NotRequired[str]
+    constraint_qualification: NotRequired[str]  # Historical artifact compatibility.
+    constraint_qualified: NotRequired[bool]
     constraint_tt: NotRequired[str]
     constraint_type: NotRequired[str]
     constraint_min: NotRequired[int | float | str | None]

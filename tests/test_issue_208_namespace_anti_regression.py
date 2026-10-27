@@ -15,7 +15,7 @@ from helianthus_vrc_explorer.artifact_schema import (
 from helianthus_vrc_explorer.scanner.identity import make_register_identity
 from helianthus_vrc_explorer.scanner.plan import make_plan_key
 from helianthus_vrc_explorer.schema.b524_constraints import (
-    CONSTRAINT_SCOPE_DECISION,
+    STATIC_CONSTRAINT_SCOPE,
     load_b524_constraints_catalog_from_path,
     lookup_static_constraint,
 )
@@ -80,10 +80,10 @@ def test_issue_208_constraint_scope_defaults_to_opcode_0x02_only(
     catalog_path.write_text(
         "\n".join(
             (
-                "group,register,type,min,max,step",
-                "0x03,0x0002,f32_range,15,30,0.5",
-                "0x03,0x0001,u16_range,1,200,1",
-                "0x04,0x0002,u8_range,0,10,1",
+                "opcode,group,register,type,min,max,step",
+                "0x02,0x03,0x0002,f32_range,15,30,0.5",
+                "0x02,0x03,0x0001,u16_range,1,200,1",
+                "0x02,0x04,0x0002,u8_range,0,10,1",
             )
         )
         + "\n",
@@ -102,7 +102,7 @@ def test_issue_208_constraint_scope_defaults_to_opcode_0x02_only(
 
     assert local is not None
     assert remote is None
-    assert local.scope == CONSTRAINT_SCOPE_DECISION
+    assert local.scope == STATIC_CONSTRAINT_SCOPE
     assert local.kind == "f32_range"
     assert local.min_value == 15
     assert local.max_value == 30

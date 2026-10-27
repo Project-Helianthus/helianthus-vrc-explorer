@@ -227,7 +227,10 @@ def test_basv0_bundle_keeps_bivalence_max_20_separate_from_basv2_max_50() -> Non
     effective = effective_parameter_description(artifact, selector)
     assert effective is not None
     assert effective["source"] == "profile"
+    assert effective["min"] == -20.0
     assert effective["max"] == 20.0
+    assert effective["step"] == 1.0
+    assert effective["type"] == "EXP"
     assert effective["codec_provenance"] == "selector_qualified"
 
 
@@ -265,7 +268,11 @@ def test_sanitized_observation_retains_unknowns_without_private_capture_fields()
     assert all(not forbidden.intersection(record) for record in fixture["records"])
 
     by_selector = {tuple(record["selector"].values()): record for record in fixture["records"]}
-    assert by_selector[("02", "00", "00", "0001")]["decoded"]["max"] == 20.0
+    dhw = by_selector[("02", "00", "00", "0001")]
+    assert dhw["access_flags"] == "03"
+    assert dhw["raw_description_hex"] == "0001000000A0C10000A0410000803F"
+    assert dhw["decoded"]["codec"] == "EXP"
+    assert (dhw["decoded"]["min"], dhw["decoded"]["max"], dhw["decoded"]["step"]) == (-20, 20, 1)
     assert by_selector[("02", "04", "01", "000B")]["decoded"]["qualification"] == ("unqualified")
     assert by_selector[("02", "09", "00", "0001")]["presence_state"] == "unknown"
     for register in ("006C", "006D", "006F", "0070"):
@@ -296,3 +303,30 @@ def test_sanitized_scalar_catalog_retains_unknown_and_wire_states_without_values
         and record["response_state"] == "echo_payload"
         for record in records
     )
+
+
+@pytest.mark.parametrize(
+    "section,field,value",
+    [
+        ("identity", "eid", "UNKNOWN"),
+        ("identity", "sw", "0218"),
+        ("identity", "hw", "8804"),
+        ("profile_context", "api_version", 2.0),
+        ("profile_context", "api_revision", 2.0),
+    ],
+)
+def test_dhw_bound_requires_every_basv0_identity_field(section, field, value) -> None:
+    artifact = _basv0_artifact()
+    artifact["meta"][section][field] = value
+    attach_bundled_descriptions(artifact)
+    selector = {"read_opcode": "0x02", "group": "0x00", "instance": "0x00", "register": "0x0001"}
+    assert effective_parameter_description(artifact, selector) is None
+
+
+@pytest.mark.parametrize("opcode,instance", [("0x02", "0x01"), ("0x06", "0x00")])
+def test_dhw_bound_does_not_cross_native_selector(opcode, instance) -> None:
+    artifact = _basv0_artifact(instance=instance)
+    artifact["operations"][opcode] = artifact["operations"].pop("0x02")
+    attach_bundled_descriptions(artifact)
+    selector = {"read_opcode": opcode, "group": "0x00", "instance": instance, "register": "0x0001"}
+    assert effective_parameter_description(artifact, selector) is None
