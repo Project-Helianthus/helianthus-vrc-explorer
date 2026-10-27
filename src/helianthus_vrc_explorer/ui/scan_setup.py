@@ -8,9 +8,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar
 
+from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.message import Message
 from textual.widgets import (
     Button,
     Checkbox,
@@ -261,6 +263,23 @@ class ScanSetupApp(App[ScanSetup | None]):
 class _JsonDirectoryTree(DirectoryTree):
     """Directory browser that shows navigation entries and JSON files only."""
 
+    BINDINGS: ClassVar = [Binding("enter", "open_or_select", "Open", show=False)]
+
+    class FileActivated(Message):
+        """Return was pressed on a file entry; the owning screen decides what to do."""
+
+        def __init__(self, path: Path) -> None:
+            super().__init__()
+            self.path = path
+
+    def action_open_or_select(self) -> None:
+        node = self.cursor_node
+        entry = None if node is None else node.data
+        if entry is not None and not Path(entry.path).is_dir():
+            self.post_message(self.FileActivated(Path(entry.path)))
+            return
+        self.action_select_cursor()
+
     def filter_paths(self, paths: Iterable[Path]) -> Iterable[Path]:
         return (
             path
@@ -315,8 +334,16 @@ class ArtifactOpenApp(App[Path | None]):
     def on_directory_tree_file_selected(self, event: DirectoryTree.FileSelected) -> None:
         path = Path(event.path)
         if path.is_file() and path.suffix.lower() == ".json":
-            self.query_one("#artifact-path", Input).value = str(path)
-            self.query_one("#artifact-open-status", Static).update("")
+            self._show_selected_artifact(path)
+
+    @on(_JsonDirectoryTree.FileActivated)
+    def _open_activated_artifact(self, event: _JsonDirectoryTree.FileActivated) -> None:
+        self._show_selected_artifact(event.path)
+        self.action_open()
+
+    def _show_selected_artifact(self, path: Path) -> None:
+        self.query_one("#artifact-path", Input).value = str(path)
+        self.query_one("#artifact-open-status", Static).update("")
 
     def _show_tree_root(self, path: Path) -> None:
         tree = self.query_one("#artifact-tree", _JsonDirectoryTree)
@@ -338,8 +365,10 @@ class ArtifactOpenApp(App[Path | None]):
             else:
                 self._show_tree_root(parent)
             return
-        if event.button.id != "artifact-open":
-            return
+        if event.button.id == "artifact-open":
+            self.action_open()
+
+    def action_open(self) -> None:
         raw = self.query_one("#artifact-path", Input).value.strip()
         path = Path(raw).expanduser() if raw else None
         if path is None or not path.exists() or not path.is_file():
