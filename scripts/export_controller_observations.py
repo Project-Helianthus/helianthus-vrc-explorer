@@ -24,6 +24,10 @@ import re
 import sys
 from pathlib import Path
 
+# Keep direct checkout invocation independent of an installed package copy.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from helianthus_vrc_explorer.artifact_schema import _derive_response_state  # noqa: E402
+
 GRADES = frozenset({"Proven", "Hypothesis", "Unknown"})
 QUALIFICATIONS = frozenset(
     {"matched", "unqualified", "unavailable", "bundled", "profile_qualified", "qualified"}
@@ -32,7 +36,9 @@ QUALIFICATIONS = frozenset(
 CODECS = frozenset(
     {"UCH", "BOOL", "I8", "UIN", "I16", "U32", "I32", "EXP", "DATE_DMY_U8X3", "TIME_HMS_U8X3"}
 )
-STATES = frozenset({"active", "empty_reply", "nack", "nack_or_crc", "timeout", "transport_error"})
+STATES = frozenset(
+    {"active", "empty_reply", "nack", "nack_or_crc", "timeout", "transport_error", "unattempted"}
+)
 
 
 def _object(value: object) -> dict:
@@ -47,6 +53,8 @@ def _choice(value: object, allowed: frozenset[str], unknown: str = "unknown") ->
 
 def _response_state(entry: dict) -> str:
     state = _choice(entry.get("response_state"), STATES)
+    if state == "unknown":
+        state = _choice(_derive_response_state(entry), STATES)
     error = entry.get("error")
     # Live scanner failures can have no state; retain only the fixed error category.
     if state == "unknown" and isinstance(error, str) and error.startswith("transport_error:"):

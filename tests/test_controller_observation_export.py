@@ -273,6 +273,36 @@ def test_transport_error_response_state_is_retained():
     assert export(source)["observations"][0]["response_state"] == "transport_error"
 
 
+@pytest.mark.parametrize("version", ["2.3", "2.4"])
+@pytest.mark.parametrize(
+    ("entry", "expected"),
+    [
+        ({"raw_hex": "PRIVATE_SENTINEL"}, "active"),
+        ({"reply_hex": "PRIVATE_SENTINEL"}, "active"),
+        ({"reply_hex": ""}, "empty_reply"),
+        ({"flags": 0}, "active"),
+        ({"flags_access": "dormant"}, "empty_reply"),
+        ({"error": "timeout"}, "timeout"),
+        ({"error": "transport_error: no_response"}, "empty_reply"),
+        ({"error": "transport_error: nack PRIVATE_SENTINEL"}, "nack"),
+        ({"error": "transport_error: PRIVATE_SENTINEL"}, "transport_error"),
+        ({}, "unknown"),
+        ({"response_state": "unattempted", "raw_hex": "PRIVATE_SENTINEL"}, "unattempted"),
+        ({"response_state": "timeout", "raw_hex": "PRIVATE_SENTINEL"}, "timeout"),
+    ],
+)
+def test_legacy_response_derivation_and_explicit_states(version, entry, expected):
+    source = artifact()
+    source["schema_version"] = version
+    registers = source["operations"]["0x02"]["groups"]["0x02"]["instances"]["0x00"]["registers"]
+    registers["0x0009"] = entry
+    before = deepcopy(source)
+    result = export(source)
+    assert result["observations"][0]["response_state"] == expected
+    assert "PRIVATE_SENTINEL" not in json.dumps(result)
+    assert source == before
+
+
 @pytest.mark.parametrize(
     ("state", "error", "expected"),
     [
@@ -291,6 +321,9 @@ def test_live_transport_failure_marker_is_sanitized(state, error, expected):
         "0x0009"
     ]
     entry.update(response_state=state, error=error)
+    # These cases exercise entries without retained reply/value evidence.
+    entry.pop("raw_hex")
+    entry.pop("value")
     before = deepcopy(source)
     result = export(source)
     record = result["observations"][0]
