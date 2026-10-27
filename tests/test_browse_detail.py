@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from helianthus_vrc_explorer.schema.b524_register_name_correspondence import (
     B524RegisterNameCorrespondence,
 )
@@ -152,6 +154,7 @@ def test_limits_section_shows_catalog_evidence_as_unqualified() -> None:
         "type": "EXP",
         "raw_hex": "00000000",
         "flags_access": "writable_visible",
+        "constraint_source": "static_catalog",
         "constraint_type": "f32_range",
         "constraint_min": 0,
         "constraint_max": 40,
@@ -162,7 +165,58 @@ def test_limits_section_shows_catalog_evidence_as_unqualified() -> None:
     assert limits is not None
     text = " ".join(f"{r.label} {r.value} {r.note}" for r in limits.rows)
     assert "catalog evidence" in text.lower()
-    assert "unqualified" in text.lower()
+    assert "unscoped_catalog (unqualified)" in text
+    assert "historical short-probe hints" in text
+
+
+@pytest.mark.parametrize(
+    ("source", "scope", "catalog"),
+    [
+        ("opcode_0x01", "opcode_0x01_probe", False),
+        ("static_catalog", "unscoped_catalog", True),
+        (None, None, True),
+    ],
+)
+def test_legacy_qualification_keeps_recorded_provenance(source, scope, catalog) -> None:
+    entry = {
+        "constraint_type": "f32_range",
+        "constraint_min": 0,
+        "constraint_max": 40,
+        "constraint_step": 0.5,
+        "constraint_qualification": "legacy_unqualified",
+    }
+    if source is not None:
+        entry["constraint_source"] = source
+    if scope is not None:
+        entry["constraint_scope"] = scope
+    sections = register_detail_sections(
+        row=_row(), entry=entry, description=None, correspondence=None
+    )
+    limits = _section(sections, "LIMITS")
+    assert limits is not None
+    text = " ".join(f"{r.label} {r.value} {r.note}" for r in limits.rows)
+    assert ("unscoped_catalog (unqualified)" in text) is catalog
+    if not catalog:
+        assert "opcode_0x01_probe" in text
+
+
+def test_limits_section_preserves_live_probe_scope() -> None:
+    entry = {
+        "constraint_type": "f32_range",
+        "constraint_min": 0,
+        "constraint_max": 40,
+        "constraint_step": 0.5,
+        "constraint_source": "probe",
+        "constraint_scope": "opcode_0x01_probe",
+    }
+    sections = register_detail_sections(
+        row=_row(), entry=entry, description=None, correspondence=None
+    )
+    limits = _section(sections, "LIMITS")
+    assert limits is not None
+    text = " ".join(f"{r.label} {r.value} {r.note}" for r in limits.rows)
+    assert "unscoped_catalog" not in text
+    assert "opcode_0x01_probe" in text
 
 
 def test_unknown_register_shows_fallback_name_flags_and_raw_unqualified_description() -> None:
@@ -448,6 +502,10 @@ def test_names_section_includes_correspondence_rows_with_explorer_name_first() -
     # The section carries names only: every row uses one of the fixed labels.
     allowed = {
         "Explorer",
+        "myvaillant_name provenance",
+        "Observed-name identification",
+        "docs-ebus catalog name",
+        "docs-ebus previous name",
         "Vaillant friendly name",
         "Vaillant name (VRC720)",
         "Vaillant name (VRC700)",
@@ -669,3 +727,118 @@ def test_legacy_calendar_label_and_display_only_limits_are_visible() -> None:
     )
     assert "HDA:3" in str(_section(sections, "TYPE"))
     assert "display-only; range unvalidated" in str(_section(sections, "LIMITS"))
+
+
+def test_docs_catalog_names_are_labelled_secondary_provisional_annotations() -> None:
+    row = _row(
+        group_key="0x00", instance_key="0x01", register_key="0x0007", myvaillant_name="system_off"
+    )
+    sections = register_detail_sections(row=row, entry={}, description=None)
+    names = _section(sections, "NAMES")
+    assert names is not None
+    assert names.rows[0].value == "system_off"
+    labels = {item.label: item.value for item in names.rows}
+    assert labels["docs-ebus catalog name (provisional)"] == "unknown_11"
+    assert labels["docs-ebus previous name"] == "system_off"
+    assert "Polarity unresolved" in labels["docs-ebus open question"]
+    other = _row(read_opcode="0x06", group_key="0x00", register_key="0x0007")
+    names = _section(register_detail_sections(row=other, entry={}, description=None), "NAMES")
+    assert not any(item.label.startswith("docs-ebus") for item in names.rows)
+
+
+@pytest.mark.parametrize("spelling", ["0x2", "0X02", " 0x02 "])
+def test_noncanonical_explicit_opcode_keeps_concrete_selector_and_names(spelling) -> None:
+    row = _row(
+        read_opcode=spelling,
+        group_key="0x00",
+        instance_key="0x01",
+        register_key="0x0007",
+        myvaillant_name="system_off",
+    )
+    assert row.effective_opcode == "0x02"
+    sections = register_detail_sections(row=row, entry={}, description=None)
+    gates = _section(sections, "GATES")
+    assert gates is not None
+    assert any(item.label == "Route" and item.value == "concrete selector" for item in gates.rows)
+    names = _section(sections, "NAMES")
+    assert names is not None
+    labels = {item.label: item.value for item in names.rows}
+    assert labels["docs-ebus catalog name (provisional)"] == "unknown_11"
+
+
+def test_invalid_explicit_opcode_does_not_fall_back_to_namespace() -> None:
+    from dataclasses import replace
+
+    row = _row(read_opcode="bogus", group_key="0x00", register_key="0x0007")
+    row = replace(row, namespace_key="0x02")
+    assert row.effective_opcode is None
+
+
+def test_docs_catalog_names_survive_legacy_migration_without_read_opcode() -> None:
+    from helianthus_vrc_explorer.ui.browse_store import BrowseStore
+
+    entry = {"value": 0, "flags_access": "config_user"}
+    artifact = {"groups": {"0x00": {"instances": {"0x00": {"registers": {"0x0007": entry}}}}}}
+    store = BrowseStore.from_artifact(artifact)
+    row = next(row for row in store.rows if row.register_key == "0x0007")
+    assert row.address.read_opcode is None
+    assert row.namespace_key == "0x02"
+
+    sections = register_detail_sections(row=row, entry=entry, description=None)
+    gates = _section(sections, "GATES")
+    assert gates is not None
+    assert any(item.label == "Route" and item.value == "concrete selector" for item in gates.rows)
+    names = _section(sections, "NAMES")
+    assert names is not None
+    labels = {item.label: item.value for item in names.rows}
+    assert labels["docs-ebus catalog name (provisional)"] == "unknown_11"
+    assert labels["docs-ebus previous name"] == "system_off"
+
+
+def test_enumeration_uses_migrated_namespace_without_read_opcode() -> None:
+    from helianthus_vrc_explorer.ui.browse_store import BrowseStore
+
+    entry = {"type": "UCH", "value": 2, "flags_access": "writable_visible"}
+    artifact = {"groups": {"0x09": {"instances": {"0x01": {"registers": {"0x0002": entry}}}}}}
+    store = BrowseStore.from_artifact(artifact)
+    row = next(row for row in store.rows if row.register_key == "0x0002")
+    assert row.address.read_opcode is None
+    assert row.namespace_key == "0x02"
+
+    enumeration = _section(
+        register_detail_sections(row=row, entry=entry, description=None), "ENUMERATION"
+    )
+    assert enumeration is not None
+    assert {item.label: item.value for item in enumeration.rows} == {
+        "1": "TIME_CONTROLLED (1)",
+        "2": "NORMAL (2)",
+        "3": "REDUCED (3)",
+    }
+    sections = register_detail_sections(row=row, entry=entry, description=None)
+    value = _section(sections, "VALUE")
+    assert value is not None
+    assert {item.label: item.value for item in value.rows}["Interpreted"] == "NORMAL (2)"
+
+
+def test_imported_app_names_render_with_family_and_hypothesis_caveat() -> None:
+    from helianthus_vrc_explorer.schema.b524_register_name_correspondence import (
+        b524_register_name_correspondence,
+    )
+
+    for register, family, expected in (
+        (0x16, "VRC700", "operationModeVentilation"),
+        (0xA2, "VRC720", "smartPhotovoltaicBufferOffset"),
+    ):
+        row = _row(group_key="0x00", instance_key="0x00", register_key=f"0x{register:04x}")
+        correspondence = b524_register_name_correspondence(opcode=2, group=0, register=register)
+        sections = register_detail_sections(
+            row=row, entry={}, description=None, correspondence=correspondence
+        )
+        names = _section(sections, "NAMES")
+        assert names is not None
+        labels = {item.label: item.value for item in names.rows}
+        assert labels[f"myVaillant name ({family})"] == expected
+        assert "Hypothesis" in labels["Observed-name identification"]
+        assert (
+            "neither codec, value range nor write access" in labels["Observed-name identification"]
+        )

@@ -577,7 +577,7 @@ def _constraint_map_to_dict(
 
 
 def _constraint_catalog_entry_count(catalog: StaticConstraintCatalog) -> int:
-    return sum(len(registers) for registers in catalog.values())
+    return len(catalog)
 
 
 def _constraint_for_register(
@@ -607,7 +607,7 @@ def _apply_constraint_metadata(
     entry: RegisterEntry,
     constraint: ConstraintEntry | StaticConstraintEntry,
 ) -> None:
-    entry["constraint_qualification"] = "legacy_unqualified"
+    entry["constraint_qualified"] = False
     entry["constraint_tt"] = _hex_u8(constraint.tt)
     entry["constraint_type"] = constraint.kind
     entry["constraint_min"] = constraint.min_value

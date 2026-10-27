@@ -18,7 +18,7 @@ opcode,group,register,name,vaillant_friendly_name,vaillant_name_vrc720,vaillant_
 0x02,0x00,0x0013,backup_heater_type,Backup heater type,system_backup_heater_type,system_backup_heater_type,backupHeaterType,,
 0x02,0x00,0x0014,adaptive_heating_curve,Adaptive heating curve,system_adaptive_heating_curve,system_adaptive_heating_curve,,,AdaptHeatCurve
 0x02,0x00,0x0015,automatic_daylight_saving_time,Automatic daylight saving time,,,,,
-0x02,0x00,0x0016,system_ventilation_operating_mode,Operating mode for air ventilation,,system_vrc700_operating_mode_for_air_ventilation,,,
+0x02,0x00,0x0016,system_ventilation_operating_mode,Operating mode for air ventilation,,system_vrc700_operating_mode_for_air_ventilation,,operationModeVentilation,
 0x02,0x00,0x0017,system_dhw_max_loading_time,Maximum DHW loading time,system_maximum_dhw_loading_time,system_maximum_dhw_loading_time,,domesticHotWaterMaximumLoadingTime,MaxCylinderChargeTime
 0x02,0x00,0x0018,system_dhw_blocking_time,DHW Blocking time,system_dhw_blocking_time,,domesticHotWaterTappingBlockingTime,,HwcLockTime
 0x02,0x00,0x0019,system_solar_flow_rate_setpoint,Set point solar flow rate,,,,,
@@ -140,7 +140,7 @@ opcode,group,register,name,vaillant_friendly_name,vaillant_name_vrc720,vaillant_
 0x02,0x00,0x009F,system_cylinder_mss_heating_top_temperature,MSS Buffer Top CH,system_mss_buffer_top_ch,system_mss_buffer_top_ch,,cylinderTemperatureSensorTopCentralHeating,HcStorageTempTop
 0x02,0x00,0x00A0,system_cylinder_mss_heating_bottom_temperature,MSS Buffer Bottom CH,system_mss_buffer_bottom_ch,system_mss_buffer_bottom_ch,,cylinderTemperatureSensorBottomCentralHeating,HcStorageTempBottom
 0x02,0x00,0x00A1,smart_pv_activation,Smart PV activation,,,,,
-0x02,0x00,0x00A2,system_cylinder_smart_pv_ch_offset,Smart PV CH buffer offset,system_smart_pv_ch_buffer_offset,system_smart_pv_ch_buffer_offset,,smartPhotovoltaicBufferOffset,
+0x02,0x00,0x00A2,system_cylinder_smart_pv_ch_offset,Smart PV CH buffer offset,system_smart_pv_ch_buffer_offset,system_smart_pv_ch_buffer_offset,smartPhotovoltaicBufferOffset,smartPhotovoltaicBufferOffset,
 0x02,0x00,0x00A3,system_ventilation_status_period,Status Period Ventilation,,,,,
 0x02,0x00,0x00A4,system_ventilation_special_function_status,Status Special Function Ventilation,,system_vrc700_status_special_function_ventilation,,currentSpecialFunction,
 0x02,0x00,0x00A5,cascade_client_sequence,Cascade client sequence,,,,,
