@@ -644,7 +644,7 @@ __ARTIFACT_JSON__
 
       // The entry evidence, decoded-value grade and codec provenance of each entry are resolved
       // server-side by the shared rules in ui/evidence_display.py. Only the interactive row
-      // override is applied here, and only to a cell that holds an entry; a cell without one
+      // override is applied here, and only to a cell whose retained bytes decode under it; a cell without one
       // reads back as Unknown.
       const B524_ENTRY_EVIDENCE_LABELS = __B524_ENTRY_EVIDENCE_LABELS__;
       const B524_ENTRY_EVIDENCE = new Map(__B524_ENTRY_EVIDENCE__.map(
@@ -2720,7 +2720,10 @@ __ARTIFACT_JSON__
                 if (descriptionEl.textContent) td.appendChild(descriptionEl);
               }
 
-              const evidence = b524EntryEvidence(opKey, groupKey, iiKey, rrKey, entry, override);
+              const evidence = b524EntryEvidence(
+                opKey, groupKey, iiKey, rrKey, entry,
+                (override && valueBytes && !decoded.error) ? override : null
+              );
               if (evidence.grade !== B524_ENTRY_EVIDENCE_LABELS.unknown || evidence.overridden) {
                 // An explicit grade or an override is always visible; the full lines, including
                 // Unknown, are in the cell's hover details below.

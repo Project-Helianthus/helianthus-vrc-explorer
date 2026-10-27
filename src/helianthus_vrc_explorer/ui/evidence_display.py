@@ -30,6 +30,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from ..protocol.parser import ValueParseError, parse_typed_value
+
 EVIDENCE_GRADES = frozenset({"Proven", "Hypothesis", "Unknown"})
 UNKNOWN = "Unknown"
 
@@ -105,9 +107,22 @@ def entry_has_decoded_value(entry: Mapping[str, Any] | None) -> bool:
 
 
 def manual_override_applies(entry: Mapping[str, Any] | None, type_override: str | None) -> bool:
-    """A row override is shown only for a selected cell that holds an entry."""
+    """A row override is shown only when it yields a value from the entry's retained bytes.
 
-    return type_override is not None and bool(entry)
+    An entry without usable ``raw_hex`` (timeout, empty response, invalid hex) or whose
+    bytes do not parse under the override has no overridden interpretation to claim.
+    """
+
+    if type_override is None or not entry:
+        return False
+    raw_hex = entry.get("raw_hex")
+    if not isinstance(raw_hex, str) or not raw_hex:
+        return False
+    try:
+        parse_typed_value(type_override, bytes.fromhex(raw_hex))
+    except (ValueError, ValueParseError):
+        return False
+    return True
 
 
 @dataclass(frozen=True, slots=True)

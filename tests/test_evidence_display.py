@@ -447,3 +447,15 @@ def test_a_decoded_value_is_never_better_than_hypothesis(
 
     assert display.decoded_value in {"Hypothesis", "Unknown"}
     assert not display.decoded_text.startswith("Proven")
+
+
+def test_override_needs_retained_bytes_that_decode_under_it() -> None:
+    timeout = {"raw_hex": "", "value": None, "error": "timeout"}
+    no_bytes = {"value": None, "error": "timeout"}
+    bad_hex = _entry(raw_hex="zz", value=None)
+    assert manual_override_applies(timeout, "HEX:2") is False
+    assert manual_override_applies(no_bytes, "HEX:2") is False
+    assert manual_override_applies(bad_hex, "HEX:2") is False
+    assert manual_override_applies(_entry(raw_hex="01"), "HEX:2") is False
+    display = entry_evidence_display(timeout, type_override="HEX:2")
+    assert (display.override_applies, display.decoded_text) == (False, "Unknown")

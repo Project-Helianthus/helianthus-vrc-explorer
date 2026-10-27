@@ -256,7 +256,14 @@ def test_sparse_cell_is_unknown_even_when_the_row_is_overridden() -> None:
         ]
 
 
-def _cell_script(html: str, *, entry: str, override: str) -> str:
+def _cell_script(
+    html: str,
+    *,
+    entry: str,
+    override: str,
+    value_bytes: str = "[1, 0]",
+    decode_error: str = "null",
+) -> str:
     start = html.index("const evidence = b524EntryEvidence(")
     end = html.index('if (typeof entry.flags_access === "string"', start)
     return (
@@ -272,6 +279,12 @@ const entry = """
 const override = """
         + override
         + """;
+const valueBytes = """
+        + value_bytes
+        + """;
+const decoded = {error: """
+        + decode_error
+        + """};
 """
         + html[start:end]
         + "console.log(JSON.stringify({appended, tooltip: evidence.lines}));"
@@ -320,7 +333,7 @@ def test_hover_details_always_carry_the_grade_lines() -> None:
     assert pushed < html.index('td.title = tipParts.join("\\n")', pushed)
     # Cells that hold no entry render the em dash and never reach the evidence lines.
     sparse = html.index("cell-missing")
-    assert sparse < html.index("b524EntryEvidence(opKey, groupKey, iiKey, rrKey, entry, override)")
+    assert sparse < html.index("const evidence = b524EntryEvidence(")
 
 
 def test_report_leaves_the_stored_artifact_unchanged() -> None:
@@ -498,3 +511,25 @@ def test_rendered_cells_show_the_explicit_grade_and_override_and_keep_sparse_cel
     # ... but never to a cell that holds none.
     sparse = overridden["0x0002"]["0x01"]
     assert sparse["lines"] == [] and sparse["title"] == "" and "cell-missing" in sparse["html"]
+
+
+def test_cell_does_not_claim_an_override_that_produced_no_value() -> None:
+    html = render_html_report(_keyed_artifact())
+
+    for value_bytes, decode_error in (("null", "null"), ("[1, 0]", '"parse_error: short"')):
+        result = _run(
+            _cell_script(
+                html,
+                entry="{}",
+                override='"HEX:2"',
+                value_bytes=value_bytes,
+                decode_error=decode_error,
+            )
+        )
+        assert result["appended"] == [
+            {
+                "className": "cell-raw",
+                "text": "Entry evidence: Proven · Decoded value: Hypothesis · "
+                "Codec provenance: selector_qualified",
+            }
+        ]
