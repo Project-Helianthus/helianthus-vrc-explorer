@@ -203,8 +203,10 @@ def _render_detail_sections(sections: tuple[DetailSection, ...]) -> Group:
         if section.title:
             parts.append(Text(section.title, style="bold cyan"))
         grid = Table.grid(expand=True, padding=(0, 1))
-        grid.add_column(style="bold", ratio=2)
-        grid.add_column(ratio=3)
+        # "fold" wraps an unbreakable token (a long register name, an address or a
+        # raw payload) at the column edge; the default "ellipsis" cut it off.
+        grid.add_column(style="bold", ratio=2, overflow="fold")
+        grid.add_column(ratio=3, overflow="fold")
         for row in section.rows:
             value = row.value
             if row.note:
@@ -339,6 +341,17 @@ if _TEXTUAL_IMPORT_ERROR is None:
 
     class _FocusableStatic(Static):
         can_focus = True
+
+    def _add_tree_child(parent: Any, node: TreeNodeRef) -> Any:
+        """Add `node` under `parent` as a leaf; the parent becomes expandable.
+
+        Tree nodes are created before their children are known. A node that never
+        receives a child stays a leaf (no expand glyph, no toggle on select), so the
+        operator is not offered a triangle that opens nothing.
+        """
+
+        parent.allow_expand = True
+        return parent.add_leaf(node.label, data=node.node_id)
 
     class _InputDialog(ModalScreen[str | None]):
         BINDINGS = [
@@ -572,10 +585,29 @@ if _TEXTUAL_IMPORT_ERROR is None:
             Binding("escape", "close_dialog", "Back"),
         ]
 
+        # Palette: Tango greys on a dark slate. Unfocused panes are dimmed; the pane
+        # that owns keyboard focus gets a heavy bright border and a bright bold title.
         CSS = """
+        $pane-dim: #555753;
+        $pane-dim-title: #888a85;
+        $pane-bright: #fce94f;
+        $scroll-track: #3a4042;
+        $scroll-thumb: #729fcf;
+
         Screen {
             background: #2e3436;
             color: #eeeeec;
+        }
+        * {
+            scrollbar-background: $scroll-track;
+            scrollbar-background-hover: $scroll-track;
+            scrollbar-background-active: $scroll-track;
+            scrollbar-color: $scroll-thumb;
+            scrollbar-color-hover: $pane-bright;
+            scrollbar-color-active: $pane-bright;
+            scrollbar-corner-color: $scroll-track;
+            scrollbar-size-vertical: 1;
+            scrollbar-size-horizontal: 1;
         }
         #identity-header {
             height: auto;
@@ -587,25 +619,59 @@ if _TEXTUAL_IMPORT_ERROR is None:
         #main {
             height: 1fr;
         }
+        #tree-pane, #right-pane, #detail-pane, #watch-dock {
+            border: round $pane-dim;
+            border-title-color: $pane-dim-title;
+            border-title-style: none;
+        }
+        #tree-pane:focus-within,
+        #right-pane:focus-within,
+        #detail-pane:focus-within,
+        #watch-dock:focus-within {
+            border: heavy $pane-bright;
+            border-title-color: $pane-bright;
+            border-title-style: bold;
+        }
         #tree-pane {
             width: 24%;
-            border: round #729fcf;
         }
         #right-pane {
             width: 1fr;
-            border: round #729fcf;
+        }
+        #browse-tabs {
+            height: 2;
+        }
+        #browse-tabs Tab {
+            color: $pane-dim-title;
+        }
+        #browse-tabs Tab.-active {
+            color: #eeeeec;
+        }
+        #browse-tabs:focus {
+            background: #204a87;
+        }
+        #browse-tabs:focus Tab.-active {
+            color: $pane-bright;
+            text-style: bold;
+        }
+        #browse-table {
+            height: 1fr;
+        }
+        #browse-table > .datatable--cursor {
+            background: #3d4a5c;
+            color: #eeeeec;
+        }
+        #browse-table:focus > .datatable--cursor {
+            background: $pane-bright;
+            color: #2e3436;
+            text-style: bold;
         }
         #detail-pane {
             width: 38;
             min-width: 34;
-            border: round #729fcf;
-        }
-        #detail-pane:focus-within {
-            border: round #fce94f;
         }
         #watch-dock {
             height: 5;
-            border: round #888a85;
         }
         #status {
             height: 1;
@@ -692,6 +758,10 @@ if _TEXTUAL_IMPORT_ERROR is None:
             table = self.query_one("#browse-table", DataTable)
             table.cursor_type = "row"
             table.add_columns(*BROWSE_TABLE_COLUMNS)
+            self.query_one("#tree-pane").border_title = "Navigation"
+            self.query_one("#right-pane").border_title = "Registers"
+            self.query_one("#detail-pane").border_title = "Detail"
+            self.query_one("#watch-dock").border_title = "Watchlist"
             self._build_tree()
             self._refresh_table()
             self._render_watch_dock()
@@ -762,7 +832,7 @@ if _TEXTUAL_IMPORT_ERROR is None:
                 if node.level == "root":
                     continue
                 if node.level == "protocol" and node.protocol is not None:
-                    proto_node = root.add(node.label, data=node.node_id)
+                    proto_node = _add_tree_child(root, node)
                     protocols[node.protocol] = proto_node
                     self._tree_node_by_ref[node.node_id] = proto_node
                     continue
@@ -774,7 +844,7 @@ if _TEXTUAL_IMPORT_ERROR is None:
                     parent = protocols.get(node.protocol)
                     if parent is None:
                         continue
-                    section_node = parent.add(node.label, data=node.node_id)
+                    section_node = _add_tree_child(parent, node)
                     sections[(node.protocol, node.section_key)] = section_node
                     self._tree_node_by_ref[node.node_id] = section_node
                     continue
@@ -789,7 +859,7 @@ if _TEXTUAL_IMPORT_ERROR is None:
                     )
                     if parent is None:
                         continue
-                    group_node = parent.add(node.label, data=node.node_id)
+                    group_node = _add_tree_child(parent, node)
                     groups[(node.protocol, section_key, node.group_key)] = group_node
                     self._tree_node_by_ref[node.node_id] = group_node
                     continue
@@ -803,7 +873,7 @@ if _TEXTUAL_IMPORT_ERROR is None:
                     parent = groups.get((node.protocol, section_key, node.group_key))
                     if parent is None:
                         continue
-                    namespace_node = parent.add(node.label, data=node.node_id)
+                    namespace_node = _add_tree_child(parent, node)
                     namespaces[(node.protocol, section_key, node.group_key, node.namespace_key)] = (
                         namespace_node
                     )
@@ -829,7 +899,7 @@ if _TEXTUAL_IMPORT_ERROR is None:
                         parent = groups.get((node.protocol, section_key, node.group_key))
                     if parent is None:
                         continue
-                    instance_node = parent.add(node.label, data=node.node_id)
+                    instance_node = _add_tree_child(parent, node)
                     self._tree_node_by_ref[node.node_id] = instance_node
                     continue
                 if (
@@ -846,18 +916,22 @@ if _TEXTUAL_IMPORT_ERROR is None:
                     parent = self._tree_node_by_ref.get(":".join(parts))
                     if parent is None:
                         continue
-                    register_node = parent.add(node.label, data=node.node_id)
+                    register_node = _add_tree_child(parent, node)
                     self._tree_node_by_ref[node.node_id] = register_node
                     continue
                 if node.level == "range" and node.protocol is not None:
                     parent = protocols.get(node.protocol)
                     if parent is None:
                         continue
-                    range_node = parent.add(node.label, data=node.node_id)
+                    range_node = _add_tree_child(parent, node)
                     self._tree_node_by_ref[node.node_id] = range_node
+            # Only a node that gained a child keeps the expand glyph and the toggle;
+            # an empty root stays a plain leaf as well.
+            root.allow_expand = bool(root.children)
             root.expand()
             for node in protocols.values():
-                node.expand()
+                if node.children:
+                    node.expand()
 
         def _current_node(self) -> TreeNodeRef | None:
             return self._node_by_id.get(self._selected_node_id)
