@@ -356,8 +356,32 @@ def _remote_identity_in_catalog(profile: dict[str, Any], selector: dict[str, str
 
     if selector is None or selector.get("read_opcode") != "0x06":
         return False
-    if _remote_device_in_catalog(profile, selector):
+    return _remote_device_in_catalog(profile, selector) or _remote_group_in_baseline(
+        profile, selector
+    )
+
+
+def remote_description_reusable(artifact: dict[str, Any], selector: dict[str, str]) -> bool:
+    """Whether an exact remote status may suppress live acquisition for this register.
+
+    A device observation only identifies the device; the register still needs a
+    bundled description with the same selector before the Describe request is skipped.
+    """
+
+    if selector.get("read_opcode") != "0x06":
         return True
+    profile = description_profile(artifact, selector)
+    if _remote_group_in_baseline(profile, selector):
+        return True
+    return any(
+        isinstance(row, dict)
+        and _same_selector(row, selector)
+        and _compatible_profiles(row.get("profile", {}), profile)
+        for row in load_description_baseline().get("descriptions", [])
+    )
+
+
+def _remote_group_in_baseline(profile: dict[str, Any], selector: dict[str, str]) -> bool:
     return any(
         isinstance(row, dict)
         and row.get("read_opcode") == "0x06"

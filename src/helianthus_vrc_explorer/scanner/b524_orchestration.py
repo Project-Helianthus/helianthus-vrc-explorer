@@ -41,6 +41,7 @@ from ..schema.myvaillant_map import MyvaillantRegisterMap
 from ..schema.parameter_descriptions import (
     bundled_instance_observation,
     description_catalog_status,
+    remote_description_reusable,
 )
 from ..transport.base import TransportInterface, TransportRecoveryExhausted, emit_trace_label
 from ..transport.instrumented import CountingTransport, ScanRequestBudgetExceeded
@@ -195,9 +196,16 @@ def _select_live_description_candidates(
             }
             status = description_catalog_status(artifact, selector)
             status_cache[device_key] = status
+        selector = {
+            "read_opcode": f"0x{candidate.read_opcode:02x}",
+            "group": f"0x{candidate.group:02x}",
+            "instance": f"0x{candidate.instance:02x}",
+            "register": f"0x{candidate.register:04x}",
+        }
         if not (
             description_probe_required(policy, opcode=candidate.read_opcode)
             or status.get("status") != "exact"
+            or not remote_description_reusable(artifact, selector)
         ):
             continue
         identity = (

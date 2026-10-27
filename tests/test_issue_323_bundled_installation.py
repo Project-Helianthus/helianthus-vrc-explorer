@@ -562,3 +562,30 @@ def test_remote_devices_are_exact_on_the_next_scan_from_the_bundle_alone() -> No
         ]
         assert registers["0x0002"]["raw_hex"] == class_raw
         assert registers["0x0004"]["raw_hex"] == firmware_raw
+
+
+def test_device_observation_without_bundled_description_still_schedules_describe() -> None:
+    from helianthus_vrc_explorer.scanner.b524_orchestration import (
+        _select_live_description_candidates,
+    )
+    from helianthus_vrc_explorer.scanner.description_scheduler import DescriptionCandidate
+    from helianthus_vrc_explorer.ui.planner_selection import default_description_policy
+    from tests.test_description_profile_policy import _with_known_remote
+    from tests.test_effective_parameter_descriptions import _artifact
+
+    artifact = _with_known_remote(_artifact())
+    group = artifact["operations"]["0x06"]["groups"].pop("0x0a")
+    registers = group["instances"]["0x01"]["registers"]
+    registers["0x0002"].update(raw_hex="0f", value="0x0f")
+    registers["0x0004"].update(raw_hex="010f00", value="01.0f.00")
+    artifact["operations"]["0x06"]["groups"]["0x0e"] = group
+    candidates = [DescriptionCandidate(0x06, 0x0E, 0x01, 0x0009, None)]
+    entries = {candidate.native_identity: {} for candidate in candidates}
+    policy = default_description_policy("recommended", exact_profile_known=True)
+
+    selected, _, rows = _select_live_description_candidates(
+        artifact, candidates, entries, policy=policy
+    )
+
+    assert rows[0]["status"] == "exact"
+    assert selected == candidates
