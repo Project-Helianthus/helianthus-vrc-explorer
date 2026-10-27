@@ -144,6 +144,17 @@ def test_nested_malformed_and_duplicate_selectors_fail():
         export(source)
 
 
+@pytest.mark.parametrize("opcode", ["0x01", "0xff", "0XFF"])
+@pytest.mark.parametrize("with_registers", [False, True])
+def test_non_register_operations_are_rejected(opcode, with_registers):
+    source = artifact()
+    source["operations"][opcode] = (
+        deepcopy(source["operations"]["0x02"]) if with_registers else {"groups": {}}
+    )
+    with pytest.raises(ValueError, match="Unsupported register opcode"):
+        export(source)
+
+
 def test_native_and_write_admission_reject_observations():
     from helianthus_vrc_explorer.artifact_schema import ArtifactSchemaError, migrate_artifact_schema
     from helianthus_vrc_explorer.evidence_export import build_native_evidence

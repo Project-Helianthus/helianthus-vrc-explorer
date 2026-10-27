@@ -4,6 +4,11 @@ This file is generated from the CLI's `--help` output. Refresh it with
 `python3 scripts/docs_sync_help.py` and verify it with
 `python3 scripts/check_docs_sync.py`.
 
+The offline `python3 scripts/export_controller_observations.py ARTIFACT` helper
+accepts register observations only in the `0x02` and `0x06` operation namespaces.
+Other operation opcodes make the artifact invalid, including operations with
+empty groups; export fails without producing an inventory.
+
 ## Root command
 
 <!-- BEGIN CLI HELP:root -->

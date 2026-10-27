@@ -107,6 +107,8 @@ def export_observations(artifact: object) -> dict:
     seen = set()
     for op, operation in operations.items():
         opcode = _selector(op, 2)
+        if opcode not in {"0x02", "0x06"}:
+            raise ValueError("Unsupported register opcode")
         for gg, group in _object(_object(operation).get("groups", {})).items():
             group_key = _selector(gg, 2)
             for ii, instance in _object(_object(group).get("instances", {})).items():
