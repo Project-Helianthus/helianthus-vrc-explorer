@@ -75,6 +75,22 @@ def test_selector_identity_grades_and_unknowns_are_independent():
     assert record["decoded_observation"]["qualification"] == "unknown"
 
 
+@pytest.mark.parametrize("key", ["reply_hex", "raw_description_hex"])
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [("", "omitted"), ("PRIVATE_SENTINEL", "omitted"), (None, "unknown"), (True, "unknown")],
+)
+def test_raw_description_presence_uses_string_type(key, value, expected):
+    source = artifact()
+    entry = source["operations"]["0x02"]["groups"]["0x02"]["instances"]["0x00"]["registers"][
+        "0x0009"
+    ]
+    entry["parameter_description"] = {key: value}
+    result = export(source)
+    assert result["observations"][0]["raw_description"] == expected
+    assert "PRIVATE_SENTINEL" not in json.dumps(result)
+
+
 def test_privacy_allowlists_at_every_level():
     source = artifact()
 

@@ -75,7 +75,9 @@ def _decoded(entry: dict, selector: tuple[str, str, str, str]) -> tuple[dict, st
                 break
     raw = (
         "omitted"
-        if description.get("reply_hex") or description.get("raw_description_hex")
+        if any(
+            isinstance(description.get(key), str) for key in ("reply_hex", "raw_description_hex")
+        )
         else ("unknown")
     )
     return {
