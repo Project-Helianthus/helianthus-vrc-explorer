@@ -466,3 +466,22 @@ def test_override_that_parses_to_no_value_is_not_claimed() -> None:
     assert manual_override_applies(nan_entry, "EXP") is False
     display = entry_evidence_display(nan_entry, type_override="EXP")
     assert (display.override_applies, display.decoded_text) == (False, "Unknown")
+
+
+def test_saved_override_falls_back_to_namespaces_per_operation() -> None:
+    artifact = {
+        "meta": {
+            "type_overrides": {
+                "0x01": {
+                    "operations": {"0x06": {"0x0005": "UIN"}},
+                    "namespaces": {"0x02": {"0x0005": "HEX:2"}},
+                }
+            }
+        }
+    }
+
+    def look(op: str) -> str | None:
+        return get_row_type_override(artifact, group_key="0x01", rr_key="0x0005", op_key=op)
+
+    assert look("0x02") == "HEX:2"
+    assert look("0x06") == "UIN"

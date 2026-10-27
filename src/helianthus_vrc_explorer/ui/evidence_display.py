@@ -64,13 +64,14 @@ def get_row_type_override(
     if not isinstance(group_overrides, dict):
         return None
     if op_key is not None:
-        ops = group_overrides.get("operations", group_overrides.get("namespaces"))
-        if isinstance(ops, dict):
-            op_overrides = ops.get(op_key)
-            if isinstance(op_overrides, dict):
-                value = op_overrides.get(rr_key)
-                if isinstance(value, str):
-                    return value
+        for tree_key in ("operations", "namespaces"):
+            ops = group_overrides.get(tree_key)
+            if isinstance(ops, dict):
+                op_overrides = ops.get(op_key)
+                if isinstance(op_overrides, dict):
+                    value = op_overrides.get(rr_key)
+                    if isinstance(value, str):
+                        return value
     value = group_overrides.get(rr_key)
     return value if isinstance(value, str) else None
 
