@@ -310,3 +310,113 @@ def test_artifact_tree_parent_navigation_and_nested_json_selection(tmp_path) -> 
         assert app.return_value == json_path
 
     asyncio.run(exercise())
+
+
+async def _tree_node(pilot, parent, path: Path):
+    for _ in range(40):
+        await pilot.pause()
+        node = next(
+            (child for child in parent.children if child.data and child.data.path == path),
+            None,
+        )
+        if node is not None:
+            return node
+    raise AssertionError(f"artifact tree never listed {path}")
+
+
+def _record_exit(monkeypatch, app: ArtifactOpenApp) -> list[Path | None]:
+    exits: list[Path | None] = []
+    original_exit = app.exit
+
+    def exit_(result: Path | None = None, *args: object, **kwargs: object) -> None:
+        exits.append(result)
+        original_exit(result, *args, **kwargs)
+
+    monkeypatch.setattr(app, "exit", exit_)
+    return exits
+
+
+def test_artifact_tree_return_on_json_file_opens_it(monkeypatch, tmp_path) -> None:
+    (tmp_path / "scan.json").write_text("{}", encoding="utf-8")
+    json_path = tmp_path.resolve() / "scan.json"
+
+    async def exercise() -> list[Path | None]:
+        app = ArtifactOpenApp(initial_directory=tmp_path)
+        exits = _record_exit(monkeypatch, app)
+        async with app.run_test(size=(110, 52)) as pilot:
+            tree = app.query_one("#artifact-tree", DirectoryTree)
+            tree.move_cursor(await _tree_node(pilot, tree.root, json_path))
+            assert tree.has_focus
+            assert app.query_one("#artifact-path", Input).value == ""
+            await pilot.press("enter")
+            await pilot.pause()
+            assert app.query_one("#artifact-path", Input).value == str(json_path)
+        assert app.return_value == json_path
+        return exits
+
+    assert asyncio.run(exercise()) == [json_path]
+
+
+def test_artifact_tree_return_on_folder_expands_without_opening(monkeypatch, tmp_path) -> None:
+    folder = tmp_path / "nested"
+    folder.mkdir()
+    (folder / "inner.json").write_text("{}", encoding="utf-8")
+    folder = tmp_path.resolve() / "nested"
+
+    async def exercise() -> list[Path | None]:
+        app = ArtifactOpenApp(initial_directory=tmp_path)
+        exits = _record_exit(monkeypatch, app)
+        async with app.run_test(size=(110, 52)) as pilot:
+            tree = app.query_one("#artifact-tree", DirectoryTree)
+            folder_node = await _tree_node(pilot, tree.root, folder)
+            tree.move_cursor(folder_node)
+            assert not folder_node.is_expanded
+            await pilot.press("enter")
+            inner = await _tree_node(pilot, folder_node, folder / "inner.json")
+            assert folder_node.is_expanded
+            assert inner.data is not None
+            assert app.query_one("#artifact-path", Input).value == ""
+            assert app.query_one("#artifact-open-status", Static).render() == ""
+        return exits
+
+    assert asyncio.run(exercise()) == []
+
+
+def test_artifact_tree_escape_cancels_with_file_highlighted(monkeypatch, tmp_path) -> None:
+    (tmp_path / "scan.json").write_text("{}", encoding="utf-8")
+    json_path = tmp_path.resolve() / "scan.json"
+
+    async def exercise() -> list[Path | None]:
+        app = ArtifactOpenApp(initial_directory=tmp_path)
+        exits = _record_exit(monkeypatch, app)
+        async with app.run_test(size=(110, 52)) as pilot:
+            tree = app.query_one("#artifact-tree", DirectoryTree)
+            tree.move_cursor(await _tree_node(pilot, tree.root, json_path))
+            await pilot.press("escape")
+            await pilot.pause()
+        assert app.return_value is None
+        return exits
+
+    assert asyncio.run(exercise()) == [None]
+
+
+def test_artifact_tree_return_reuses_open_validation(monkeypatch, tmp_path) -> None:
+    json_path = tmp_path / "scan.json"
+    json_path.write_text("{}", encoding="utf-8")
+    json_path = tmp_path.resolve() / "scan.json"
+
+    async def exercise() -> tuple[list[Path | None], str]:
+        app = ArtifactOpenApp(initial_directory=tmp_path)
+        exits = _record_exit(monkeypatch, app)
+        async with app.run_test(size=(110, 52)) as pilot:
+            tree = app.query_one("#artifact-tree", DirectoryTree)
+            tree.move_cursor(await _tree_node(pilot, tree.root, json_path))
+            json_path.unlink()
+            await pilot.press("enter")
+            await pilot.pause()
+            status = str(app.query_one("#artifact-open-status", Static).render())
+        return exits, status
+
+    exits, status = asyncio.run(exercise())
+    assert exits == []
+    assert "must be an existing file" in status
