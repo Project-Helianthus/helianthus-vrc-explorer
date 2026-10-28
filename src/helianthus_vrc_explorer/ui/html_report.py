@@ -18,6 +18,16 @@ from ..schema.b524_register_names import apply_b524_canonical_register_names
 from ..schema.b524_value_labels import apply_b524_value_labels
 from ..schema.parameter_descriptions import attach_bundled_descriptions, description_profile
 from .emphasis import html_star_bold
+from .evidence_display import (
+    DECODED_GRADE,
+    DECODED_LABEL,
+    ENTRY_LABEL,
+    EVIDENCE_GRADES,
+    OVERRIDE_TEXT,
+    PROVENANCE_LABEL,
+    UNKNOWN,
+    entry_evidence_display,
+)
 
 
 def _correspondence_json_map() -> dict[str, dict[str, dict[str, dict[str, list[str]]]]]:
@@ -66,6 +76,38 @@ def _docs_catalog_json_map(artifact: dict[str, Any]) -> dict[str, dict[str, Any]
                 "open_question": entry.open_question,
             }
     return table
+
+
+def _entry_evidence_rows(artifact: dict[str, Any]) -> list[list[Any]]:
+    """Resolve the shared evidence rules once per entry for client-side lookup.
+
+    Rows are ``[op, group, instance, register, entry_evidence, codec_provenance,
+    decoded_value, explicit]`` using the artifact's own selector keys; ``explicit`` is
+    whether the entry retains one of the three valid grades (so an explicit ``Unknown``
+    is told apart from no grade). Entries that are neither explicit nor have any
+    non-Unknown value are left out and read back as Unknown. Purely presentational,
+    resolved for this render only -- never written into the scan artifact.
+    """
+    rows: list[list[Any]] = []
+    for op, gg, ii, rr, entry in iter_register_entries(artifact):
+        display = entry_evidence_display(entry)
+        values = (display.grade, display.codec_provenance, display.decoded_value)
+        grade = entry.get("evidence_grade") if isinstance(entry, dict) else None
+        explicit = isinstance(grade, str) and grade in EVIDENCE_GRADES
+        if explicit or any(value != UNKNOWN for value in values):
+            rows.append([op, gg, ii, rr, *values, explicit])
+    return rows
+
+
+def _entry_evidence_labels() -> dict[str, str]:
+    return {
+        "entry": ENTRY_LABEL,
+        "decoded": DECODED_LABEL,
+        "decoded_grade": DECODED_GRADE,
+        "override_text": OVERRIDE_TEXT,
+        "provenance": PROVENANCE_LABEL,
+        "unknown": UNKNOWN,
+    }
 
 
 def _json_for_html(obj: Any) -> str:
@@ -605,6 +647,35 @@ __ARTIFACT_JSON__
         return parts.join(" · ");
       }
 
+      // The entry evidence, decoded-value grade and codec provenance of each entry are resolved
+      // server-side by the shared rules in ui/evidence_display.py. Only the interactive row
+      // override is applied here, and only to a cell whose retained bytes decode under it; a cell without one
+      // reads back as Unknown.
+      const B524_ENTRY_EVIDENCE_LABELS = __B524_ENTRY_EVIDENCE_LABELS__;
+      const B524_ENTRY_EVIDENCE = new Map(__B524_ENTRY_EVIDENCE__.map(
+        ([op, gg, ii, rr, grade, provenance, decoded, explicit]) => [
+          JSON.stringify([op, gg, ii, rr]),
+          {grade, provenance, decoded, explicit},
+        ]
+      ));
+
+      function b524EntryEvidence(op, gg, ii, rr, entry, override) {
+        const labels = B524_ENTRY_EVIDENCE_LABELS;
+        const hasEntry = !!entry && typeof entry === "object";
+        const known = hasEntry ? B524_ENTRY_EVIDENCE.get(JSON.stringify([op, gg, ii, rr])) : null;
+        const grade = known ? known.grade : labels.unknown;
+        const provenance = known ? known.provenance : labels.unknown;
+        const overridden = hasEntry && typeof override === "string";
+        const decoded = overridden ? labels.decoded_grade : (known ? known.decoded : labels.unknown);
+        const lines = [
+          `${labels.entry}: ${grade}`,
+          `${labels.decoded}: ${overridden ? labels.override_text : decoded}`,
+          `${labels.provenance}: ${provenance}`,
+        ];
+        const explicit = !!known && known.explicit === true;
+        return { grade, decoded, provenance, overridden, explicit, lines };
+      }
+
       function b524CorrespondenceSecondaryText(opKey, groupKey, registerKey) {
         const opHex = b524CanonicalHexKey(opKey, 2);
         const groupHex = b524CanonicalHexKey(groupKey, 2);
@@ -743,15 +814,23 @@ __ARTIFACT_JSON__
       }
 
       function bytesFromHex(rawHex) {
-        if (typeof rawHex !== "string" || rawHex.length % 2) return null;
-        const out = new Uint8Array(rawHex.length / 2);
-        for (let i = 0; i < out.length; i++) {
-          const byteStr = rawHex.slice(i * 2, i * 2 + 2);
-          const v = parseInt(byteStr, 16);
-          if (!Number.isFinite(v)) return null;
-          out[i] = v;
+        // Same acceptance as Python's bytes.fromhex: ASCII whitespace is allowed between
+        // bytes only, and every byte is exactly two hexadecimal digits.
+        if (typeof rawHex !== "string") return null;
+        const isHex = (ch) => /^[0-9a-fA-F]$/.test(ch);
+        const out = [];
+        let i = 0;
+        while (i < rawHex.length) {
+          const ch = rawHex[i];
+          if (ch === " " || ch === "\\t" || ch === "\\n" || ch === "\\r" || ch === "\\v" || ch === "\\f") {
+            i += 1;
+            continue;
+          }
+          if (i + 1 >= rawHex.length || !isHex(ch) || !isHex(rawHex[i + 1])) return null;
+          out.push(parseInt(rawHex.slice(i, i + 2), 16));
+          i += 2;
         }
-        return out;
+        return Uint8Array.from(out);
       }
 
       function decodeLatin1(bytes) {
@@ -942,8 +1021,8 @@ __ARTIFACT_JSON__
         const g = state.overrides && state.overrides[groupKey];
         if (!g || typeof g !== "object") return null;
         if (namespaceKey) {
-          if (g.namespaces && typeof g.namespaces === "object") {
-            const ns = g.namespaces[namespaceKey];
+          for (const tree of [g.operations, g.namespaces]) {
+            const ns = tree && typeof tree === "object" ? tree[namespaceKey] : null;
             if (ns && typeof ns === "object" && typeof ns[rrKey] === "string") return ns[rrKey];
           }
           return null;
@@ -962,6 +1041,12 @@ __ARTIFACT_JSON__
             state.overrides[groupKey].namespaces[namespaceKey] = {};
           }
           state.overrides[groupKey].namespaces[namespaceKey][rrKey] = typeSpec;
+          // getRowOverride prefers the operation-keyed tree when one was saved, so keep it in step.
+          const opsTree = state.overrides[groupKey].operations;
+          if (opsTree && typeof opsTree === "object") {
+            if (!opsTree[namespaceKey] || typeof opsTree[namespaceKey] !== "object") opsTree[namespaceKey] = {};
+            opsTree[namespaceKey][rrKey] = typeSpec;
+          }
           return;
         }
         state.overrides[groupKey][rrKey] = typeSpec;
@@ -2655,6 +2740,20 @@ __ARTIFACT_JSON__
                 if (descriptionEl.textContent) td.appendChild(descriptionEl);
               }
 
+              const evidence = b524EntryEvidence(
+                opKey, groupKey, iiKey, rrKey, entry,
+                (override && valueBytes && !decoded.error && decoded.value !== null && decoded.value !== undefined)
+                  ? override : null
+              );
+              if (evidence.explicit || evidence.overridden) {
+                // An explicit grade or an override is always visible; the full lines, including
+                // Unknown, are in the cell's hover details below.
+                const evidenceEl = document.createElement("div");
+                evidenceEl.className = "cell-raw";
+                evidenceEl.textContent = evidence.lines.join(" · ");
+                td.appendChild(evidenceEl);
+              }
+
               if (typeof entry.flags_access === "string" && entry.flags_access && statusKind === "ok") {
                 const flagsEl = document.createElement("div");
                 flagsEl.className = "cell-flags";
@@ -2701,6 +2800,7 @@ __ARTIFACT_JSON__
               if (entry.constraint_provenance) tipParts.push(`constraint_provenance=${entry.constraint_provenance}`);
               if (entry.candidate_name) tipParts.push(`candidate_name=${entry.candidate_name}`);
               if (description && typeof description === "object") tipParts.push(`parameter_description_qualification=${description.qualification || "unknown"}`);
+              tipParts.push(...evidence.lines);
               if (tipParts.length) td.title = tipParts.join("\\n");
 
               tr.appendChild(td);
@@ -2890,6 +2990,9 @@ __ARTIFACT_JSON__
 def render_html_report(artifact: dict[str, Any], *, title: str | None = None) -> str:
     # Ensure operations-first structure for consistent JS traversal.
     artifact, _migration = migrate_artifact_schema(artifact)
+    # Grade and provenance are what the artifact retains: resolve them before the display passes
+    # below normalise or annotate descriptions.
+    entry_evidence = _entry_evidence_rows(artifact)
     apply_b524_value_labels(artifact)
     operations = artifact.get("operations")
     if isinstance(operations, dict):
@@ -2974,6 +3077,8 @@ def render_html_report(artifact: dict[str, Any], *, title: str | None = None) ->
                 "__B524_GROUP_NAMES__": _json_for_html(group_name_map),
                 "__B524_REGISTER_NAME_CORRESPONDENCE__": _json_for_html(_correspondence_json_map()),
                 "__B524_DOCS_CATALOG_NAMES__": _json_for_html(_docs_catalog_json_map(artifact)),
+                "__B524_ENTRY_EVIDENCE__": _json_for_html(entry_evidence),
+                "__B524_ENTRY_EVIDENCE_LABELS__": _json_for_html(_entry_evidence_labels()),
                 "__OBSERVED_NAME_CAVEAT__": _json_for_html(OBSERVED_NAME_CAVEAT),
                 "__B524_CIRCUIT_II_MIN__": (
                     "0"

@@ -50,6 +50,7 @@ from .browse_detail import DetailSection, node_detail_sections, register_detail_
 from .browse_models import BrowseTab, RegisterRow, TreeNodeRef
 from .browse_store import BrowseStore
 from .emphasis import rich_star_bold_text
+from .evidence_display import get_row_type_override
 from .parameter_editor import parameter_enum_choices, parameter_value_display, record_offline_edit
 
 try:
@@ -1118,6 +1119,17 @@ if _TEXTUAL_IMPORT_ERROR is None:
                 return self._live_edit_context.entry
             return self._entry_for_row(row)
 
+        def _type_override_for_row(self, row: RegisterRow) -> str | None:
+            """The row's saved manual type override from ``meta.type_overrides``, if any."""
+            if row.protocol != "b524" or row.group_key is None:
+                return None
+            return get_row_type_override(
+                self._artifact,
+                group_key=row.group_key,
+                rr_key=row.register_key,
+                op_key=row.namespace_key,
+            )
+
         def _refresh_detail(self) -> None:
             try:
                 content = self.query_one("#detail-content", Static)
@@ -1142,6 +1154,7 @@ if _TEXTUAL_IMPORT_ERROR is None:
                     description=description,
                     correspondence=correspondence,
                     operation_view=operation_view,
+                    type_override=self._type_override_for_row(row),
                 )
             content.update(_render_detail_sections(sections))
 

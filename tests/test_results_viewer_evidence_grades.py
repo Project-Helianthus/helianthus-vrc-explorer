@@ -55,8 +55,10 @@ def test_explicit_grade_is_separate_from_acceptance_and_profile(grade: str) -> N
 
     view = _view(artifact)
 
-    assert f"Decoded evidence: {grade}" in view
-    assert "Decoded interpretation" not in view
+    assert f"Entry evidence: {grade}" in view
+    assert "Decoded value: Hypothesis" in view
+    assert "Decoded value: Proven" not in view
+    assert "manual type override" not in view
     assert "Codec acceptance: matched (codec_provenance=selector_qualified)" in view
     assert "Controller-profile match: True" in view
     assert "raw_hex=0100" in view
@@ -73,8 +75,9 @@ def test_unsupported_grade_is_unknown_despite_successful_decode(grade: object) -
 
     view = _view(artifact)
 
-    assert "Decoded evidence: Unknown" in view
-    assert "Decoded evidence: Proven" not in view
+    assert "Entry evidence: Unknown" in view
+    assert "Entry evidence: Proven" not in view
+    assert "Decoded value: Proven" not in view
     assert artifact == before
 
 
@@ -89,8 +92,9 @@ def test_missing_grade_is_unknown_including_legacy_metadata(legacy: bool) -> Non
 
     view = _view(artifact)
 
-    assert "Decoded evidence: Unknown" in view
-    assert "Decoded evidence: Proven" not in view
+    assert "Entry evidence: Unknown" in view
+    assert "Entry evidence: Proven" not in view
+    assert "Decoded value: Proven" not in view
     if legacy:
         assert "Codec acceptance: Unknown (codec_provenance=Unknown)" in view
         assert "Controller-profile match: Unknown" in view
@@ -112,8 +116,11 @@ def test_override_is_view_hypothesis_without_regrading_native_evidence(grade: st
     view = _view(artifact)
 
     shown = grade if grade is not None else "Unknown"
-    assert re.search(rf"Decoded evidence: {shown}\s*│", view)
-    assert "Decoded interpretation: Hypothesis (manual type override; view only)" in view
+    assert re.search(rf"Entry evidence: {shown}\s*│", view)
+    assert "Decoded value: Hypothesis (manual type override; view only)" in view
+    # The override form replaces the plain decoded-value line rather than adding to it.
+    assert not re.search(r"Decoded value: Hypothesis\s*│", view)
+    assert "Decoded value: Proven" not in view
     assert entry["raw_hex"] == "0100"
     assert entry["value"] == "0x0100"
     assert entry.get("evidence_grade") == grade
@@ -131,7 +138,9 @@ def test_grade_does_not_imply_accepted_codec_or_matching_profile() -> None:
 
     view = _view(_artifact(entry))
 
-    assert "Decoded evidence: Proven" in view
+    assert "Entry evidence: Proven" in view
+    assert "Decoded value: Hypothesis" in view
+    assert "Decoded value: Proven" not in view
     assert "Codec acceptance: unqualified (codec_provenance=length_inferred)" in view
     assert "Controller-profile match: False" in view
 
@@ -153,8 +162,9 @@ def test_saved_override_is_hypothesis_without_altering_retained_entry(
 
     view = _view(artifact)
 
-    assert re.search(r"Decoded evidence: Proven\s*│", view)
-    assert "Decoded interpretation: Hypothesis (manual type override; view only)" in view
+    assert re.search(r"Entry evidence: Proven\s*│", view)
+    assert "Decoded value: Hypothesis (manual type override; view only)" in view
+    assert "Decoded value: Proven" not in view
     assert "raw_hex=0100" in view
     assert artifact == before
 
@@ -174,8 +184,9 @@ def test_row_override_does_not_grade_instance_without_entry() -> None:
     view = output.getvalue()
 
     assert "II=0x01" in view
-    assert "Decoded evidence: Unknown" in view
-    assert "Decoded interpretation" not in view
+    assert "Entry evidence: Unknown" in view
+    assert re.search(r"Decoded value: Unknown\s*│", view)
+    assert "manual type override" not in view
 
 
 def test_entry_level_codec_provenance_is_used_without_description() -> None:
@@ -186,3 +197,21 @@ def test_entry_level_codec_provenance_is_used_without_description() -> None:
     view = _view(_artifact(entry))
 
     assert "(codec_provenance=length_inferred)" in view
+
+
+@pytest.mark.parametrize("value", [None, 1])
+def test_decoded_value_is_unknown_without_a_decode_and_hypothesis_with_one(
+    value: int | None,
+) -> None:
+    entry = _entry()
+    entry["evidence_grade"] = "Proven"
+    entry["value"] = value
+    if value is None:
+        entry["error"] = "parse_error: short payload"
+
+    view = _view(_artifact(entry))
+
+    expected = "Hypothesis" if value is not None else "Unknown"
+    assert re.search(rf"Decoded value: {expected}\s*│", view)
+    assert "Entry evidence: Proven" in view
+    assert "Decoded value: Proven" not in view

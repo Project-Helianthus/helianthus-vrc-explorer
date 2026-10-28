@@ -33,6 +33,14 @@ from ..schema.b524_register_name_correspondence import (
 from ..schema.myvaillant_map import MyvaillantRegisterName
 from .b524_operation_reads import OPERATION_EXPORT_BY_SECTION, OperationReadView
 from .browse_models import RegisterRow, TreeNodeRef
+from .evidence_display import (
+    DECODED_LABEL,
+    ENTRY_LABEL,
+    OVERRIDE_NOTE,
+    PROVENANCE_LABEL,
+    entry_evidence_display,
+    manual_override_value,
+)
 from .parameter_editor import parameter_enum_choices, parameter_value_display
 from .register_semantics import entry_display_value_text, entry_status_kind, entry_status_label
 
@@ -134,12 +142,34 @@ def _interpreted_value_text(row: RegisterRow, entry: dict[str, Any] | None) -> s
     return entry_display_value_text(entry)
 
 
-def _value_section(row: RegisterRow, entry: dict[str, Any] | None) -> DetailSection:
+def _evidence_grade_rows(
+    entry: dict[str, Any] | None, type_override: str | None
+) -> list[DetailRow]:
+    """Entry evidence, decoded value and codec provenance, by the rules shared with the viewer."""
+
+    display = entry_evidence_display(entry, type_override=type_override)
+    return [
+        DetailRow(ENTRY_LABEL, display.grade),
+        DetailRow(
+            DECODED_LABEL,
+            display.decoded_value,
+            note=OVERRIDE_NOTE if display.override_applies else "",
+        ),
+        DetailRow(PROVENANCE_LABEL, display.codec_provenance),
+    ]
+
+
+def _value_section(
+    row: RegisterRow, entry: dict[str, Any] | None, type_override: str | None = None
+) -> DetailSection:
+    overridden = manual_override_value(entry, type_override)
+    interpreted = str(overridden) if overridden is not None else _interpreted_value_text(row, entry)
     rows: list[DetailRow] = [
-        DetailRow("Interpreted", _interpreted_value_text(row, entry)),
+        DetailRow("Interpreted", interpreted),
         DetailRow("RAW", (entry.get("raw_hex") if entry else None) or row.raw_hex or "—"),
     ]
     if entry is not None:
+        rows.extend(_evidence_grade_rows(entry, type_override))
         preview = entry.get("local_edit_preview")
         if isinstance(preview, dict):
             rows.append(
@@ -593,8 +623,13 @@ def register_detail_sections(
     description: dict[str, Any] | None,
     correspondence: B524RegisterNameCorrespondence | None = None,
     operation_view: OperationReadView | None = None,
+    type_override: str | None = None,
 ) -> tuple[DetailSection, ...]:
-    """Build the ordered, omit-when-empty detail sections for one register row."""
+    """Build the ordered, omit-when-empty detail sections for one register row.
+
+    ``type_override`` is the row's saved manual type override, if any; it is shown as a
+    separate Hypothesis interpretation, and only when ``entry`` holds the selected cell.
+    """
 
     if operation_view is not None:
         return _operation_detail_sections(row, operation_view)
@@ -623,11 +658,15 @@ def register_detail_sections(
                 DetailRow("Note", "No artifact entry for this row."),
                 DetailRow("Address", row.address.label),
                 DetailRow("Path", row.path),
+                *_evidence_grade_rows(None, type_override),
             ),
         )
         return (header, note_section)
 
-    sections: list[DetailSection] = [_header_section(row, entry), _value_section(row, entry)]
+    sections: list[DetailSection] = [
+        _header_section(row, entry),
+        _value_section(row, entry, type_override),
+    ]
     type_section = _type_section(entry)
     if type_section is not None:
         sections.append(type_section)

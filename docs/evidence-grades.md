@@ -4,10 +4,17 @@ A decoded description is an interpretation of evidence, not proof of a current
 value or permission to write. This guide applies the published
 [native field crosswalk][crosswalk] to Explorer's existing descriptions, limits,
 widths and missing context. It follows the [shared evidence contract][shared].
-Today the Browser and HTML displays do not display grade labels, and no artifact
-or export field named `evidence_grade` exists; this page adds no UI behavior,
-stored fields or artifact changes. The remaining grade UI
-work in [#302](https://github.com/Project-Helianthus/helianthus-vrc-explorer/issues/302)
+The Browser detail pane (`Entry evidence`, `Decoded value` and `Codec provenance`, beside
+Status, Interpreted and RAW), the HTML report's entry details and the results viewer show
+a selected entry's retained `evidence_grade` exactly as stored as `Entry evidence`
+(`Unknown` when it is absent, unsupported or the cell holds no entry). The decoded value
+is a separate claim: `Decoded value` is never better than `Hypothesis` (`Unknown` when the
+cell holds no decoded value), and a manual type override shows it as `Hypothesis (manual
+type override; view only)` for a cell that holds an entry, without rewriting the entry
+evidence. They also show the codec provenance. Scans do not write
+`evidence_grade` yet, and this page adds no stored fields or artifact changes. The
+remaining grade UI work in
+[#302](https://github.com/Project-Helianthus/helianthus-vrc-explorer/issues/302)
 stays open.
 
 ## Entry-level contract (required follow-up behavior)
