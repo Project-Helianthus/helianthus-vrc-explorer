@@ -433,14 +433,30 @@ function b524CorrespondenceSecondaryText() { return ""; }
 """
 
 
-def _rendered_cells(html: str, group: dict[str, Any], overrides: dict[str, str]) -> dict[str, Any]:
+def _rendered_cells(
+    html: str,
+    group: dict[str, Any],
+    overrides: dict[str, str],
+    *,
+    real_hex_parser: bool = False,
+) -> dict[str, Any]:
     """Render the report's real group table and return {register: {instance: cell}}."""
     start = html.index("function renderActiveGroup(")
     end = html.index("function renderB524Tab()", start)
     docs_start = html.index("const B524_DOCS_CATALOG_NAMES")
     docs_end = html.index("function b524CorrespondenceSecondaryText", docs_start)
+    harness = _DOM_HARNESS
+    if real_hex_parser:
+        hex_start = html.index("function bytesFromHex(")
+        hex_end = html.index("function decodeLatin1", hex_start)
+        stub = (
+            "function bytesFromHex(raw) "
+            "{ return raw.match(/../g).map((value) => parseInt(value, 16)); }\n"
+        )
+        assert stub in harness
+        harness = harness.replace(stub, html[hex_start:hex_end])
     script = (
-        _DOM_HARNESS
+        harness
         + html[docs_start:docs_end]
         + html[start:end]
         + "groupData = "
@@ -631,3 +647,63 @@ def test_explicit_unknown_grade_is_visible_in_the_cell_but_a_missing_one_is_not(
 
     missing = render_html_report(_artifact({BASE: _entry()}))
     assert _run(_cell_script(missing, entry="{}", override="null"))["appended"] == []
+
+
+_PARITY_CASES: dict[str, dict[str, Any]] = {
+    "valid": _entry(evidence_grade="Proven"),
+    "valid_mixed_case": _entry(evidence_grade="Hypothesis", raw_hex="0A bB"),
+    "whitespace_between_bytes": _entry(evidence_grade="Proven", raw_hex="01\t00"),
+    "whitespace_inside_a_byte": _entry(evidence_grade="Proven", raw_hex="0 100"),
+    "partially_parsed_pair": _entry(evidence_grade="Proven", raw_hex="0g00"),
+    "partially_parsed_trailing_pair": _entry(evidence_grade="Proven", raw_hex="000g"),
+    "odd_length": _entry(evidence_grade="Proven", raw_hex="010"),
+    "empty": _entry(evidence_grade="Proven", raw_hex=""),
+    "explicit_unknown": _entry(evidence_grade="Unknown"),
+    "missing_grade": _entry(),
+    "invalid_grade": _entry(evidence_grade="proven"),
+    "no_decoded_value": _entry(evidence_grade="Proven", value=None),
+}
+
+
+@pytest.mark.parametrize("name", sorted(_PARITY_CASES))
+def test_html_grading_matches_the_python_helper_for_edge_artifacts(name: str) -> None:
+    from helianthus_vrc_explorer.ui.evidence_display import entry_evidence_display
+
+    entry = _PARITY_CASES[name]
+    artifact = _artifact({("0x02", "0x09", "0x00", "0x0002"): entry})
+    html = render_html_report(artifact)
+    group = artifact["operations"]["0x02"]["groups"]["0x09"]
+
+    for override in (None, "HEX:2"):
+        cells = _rendered_cells(
+            html, group, {} if override is None else {"0x0002": override}, real_hex_parser=True
+        )
+        shown = entry_evidence_display(entry, type_override=override)
+        expected = [
+            f"Entry evidence: {shown.grade}",
+            f"Decoded value: {shown.decoded_text}",
+            f"Codec provenance: {shown.codec_provenance}",
+        ]
+        assert cells["0x0002"]["0x00"]["title"].split("\n")[-3:] == expected, (name, override)
+
+
+def test_report_script_hex_parser_accepts_exactly_what_bytes_fromhex_accepts() -> None:
+    html = render_html_report(_keyed_artifact())
+    start = html.index("function bytesFromHex(")
+    parser = html[start : html.index("function decodeLatin1", start)]
+    samples = [
+        "", "00", "0g", "g0", "0g00", "000g", "010", "0A bB", "01\t00", "0 100", " 01 ",
+        "\n01\r\n02\x0b03\x0c", "ab\u00a0cd", "０１", "+1", "0x", "-1", "00 0",
+    ]  # fmt: skip
+    result = _run(
+        parser
+        + f"console.log(JSON.stringify({json.dumps(samples)}.map("
+        + "(s) => { const b = bytesFromHex(s); return b === null ? null : Array.from(b); })));"
+    )
+    expected = []
+    for sample in samples:
+        try:
+            expected.append(list(bytes.fromhex(sample)))
+        except ValueError:
+            expected.append(None)
+    assert result == expected

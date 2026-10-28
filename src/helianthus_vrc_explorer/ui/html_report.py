@@ -814,15 +814,23 @@ __ARTIFACT_JSON__
       }
 
       function bytesFromHex(rawHex) {
-        if (typeof rawHex !== "string" || rawHex.length % 2) return null;
-        const out = new Uint8Array(rawHex.length / 2);
-        for (let i = 0; i < out.length; i++) {
-          const byteStr = rawHex.slice(i * 2, i * 2 + 2);
-          const v = parseInt(byteStr, 16);
-          if (!Number.isFinite(v)) return null;
-          out[i] = v;
+        // Same acceptance as Python's bytes.fromhex: ASCII whitespace is allowed between
+        // bytes only, and every byte is exactly two hexadecimal digits.
+        if (typeof rawHex !== "string") return null;
+        const isHex = (ch) => /^[0-9a-fA-F]$/.test(ch);
+        const out = [];
+        let i = 0;
+        while (i < rawHex.length) {
+          const ch = rawHex[i];
+          if (ch === " " || ch === "\\t" || ch === "\\n" || ch === "\\r" || ch === "\\v" || ch === "\\f") {
+            i += 1;
+            continue;
+          }
+          if (i + 1 >= rawHex.length || !isHex(ch) || !isHex(rawHex[i + 1])) return null;
+          out.push(parseInt(rawHex.slice(i, i + 2), 16));
+          i += 2;
         }
-        return out;
+        return Uint8Array.from(out);
       }
 
       function decodeLatin1(bytes) {
