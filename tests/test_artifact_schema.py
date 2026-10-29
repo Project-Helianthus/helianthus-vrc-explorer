@@ -486,6 +486,35 @@ def test_demo_browse_calendar_values_match_retained_bytes() -> None:
     assert regs["0x00da"]["value"] == "2019-01-01"
 
 
+@pytest.mark.parametrize("state", [[], {}])
+@pytest.mark.parametrize("status", ["00", "ff"])
+def test_malformed_response_state_keeps_legacy_inference(state, status):
+    source = {
+        "schema_version": "2.4",
+        "operations": {
+            "0x02": {
+                "groups": {
+                    "0x02": {
+                        "instances": {
+                            "0x00": {
+                                "registers": {
+                                    "0x1234": {"response_state": state, "reply_hex": status}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+    }
+    before = deepcopy(source)
+    migrated, _ = migrate_artifact_schema(source)
+    entry = next(iter_register_entries(migrated))[-1]
+    assert entry["response_state"] == "active"
+    assert entry["reply_hex"] == status
+    assert source == before
+
+
 @pytest.mark.parametrize("opcode", ["0x02", "0x06"])
 @pytest.mark.parametrize(
     "group,instance,register",

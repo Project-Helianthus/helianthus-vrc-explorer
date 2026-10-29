@@ -823,9 +823,13 @@ def replay_trace_to_artifact(trace_path: Path) -> dict[str, Any]:
             # Preserve useful value evidence when a later reply has only status.
             existing = registers.get(register_key)
             response_rank: dict[str | None, int] = {"active": 3, "status_only": 2, "empty_reply": 1}
-            if existing is None or response_rank.get(
-                entry.get("response_state"), 0
-            ) >= response_rank.get(existing.get("response_state"), 0):
+            if (
+                existing is None
+                or entry.get("response_state") == "active"
+                or response_rank.get(existing.get("response_state"), 0) == 0
+                or response_rank.get(entry.get("response_state"), 0)
+                > response_rank.get(existing.get("response_state"), 0)
+            ):
                 registers[register_key] = entry
             if (
                 _response_state_implies_present(entry.get("response_state"))

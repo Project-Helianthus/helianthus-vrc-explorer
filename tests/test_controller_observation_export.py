@@ -44,6 +44,25 @@ def artifact():
     }
 
 
+@pytest.mark.parametrize("state", [[], {}])
+@pytest.mark.parametrize("status", ["00", "ff"])
+def test_cli_malformed_response_state_keeps_legacy_inference(tmp_path, state, status):
+    source = artifact()
+    for operation in source["operations"].values():
+        entry = operation["groups"]["0x02"]["instances"]["0x00"]["registers"]["0x0009"]
+        entry["response_state"] = state
+        entry["reply_hex"] = status
+    path = tmp_path / "input.json"
+    original = json.dumps(source)
+    path.write_text(original)
+    result = subprocess.run([sys.executable, str(SCRIPT), str(path)], capture_output=True)
+    assert result.returncode == 0, result.stderr.decode()
+    records = json.loads(result.stdout)["observations"]
+    assert len(records) == 2
+    assert all(record["response_state"] == "active" for record in records)
+    assert path.read_text() == original
+
+
 def test_selector_identity_grades_and_unknowns_are_independent():
     source = artifact()
     before = deepcopy(source)

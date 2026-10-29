@@ -162,7 +162,11 @@ def _derive_response_state(entry: dict[str, Any]) -> str | None:
     if (
         isinstance(reply, str)
         and reply.strip().lower() in {"00", "ff"}
-        and response_state in {None, "active", "status_only"}
+        and (
+            response_state is None
+            or isinstance(response_state, str)
+            and response_state in {"active", "status_only"}
+        )
         and entry.get("error") is None
     ):
         return "status_only"

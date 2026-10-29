@@ -823,9 +823,7 @@ def probe_instance_availability(
     response_state = entry.get("response_state")
 
     if opcode == 0x02 and (
-        entry.get("error") is not None
-        or response_state in {"empty_reply", "status_only"}
-        or entry.get("raw_hex") is None
+        entry.get("error") is not None or response_state in {"empty_reply", "status_only"}
     ):
         entry["availability_qualification"] = "unknown"
         return InstanceAvailabilityProbe(present=False, contract=contract, evidence=entry)

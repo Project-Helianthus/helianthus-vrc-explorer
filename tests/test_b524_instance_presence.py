@@ -247,6 +247,19 @@ def test_remote_positive_count_keeps_sparse_slots_eligible(count, present, expec
     )
 
 
+@pytest.mark.parametrize("group", range(6, 18))
+@pytest.mark.parametrize("instance", [0, 1])
+def test_nonstatus_single_byte_op02_keeps_legacy_presence(group, instance):
+    probe = probe_instance_availability(
+        _ReplyTransport(b"\x01"), dst=0x15, group=group, instance=instance, opcode=0x02
+    )
+    assert probe.present is True
+    assert probe.evidence["response_state"] == "active"
+    assert probe.evidence["reply_hex"] == "01"
+    assert probe.evidence["raw_hex"] is None
+    assert probe.evidence.get("availability_qualification") is None
+
+
 @pytest.mark.parametrize("opcode", [0x02, 0x06])
 @pytest.mark.parametrize("group", list(range(1, 18)))
 @pytest.mark.parametrize("instance", [0, 1])

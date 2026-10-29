@@ -1221,6 +1221,41 @@ def test_replay_uses_neutral_plain_byte_calendar_codecs(tmp_path, register, payl
     assert entry["raw_hex"] == payload
 
 
+@pytest.mark.parametrize("responses", [(b"", b""), (b"\x00", b"\xff"), (b"\xff", b"\x00")])
+def test_replay_keeps_first_equal_rank_nonvalue_reply(tmp_path, monkeypatch, responses):
+    from datetime import datetime
+
+    import helianthus_vrc_explorer.replay_trace as replay
+
+    exchanges = [
+        replay._TraceExchange(
+            seq=i,
+            timestamp=datetime.min,
+            src=0,
+            dst=0x15,
+            primary=0xB5,
+            secondary=0x24,
+            payload=bytes((2, 0, 2, 0, 0x34, 0x12)),
+            response=response,
+            op_label=f"reply-{i}",
+        )
+        for i, response in enumerate(responses)
+    ]
+    meta = replay.TraceReplayMetadata("synthetic", datetime.min, datetime.min, 0, 2, 0)
+    monkeypatch.setattr(
+        replay, "_parse_enhanced_trace_lines", lambda *args, **kwargs: (exchanges, meta)
+    )
+    path = tmp_path / "synthetic.trace"
+    path.write_text("")
+    result = replay.replay_trace_to_artifact(path)
+    entry = result["operations"]["0x02"]["groups"]["0x02"]["instances"]["0x00"]["registers"][
+        "0x1234"
+    ]
+    assert entry["reply_hex"] == responses[0].hex()
+    assert entry["trace_seq"] == 0
+    assert entry["trace_label"] == "reply-0"
+
+
 @pytest.mark.parametrize("opcode", [2, 6])
 @pytest.mark.parametrize(
     "group,instance,register",
