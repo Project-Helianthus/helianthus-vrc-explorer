@@ -62,7 +62,7 @@ class RegisterEntry(TypedDict):
     # Access semantics derived from FLAGS and payload shape.
     flags_access: str | None
     # Wire-level response state for the request.
-    # One of: "active", "empty_reply", "nack", "timeout", or None for non-protocol transport
+    # One of: "active", "status_only", "empty_reply", "nack", "timeout", or None
     # failures where a state could not be determined.
     response_state: NotRequired[str | None]
     # Optional register name annotations.
@@ -667,8 +667,7 @@ def read_register(
         else None
     )
 
-    # Some registers respond with a single status byte (no GG/RR echo and no value bytes).
-    # We treat this as a valid "absent register" reply rather than a decoder bug.
+    # A status byte alone establishes neither a value nor instance absence.
     if len(response) == 1:
         return {
             "read_opcode": read_opcode,
@@ -676,8 +675,8 @@ def read_register(
             "reply_hex": reply_hex,
             "flags": flags,
             "reply_kind": reply_kind,
-            "flags_access": flags_access,
-            "response_state": "active",
+            "flags_access": None if flags in {0x00, 0xFF} else flags_access,
+            "response_state": "status_only" if flags in {0x00, 0xFF} else "active",
             "ebusd_name": None,
             "myvaillant_name": None,
             "raw_hex": None,
@@ -823,7 +822,11 @@ def probe_instance_availability(
     present = False
     response_state = entry.get("response_state")
 
-    if opcode == 0x02 and (entry.get("error") is not None or response_state == "empty_reply"):
+    if opcode == 0x02 and (
+        entry.get("error") is not None
+        or response_state in {"empty_reply", "status_only"}
+        or entry.get("raw_hex") is None
+    ):
         entry["availability_qualification"] = "unknown"
         return InstanceAvailabilityProbe(present=False, contract=contract, evidence=entry)
 
@@ -916,6 +919,8 @@ def probe_instance_availability(
         return InstanceAvailabilityProbe(present=present, contract=contract, evidence=entry)
 
     if opcode == 0x06:
+        if response_state == "status_only":
+            entry["availability_qualification"] = "unknown"
         header_evidence = entry
         present = (
             entry["error"] is None

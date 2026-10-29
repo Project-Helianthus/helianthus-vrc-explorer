@@ -320,9 +320,10 @@ def test_exporter_still_documents_what_it_omits() -> None:
     doc = " ".join((_exporter().__doc__ or "").split())
 
     assert (
-        "Current values (including text, clocks and identifiers), raw bytes, names and "
+        "Current values (including text, clocks and identifiers), value bytes, names and "
         "arbitrary metadata are omitted." in doc
     )
+    assert "Status-only replies retain their single raw status byte." in doc
 
 
 # --- the guard can fail ------------------------------------------------------------------

@@ -157,9 +157,18 @@ def _migrate_group(group_obj: dict[str, Any]) -> bool:
 
 def _derive_response_state(entry: dict[str, Any]) -> str | None:
     response_state = entry.get("response_state")
+    # Legacy one-byte records were labelled active despite lacking a value body.
+    reply = entry.get("reply_hex")
+    if (
+        isinstance(reply, str)
+        and reply.strip().lower() in {"00", "ff"}
+        and response_state in {None, "active", "status_only"}
+        and entry.get("error") is None
+    ):
+        return "status_only"
     if isinstance(response_state, str):
         normalized = response_state.strip().lower()
-        if normalized in {"active", "empty_reply", "nack", "nack_or_crc", "timeout"}:
+        if normalized in {"active", "status_only", "empty_reply", "nack", "nack_or_crc", "timeout"}:
             return normalized
 
     error = entry.get("error")
@@ -213,6 +222,18 @@ def _migrate_entry(entry: dict[str, Any]) -> bool:
                 changed = True
             elif lowered.startswith("transport_error:") and "nack" in lowered:
                 entry["error"] = "nack"
+                changed = True
+
+    if response_state == "status_only":
+        reply = entry.get("reply_hex")
+        if isinstance(reply, str) and reply.strip().lower() in {"00", "ff"}:
+            status = int(reply, 16)
+            if entry.get("flags") != status:
+                entry["flags"] = status
+                changed = True
+        for key in ("flags_access", "reply_kind"):
+            if entry.get(key) is not None:
+                entry[key] = None
                 changed = True
 
     if response_state == "empty_reply":

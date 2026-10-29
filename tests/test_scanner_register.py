@@ -270,7 +270,8 @@ def test_read_register_status_only_response_is_not_decode_error() -> None:
 
     assert entry["reply_hex"] == "00"
     assert entry["flags"] == 0x00
-    assert entry["flags_access"] == "absent"
+    assert entry["flags_access"] is None
+    assert entry["response_state"] == "status_only"
     assert entry["raw_hex"] is None
     assert entry["type"] is None
     assert entry["value"] is None
@@ -1099,3 +1100,60 @@ def test_strip_echo_header_ii_mismatch_rejected() -> None:
     # Current implementation may not validate II — this test documents the gap.
     with contextlib.suppress(ValueError, IndexError):
         _strip_echo_header(payload, response)
+
+
+@pytest.mark.parametrize("opcode", [0x02, 0x06])
+@pytest.mark.parametrize(
+    "group,instance,register",
+    [(2, 0, 0x1234), (3, 0, 0x1234), (2, 1, 0x1234), (2, 0, 0x1235), (2, 0, 0x1334)],
+)
+@pytest.mark.parametrize("status", [0x00, 0xFF])
+def test_status_only_acquisition_retains_selector_and_status(
+    opcode, group, instance, register, status
+):
+    class SyntheticTransport(TransportInterface):
+        def send(self, dst, payload):
+            assert payload == bytes((opcode, 0, group, instance)) + register.to_bytes(2, "little")
+            return bytes((status,))
+
+    entry = read_register(
+        SyntheticTransport(),
+        0x15,
+        opcode,
+        group=group,
+        instance=instance,
+        register=register,
+        type_hint="UIN",
+    )
+    assert entry["response_state"] == "status_only"
+    assert entry["reply_hex"] == bytes((status,)).hex()
+    assert entry["flags"] == status
+    assert entry["flags_access"] is None
+    assert entry["type"] is None and entry["value"] is None and entry["raw_hex"] is None
+    assert "codec_provenance" not in entry
+
+
+@pytest.mark.parametrize("opcode", [2, 6])
+@pytest.mark.parametrize(
+    "body,state",
+    [
+        (b"", "empty_reply"),
+        (b"\x01", "active"),
+        (b"\x00\x02", "active"),
+        (b"\xff\x02\x34", "active"),
+    ],
+)
+def test_status_only_boundary_controls_remain_unqualified(opcode, body, state):
+    class SyntheticTransport(TransportInterface):
+        def send(self, dst, payload):
+            return body
+
+    entry = read_register(
+        SyntheticTransport(), 0x15, opcode, group=2, instance=0, register=0x1234, type_hint="UIN"
+    )
+    assert entry["reply_hex"] == body.hex()
+    assert entry["response_state"] == state
+    assert entry["value"] is None and entry["type"] is None
+    assert "codec_provenance" not in entry
+    if len(body) in {2, 3}:
+        assert entry["error"].startswith("decode_error:")

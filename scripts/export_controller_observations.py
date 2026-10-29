@@ -4,7 +4,8 @@
 Usage: python3 scripts/export_controller_observations.py ARTIFACT > inventory.json
 Only family, full selectors, evidence grades, response states and numeric decoded
 parameter-description observations are retained. Current values (including text,
-clocks and identifiers), raw bytes, names and arbitrary metadata are omitted.
+clocks and identifiers), value bytes, names and arbitrary metadata are omitted.
+Status-only replies retain their single raw status byte.
 Missing qualifiers and absent raw descriptions are unknown; an absent grade is
 "unspecified", distinct from an explicit Unknown grade. Qualifiers and grades
 are source claims, never qualification by this tool. This is not native profile
@@ -37,7 +38,16 @@ CODECS = frozenset(
     {"UCH", "BOOL", "I8", "UIN", "I16", "U32", "I32", "EXP", "DATE_DMY_U8X3", "TIME_HMS_U8X3"}
 )
 STATES = frozenset(
-    {"active", "empty_reply", "nack", "nack_or_crc", "timeout", "transport_error", "unattempted"}
+    {
+        "active",
+        "status_only",
+        "empty_reply",
+        "nack",
+        "nack_or_crc",
+        "timeout",
+        "transport_error",
+        "unattempted",
+    }
 )
 
 
@@ -52,7 +62,10 @@ def _choice(value: object, allowed: frozenset[str], unknown: str = "unknown") ->
 
 
 def _response_state(entry: dict) -> str:
-    state = _choice(entry.get("response_state"), STATES)
+    derived = _derive_response_state(entry)
+    state = (
+        "status_only" if derived == "status_only" else _choice(entry.get("response_state"), STATES)
+    )
     if state == "unknown":
         state = _choice(_derive_response_state(entry), STATES)
     error = entry.get("error")
@@ -163,6 +176,16 @@ def export_observations(artifact: object) -> dict:
                             ),
                             "evidence_grade": _evidence_grade(entry),
                             "response_state": _response_state(entry),
+                            **(
+                                {
+                                    "reply_hex": entry["reply_hex"].strip().lower(),
+                                    "flags": int(entry["reply_hex"], 16),
+                                }
+                                if _response_state(entry) == "status_only"
+                                and isinstance(entry.get("reply_hex"), str)
+                                and entry["reply_hex"].strip().lower() in {"00", "ff"}
+                                else {}
+                            ),
                             "raw_description": raw,
                             "decoded_observation": decoded,
                         }

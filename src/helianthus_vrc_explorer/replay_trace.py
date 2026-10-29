@@ -529,6 +529,9 @@ def _decode_register_read_entry(
     entry["response_state"] = "active"
 
     if len(response) == 1:
+        if flags in {0x00, 0xFF}:
+            entry["response_state"] = "status_only"
+            entry["flags_access"] = None
         return entry
 
     try:
@@ -817,13 +820,12 @@ def replay_trace_to_artifact(trace_path: Path) -> dict[str, Any]:
             entry["trace_seq"] = exchange.seq
             if exchange.op_label:
                 entry["trace_label"] = exchange.op_label
-            # Keep the entry with the best response (active > empty > timeout)
+            # Preserve useful value evidence when a later reply has only status.
             existing = registers.get(register_key)
-            if (
-                existing is None
-                or entry.get("response_state") == "active"
-                or existing.get("response_state") in {None, "timeout", "nack", "nack_or_crc"}
-            ):
+            response_rank: dict[str | None, int] = {"active": 3, "status_only": 2, "empty_reply": 1}
+            if existing is None or response_rank.get(
+                entry.get("response_state"), 0
+            ) >= response_rank.get(existing.get("response_state"), 0):
                 registers[register_key] = entry
             if (
                 _response_state_implies_present(entry.get("response_state"))

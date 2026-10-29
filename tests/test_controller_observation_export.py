@@ -386,3 +386,52 @@ def test_misplaced_description_selector_is_not_bound_to_enclosing_entry(key, oth
     assert record["raw_description"] == "unknown"
     assert record["decoded_observation"]["min"] == "unknown"
     assert record["decoded_observation"]["qualification"] == "unknown"
+
+
+@pytest.mark.parametrize("opcode", ["0x02", "0x06"])
+@pytest.mark.parametrize(
+    "group,instance,register",
+    [
+        ("0x02", "0x00", "0x1234"),
+        ("0x03", "0x00", "0x1234"),
+        ("0x02", "0x01", "0x1234"),
+        ("0x02", "0x00", "0x1235"),
+        ("0x02", "0x00", "0x1334"),
+    ],
+)
+@pytest.mark.parametrize("status", ["00", "ff"])
+@pytest.mark.parametrize("state", ["active", "status_only"])
+def test_status_only_export_reload_retains_raw_status(
+    opcode, group, instance, register, status, state
+):
+    source = {
+        "schema_version": "2.4",
+        "operations": {
+            opcode: {
+                "groups": {
+                    group: {
+                        "instances": {
+                            instance: {
+                                "registers": {
+                                    register: {"response_state": state, "reply_hex": status}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+    }
+    (row,) = json.loads(json.dumps(export(source)))["observations"]
+    assert row["selector"] == dict(
+        zip(
+            ("opcode", "group", "instance", "register"),
+            (opcode, group, instance, register),
+            strict=True,
+        )
+    )
+    assert row["response_state"] == "status_only"
+    assert row["reply_hex"] == status
+    assert row["flags"] == int(status, 16)
+    assert row["evidence_grade"] == "unspecified"
+    assert row["decoded_observation"]["type"] == "unknown"

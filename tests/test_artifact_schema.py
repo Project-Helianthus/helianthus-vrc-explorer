@@ -484,3 +484,107 @@ def test_demo_browse_calendar_values_match_retained_bytes() -> None:
     assert regs["0x0035"]["raw_hex"] == "122109"
     assert regs["0x0035"]["value"] == "18:33:09"
     assert regs["0x00da"]["value"] == "2019-01-01"
+
+
+@pytest.mark.parametrize("opcode", ["0x02", "0x06"])
+@pytest.mark.parametrize(
+    "group,instance,register",
+    [
+        ("0x02", "0x00", "0x1234"),
+        ("0x03", "0x00", "0x1234"),
+        ("0x02", "0x01", "0x1234"),
+        ("0x02", "0x00", "0x1235"),
+        ("0x02", "0x00", "0x1334"),
+    ],
+)
+@pytest.mark.parametrize("status", ["00", "ff"])
+@pytest.mark.parametrize("state", ["active", "status_only"])
+def test_status_only_migration_preserves_raw_without_inventing_values(
+    opcode, group, instance, register, status, state
+):
+    entry = {
+        "response_state": state,
+        "reply_hex": status,
+        "flags": int(status, 16),
+        "value": None,
+        "type": None,
+    }
+    source = {
+        "schema_version": "2.4",
+        "operations": {
+            opcode: {"groups": {group: {"instances": {instance: {"registers": {register: entry}}}}}}
+        },
+    }
+    before = deepcopy(source)
+    migrated, report = migrate_artifact_schema(source)
+    op, gg, ii, rr, result = next(iter_register_entries(migrated))
+    assert (op, gg, ii, rr) == (opcode, group, instance, register)
+    assert result["response_state"] == "status_only"
+    assert result["reply_hex"] == status and result["flags"] == int(status, 16)
+    assert result["value"] is None and result["type"] is None
+    assert report.register_count_after == 1
+    assert source == before
+    assert migrate_artifact_schema(migrated)[0] == migrated
+
+
+@pytest.mark.parametrize("state", ["active", "status_only"])
+@pytest.mark.parametrize("status", ["00", "ff"])
+def test_status_only_legacy_fields_are_retained_but_ineligible(monkeypatch, state, status):
+    import helianthus_vrc_explorer.schema.parameter_descriptions as descriptions
+
+    entry = {
+        "response_state": state,
+        "reply_hex": status,
+        "value": 7,
+        "type": "UIN",
+        "raw_hex": "0700",
+        "codec_provenance": "selector_qualified",
+        "parameter_description": {"qualification": "matched"},
+    }
+    source = {
+        "schema_version": "2.4",
+        "operations": {
+            "0x02": {"groups": {"0x02": {"instances": {"0x00": {"registers": {"0x1234": entry}}}}}}
+        },
+    }
+    migrated, _ = migrate_artifact_schema(source)
+    result = next(iter_register_entries(migrated))[-1]
+    assert result["value"] == 7 and result["raw_hex"] == "0700"
+    assert result["parameter_description"] == entry["parameter_description"]
+    monkeypatch.setattr(
+        descriptions,
+        "description_profile",
+        lambda *args: pytest.fail("status-only must not qualify a profile"),
+    )
+    selector = {"read_opcode": "0x02", "group": "0x02", "instance": "0x00", "register": "0x1234"}
+    assert descriptions.effective_parameter_description(source, selector) is None
+    assert descriptions.effective_parameter_description(migrated, selector) is None
+    assert descriptions.export_description_baseline(migrated)["descriptions"] == []
+
+
+@pytest.mark.parametrize("state", ["active", "status_only"])
+@pytest.mark.parametrize("status", ["00", "ff"])
+@pytest.mark.parametrize("location", ["probe", "entry"])
+def test_status_only_native_description_scope_is_unknown(monkeypatch, state, status, location):
+    import helianthus_vrc_explorer.schema.parameter_descriptions as descriptions
+
+    status_entry = {"response_state": state, "reply_hex": status}
+    probe = {"present": True, **(status_entry if location == "probe" else {})}
+    entry = status_entry if location == "entry" else {"response_state": "active", "raw_hex": "0100"}
+    artifact = {
+        "operations": {
+            "0x02": {
+                "groups": {
+                    "0x02": {
+                        "availability_probes": {"0x00": probe},
+                        "instances": {"0x00": {"registers": {"0x1234": entry}}},
+                    }
+                }
+            }
+        }
+    }
+    monkeypatch.setattr(
+        descriptions, "validation_scope_for_record", lambda record, *, presence: presence
+    )
+    selector = {"read_opcode": "0x02", "group": "0x02", "instance": "0x00", "register": "0x1234"}
+    assert descriptions._native_current_scope(artifact, selector, {}) == "unknown"

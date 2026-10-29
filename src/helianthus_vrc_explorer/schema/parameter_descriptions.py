@@ -16,6 +16,7 @@ from copy import deepcopy
 from importlib import resources
 from typing import Any
 
+from ..artifact_schema import _derive_response_state
 from ..evidence_compat import interpret_legacy_codecs, normalize_api_identity
 from ..evidence_export import validate_scope_overlay, validation_scope_for_record
 from ..protocol.b524_metadata import decode_parameter_description
@@ -199,6 +200,8 @@ def _device_identity(artifact: dict[str, Any], group: str, instance: str) -> dic
 
     def observed_bytes(register: str, codecs: tuple[str, ...], width: int) -> str | None:
         entry = registers.get(register, {})
+        if _derive_response_state(entry) == "status_only":
+            return None
         if entry.get("type") not in codecs or entry.get("value") is None:
             return None
         try:
@@ -460,6 +463,8 @@ def export_description_baseline(
     """
     descriptions: list[dict[str, Any]] = []
     for selector, entry in _entries(artifact):
+        if _derive_response_state(entry) == "status_only":
+            continue
         profile = description_profile(artifact, selector)
         if _qualified_profile(profile):
             desc = entry.get("parameter_description")
@@ -905,6 +910,7 @@ def _native_current_scope(
     present = probe.get("present")
     if (
         probe.get("availability_qualification") == "unknown"
+        or _derive_response_state(probe) == "status_only"
         or probe.get("source", group.get("availability_contract", {}).get("source"))
         == "always_present"
     ):
@@ -918,11 +924,12 @@ def _native_current_scope(
         else "unknown"
     )
     entry = instance.get("registers", {}).get(selector["register"], {})
-    if entry.get("error") is not None or entry.get("response_state") in {
+    if entry.get("error") is not None or _derive_response_state(entry) in {
         "timeout",
         "nack",
         "nack_or_crc",
         "empty_reply",
+        "status_only",
     }:
         presence = "unknown"
     return validation_scope_for_record(record, presence=presence)
@@ -1040,7 +1047,7 @@ def effective_parameter_description(
     """
 
     entry = _entry_for_selector(artifact, selector)
-    if entry is None:
+    if entry is None or _derive_response_state(entry) == "status_only":
         return None
     profile = description_profile(artifact, selector)
     live = entry.get("parameter_description")

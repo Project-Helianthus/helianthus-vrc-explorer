@@ -1219,3 +1219,84 @@ def test_replay_uses_neutral_plain_byte_calendar_codecs(tmp_path, register, payl
     assert entry["type"] == codec
     assert entry["value"] == value
     assert entry["raw_hex"] == payload
+
+
+@pytest.mark.parametrize("opcode", [2, 6])
+@pytest.mark.parametrize(
+    "group,instance,register",
+    [(2, 0, 0x1234), (3, 0, 0x1234), (2, 1, 0x1234), (2, 0, 0x1235), (2, 0, 0x1334)],
+)
+@pytest.mark.parametrize("status", [0, 255])
+@pytest.mark.parametrize("prior", [False, True])
+def test_status_only_replay_presence_and_last_useful_value(
+    tmp_path, monkeypatch, opcode, group, instance, register, status, prior
+):
+    from datetime import datetime
+
+    import helianthus_vrc_explorer.replay_trace as replay
+
+    payload = bytes((opcode, 0, group, instance)) + register.to_bytes(2, "little")
+    responses = [bytes((status,))]
+    if prior:
+        responses.insert(0, bytes((1, group)) + register.to_bytes(2, "little") + b"\x01\x00")
+    exchanges = [
+        replay._TraceExchange(
+            seq=i,
+            timestamp=datetime.min,
+            src=0,
+            dst=0x15,
+            primary=0xB5,
+            secondary=0x24,
+            payload=payload,
+            response=response,
+        )
+        for i, response in enumerate(responses)
+    ]
+    meta = replay.TraceReplayMetadata("synthetic", datetime.min, datetime.min, 0, len(exchanges), 0)
+    monkeypatch.setattr(
+        replay, "_parse_enhanced_trace_lines", lambda *args, **kwargs: (exchanges, meta)
+    )
+    path = tmp_path / "synthetic.trace"
+    path.write_text("")
+    result = replay.replay_trace_to_artifact(path)
+    slot = result["operations"][f"0x{opcode:02x}"]["groups"][f"0x{group:02x}"]["instances"][
+        f"0x{instance:02x}"
+    ]
+    entry = slot["registers"][f"0x{register:04x}"]
+    assert slot["present"] is prior
+    if prior:
+        assert entry["value"] == 1
+        assert entry["raw_hex"] == "0100"
+    else:
+        assert entry["response_state"] == "status_only"
+        assert entry["reply_hex"] == bytes((status,)).hex()
+        assert entry["flags"] == status
+        assert entry["type"] is None and entry["value"] is None
+
+
+@pytest.mark.parametrize("opcode", [2, 6])
+@pytest.mark.parametrize(
+    "response,state",
+    [
+        (b"", "empty_reply"),
+        (b"\x01", "active"),
+        (b"\x00", "status_only"),
+        (b"\xff", "status_only"),
+        (b"\x00\x02", "active"),
+        (b"\xff\x02\x34", "active"),
+        (b"\x01\x02\x34\x12\x01\x00", "active"),
+    ],
+)
+def test_status_only_replay_decode_boundary_controls(opcode, response, state):
+    from helianthus_vrc_explorer.replay_trace import _decode_register_read_entry
+
+    entry = _decode_register_read_entry(
+        opcode=opcode, payload=bytes((opcode, 0, 2, 1, 0x34, 0x12)), response=response
+    )
+    assert entry["response_state"] == state
+    assert entry["reply_hex"] == response.hex()
+    if len(response) < 4:
+        assert entry["value"] is None and entry["type"] is None
+        assert "codec_provenance" not in entry
+    else:
+        assert entry["value"] == 1 and entry["raw_hex"] == "0100"
