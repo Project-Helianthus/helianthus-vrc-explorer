@@ -826,9 +826,12 @@ def replay_trace_to_artifact(trace_path: Path) -> dict[str, Any]:
             if (
                 existing is None
                 or entry.get("response_state") == "active"
-                or response_rank.get(existing.get("response_state"), 0) == 0
-                or response_rank.get(entry.get("response_state"), 0)
-                > response_rank.get(existing.get("response_state"), 0)
+                or existing.get("response_state") in {None, "timeout", "nack", "nack_or_crc"}
+                or (
+                    existing.get("response_state") in response_rank
+                    and response_rank.get(entry.get("response_state"), 0)
+                    > response_rank.get(existing.get("response_state"), 0)
+                )
             ):
                 registers[register_key] = entry
             if (
