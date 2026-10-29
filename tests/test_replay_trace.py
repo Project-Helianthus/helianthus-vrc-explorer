@@ -1282,6 +1282,15 @@ def test_replay_preserves_transport_error_replacement_boundary(tmp_path, reply, 
         assert entry["response_state"] == "active"
         assert entry["reply_hex"] == reply
         assert entry["error"].startswith("decode_error:")
+    elif reply == "":
+        assert entry["response_state"] == "empty_reply"
+        assert entry["reply_hex"] == ""
+        assert entry["trace_seq"] == 2
+        assert entry["flags"] is None and entry["reply_kind"] is None
+        assert entry["type"] is None and entry["value"] is None
+        assert entry["error"] is None
+        assert "transport_diagnostic" not in entry
+        assert slot["present"] is True
     elif reply in {"00", "ff"}:
         assert entry["response_state"] == "status_only"
         assert entry["reply_hex"] == reply

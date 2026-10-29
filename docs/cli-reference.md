@@ -22,6 +22,9 @@ earlier transport failure for the same selector in the `0x02` or `0x06`
 operation namespace. Replay retains its raw status byte as `status_only`,
 without inferring a value or instance presence. A prior useful value remains
 preferred over a later status-only reply.
+A clean zero-length reply also replaces an earlier transport failure as
+`empty_reply`, without inferring a register value. Replay retains its existing
+behavior of treating an empty reply as instance presence evidence.
 
 ## Root command
 
