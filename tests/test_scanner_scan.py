@@ -1786,17 +1786,18 @@ def test_scan_unknown_group_probes_both_opcodes_and_two_instances(tmp_path: Path
     }
 
 
-def test_probe_unknown_group_opcodes_ignores_absent_flags_access() -> None:
-    class _AbsentProbeTransport(TransportInterface):
+@pytest.mark.parametrize("status", [b"\x00", b"\xff"])
+def test_probe_unknown_group_opcodes_keeps_status_only_access_unknown(status: bytes) -> None:
+    class _StatusOnlyProbeTransport(TransportInterface):
         def send(self, dst: int, payload: bytes) -> bytes:  # noqa: ARG002
             if payload == bytes((0x02, 0x00, 0x69, 0x00, 0x00, 0x00)):
-                return b"\x00"
+                return status
             if payload == bytes((0x06, 0x00, 0x69, 0x01, 0x00, 0x00)):
                 return b"\x01\x69\x00\x00\x01"
             raise AssertionError(f"unexpected probe payload: {payload.hex()}")
 
     opcodes, probe_summary = _probe_unknown_group_opcodes(
-        _AbsentProbeTransport(),
+        _StatusOnlyProbeTransport(),
         dst=0x15,
         group=0x69,
         observer=None,
@@ -1804,8 +1805,13 @@ def test_probe_unknown_group_opcodes_ignores_absent_flags_access() -> None:
 
     assert opcodes == (0x06,)
     assert probe_summary["responsive_opcodes"] == ["0x06"]
-    assert probe_summary["candidates"]["0x02"]["flags_access"] == "absent"
-    assert probe_summary["candidates"]["0x02"]["responsive"] is False
+    candidate = probe_summary["candidates"]["0x02"]
+    assert candidate["flags_access"] is None
+    assert candidate["response_state"] == "status_only"
+    assert candidate["reply_hex"] == status.hex()
+    assert candidate["raw_hex"] is None
+    assert candidate["error"] is None
+    assert candidate["responsive"] is False
 
 
 def test_probe_unknown_group_opcodes_treats_empty_reply_as_responsive() -> None:

@@ -245,3 +245,65 @@ def test_remote_positive_count_keeps_sparse_slots_eligible(count, present, expec
     assert {ii for ii, probe in probes.items() if probe.present} == present.intersection(
         expected_probes
     )
+
+
+@pytest.mark.parametrize("group", range(6, 18))
+@pytest.mark.parametrize("instance", [0, 1])
+def test_nonstatus_single_byte_op02_keeps_legacy_presence(group, instance):
+    probe = probe_instance_availability(
+        _ReplyTransport(b"\x01"), dst=0x15, group=group, instance=instance, opcode=0x02
+    )
+    assert probe.present is True
+    assert probe.evidence["response_state"] == "active"
+    assert probe.evidence["reply_hex"] == "01"
+    assert probe.evidence["raw_hex"] is None
+    assert probe.evidence.get("availability_qualification") is None
+
+
+@pytest.mark.parametrize("opcode", [0x02, 0x06])
+@pytest.mark.parametrize("group", list(range(1, 18)))
+@pytest.mark.parametrize("instance", [0, 1])
+@pytest.mark.parametrize("status", [0x00, 0xFF])
+def test_status_only_never_establishes_instance_presence(opcode, group, instance, status):
+    probe = probe_instance_availability(
+        _ReplyTransport(bytes((status,))), dst=0x15, group=group, instance=instance, opcode=opcode
+    )
+    if probe.contract.source == "always_present":
+        assert probe.evidence is None
+        return
+    assert probe.present is False
+    assert probe.evidence["response_state"] == "status_only"
+    assert probe.evidence["availability_qualification"] == "unknown"
+    assert probe.connection_state in {None, "unknown"}
+
+
+@pytest.mark.parametrize("opcode", [2, 6])
+@pytest.mark.parametrize("connected", [False, True])
+def test_status_only_presence_has_independent_typed_controls(opcode, connected):
+    class CorrelatedTransport(TransportInterface):
+        def send(self, dst, payload):
+            body = bytes((int(connected),)) if opcode == 6 else int(connected).to_bytes(2, "little")
+            return bytes((1, payload[2])) + payload[4:6] + body
+
+    probe = probe_instance_availability(
+        CorrelatedTransport(), dst=0x15, group=1, instance=1, opcode=opcode
+    )
+    assert probe.present is connected
+    assert probe.evidence["response_state"] == "active"
+    assert probe.evidence["value"] == connected
+
+
+@pytest.mark.parametrize("status", [0, 255])
+def test_status_only_remote_probe_keeps_independent_typed_header_control(status):
+    class CorrelatedTransport(TransportInterface):
+        def send(self, dst, payload):
+            if payload[4:6] == b"\x01\x00":
+                return bytes((status,))
+            return bytes((1, payload[2])) + payload[4:6] + b"\x01"
+
+    probe = probe_instance_availability(
+        CorrelatedTransport(), dst=0x15, group=4, instance=1, opcode=6
+    )
+    assert probe.present is True
+    assert probe.evidence["response_state"] == "active"
+    assert probe.evidence["raw_hex"] == "01"

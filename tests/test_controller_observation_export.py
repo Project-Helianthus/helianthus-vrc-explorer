@@ -44,6 +44,45 @@ def artifact():
     }
 
 
+@pytest.mark.parametrize(
+    "state",
+    [
+        None,
+        "active",
+        "ACTIVE",
+        " active ",
+        "status_only",
+        " STATUS_ONLY ",
+        "timeout",
+        "nack",
+        "empty_reply",
+        "invalid",
+        [],
+        {},
+        42,
+        False,
+    ],
+)
+@pytest.mark.parametrize("status", ["00", "ff"])
+def test_cli_status_reply_inference_is_independent_of_state(tmp_path, state, status):
+    source = artifact()
+    for operation in source["operations"].values():
+        entry = operation["groups"]["0x02"]["instances"]["0x00"]["registers"]["0x0009"]
+        entry["response_state"] = state
+        entry["reply_hex"] = status
+    path = tmp_path / "input.json"
+    original = json.dumps(source)
+    path.write_text(original)
+    result = subprocess.run([sys.executable, str(SCRIPT), str(path)], capture_output=True)
+    assert result.returncode == 0, result.stderr.decode()
+    records = json.loads(result.stdout)["observations"]
+    assert len(records) == 2
+    assert all(record["response_state"] == "status_only" for record in records)
+    assert all(record["reply_hex"] == status for record in records)
+    assert all(record["flags"] == int(status, 16) for record in records)
+    assert path.read_text() == original
+
+
 def test_selector_identity_grades_and_unknowns_are_independent():
     source = artifact()
     before = deepcopy(source)
@@ -386,3 +425,89 @@ def test_misplaced_description_selector_is_not_bound_to_enclosing_entry(key, oth
     assert record["raw_description"] == "unknown"
     assert record["decoded_observation"]["min"] == "unknown"
     assert record["decoded_observation"]["qualification"] == "unknown"
+
+
+@pytest.mark.parametrize("opcode", ["0x02", "0x06"])
+@pytest.mark.parametrize(
+    "group,instance,register",
+    [
+        ("0x02", "0x00", "0x1234"),
+        ("0x03", "0x00", "0x1234"),
+        ("0x02", "0x01", "0x1234"),
+        ("0x02", "0x00", "0x1235"),
+        ("0x02", "0x00", "0x1334"),
+    ],
+)
+@pytest.mark.parametrize("status", ["00", "ff"])
+@pytest.mark.parametrize("state", ["active", "status_only"])
+def test_status_only_export_reload_retains_raw_status(
+    opcode, group, instance, register, status, state
+):
+    source = {
+        "schema_version": "2.4",
+        "operations": {
+            opcode: {
+                "groups": {
+                    group: {
+                        "instances": {
+                            instance: {
+                                "registers": {
+                                    register: {"response_state": state, "reply_hex": status}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+    }
+    (row,) = json.loads(json.dumps(export(source)))["observations"]
+    assert row["selector"] == dict(
+        zip(
+            ("opcode", "group", "instance", "register"),
+            (opcode, group, instance, register),
+            strict=True,
+        )
+    )
+    assert row["response_state"] == "status_only"
+    assert row["reply_hex"] == status
+    assert row["flags"] == int(status, 16)
+    assert row["evidence_grade"] == "unspecified"
+    assert row["decoded_observation"]["type"] == "unknown"
+
+
+@pytest.mark.parametrize("state", ["active", "status_only"])
+@pytest.mark.parametrize("status", ["00", "ff"])
+def test_status_only_export_ignores_retained_description(state, status):
+    source = artifact()
+    for operation in source["operations"].values():
+        entry = operation["groups"]["0x02"]["instances"]["0x00"]["registers"]["0x0009"]
+        entry.update(response_state=state, reply_hex=status)
+        entry["parameter_description"].update(
+            type="UIN",
+            qualification="matched",
+            step_qualification="decoded",
+            codec_provenance="selector_qualified",
+            evidence_grade="Proven",
+        )
+    before = deepcopy(source)
+    rows = json.loads(json.dumps(export(source)))["observations"]
+    assert len(rows) == 2
+    for row in rows:
+        assert row["response_state"] == "status_only"
+        assert row["reply_hex"] == status
+        assert row["flags"] == int(status, 16)
+        assert row["evidence_grade"] == "Proven"
+        assert row["raw_description"] == "unknown"
+        assert row["decoded_observation"] == {
+            "type": "unknown",
+            "min": "unknown",
+            "max": "unknown",
+            "step": "unknown",
+            "width": "unknown",
+            "qualification": "unknown",
+            "step_qualification": "unknown",
+            "codec_provenance": "unknown",
+            "evidence_grade": "Unknown",
+        }
+    assert source == before

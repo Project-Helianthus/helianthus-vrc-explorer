@@ -17,6 +17,15 @@ error marker exports as `response_state: "transport_error"`. Explicit recognized
 states take precedence; error text is omitted and prior decoded observations
 and evidence grades are retained.
 
+During trace replay, a clean one-byte `00` or `ff` register reply replaces an
+earlier transport failure for the same selector in the `0x02` or `0x06`
+operation namespace. Replay retains its raw status byte as `status_only`,
+without inferring a value or instance presence. A prior useful value remains
+preferred over a later status-only reply.
+A clean zero-length reply also replaces an earlier transport failure as
+`empty_reply`, without inferring a register value. Replay retains its existing
+behavior of treating an empty reply as instance presence evidence.
+
 ## Root command
 
 <!-- BEGIN CLI HELP:root -->
