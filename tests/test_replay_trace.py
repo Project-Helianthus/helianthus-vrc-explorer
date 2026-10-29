@@ -1257,15 +1257,16 @@ def test_replay_keeps_first_equal_rank_nonvalue_reply(tmp_path, monkeypatch, res
 
 
 @pytest.mark.parametrize("reply", [None, "", "00", "ff", "0102"])
-def test_replay_preserves_transport_error_replacement_boundary(tmp_path, reply):
+@pytest.mark.parametrize("opcode", [2, 6])
+def test_replay_preserves_transport_error_replacement_boundary(tmp_path, reply, opcode):
     lines = [
         "2026-04-06T10:00:00.000000Z INIT features=0x01",
         "2026-04-06T10:00:00.050000Z START initiator=0xF7",
         "2026-04-06T10:00:01.000000Z #1 SEND_PROTO src=0xF7 dst=0x15 "
-        "primary=0xB5 secondary=0x24 payload=020002003412",
+        f"primary=0xB5 secondary=0x24 payload={opcode:02x}0002003412",
         "2026-04-06T10:00:01.100000Z #1 RETRY type=protocol_sync_error n=1/1",
         "2026-04-06T10:00:02.000000Z #2 SEND_PROTO src=0xF7 dst=0x15 "
-        "primary=0xB5 secondary=0x24 payload=020002003412",
+        f"primary=0xB5 secondary=0x24 payload={opcode:02x}0002003412",
     ]
     if reply is None:
         lines.append("2026-04-06T10:00:02.100000Z #2 RETRY type=reconnect n=1/1")
@@ -1275,13 +1276,20 @@ def test_replay_preserves_transport_error_replacement_boundary(tmp_path, reply):
         )
     path = _write_trace(tmp_path, "transport_error.trace", "\n".join(lines) + "\n")
     artifact = replay_trace_to_artifact(path)
-    entry = artifact["operations"]["0x02"]["groups"]["0x02"]["instances"]["0x00"]["registers"][
-        "0x1234"
-    ]
+    slot = artifact["operations"][f"0x{opcode:02x}"]["groups"]["0x02"]["instances"]["0x00"]
+    entry = slot["registers"]["0x1234"]
     if reply == "0102":
         assert entry["response_state"] == "active"
         assert entry["reply_hex"] == reply
         assert entry["error"].startswith("decode_error:")
+    elif reply in {"00", "ff"}:
+        assert entry["response_state"] == "status_only"
+        assert entry["reply_hex"] == reply
+        assert entry["flags"] == int(reply, 16)
+        assert entry["trace_seq"] == 2
+        assert entry["type"] is None and entry["value"] is None
+        assert entry["error"] is None
+        assert slot["present"] is False
     else:
         assert entry["response_state"] == "transport_error"
         assert entry["error"] == "protocol_sync_error"

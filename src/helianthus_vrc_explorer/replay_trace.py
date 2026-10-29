@@ -828,6 +828,10 @@ def replay_trace_to_artifact(trace_path: Path) -> dict[str, Any]:
                 or entry.get("response_state") == "active"
                 or existing.get("response_state") in {None, "timeout", "nack", "nack_or_crc"}
                 or (
+                    existing.get("response_state") == "transport_error"
+                    and entry.get("response_state") == "status_only"
+                )
+                or (
                     existing.get("response_state") in response_rank
                     and response_rank.get(entry.get("response_state"), 0)
                     > response_rank.get(existing.get("response_state"), 0)
