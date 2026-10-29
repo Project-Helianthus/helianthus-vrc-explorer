@@ -5,7 +5,8 @@ Usage: python3 scripts/export_controller_observations.py ARTIFACT > inventory.js
 Only family, full selectors, evidence grades, response states and numeric decoded
 parameter-description observations are retained. Current values (including text,
 clocks and identifiers), value bytes, names and arbitrary metadata are omitted.
-Status-only replies retain their single raw status byte.
+Status-only replies retain their single raw status byte. Their decoded metadata
+is unknown.
 Missing qualifiers and absent raw descriptions are unknown; an absent grade is
 "unspecified", distinct from an explicit Unknown grade. Qualifiers and grades
 are source claims, never qualification by this tool. This is not native profile
@@ -100,7 +101,11 @@ def _numeric(value: object) -> int | float | str:
 
 
 def _decoded(entry: dict, selector: tuple[str, str, str, str]) -> tuple[dict, str]:
-    description = _object(entry.get("parameter_description", {}))
+    description = (
+        {"evidence_grade": "Unknown"}
+        if _response_state(entry) == "status_only"
+        else _object(entry.get("parameter_description", {}))
+    )
     for key, expected, digits in zip(
         ("read_opcode", "group", "instance", "register"), selector, (2, 2, 2, 4), strict=True
     ):

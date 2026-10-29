@@ -44,9 +44,27 @@ def artifact():
     }
 
 
-@pytest.mark.parametrize("state", [[], {}])
+@pytest.mark.parametrize(
+    "state",
+    [
+        None,
+        "active",
+        "ACTIVE",
+        " active ",
+        "status_only",
+        " STATUS_ONLY ",
+        "timeout",
+        "nack",
+        "empty_reply",
+        "invalid",
+        [],
+        {},
+        42,
+        False,
+    ],
+)
 @pytest.mark.parametrize("status", ["00", "ff"])
-def test_cli_malformed_response_state_keeps_legacy_inference(tmp_path, state, status):
+def test_cli_status_reply_inference_is_independent_of_state(tmp_path, state, status):
     source = artifact()
     for operation in source["operations"].values():
         entry = operation["groups"]["0x02"]["instances"]["0x00"]["registers"]["0x0009"]
@@ -59,7 +77,9 @@ def test_cli_malformed_response_state_keeps_legacy_inference(tmp_path, state, st
     assert result.returncode == 0, result.stderr.decode()
     records = json.loads(result.stdout)["observations"]
     assert len(records) == 2
-    assert all(record["response_state"] == "active" for record in records)
+    assert all(record["response_state"] == "status_only" for record in records)
+    assert all(record["reply_hex"] == status for record in records)
+    assert all(record["flags"] == int(status, 16) for record in records)
     assert path.read_text() == original
 
 
@@ -454,3 +474,40 @@ def test_status_only_export_reload_retains_raw_status(
     assert row["flags"] == int(status, 16)
     assert row["evidence_grade"] == "unspecified"
     assert row["decoded_observation"]["type"] == "unknown"
+
+
+@pytest.mark.parametrize("state", ["active", "status_only"])
+@pytest.mark.parametrize("status", ["00", "ff"])
+def test_status_only_export_ignores_retained_description(state, status):
+    source = artifact()
+    for operation in source["operations"].values():
+        entry = operation["groups"]["0x02"]["instances"]["0x00"]["registers"]["0x0009"]
+        entry.update(response_state=state, reply_hex=status)
+        entry["parameter_description"].update(
+            type="UIN",
+            qualification="matched",
+            step_qualification="decoded",
+            codec_provenance="selector_qualified",
+            evidence_grade="Proven",
+        )
+    before = deepcopy(source)
+    rows = json.loads(json.dumps(export(source)))["observations"]
+    assert len(rows) == 2
+    for row in rows:
+        assert row["response_state"] == "status_only"
+        assert row["reply_hex"] == status
+        assert row["flags"] == int(status, 16)
+        assert row["evidence_grade"] == "Proven"
+        assert row["raw_description"] == "unknown"
+        assert row["decoded_observation"] == {
+            "type": "unknown",
+            "min": "unknown",
+            "max": "unknown",
+            "step": "unknown",
+            "width": "unknown",
+            "qualification": "unknown",
+            "step_qualification": "unknown",
+            "codec_provenance": "unknown",
+            "evidence_grade": "Unknown",
+        }
+    assert source == before

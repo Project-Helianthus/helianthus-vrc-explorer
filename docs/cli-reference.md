@@ -16,6 +16,12 @@ When no recognized response state is present, an entry's `transport_error:`
 error marker exports as `response_state: "transport_error"`. Explicit recognized
 states take precedence; error text is omitted and prior decoded observations
 and evidence grades are retained.
+A one-byte `00` or `ff` reply without an error exports as `status_only`,
+regardless of the retained state label's spelling or type. Its raw status byte,
+flags and entry-level evidence grade are preserved. Decoded description fields
+and qualifiers export as `unknown`, with decoded evidence grade `Unknown`,
+even if the source retains a prior parameter description. Export leaves that
+source description unchanged.
 
 ## Root command
 

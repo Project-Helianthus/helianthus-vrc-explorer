@@ -157,16 +157,11 @@ def _migrate_group(group_obj: dict[str, Any]) -> bool:
 
 def _derive_response_state(entry: dict[str, Any]) -> str | None:
     response_state = entry.get("response_state")
-    # Legacy one-byte records were labelled active despite lacking a value body.
+    # A clean one-byte status has no value body, regardless of the legacy state label.
     reply = entry.get("reply_hex")
     if (
         isinstance(reply, str)
         and reply.strip().lower() in {"00", "ff"}
-        and (
-            response_state is None
-            or isinstance(response_state, str)
-            and response_state in {"active", "status_only"}
-        )
         and entry.get("error") is None
     ):
         return "status_only"
