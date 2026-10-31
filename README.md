@@ -149,6 +149,8 @@ Replay limitations (v1):
 - Metadata requiring live probing (for example runtime identity enrichment) is not replayed.
 - A replay artifact represents the first B524 destination in the trace. Exchanges for other destinations are excluded and counted in its limitations.
 
+Input limits: input files are read in full and are therefore size-bounded. `replay-trace` accepts traces up to 100 MB, an ebusd CSV up to 10 MB and a myVaillant register map up to 50 MB. Larger files, and files containing NUL bytes, are rejected with a one-line error and exit status 2 before any parsing; malformed trace text (invalid UTF-8 or timestamps) is reported as an unsupported trace format. These limits guard against accidental or malformed input only; paths are used exactly as given.
+
 Browse opens a visual artifact picker in fullscreen Textual UI:
 ```bash
 python -m helianthus_vrc_explorer browse

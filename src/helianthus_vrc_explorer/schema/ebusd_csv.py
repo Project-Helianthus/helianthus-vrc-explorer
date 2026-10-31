@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import csv
+import io
 import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..input_limits import MAX_EBUSD_CSV_BYTES, read_bounded_text
 from ..protocol.b524 import B524RegisterSelector, parse_b524_id
 
 _HEX_RE = re.compile(r"^[0-9a-fA-F]+$")
@@ -125,7 +127,8 @@ class EbusdCsvSchema:
         wildcard_instance: dict[tuple[int, int, int], EbusdRegisterSchemaEntry] = {}
         b509_reads: dict[int, EbusdRegisterSchemaEntry] = {}
 
-        with path.open(newline="", encoding="utf-8") as f:
+        text = read_bounded_text(path, limit=MAX_EBUSD_CSV_BYTES, label="ebusd CSV file")
+        with io.StringIO(text, newline="") as f:
             reader = csv.reader(f)
             for row in reader:
                 if not row:
