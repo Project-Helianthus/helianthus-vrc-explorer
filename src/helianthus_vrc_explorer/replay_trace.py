@@ -3,12 +3,19 @@ from __future__ import annotations
 import math
 import re
 import struct
+from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, cast
 
 from .artifact_schema import CURRENT_ARTIFACT_SCHEMA_VERSION
+from .input_limits import (
+    MAX_TRACE_REPLAY_BYTES,
+    InputRejectedError,
+    InputTooLargeError,
+    iter_bounded_lines,
+)
 from .protocol.b524_metadata import SYSTEM_INFORMATION_NAMES, decode_parameter_description
 from .protocol.b524_schedules import EVENT_PROFILES, TIMER_CHANNELS
 from .protocol.parser import ValueParseError, parse_typed_value
@@ -149,7 +156,7 @@ def _parse_hex(raw: str, *, line_no: int, field_name: str) -> tuple[bytes, bool]
 
 
 def _parse_enhanced_trace_lines(
-    lines: list[str], *, source_path: str
+    lines: Iterable[str], *, source_path: str
 ) -> tuple[list[_TraceExchange], TraceReplayMetadata]:
     exchange_by_seq: dict[int, _TraceExchange] = {}
     exchanges_in_order: list[_TraceExchange] = []
@@ -167,15 +174,20 @@ def _parse_enhanced_trace_lines(
 
     first_ts: datetime | None = None
     last_ts: datetime | None = None
+    total_lines = 0
 
     for line_no, line in enumerate(lines, start=1):
+        total_lines = line_no
         stripped = line.strip()
         if not stripped:
             continue
         match = _TRACE_LINE_RE.match(stripped)
         if match is None:
             continue
-        timestamp = _parse_timestamp(match.group("timestamp"))
+        try:
+            timestamp = _parse_timestamp(match.group("timestamp"))
+        except (ValueError, OverflowError) as exc:
+            raise UnsupportedTraceFormatError(f"invalid timestamp at line {line_no}.") from exc
         body = match.group("body").strip()
 
         if first_ts is None:
@@ -386,7 +398,7 @@ def _parse_enhanced_trace_lines(
         source_path=source_path,
         first_timestamp=first_ts,
         last_timestamp=last_ts,
-        total_lines=len(lines),
+        total_lines=total_lines,
         parsed_exchanges=len(exchanges),
         truncated_hex_frames=truncated_hex_frames,
     )
@@ -724,8 +736,18 @@ def replay_trace_to_artifact(trace_path: Path) -> dict[str, Any]:
     - metadata that cannot be reconstructed from trace is filled with stable minimal defaults
     """
 
-    lines = trace_path.read_text(encoding="utf-8").splitlines()
-    exchanges, meta = _parse_enhanced_trace_lines(lines, source_path=str(trace_path))
+    try:
+        exchanges, meta = _parse_enhanced_trace_lines(
+            iter_bounded_lines(trace_path, limit=MAX_TRACE_REPLAY_BYTES, label="Trace file"),
+            source_path=str(trace_path),
+        )
+    except (TraceReplayError, InputTooLargeError):
+        raise
+    except InputRejectedError as exc:
+        raise UnsupportedTraceFormatError(f"{exc}.") from exc
+    except ValueError as exc:
+        # Includes invalid UTF-8 and out-of-range numeric fields in the trace text.
+        raise UnsupportedTraceFormatError(f"malformed trace text: {exc}") from exc
 
     b524_exchanges = [ex for ex in exchanges if ex.primary == 0xB5 and ex.secondary == 0x24]
     if not b524_exchanges:
