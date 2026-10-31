@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,7 @@ from helianthus_vrc_explorer.input_limits import (
     MAX_TRACE_REPLAY_BYTES,
     InputRejectedError,
     InputTooLargeError,
+    iter_bounded_lines,
 )
 from helianthus_vrc_explorer.replay_trace import (
     UnsupportedTraceFormatError,
@@ -82,8 +84,9 @@ def test_nul_byte_in_trace_is_unsupported_format(tmp_path: Path) -> None:
         b"2026-04-06T10:00:00Z INIT features=0x01\n\xff\xfe bad bytes\n",
         _GOOD_TRACE.encode() + b"2026-04-06T10:00:02Z #" + b"9" * 5000 + b" RETRY type=x\n",
         b"",
+        b"0001-01-01T00:00:00+01:00 INIT features=0x01\n",
     ],
-    ids=["bad-timestamp", "invalid-utf8", "oversized-number", "empty"],
+    ids=["bad-timestamp", "invalid-utf8", "oversized-number", "empty", "timestamp-overflow"],
 )
 def test_malformed_trace_raises_unsupported_format_error(tmp_path: Path, content: bytes) -> None:
     trace = tmp_path / "bad.trace"
@@ -131,3 +134,23 @@ def test_cli_replay_trace_malformed_exits_without_traceback(tmp_path: Path, bad:
     assert result.exit_code == 2
     assert isinstance(result.exception, SystemExit)
     assert "Unsupported trace format" in result.output
+
+
+def test_line_stream_enforces_limit_on_bytes_actually_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "grown.trace"
+    path.write_bytes(b"a" * 4096)  # one line, no newline
+
+    class _Stat:
+        st_size = 0
+
+    monkeypatch.setattr("helianthus_vrc_explorer.input_limits.os.fstat", lambda fd: _Stat())
+    with pytest.raises(InputTooLargeError):
+        list(iter_bounded_lines(path, limit=1024, label="trace"))
+
+
+@pytest.mark.skipif(not os.path.exists("/dev/zero"), reason="needs /dev/zero")
+def test_line_stream_rejects_endless_device() -> None:
+    with pytest.raises(InputTooLargeError):
+        list(iter_bounded_lines(Path("/dev/zero"), limit=1024 * 1024, label="trace"))

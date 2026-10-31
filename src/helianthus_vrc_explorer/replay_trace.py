@@ -186,7 +186,7 @@ def _parse_enhanced_trace_lines(
             continue
         try:
             timestamp = _parse_timestamp(match.group("timestamp"))
-        except ValueError as exc:
+        except (ValueError, OverflowError) as exc:
             raise UnsupportedTraceFormatError(f"invalid timestamp at line {line_no}.") from exc
         body = match.group("body").strip()
 
