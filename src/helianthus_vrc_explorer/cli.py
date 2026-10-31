@@ -21,6 +21,7 @@ from . import __version__
 from .artifact_schema import ArtifactSchemaError, migrate_artifact_schema
 from .commands.b524 import app as b524_app
 from .ebusd import parse_ebusd_info_target_addresses
+from .input_limits import InputRejectedError, InputTooLargeError
 from .protocol.b524 import build_directory_probe_payload
 from .protocol.basv import (
     ScanIdentification,
@@ -765,6 +766,9 @@ def _scan_configured(
         try:
             ebusd_schema = EbusdCsvSchema.from_path(ebusd_csv_path)
             ebusd_schema_source = f"ebusd_csv:{ebusd_csv_path.name}"
+        except InputRejectedError as exc:
+            typer.echo(f"Cannot load ebusd CSV schema: {exc}", err=True)
+            raise typer.Exit(2) from exc
         except Exception as exc:
             typer.echo(f"Warning: failed to load ebusd CSV schema: {exc}", err=True)
 
@@ -775,6 +779,9 @@ def _scan_configured(
         try:
             myvaillant_map = MyvaillantRegisterMap.from_path(myvaillant_map_path)
             myvaillant_map_source = f"myvaillant_map:{myvaillant_map_path.name}"
+        except InputRejectedError as exc:
+            typer.echo(f"Cannot load myVaillant mapping: {exc}", err=True)
+            raise typer.Exit(2) from exc
         except Exception as exc:
             typer.echo(f"Warning: failed to load myVaillant mapping: {exc}", err=True)
     else:
@@ -1055,6 +1062,9 @@ def replay_trace(
 
     try:
         artifact = replay_trace_to_artifact(trace_file)
+    except InputTooLargeError as exc:
+        typer.echo(f"Cannot replay trace: {exc}", err=True)
+        raise typer.Exit(2) from exc
     except UnsupportedTraceFormatError as exc:
         typer.echo(f"Unsupported trace format: {exc}", err=True)
         raise typer.Exit(2) from exc

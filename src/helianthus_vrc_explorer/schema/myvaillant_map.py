@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import csv
+import io
 from dataclasses import dataclass
 from pathlib import Path
+
+from ..input_limits import MAX_MYVAILLANT_MAP_BYTES, read_bounded_text
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,7 +82,8 @@ class MyvaillantRegisterMap:
         wildcard_instance: dict[tuple[int, int, int | None], MyvaillantRegisterName] = {}
         wildcard_group: dict[tuple[int, int | None], MyvaillantRegisterName] = {}
 
-        with path.open(newline="", encoding="utf-8") as f:
+        text = read_bounded_text(path, limit=MAX_MYVAILLANT_MAP_BYTES, label="myVaillant map file")
+        with io.StringIO(text, newline="") as f:
             reader = csv.DictReader(f)
             for row in reader:
                 if not row:

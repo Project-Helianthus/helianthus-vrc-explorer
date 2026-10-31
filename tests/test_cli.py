@@ -1359,3 +1359,26 @@ def test_resolve_scan_destination_accepts_zero_descriptor() -> None:
     )
 
     assert _resolve_scan_destination(transport, dst="auto") == 0x15
+
+
+@pytest.mark.parametrize(
+    ("option", "size"),
+    [("--ebusd-csv-path", 10 * 1024 * 1024 + 1), ("--myvaillant-map-path", 50 * 1024 * 1024 + 1)],
+)
+def test_scan_oversize_schema_input_exits_before_connecting(
+    monkeypatch, tmp_path: Path, option: str, size: int
+) -> None:
+    import helianthus_vrc_explorer.cli as cli_mod
+
+    def _must_not_connect(settings, *, trace_file):  # noqa: ANN001
+        raise AssertionError("scan must stop before connecting")
+
+    monkeypatch.setattr(cli_mod, "_build_transport", _must_not_connect)
+    big = tmp_path / "big.csv"
+    with big.open("wb") as handle:  # sparse file: no real data written
+        handle.seek(size - 1)
+        handle.write(b"x")
+
+    result = CliRunner().invoke(app, ["scan", option, str(big), "--output-dir", str(tmp_path)])
+    assert result.exit_code == 2
+    assert "MB input limit" in result.output
