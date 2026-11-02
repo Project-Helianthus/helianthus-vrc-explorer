@@ -116,7 +116,8 @@ class TransportRecoveryExhausted(TransportError):
     ) -> None:
         self.cause = cause if cause in self._CAUSES else "transport_error"
         self.phase = phase if phase in self._PHASES else "transaction"
-        self.request_attempts = max(1, request_attempts)
+        # Zero is valid: an elapsed deadline can expire before any request is admitted.
+        self.request_attempts = max(0, request_attempts)
         self.retry_count = max(0, self.request_attempts - 1)
         self.reconnect_attempts = max(0, reconnect_attempts)
         self.selector: dict[str, str] | None = None
