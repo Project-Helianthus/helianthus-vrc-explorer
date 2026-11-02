@@ -24,6 +24,7 @@ from .base import (
     TransportRecoveryExhausted,
     TransportTimeout,
 )
+from .request_deadline import RequestDeadline, RequestDeadlineExpired, validate_budget_seconds
 
 _EBUS_ESCAPE = 0xA9
 _EBUS_SYN = 0xAA
@@ -323,6 +324,10 @@ class EnhancedTcpConfig:
     host: str = "127.0.0.1"
     port: int = 9999
     timeout_s: float = 5.0
+    # Elapsed budget for one logical public operation: lock wait, attempts,
+    # reconnects, backoff, framing and response phases share one deadline.
+    # Every shorter phase limit above and below still applies within it.
+    max_command_s: float = 30.0
     # Default initiator: priority class 3, sub-address 0xF.
     # Lowest useful priority while avoiding the 0xFF target-address
     # conflict with NETX3 (0x04).  Per eBUS spec section 6.4,
@@ -353,6 +358,10 @@ class _EnhancedTcpSession:
     sock: socket.socket
 
 
+class _RequestLocal(threading.local):
+    root: RequestDeadline | None = None
+
+
 class _EnhancedCollision(TransportError):
     """Retryable collision or unexpected bus-ownership event."""
 
@@ -379,6 +388,18 @@ class _EnhancedSessionError(TransportError):
         self.cause = cause
         self.phase = phase
         self.unexpected_symbol = unexpected_symbol
+
+
+def _deadline_exhausted(
+    *, request_attempts: int, reconnect_attempts: int
+) -> TransportRecoveryExhausted:
+    """Terminal outcome for an exhausted operation deadline; never retried."""
+    return TransportRecoveryExhausted(
+        cause="timeout",
+        phase="transaction",
+        request_attempts=request_attempts,
+        reconnect_attempts=reconnect_attempts,
+    )
 
 
 def _utc_ts() -> str:
@@ -523,6 +544,10 @@ class EnhancedTcpTransport(TransportInterface):
             raise ValueError("collision_backoff_max_ms must be >= collision_backoff_min_ms")
         if config.timeout_s <= 0 or not math.isfinite(config.timeout_s):
             raise ValueError(f"timeout_s must be positive and finite, got {config.timeout_s}")
+        try:
+            validate_budget_seconds(config.max_command_s)
+        except (TypeError, ValueError) as exc:
+            raise type(exc)(f"max_command_s: {exc}") from exc
         if not (1 <= config.port <= 65535):
             raise ValueError(f"port must be in range 1..65535, got {config.port}")
 
@@ -539,6 +564,60 @@ class EnhancedTcpTransport(TransportInterface):
         # postGrantPreEcho, proxy requestBytesSeen==0 guard.
         self._post_grant_pre_echo: bool = False
         self._lock = threading.RLock()
+        # The active operation deadline belongs to the calling thread only.
+        self._request_local = _RequestLocal()
+
+    def _active_root(self) -> RequestDeadline | None:
+        return self._request_local.root
+
+    @contextlib.contextmanager
+    def _operation_root(self) -> Iterator[RequestDeadline]:
+        """Start one deadline for an independent operation, or reuse the active one."""
+        active = self._active_root()
+        if active is not None:
+            yield active
+            return
+        root = RequestDeadline(self._config.max_command_s, clock=time.monotonic)
+        self._request_local.root = root
+        try:
+            yield root
+        finally:
+            self._request_local.root = None
+
+    @contextlib.contextmanager
+    def _serialized(self, root: RequestDeadline) -> Iterator[None]:
+        """Hold the reentrant lock; waiting for it consumes the operation budget."""
+        wait_s = min(root.remaining_s(), threading.TIMEOUT_MAX)
+        if not self._lock.acquire(timeout=wait_s):
+            raise RequestDeadlineExpired(root.budget_s)
+        try:
+            # A queued operation that expired while waiting must not begin.
+            root.remaining_s()
+            yield
+        finally:
+            self._lock.release()
+
+    def _check_root(self) -> None:
+        root = self._active_root()
+        if root is not None:
+            root.remaining_s()
+
+    def _phase_timeout_s(self, local_s: float) -> float:
+        """Cap a local phase limit by the active root; unchanged without one."""
+        root = self._active_root()
+        if root is None:
+            return local_s
+        return root.io_timeout_s(local_s)
+
+    def _sleep(self, delay_s: float) -> None:
+        time.sleep(delay_s)
+
+    def _phase_sleep(self, delay_s: float) -> None:
+        root = self._active_root()
+        if root is None:
+            self._sleep(delay_s)
+            return
+        root.sleep(delay_s, sleep=self._sleep)
 
     def _trace(self, message: str) -> None:
         trace_handle = self._trace_handle
@@ -603,14 +682,19 @@ class EnhancedTcpTransport(TransportInterface):
 
     @contextlib.contextmanager
     def session(self) -> Iterator[EnhancedTcpTransport]:
-        with self._lock:
-            self._session_depth += 1
-            if self._session_depth == 1:
-                try:
-                    self._open_session()
-                except Exception:
-                    self._session_depth = max(0, self._session_depth - 1)
-                    raise
+        # Standalone connect/INIT gets its own budget; it ends before the body.
+        with self._operation_root() as root:
+            try:
+                with self._serialized(root):
+                    self._session_depth += 1
+                    if self._session_depth == 1:
+                        try:
+                            self._open_session()
+                        except Exception:
+                            self._session_depth = max(0, self._session_depth - 1)
+                            raise
+            except RequestDeadlineExpired as exc:
+                raise _deadline_exhausted(request_attempts=0, reconnect_attempts=0) from exc
         try:
             yield self
         finally:
@@ -624,21 +708,30 @@ class EnhancedTcpTransport(TransportInterface):
         try:
             sock = socket.create_connection(
                 (self._config.host, self._config.port),
-                self._config.timeout_s,
+                self._phase_timeout_s(self._config.timeout_s),
             )
             sock.settimeout(self._config.timeout_s)
             sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         except TimeoutError as exc:
+            self._check_root()
             raise TransportTimeout(
                 f"Enhanced adapter timeout {self._config.host}:{self._config.port}"
             ) from exc
         except OSError as exc:
+            self._check_root()
             self._trace("CONNECT failed cause=socket_error phase=connect")
             raise _EnhancedSessionError(
                 f"Enhanced adapter {self._config.host}:{self._config.port}: {exc}",
                 cause="socket_error",
                 phase="connect",
             ) from exc
+        try:
+            # Resolution and connect cannot be interrupted; refuse a late result.
+            self._check_root()
+        except RequestDeadlineExpired:
+            with contextlib.suppress(OSError):
+                sock.close()
+            raise
         self._session = _EnhancedTcpSession(sock=sock)
         self._reset_parser()
         try:
@@ -668,9 +761,12 @@ class EnhancedTcpTransport(TransportInterface):
                 frame = _ENH_SEND_NACK
             else:
                 frame = _encode_enh(command, data)
+            # No symbol may begin at or after the operation deadline.
+            session.sock.settimeout(self._phase_timeout_s(self._config.timeout_s))
             session.sock.sendall(frame)
         except TimeoutError as exc:
             self.close()
+            self._check_root()
             raise TransportTimeout(
                 f"Enhanced adapter timeout {self._config.host}:{self._config.port}"
             ) from exc
@@ -685,14 +781,19 @@ class EnhancedTcpTransport(TransportInterface):
 
     def _read_message(self) -> tuple[str, int, int]:
         while True:
+            # Checked per message: queued, partial or malformed input never
+            # buys time, and nothing queued is consumed at or after expiry.
+            self._check_root()
             if self._messages:
                 return self._messages.popleft()
 
             session = self._ensure_session()
             try:
+                session.sock.settimeout(self._phase_timeout_s(self._config.timeout_s))
                 chunk = session.sock.recv(4096)
             except TimeoutError as exc:
                 self._reset_parser()
+                self._check_root()
                 raise TransportTimeout(
                     f"Enhanced adapter timeout {self._config.host}:{self._config.port}"
                 ) from exc
@@ -805,7 +906,8 @@ class EnhancedTcpTransport(TransportInterface):
                 continue
             if command == _ENH_RES_RECEIVED:
                 # VE11: Bus traffic extends activity deadline — received
-                # frames should not consume arbitration budget.
+                # frames should not consume arbitration budget.  The root
+                # deadline is never extended; _read_message enforces it.
                 deadline = time.monotonic() + self._config.timeout_s
                 # R6-VE-NEW-01: Do NOT reset mismatch_count on RECEIVED.
                 # Aligns with Go StartArbitration behavior — prevents
@@ -984,103 +1086,121 @@ class EnhancedTcpTransport(TransportInterface):
         XR2: Drains only stale INFO frames (preserves pending RESETTED).
         """
         _validate_u8("info_id", info_id)
-        with self._lock:
-            # XR2: Selective pre-drain — discard stale INFO from BOTH the
-            # kernel TCP buffer and the message queue, while preserving
-            # RESETTED and other control frames.
-            #
-            # Step 1: Non-blocking socket drain into message queue.
-            session = self._session
-            if session is not None:
-                with contextlib.suppress(OSError):
-                    session.sock.setblocking(False)
+        admitted = 0
+
+        def _attempt_admitted() -> None:
+            nonlocal admitted
+            admitted += 1
+
+        with self._operation_root() as root:
+            try:
+                with self._serialized(root):
                     try:
-                        for _ in range(16):
-                            chunk = session.sock.recv(4096)
-                            if not chunk:
-                                break
-                            for value in chunk:
-                                message = self._parse_enh_byte(value)
-                                if message is not None:
-                                    self._messages.append(message)
-                    except BlockingIOError:
-                        pass
-                    finally:
-                        session.sock.settimeout(self._config.timeout_s)
-                # Clear parser carry-over from partial ENH frames that may
-                # have been split at the TCP chunk boundary during drain.
-                self._enh_pending_first = None
-            # Step 2: Remove only stale INFO from message queue.
-            preserved = deque[tuple[str, int, int]]()
-            while self._messages:
-                msg = self._messages.popleft()
-                if msg[0] == "frame" and msg[1] == _ENH_RES_INFO:
-                    self._trace(f"INFO_DRAIN stale data=0x{msg[2]:02X}")
-                    continue
-                preserved.append(msg)
-            self._messages = preserved
+                        return self._request_info_once(info_id, _attempt_admitted)
+                    except RequestDeadlineExpired:
+                        # An INFO reply may still be in flight: discard the session.
+                        self.close()
+                        raise
+            except RequestDeadlineExpired as exc:
+                raise _deadline_exhausted(request_attempts=admitted, reconnect_attempts=0) from exc
 
-            # Check for pending RESETTED that was preserved.
-            for msg in self._messages:
-                if msg[0] == "frame" and msg[1] == _ENH_RES_RESETTED:
-                    self._trace(f"INFO pre-drain found RESETTED (features=0x{msg[2]:02X})")
-                    self.close()
-                    self._open_session()
-                    raise TransportTimeout(
-                        f"Adapter reset detected before INFO (features=0x{msg[2]:02X})"
-                    )
+    def _request_info_once(self, info_id: int, attempt_admitted_hook: AttemptHook) -> bytes:
+        # XR2: Selective pre-drain — discard stale INFO from BOTH the
+        # kernel TCP buffer and the message queue, while preserving
+        # RESETTED and other control frames.
+        #
+        # Step 1: Non-blocking socket drain into message queue.  The lock
+        # holder already confirmed the deadline; draining never waits.
+        session = self._session
+        if session is not None:
+            with contextlib.suppress(OSError):
+                session.sock.setblocking(False)
+                try:
+                    for _ in range(16):
+                        chunk = session.sock.recv(4096)
+                        if not chunk:
+                            break
+                        for value in chunk:
+                            message = self._parse_enh_byte(value)
+                            if message is not None:
+                                self._messages.append(message)
+                except BlockingIOError:
+                    pass
+                finally:
+                    session.sock.settimeout(self._config.timeout_s)
+            # Clear parser carry-over from partial ENH frames that may
+            # have been split at the TCP chunk boundary during drain.
+            self._enh_pending_first = None
+        # Step 2: Remove only stale INFO from message queue.
+        preserved = deque[tuple[str, int, int]]()
+        while self._messages:
+            msg = self._messages.popleft()
+            if msg[0] == "frame" and msg[1] == _ENH_RES_INFO:
+                self._trace(f"INFO_DRAIN stale data=0x{msg[2]:02X}")
+                continue
+            preserved.append(msg)
+        self._messages = preserved
 
-            self._trace(f"INFO_REQ id=0x{info_id:02X}")
-            self._send_enh_frame(_ENH_REQ_INFO, info_id)
-            deadline = time.monotonic() + self._config.timeout_s
-
-            # First INFO frame carries the payload length.
-            payload_len: int | None = None
-            payload = bytearray()
-
-            while time.monotonic() < deadline:
-                kind, command, data = self._read_message()
-                if kind != "frame":
-                    continue
-                if command == _ENH_RES_INFO:
-                    if payload_len is None:
-                        payload_len = data
-                        if payload_len == 0:
-                            self._trace(f"INFO_RESP id=0x{info_id:02X} len=0")
-                            return b""
-                    else:
-                        payload.append(data)
-                        if len(payload) >= payload_len:
-                            self._trace(
-                                f"INFO_RESP id=0x{info_id:02X} "
-                                f"len={payload_len} "
-                                f"hex={bytes(payload).hex()}"
-                            )
-                            return bytes(payload)
-                    continue
-                if command == _ENH_RES_ERROR_HOST:
-                    raise TransportHostError(
-                        f"INFO request 0x{info_id:02X} host error 0x{data:02X}"
-                    )
-                if command == _ENH_RES_ERROR_EBUS:
-                    raise TransportError(f"INFO request 0x{info_id:02X} eBUS error 0x{data:02X}")
-                if command == _ENH_RES_RESETTED:
-                    self.close()
-                    self._open_session()
-                    raise TransportTimeout(f"Adapter reset during INFO (features=0x{data:02X})")
-                if command == _ENH_RES_RECEIVED:
-                    # Busy-bus background traffic can still surface as RECEIVED
-                    # while an INFO request is pending. That frame is unrelated
-                    # to the INFO response and must not fail the request.
-                    self._trace(f"INFO ignore RECEIVED data=0x{data:02X}")
-                    continue
-                # Unknown command in INFO path — explicit error, not timeout.
-                self._reset_parser()
-                raise TransportError(
-                    f"INFO request 0x{info_id:02X}: unexpected ENH command "
-                    f"0x{command:02X} data=0x{data:02X}"
+        # Check for pending RESETTED that was preserved.
+        for msg in self._messages:
+            if msg[0] == "frame" and msg[1] == _ENH_RES_RESETTED:
+                self._trace(f"INFO pre-drain found RESETTED (features=0x{msg[2]:02X})")
+                self.close()
+                self._open_session()
+                raise TransportTimeout(
+                    f"Adapter reset detected before INFO (features=0x{msg[2]:02X})"
                 )
-            raise TransportTimeout(f"INFO request 0x{info_id:02X} deadline expired")
+
+        attempt_admitted_hook()
+        self._trace(f"INFO_REQ id=0x{info_id:02X}")
+        self._send_enh_frame(_ENH_REQ_INFO, info_id)
+        deadline = time.monotonic() + self._config.timeout_s
+
+        # First INFO frame carries the payload length.
+        payload_len: int | None = None
+        payload = bytearray()
+
+        while time.monotonic() < deadline:
+            kind, command, data = self._read_message()
+            if kind != "frame":
+                continue
+            if command == _ENH_RES_INFO:
+                if payload_len is None:
+                    payload_len = data
+                    if payload_len == 0:
+                        self._trace(f"INFO_RESP id=0x{info_id:02X} len=0")
+                        return b""
+                else:
+                    payload.append(data)
+                    if len(payload) >= payload_len:
+                        self._trace(
+                            f"INFO_RESP id=0x{info_id:02X} "
+                            f"len={payload_len} "
+                            f"hex={bytes(payload).hex()}"
+                        )
+                        return bytes(payload)
+                continue
+            if command == _ENH_RES_ERROR_HOST:
+                raise TransportHostError(f"INFO request 0x{info_id:02X} host error 0x{data:02X}")
+            if command == _ENH_RES_ERROR_EBUS:
+                raise TransportError(f"INFO request 0x{info_id:02X} eBUS error 0x{data:02X}")
+            if command == _ENH_RES_RESETTED:
+                self.close()
+                self._open_session()
+                raise TransportTimeout(f"Adapter reset during INFO (features=0x{data:02X})")
+            if command == _ENH_RES_RECEIVED:
+                # Busy-bus background traffic can still surface as RECEIVED
+                # while an INFO request is pending. That frame is unrelated
+                # to the INFO response and must not fail the request.
+                self._trace(f"INFO ignore RECEIVED data=0x{data:02X}")
+                continue
+            # Unknown command in INFO path — explicit error, not timeout.
+            self._reset_parser()
+            raise TransportError(
+                f"INFO request 0x{info_id:02X}: unexpected ENH command "
+                f"0x{command:02X} data=0x{data:02X}"
+            )
+        raise TransportTimeout(f"INFO request 0x{info_id:02X} deadline expired")
 
     def send(self, dst: int, payload: bytes) -> bytes:
         return self._send_b524(dst, payload, attempt_hook=None)
@@ -1158,25 +1278,31 @@ class EnhancedTcpTransport(TransportInterface):
         if len(payload) > 0xFF:
             raise ValueError(f"payload too large for eBUS telegram: {len(payload)} bytes")
 
-        with self._lock:
-            self._trace_seq += 1
-            seq = self._trace_seq
-            payload_bytes = bytes(payload)
-            return self._send_with_policy(
-                seq,
-                lambda attempt_admitted_hook: self._send_proto_once(
-                    seq,
-                    dst=dst,
-                    primary=primary,
-                    secondary=secondary,
-                    payload=payload_bytes,
-                    expect_response=expect_response,
-                    attempt_hook=attempt_hook,
-                    retry_safe=retry_safe,
-                    attempt_admitted_hook=attempt_admitted_hook,
-                ),
-                retry_safe=retry_safe,
-            )
+        payload_bytes = bytes(payload)
+        # The root starts before the lock wait; _send_with_policy reuses it.
+        with self._operation_root() as root:
+            try:
+                with self._serialized(root):
+                    self._trace_seq += 1
+                    seq = self._trace_seq
+                    return self._send_with_policy(
+                        seq,
+                        lambda attempt_admitted_hook: self._send_proto_once(
+                            seq,
+                            dst=dst,
+                            primary=primary,
+                            secondary=secondary,
+                            payload=payload_bytes,
+                            expect_response=expect_response,
+                            attempt_hook=attempt_hook,
+                            retry_safe=retry_safe,
+                            attempt_admitted_hook=attempt_admitted_hook,
+                        ),
+                        retry_safe=retry_safe,
+                    )
+            except RequestDeadlineExpired as exc:
+                # Expired while queued for the lock: nothing was admitted.
+                raise _deadline_exhausted(request_attempts=0, reconnect_attempts=0) from exc
 
     def _reconnect(self, seq: int, attempt: int) -> None:
         """Close the current session and re-establish a fresh TCP + INIT handshake."""
@@ -1185,7 +1311,7 @@ class EnhancedTcpTransport(TransportInterface):
             f"delay={self._config.reconnect_delay_s}s"
         )
         self.close()
-        time.sleep(self._config.reconnect_delay_s)
+        self._phase_sleep(self._config.reconnect_delay_s)
         self._open_session()
 
     def _send_with_policy(
@@ -1195,6 +1321,11 @@ class EnhancedTcpTransport(TransportInterface):
         *,
         retry_safe: bool,
     ) -> bytes:
+        root = self._active_root()
+        if root is None:
+            # Direct internal use: one root spans this whole policy run.
+            with self._operation_root():
+                return self._send_with_policy(seq, send_once, retry_safe=retry_safe)
         timeout_retries = 0
         reconnect_retries = 0
         successful_reconnects = 0
@@ -1245,7 +1376,7 @@ class EnhancedTcpTransport(TransportInterface):
                     with contextlib.suppress(OSError):
                         trace_handle.close()
 
-        def _terminal(exc: TransportError, *, cause: str, phase: str) -> TransportRecoveryExhausted:
+        def _terminal(exc: Exception, *, cause: str, phase: str) -> TransportRecoveryExhausted:
             failure = TransportRecoveryExhausted(
                 cause=cause,
                 phase=phase,
@@ -1279,6 +1410,8 @@ class EnhancedTcpTransport(TransportInterface):
             last_cause = cause
             reconnect_failed = False
             while reconnect_retries < self._config.reconnect_max_retries:
+                # Count only reconnects actually begun before the deadline.
+                self._check_root()
                 reconnect_retries += 1
                 try:
                     self._reconnect(seq, reconnect_retries)
@@ -1323,134 +1456,143 @@ class EnhancedTcpTransport(TransportInterface):
                 raise failure from exc
             raise _terminal(exc, cause=terminal_cause, phase=terminal_phase) from exc
 
-        while True:
-            try:
-                return send_once(_attempt_admitted)
-            except TransportTimeout as exc:
-                if not retry_safe:
-                    _trace_terminal_failure(cause="timeout", phase="transaction")
-                    raise
-                timeout_retries += 1
-                if timeout_retries > self._config.timeout_max_retries:
-                    _recover_session(exc)
-                    continue
-                # First timeout: reset parser and retry on the same session.
-                self._reset_parser()
-                self._trace(
-                    f"#{seq} RETRY type=timeout "
-                    f"n={timeout_retries}/{self._config.timeout_max_retries}"
-                )
-            except TransportHostError:
-                # Host errors are non-retryable — the request is malformed.
-                _trace_terminal_failure(cause="host_error", phase="transaction")
-                raise
-            except TransportDisconnected as exc:
-                if not retry_safe:
-                    _trace_terminal_failure(cause="disconnected", phase="receive")
-                    raise
-                _recover_session(exc)
-                continue
-            except _EnhancedCollision as exc:
-                if not retry_safe:
-                    _trace_terminal_failure(cause="collision", phase="arbitration")
-                    raise
-                # Collision is normal on a shared bus.  Per eBUS spec
-                # section 6.2.2.2 the adapter waits for the winner's
-                # telegram and the subsequent SYN release automatically.
-                # We just re-issue START — no software backoff needed.
-                collision_retries += 1
-                if collision_retries > self._config.collision_max_retries:
-                    _trace_terminal_failure(cause="collision", phase="arbitration")
-                    self.close()
-                    raise TransportError(
-                        f"{exc} (collision retries exhausted "
-                        f"({self._config.collision_max_retries}))"
-                    ) from exc
-                self._reset_parser()
-                backoff_max = self._config.collision_backoff_max_ms
-                if backoff_max > 0:
-                    sleep_s = random.uniform(
-                        self._config.collision_backoff_min_ms / 1000.0,
-                        backoff_max / 1000.0,
-                    )
-                    time.sleep(sleep_s)
-                else:
-                    sleep_s = 0.0
-                self._trace(
-                    f"#{seq} RETRY type=collision n={collision_retries}/"
-                    f"{self._config.collision_max_retries} "
-                    f"sleep_ms={int(round(sleep_s * 1000))}"
-                )
-            except (_EnhancedNack, _EnhancedCrcMismatch) as exc:
-                if not retry_safe:
-                    _trace_terminal_failure(
-                        cause="nack" if isinstance(exc, _EnhancedNack) else "crc_mismatch",
-                        phase="response",
-                    )
-                    raise
-                # NACK/CRC are retryable on the same session — the bus
-                # protocol already handled ACK/NACK exchange.
-                nack_retries += 1
-                if nack_retries > self._config.nack_max_retries:
-                    message = (
-                        f"{exc} (nack/crc retries exhausted ({self._config.nack_max_retries}))"
-                    )
-                    _trace_terminal_failure(
-                        cause="nack" if isinstance(exc, _EnhancedNack) else "crc_mismatch",
-                        phase="response",
-                    )
-                    self.close()
-                    if isinstance(exc, _EnhancedNack):
-                        raise TransportNack(message) from exc
-                    raise TransportError(message) from exc
-                self._reset_parser()
-                self._trace(
-                    f"#{seq} RETRY type=nack_or_crc "
-                    f"n={nack_retries}/{self._config.nack_max_retries}"
-                )
-            except TransportNack:
-                # A definitive target rejection is not a broken TCP/ENH session.
-                _trace_terminal_failure(cause="nack", phase="command_ack")
-                raise
-            except _EnhancedCommandNotAcknowledgedBeforeSyn as exc:
-                # A bare RECEIVED(0xAA) at command-ACK is the raw-wire SYN
-                # boundary.  Ownership has already ended, so the TCP/ENH
-                # session remains synchronized and one fresh arbitration is
-                # sufficient for an idempotent read.  Never apply this retry
-                # to a request whose retry safety is unknown.
-                if retry_safe and command_syn_retries == 0:
-                    command_syn_retries += 1
+        try:
+            while True:
+                # No attempt, hook or retry begins at or after the deadline.
+                root.remaining_s()
+                try:
+                    result = send_once(_attempt_admitted)
+                    # A response completed at or after the deadline is refused.
+                    root.remaining_s()
+                    return result
+                except TransportTimeout as exc:
+                    if not retry_safe:
+                        _trace_terminal_failure(cause="timeout", phase="transaction")
+                        raise
+                    timeout_retries += 1
+                    if timeout_retries > self._config.timeout_max_retries:
+                        _recover_session(exc)
+                        continue
+                    # First timeout: reset parser and retry on the same session.
                     self._reset_parser()
                     self._trace(
-                        f"#{seq} RETRY type=command_not_acknowledged_before_syn "
-                        f"n={command_syn_retries}/1"
+                        f"#{seq} RETRY type=timeout "
+                        f"n={timeout_retries}/{self._config.timeout_max_retries}"
                     )
-                    continue
-                failure = TransportProtocolFailure(
-                    cause="command_not_acknowledged_before_syn",
-                    request_attempts=request_attempts,
-                    reconnect_attempts=reconnect_retries,
-                    unexpected_symbol=_EBUS_SYN,
-                )
-                _trace_terminal_failure(
-                    cause=failure.cause,
-                    phase=failure.phase,
-                    attempts=failure.request_attempts,
-                    retries=failure.retry_count,
-                    reconnects=failure.reconnect_attempts,
-                    unexpected_symbol=failure.unexpected_symbol,
-                )
-                self._reset_parser()
-                raise failure from exc
-            except _EnhancedSessionError as exc:
-                if not retry_safe:
-                    _trace_terminal_failure(cause=exc.cause, phase=exc.phase)
+                except TransportHostError:
+                    # Host errors are non-retryable — the request is malformed.
+                    _trace_terminal_failure(cause="host_error", phase="transaction")
                     raise
-                _recover_session(exc)
-            except TransportError as exc:
-                cause, phase = _failure_details(exc)
-                _trace_terminal_failure(cause=cause, phase=phase)
-                raise
+                except TransportDisconnected as exc:
+                    if not retry_safe:
+                        _trace_terminal_failure(cause="disconnected", phase="receive")
+                        raise
+                    _recover_session(exc)
+                    continue
+                except _EnhancedCollision as exc:
+                    if not retry_safe:
+                        _trace_terminal_failure(cause="collision", phase="arbitration")
+                        raise
+                    # Collision is normal on a shared bus.  Per eBUS spec
+                    # section 6.2.2.2 the adapter waits for the winner's
+                    # telegram and the subsequent SYN release automatically.
+                    # We just re-issue START — no software backoff needed.
+                    collision_retries += 1
+                    if collision_retries > self._config.collision_max_retries:
+                        _trace_terminal_failure(cause="collision", phase="arbitration")
+                        self.close()
+                        raise TransportError(
+                            f"{exc} (collision retries exhausted "
+                            f"({self._config.collision_max_retries}))"
+                        ) from exc
+                    self._reset_parser()
+                    backoff_max = self._config.collision_backoff_max_ms
+                    if backoff_max > 0:
+                        sleep_s = random.uniform(
+                            self._config.collision_backoff_min_ms / 1000.0,
+                            backoff_max / 1000.0,
+                        )
+                        root.sleep(sleep_s, sleep=self._sleep)
+                    else:
+                        sleep_s = 0.0
+                    self._trace(
+                        f"#{seq} RETRY type=collision n={collision_retries}/"
+                        f"{self._config.collision_max_retries} "
+                        f"sleep_ms={int(round(sleep_s * 1000))}"
+                    )
+                except (_EnhancedNack, _EnhancedCrcMismatch) as exc:
+                    if not retry_safe:
+                        _trace_terminal_failure(
+                            cause="nack" if isinstance(exc, _EnhancedNack) else "crc_mismatch",
+                            phase="response",
+                        )
+                        raise
+                    # NACK/CRC are retryable on the same session — the bus
+                    # protocol already handled ACK/NACK exchange.
+                    nack_retries += 1
+                    if nack_retries > self._config.nack_max_retries:
+                        message = (
+                            f"{exc} (nack/crc retries exhausted ({self._config.nack_max_retries}))"
+                        )
+                        _trace_terminal_failure(
+                            cause="nack" if isinstance(exc, _EnhancedNack) else "crc_mismatch",
+                            phase="response",
+                        )
+                        self.close()
+                        if isinstance(exc, _EnhancedNack):
+                            raise TransportNack(message) from exc
+                        raise TransportError(message) from exc
+                    self._reset_parser()
+                    self._trace(
+                        f"#{seq} RETRY type=nack_or_crc "
+                        f"n={nack_retries}/{self._config.nack_max_retries}"
+                    )
+                except TransportNack:
+                    # A definitive target rejection is not a broken TCP/ENH session.
+                    _trace_terminal_failure(cause="nack", phase="command_ack")
+                    raise
+                except _EnhancedCommandNotAcknowledgedBeforeSyn as exc:
+                    # A bare RECEIVED(0xAA) at command-ACK is the raw-wire SYN
+                    # boundary.  Ownership has already ended, so the TCP/ENH
+                    # session remains synchronized and one fresh arbitration is
+                    # sufficient for an idempotent read.  Never apply this retry
+                    # to a request whose retry safety is unknown.
+                    if retry_safe and command_syn_retries == 0:
+                        command_syn_retries += 1
+                        self._reset_parser()
+                        self._trace(
+                            f"#{seq} RETRY type=command_not_acknowledged_before_syn "
+                            f"n={command_syn_retries}/1"
+                        )
+                        continue
+                    failure = TransportProtocolFailure(
+                        cause="command_not_acknowledged_before_syn",
+                        request_attempts=request_attempts,
+                        reconnect_attempts=reconnect_retries,
+                        unexpected_symbol=_EBUS_SYN,
+                    )
+                    _trace_terminal_failure(
+                        cause=failure.cause,
+                        phase=failure.phase,
+                        attempts=failure.request_attempts,
+                        retries=failure.retry_count,
+                        reconnects=failure.reconnect_attempts,
+                        unexpected_symbol=failure.unexpected_symbol,
+                    )
+                    self._reset_parser()
+                    raise failure from exc
+                except _EnhancedSessionError as exc:
+                    if not retry_safe:
+                        _trace_terminal_failure(cause=exc.cause, phase=exc.phase)
+                        raise
+                    _recover_session(exc)
+                except TransportError as exc:
+                    cause, phase = _failure_details(exc)
+                    _trace_terminal_failure(cause=cause, phase=phase)
+                    raise
+        except RequestDeadlineExpired as exc:
+            # Translated before any retry handler can see it; never retried.
+            raise _terminal(exc, cause="timeout", phase="transaction") from exc
 
     def _send_proto_once(
         self,
@@ -1465,8 +1607,11 @@ class EnhancedTcpTransport(TransportInterface):
         retry_safe: bool,
         attempt_admitted_hook: AttemptHook,
     ) -> bytes:
+        # The policy loop confirmed the deadline just before this call.  A hook
+        # that overruns it (it cannot be interrupted) does not admit its attempt.
         if attempt_hook is not None:
             attempt_hook()
+            self._check_root()
         attempt_admitted_hook()
         self._start_arbitration(self._config.src)
 
@@ -1484,6 +1629,9 @@ class EnhancedTcpTransport(TransportInterface):
         max_nack_attempts = 1 + (self._config.nack_max_retries if retry_safe else 0)
         for nack_attempt in range(max_nack_attempts):
             if nack_attempt > 0:
+                # Expiry here leaves the bus owned; the policy closes the
+                # session instead of emitting a post-deadline symbol.
+                self._check_root()
                 if attempt_hook is not None:
                     try:
                         attempt_hook()
@@ -1495,6 +1643,7 @@ class EnhancedTcpTransport(TransportInterface):
                             with contextlib.suppress(BaseException):
                                 self.close()
                         raise
+                    self._check_root()
                 attempt_admitted_hook()
                 self._trace(f"#{seq} LOCAL_NACK_RETRY attempt={nack_attempt}")
 
