@@ -914,3 +914,122 @@ console.log(JSON.stringify([
         assert entry["myvaillant_name"] == "system_off"
         assert "docs" not in str(entry)
     assert "otherwise a myVaillant map leaf" in html
+
+
+def _status_helpers_script(html: str, expression: str) -> str:
+    parse_start = html.index("function parseHexKey(")
+    sorted_start = html.index("function sortedHexKeys(", parse_start)
+    sorted_end = html.index("function", sorted_start + 10)
+    start = html.index("function oneByteHex(")
+    end = html.index("// Raw attributes provide", start)
+    return (
+        html[parse_start:sorted_end]
+        + html[start:end]
+        + f"console.log(JSON.stringify({expression}));"
+    )
+
+
+def _run_node(script: str) -> object:
+    node = shutil.which("node")
+    assert node, "Node is required for the generated HTML status smoke test"
+    result = subprocess.run(
+        [node, "-e", script], check=True, text=True, capture_output=True, timeout=10
+    )
+    return json.loads(result.stdout)
+
+
+_HTML_STATUS_CASES = [
+    (
+        {"response_state": "status_only", "reply_hex": "00", "error": None},
+        "status_only",
+        "Status only",
+    ),
+    (
+        {"response_state": "status_only", "reply_hex": "ff", "error": None},
+        "status_only",
+        "Status only",
+    ),
+    (
+        {"response_state": "active", "reply_hex": "00", "flags_access": "absent", "error": None},
+        "status_only",
+        "Status only",
+    ),
+    ({"reply_hex": " FF ", "error": None}, "status_only", "Status only"),
+    ({"response_state": "empty_reply", "reply_hex": ""}, "dormant", "Dormant (feature inactive)"),
+    ({"response_state": "timeout", "error": "timeout"}, "transport_failure", "Transport failure"),
+    ({"flags_access": "absent", "error": None}, "absent", "Absent / no data"),
+    (
+        {"response_state": "active", "reply_hex": "0001e3", "raw_hex": "e3", "value": 227},
+        "ok",
+        "OK",
+    ),
+]
+
+
+def test_generated_html_classifies_one_byte_status_without_an_absence_claim() -> None:
+    html = render_html_report({})
+    entries = [case[0] for case in _HTML_STATUS_CASES]
+    expression = (
+        f"{json.dumps(entries)}.map(e => [entryStatusKind(e), entryStatusLabel(e), "
+        "entryStatusRawByte(e)])"
+    )
+    observed = _run_node(_status_helpers_script(html, expression))
+
+    assert observed == [
+        ["status_only", "Status only", "00"],
+        ["status_only", "Status only", "ff"],
+        ["status_only", "Status only", "00"],
+        ["status_only", "Status only", "ff"],
+        ["dormant", "Dormant (feature inactive)", None],
+        ["transport_failure", "Transport failure", None],
+        ["absent", "Absent / no data", None],
+        ["ok", "OK", None],
+    ]
+    assert 'if (replyHex === "00") return "absent"' not in html
+    assert ".status-only {" in html
+    cell_source = " ".join(html.split())
+    assert 'const valueTxt = statusKind === "status_only" ? "status only" :' in cell_source
+    assert "rawEl.textContent = statusRawByte ? `status byte ${statusRawByte}`" in html
+
+
+def test_generated_html_keeps_status_only_rows_and_namespaces_independent() -> None:
+    html = render_html_report({})
+
+    def namespace(first: str, second: str, tail: str) -> dict[str, object]:
+        def status(raw: str) -> dict[str, object]:
+            return {"response_state": "status_only", "reply_hex": raw, "error": None}
+
+        return {
+            "0x00": {
+                "registers": {
+                    "0x0001": {"value": 1, "raw_hex": "01"},
+                    "0x0002": status(first),
+                    "0x0003": {"flags_access": "absent", "error": None},
+                    "0x0004": status(second),
+                    "0x0005": status(tail),
+                    "0x0006": {"flags_access": "absent", "error": None},
+                }
+            },
+            "0x01": {"registers": {"0x0003": {"flags_access": "absent", "error": None}}},
+        }
+
+    namespaces = [
+        namespace("00", "00", "00"),
+        namespace("ff", "ff", "ff"),
+        namespace("ff", "00", "ff"),
+    ]
+    expression = (
+        f"{json.dumps(namespaces)}.map(ns => [visibleRegisterKeys(ns), "
+        "rowIsAbsent(ns, '0x0003'), rowIsAbsent(ns, '0x0005'), rowIsDormant(ns, '0x0005'), "
+        "['0x0002', '0x0004', '0x0005'].map(k => entryStatusRawByte(ns['0x00'].registers[k]))])"
+    )
+    observed = _run_node(_status_helpers_script(html, expression))
+
+    kept = ["0x0001", "0x0002", "0x0003", "0x0004", "0x0005"]
+    # The trailing absent-only row is trimmed; status-only rows and the absent row between
+    # them stay, and a status-only row is neither absent nor dormant.
+    assert observed == [
+        [kept, True, False, False, ["00", "00", "00"]],
+        [kept, True, False, False, ["ff", "ff", "ff"]],
+        [kept, True, False, False, ["ff", "00", "ff"]],
+    ]

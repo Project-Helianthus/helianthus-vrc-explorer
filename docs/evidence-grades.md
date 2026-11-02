@@ -186,6 +186,33 @@ family-specific inference, not proof of write acceptance. Retained response
 state is Hypothesis. See the native [response header][flags] and
 [response states][responses].
 
+### Status-only records
+
+A B524 reply of one byte, `00` or `FF`, is a status-only reply: it carries no
+register value. Explorer shows it with the neutral label **Status only** and the
+raw status byte. The standalone HTML report shows both in the cell; the Browser
+detail pane and the results viewer detail show the label in their Status line,
+and the Browser lists the raw `reply_hex` under Evidence. Both an explicit `response_state: status_only` record and a legacy
+active record whose `reply_hex` is a single `00` or `FF` byte are shown this way.
+
+- The label makes no claim about presence or absence, about what the register
+  means, or about whether it can be written. A `00` status is not shown as
+  `Absent / no data`, and no row is hidden because its reply is a status byte.
+- Rows with a status-only reply stay in the table when the trailing-row trimming
+  and the `Hide absent` filter run; they are neither absent nor dormant.
+- The raw selector (operation, group, instance and register), the raw status
+  byte and all other stored metadata, including `evidence_grade`, are shown as
+  stored. Each namespace keeps its own status, so equal numeric selectors under
+  different operations are never merged.
+- Other outcomes keep their own labels: an empty reply stays `Dormant (feature
+  inactive)`, a timeout or NACK stays `Transport failure`, and a reply with a
+  value body stays `OK`. A legacy record that carries only an access marker of
+  `absent` and no one-byte reply keeps `Absent / no data`.
+
+This is a display rule. It adds no stored field, grade, codec qualification,
+acquisition change or write path. The native
+[response states][responses] describe the status-only outcome itself.
+
 ## Using prior evidence safely
 
 Use current evidence to determine presence and recompute application validation

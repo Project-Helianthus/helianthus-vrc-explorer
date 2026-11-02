@@ -407,6 +407,7 @@ function getGroupObject(value) { return value; }
 function groupLabelForSection(_group, _section, fallback) { return fallback; }
 function entryStatusKind() { return "ok"; }
 function entryStatusLabel() { return "OK"; }
+function entryStatusRawByte() { return null; }
 function sortedHexKeys(keys) { return keys.sort((a, b) => parseInt(a, 16) - parseInt(b, 16)); }
 function visibleRegisterKeys(instances) {
   const keys = new Set();
