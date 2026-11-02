@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import io
 from dataclasses import replace
 
@@ -446,5 +447,134 @@ def test_panel_shows_editable_row_and_fresh_live_edit_context_entry() -> None:
             assert "04" in text_after
             assert "RAW" in text_after
             assert text_after != text_before
+
+    asyncio.run(exercise())
+
+
+def _status_only_artifact(op02_entry: dict[str, object], op06_entry: dict[str, object]):
+    def namespace(entry: dict[str, object]) -> dict[str, object]:
+        return {
+            "groups": {
+                "0x09": {
+                    "name": "Controller",
+                    "instances": {
+                        "0x01": {"present": True, "registers": {"0x0004": entry}},
+                    },
+                }
+            }
+        }
+
+    return {
+        "schema_version": "2.3",
+        "meta": {"destination_address": "0x15"},
+        "operations": {"0x02": namespace(op02_entry), "0x06": namespace(op06_entry)},
+    }
+
+
+def _status_entry(opcode: str, raw: str, grade: str) -> dict[str, object]:
+    return {
+        "read_opcode": opcode,
+        "register_class": "config",
+        "response_state": "status_only",
+        "reply_hex": raw,
+        "flags_access": None,
+        "error": None,
+        "evidence_grade": grade,
+    }
+
+
+async def _namespace_detail_and_cell(app, pilot, namespace_key: str) -> tuple[str, str]:
+    node = next(
+        item
+        for item in app._store.tree_nodes
+        if item.level == "instance"
+        and item.namespace_key == namespace_key
+        and item.group_key == "0x09"
+        and item.instance_key == "0x01"
+    )
+    app.query_one("#browse-tree", Tree).select_node(app._tree_node_by_ref[node.node_id])
+    await pilot.pause()
+    app._selected_node_id = node.node_id
+    app.action_tab_config()
+    await pilot.pause()
+    app._refresh_table()
+    await pilot.pause()
+    table = app.query_one("#browse-table", DataTable)
+    table.focus()
+    table.move_cursor(row=0)
+    await pilot.pause()
+    cells = " | ".join(str(cell) for cell in table.get_row_at(0))
+    return _detail_text(app), cells
+
+
+@pytest.mark.parametrize(
+    ("op02_raw", "op06_raw"),
+    [("00", "ff"), ("ff", "00"), ("00", "00"), ("ff", "ff")],
+)
+def test_detail_pane_shows_status_only_per_namespace_without_absence_claim(
+    op02_raw: str, op06_raw: str
+) -> None:
+    artifact = _status_only_artifact(
+        _status_entry("0x02", op02_raw, "Hypothesis"),
+        _status_entry("0x06", op06_raw, "Unknown"),
+    )
+    before = copy.deepcopy(artifact)
+    rows = {row.namespace_key: row for row in BrowseStore.from_artifact(artifact).rows}
+    assert rows["0x02"].register_key == rows["0x06"].register_key == "0x0004"
+    assert rows["0x02"].value_text == f"status only ({op02_raw})"
+    assert rows["0x06"].value_text == f"status only ({op06_raw})"
+
+    async def exercise() -> None:
+        app = browse_textual._BrowseApp(artifact, allow_write=False)
+        async with app.run_test(size=(140, 45)) as pilot:
+            for namespace_key, raw, grade in (
+                ("0x02", op02_raw, "Hypothesis"),
+                ("0x06", op06_raw, "Unknown"),
+            ):
+                text, cells = await _namespace_detail_and_cell(app, pilot, namespace_key)
+                assert "Status only" in text
+                assert "Absent / no data" not in text
+                assert "absent" not in cells.lower()
+                lines = [line.split() for line in text.splitlines()]
+                assert ["reply_hex:", raw] in lines
+                assert ["Entry", "evidence:", grade] in lines
+
+    asyncio.run(exercise())
+    assert artifact == before
+
+
+@pytest.mark.parametrize(
+    ("entry", "label"),
+    [
+        ({"response_state": "empty_reply", "reply_hex": ""}, "Dormant (feature inactive)"),
+        ({"response_state": "timeout", "error": "timeout"}, "Transport failure"),
+        (
+            {
+                "response_state": "active",
+                "reply_hex": "0001e3",
+                "raw_hex": "e3",
+                "type": "UCH",
+                "value": 227,
+            },
+            "OK",
+        ),
+    ],
+)
+def test_detail_pane_controls_keep_their_non_status_only_labels(
+    entry: dict[str, object], label: str
+) -> None:
+    control = {"read_opcode": "0x02", "register_class": "config", "error": None, **entry}
+    artifact = _status_only_artifact(control, _status_entry("0x06", "00", "Unknown"))
+
+    async def exercise() -> None:
+        app = browse_textual._BrowseApp(artifact, allow_write=False)
+        async with app.run_test(size=(140, 45)) as pilot:
+            text, _cells = await _namespace_detail_and_cell(app, pilot, "0x02")
+            assert any(
+                line.split()[:2] == ["Status:", label.split()[0]] for line in text.splitlines()
+            )
+            assert "Status only" not in text
+            other, _other_cells = await _namespace_detail_and_cell(app, pilot, "0x06")
+            assert "Status only" in other
 
     asyncio.run(exercise())

@@ -4,8 +4,10 @@ from collections.abc import Iterable
 from typing import Any, Literal
 
 RegisterStatusKind = Literal[
-    "ok", "absent", "dormant", "transport_failure", "decode_error", "error"
+    "ok", "absent", "dormant", "status_only", "transport_failure", "decode_error", "error"
 ]
+
+_STATUS_ONLY_BYTES = frozenset({"00", "ff"})
 
 
 def _sorted_hex_keys(keys: Iterable[str]) -> list[str]:
@@ -19,6 +21,37 @@ def _sorted_hex_keys(keys: Iterable[str]) -> list[str]:
             continue
     parsed.sort(key=lambda item: item[0])
     return [key for (_num, key) in parsed]
+
+
+def _one_byte_hex(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().lower()
+    if len(normalized) != 2:
+        return None
+    try:
+        int(normalized, 16)
+    except ValueError:
+        return None
+    return normalized
+
+
+def entry_status_raw_byte(entry: dict[str, Any] | None) -> str | None:
+    """Return the raw status byte of a status-only entry, or None for any other entry."""
+
+    if not isinstance(entry, dict) or entry_status_kind(entry) != "status_only":
+        return None
+    return _one_byte_hex(entry.get("reply_hex"))
+
+
+def _is_status_only(entry: dict[str, Any]) -> bool:
+    response_state = entry.get("response_state")
+    if isinstance(response_state, str) and response_state.strip().lower() == "status_only":
+        return True
+    # Legacy records keep a clean one-byte reply as "active" with no value body.
+    raw_hex = entry.get("raw_hex")
+    has_value_body = isinstance(raw_hex, str) and bool(raw_hex.strip())
+    return _one_byte_hex(entry.get("reply_hex")) in _STATUS_ONLY_BYTES and not has_value_body
 
 
 def entry_status_kind(entry: dict[str, Any] | None) -> RegisterStatusKind:
@@ -46,15 +79,15 @@ def entry_status_kind(entry: dict[str, Any] | None) -> RegisterStatusKind:
             return "transport_failure"
         return "error"
 
+    # A one-byte status carries no register value, so it makes no presence claim.
+    if _is_status_only(entry):
+        return "status_only"
+
     flags_access = entry.get("flags_access")
     if isinstance(flags_access, str) and flags_access.strip().lower() == "absent":
         return "absent"
     if isinstance(flags_access, str) and flags_access.strip().lower() == "dormant":
         return "dormant"
-
-    reply_hex = entry.get("reply_hex")
-    if isinstance(reply_hex, str) and reply_hex.strip().lower() == "00":
-        return "absent"
 
     return "ok"
 
@@ -65,6 +98,8 @@ def entry_status_label(entry: dict[str, Any] | None) -> str:
             return "Absent / no data"
         case "dormant":
             return "Dormant (feature inactive)"
+        case "status_only":
+            return "Status only"
         case "transport_failure":
             return "Transport failure"
         case "decode_error":
@@ -81,6 +116,9 @@ def entry_display_value_text(entry: dict[str, Any]) -> str:
         return "absent"
     if status == "dormant":
         return "dormant"
+    if status == "status_only":
+        raw_byte = entry_status_raw_byte(entry)
+        return f"status only ({raw_byte})" if raw_byte else "status only"
     if status == "transport_failure":
         return "transport failure"
     if status == "decode_error":

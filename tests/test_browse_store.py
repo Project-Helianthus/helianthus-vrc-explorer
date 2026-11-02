@@ -912,6 +912,11 @@ def test_browse_store_distinguishes_absent_from_transport_failure() -> None:
                                 "flags_access": None,
                                 "error": "transport_error: ERR: arbitration lost",
                             },
+                            "0x0003": {
+                                "reply_hex": None,
+                                "flags_access": "absent",
+                                "error": None,
+                            },
                         }
                     }
                 },
@@ -921,8 +926,12 @@ def test_browse_store_distinguishes_absent_from_transport_failure() -> None:
 
     store = BrowseStore.from_artifact(artifact)
     by_register = {row.register_key: row for row in store.rows}
-    assert by_register["0x0001"].value_text == "absent"
+    # A one-byte status reply is neutral: it never claims absence.
+    assert by_register["0x0001"].value_text == "status only (00)"
     assert by_register["0x0002"].value_text == "transport failure"
+    # Absence still comes only from the stored access marker with no reply; as the trailing
+    # unnamed row it is trimmed, unlike the status-only row before it.
+    assert "0x0003" not in by_register
 
 
 def test_browse_store_hides_rr_zero_and_trailing_unnamed_absent_rows_per_namespace() -> None:
@@ -981,7 +990,12 @@ def test_browse_store_hides_rr_zero_and_trailing_unnamed_absent_rows_per_namespa
                                         "error": None,
                                     },
                                     "0x0037": {
-                                        "reply_hex": "00",
+                                        "reply_hex": None,
+                                        "flags_access": "absent",
+                                        "error": None,
+                                    },
+                                    "0x0038": {
+                                        "reply_hex": None,
                                         "flags_access": "absent",
                                         "error": None,
                                     },
@@ -999,5 +1013,10 @@ def test_browse_store_hides_rr_zero_and_trailing_unnamed_absent_rows_per_namespa
     assert "0x0c:0x02:0x01:0x0000" not in row_ids
     assert "0x0c:0x06:0x01:0x0000" not in row_ids
     assert "0x0c:0x02:0x01:0x0036" in row_ids
-    assert "0x0c:0x06:0x01:0x0036" not in row_ids
+    # A one-byte status reply is retained with the neutral label, even in the trailing position.
+    assert "0x0c:0x06:0x01:0x0036" in row_ids
+    by_row_id = {row.row_id: row for row in store.rows}
+    assert by_row_id["0x0c:0x06:0x01:0x0036"].value_text == "status only (00)"
+    # Trailing rows that carry absence without any reply are still trimmed.
     assert "0x0c:0x06:0x01:0x0037" not in row_ids
+    assert "0x0c:0x06:0x01:0x0038" not in row_ids

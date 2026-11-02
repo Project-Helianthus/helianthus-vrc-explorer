@@ -387,6 +387,12 @@ _TEMPLATE = """<!doctype html>
         border-color: rgba(122, 196, 255, 0.32);
       }
 
+      .status-only {
+        color: #d5dbe6;
+        background: rgba(160, 170, 190, 0.14);
+        border-color: rgba(160, 170, 190, 0.3);
+      }
+
       .status-transport {
         color: #ffb3b3;
         background: rgba(255, 122, 122, 0.16);
@@ -1132,6 +1138,27 @@ __ARTIFACT_JSON__
 
 
 
+      function oneByteHex(value) {
+        if (typeof value !== "string") return null;
+        const normalized = value.trim().toLowerCase();
+        return /^[0-9a-f]{2}$/.test(normalized) ? normalized : null;
+      }
+
+      function entryIsStatusOnly(entry) {
+        const state = typeof entry.response_state === "string"
+          ? entry.response_state.trim().toLowerCase()
+          : "";
+        if (state === "status_only") return true;
+        const rawBody = typeof entry.raw_hex === "string" && entry.raw_hex.trim().length > 0;
+        const reply = oneByteHex(entry.reply_hex);
+        return (reply === "00" || reply === "ff") && !rawBody;
+      }
+
+      function entryStatusRawByte(entry) {
+        if (!entry || typeof entry !== "object" || entryStatusKind(entry) !== "status_only") return null;
+        return oneByteHex(entry.reply_hex);
+      }
+
       function entryStatusKind(entry) {
         if (!entry || typeof entry !== "object") return "error";
         const responseState = typeof entry.response_state === "string"
@@ -1148,11 +1175,11 @@ __ARTIFACT_JSON__
           }
           return "error";
         }
+        // A one-byte status carries no register value, so it makes no presence claim.
+        if (entryIsStatusOnly(entry)) return "status_only";
         const access = typeof entry.flags_access === "string" ? entry.flags_access.trim().toLowerCase() : "";
         if (access === "absent") return "absent";
         if (access === "dormant") return "dormant";
-        const replyHex = typeof entry.reply_hex === "string" ? entry.reply_hex.trim().toLowerCase() : "";
-        if (replyHex === "00") return "absent";
         return "ok";
       }
 
@@ -1160,6 +1187,7 @@ __ARTIFACT_JSON__
         const kind = entryStatusKind(entry);
         if (kind === "absent") return "Absent / no data";
         if (kind === "dormant") return "Dormant (feature inactive)";
+        if (kind === "status_only") return "Status only";
         if (kind === "transport_failure") return "Transport failure";
         if (kind === "decode_error") return "Decode error";
         if (kind === "error") return "Error";
@@ -1169,6 +1197,7 @@ __ARTIFACT_JSON__
       function statusChipClass(kind) {
         if (kind === "absent") return "status-chip status-absent";
         if (kind === "dormant") return "status-chip status-dormant";
+        if (kind === "status_only") return "status-chip status-only";
         if (kind === "transport_failure") return "status-chip status-transport";
         if (kind === "decode_error") return "status-chip status-decode";
         return "status-chip status-error";
@@ -2654,16 +2683,26 @@ __ARTIFACT_JSON__
                 ? parseTypedValue(selectedType, valueBytes)
                 : { value: displayValue, error: null };
 
-              const valueTxt = (statusKind === "absent" || statusKind === "dormant")
-                ? statusKind
-                : formatValue(decoded.value);
+              const statusRawByte = entryStatusRawByte(entry);
+              const valueTxt = statusKind === "status_only"
+                ? "status only"
+                : (statusKind === "absent" || statusKind === "dormant")
+                  ? statusKind
+                  : formatValue(decoded.value);
               const valueEl = document.createElement("div");
               valueEl.className = "cell-value";
-              if (statusKind === "absent" || statusKind === "dormant") valueEl.classList.add("cell-value-muted");
+              if (statusKind === "absent" || statusKind === "dormant" || statusKind === "status_only") {
+                valueEl.classList.add("cell-value-muted");
+              }
               valueEl.textContent = valueTxt;
               td.appendChild(valueEl);
 
-              if (rawHex) {
+              if (statusKind === "status_only") {
+                const rawEl = document.createElement("div");
+                rawEl.className = "cell-raw";
+                rawEl.textContent = statusRawByte ? `status byte ${statusRawByte}` : "status byte not retained";
+                td.appendChild(rawEl);
+              } else if (rawHex) {
                 const rawEl = document.createElement("div");
                 rawEl.className = "cell-raw";
                 rawEl.textContent = rawHex;
