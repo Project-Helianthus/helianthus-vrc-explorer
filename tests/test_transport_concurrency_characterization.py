@@ -232,7 +232,7 @@ def _exercise_schedule(monkeypatch: pytest.MonkeyPatch, first: str, contender: s
     lock = transport._lock
 
     class ObservedLock:
-        def __enter__(self) -> None:
+        def acquire(self, blocking: bool = True, timeout: float = -1) -> bool:
             if threading.current_thread() is threads[1]:
                 # This probe is inside the public operation's lock entry. A
                 # missing successor-side lock cannot signal contention.
@@ -241,10 +241,16 @@ def _exercise_schedule(monkeypatch: pytest.MonkeyPatch, first: str, contender: s
                     lock.release()
                 assert not acquired, "Public request released its lock before response completion"
                 contended.set()
-            lock.acquire()
+            return lock.acquire(blocking, timeout)
+
+        def release(self) -> None:
+            lock.release()
+
+        def __enter__(self) -> None:
+            self.acquire()
 
         def __exit__(self, *_args: object) -> None:
-            lock.release()
+            self.release()
 
     monkeypatch.setattr(transport, "_lock", ObservedLock())
     started: list[threading.Thread] = []
