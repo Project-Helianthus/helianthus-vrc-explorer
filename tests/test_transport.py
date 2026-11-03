@@ -13,6 +13,7 @@ import pytest
 from helianthus_vrc_explorer.transport.base import (
     TransportCommandNotEnabled,
     TransportError,
+    TransportRecoveryExhausted,
     TransportTimeout,
     emit_trace_label,
 )
@@ -477,10 +478,15 @@ def test_transport_send_collision_retries_exhaust(monkeypatch: pytest.MonkeyPatc
 
 
 def test_transport_send_respects_max_command_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
-    with _run_ebusd_test_server([["ERR: no signal"]] * 10) as (host, port, _commands):
+    # Deliberate contract: max_command_s is one absolute deadline for the whole logical
+    # request.  The fixed 15 s no-signal wait is truncated to the 0.5 s remainder and the
+    # expiry is the terminal recovery category, not a between-attempt TransportTimeout.
+    with _run_ebusd_test_server([["ERR: no signal"]] * 10) as (host, port, commands):
         now = {"t": 0.0}
+        sleep_calls: list[float] = []
 
         def _sleep(seconds: float) -> None:
+            sleep_calls.append(seconds)
             now["t"] += seconds
 
         import helianthus_vrc_explorer.transport.ebusd_tcp as ebusd_tcp
@@ -498,8 +504,14 @@ def test_transport_send_respects_max_command_timeout(monkeypatch: pytest.MonkeyP
             )
         )
         payload = bytes.fromhex("020002000F00")
-        with pytest.raises(TransportTimeout, match=r"Command exceeded 0.5s retry budget"):
+        with pytest.raises(TransportRecoveryExhausted) as raised:
             transport.send(0x15, payload)
+
+    assert (raised.value.cause, raised.value.phase) == ("timeout", "transaction")
+    assert raised.value.request_attempts == 1
+    assert raised.value.reconnect_attempts == 0
+    assert sleep_calls == [0.5]
+    assert commands == ["hex 15B52406020002000F00"]
 
 
 def test_transport_send_proto_uses_retry_policy(monkeypatch: pytest.MonkeyPatch) -> None:
