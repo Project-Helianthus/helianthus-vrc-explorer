@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import contextlib
-import io
 import socket
 import string
+import threading
 import time
 from collections.abc import Callable, Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final
@@ -16,8 +16,10 @@ from .base import (
     TransportCommandNotEnabled,
     TransportError,
     TransportInterface,
+    TransportRecoveryExhausted,
     TransportTimeout,
 )
+from .request_deadline import RequestDeadline, RequestDeadlineExpired, validate_budget_seconds
 
 
 @dataclass(frozen=True)
@@ -33,6 +35,9 @@ class EbusdTcpConfig:
     collision_backoff_max_ms: int = 100
     no_signal_poll_ms: int = 200
     no_signal_max_s: float = 15.0
+    # Elapsed budget for one logical public operation: connection, command
+    # write, response reads, reconnect and backoff share one deadline.  Every
+    # shorter phase limit above still applies within it.
     max_command_s: float = 30.0
 
 
@@ -43,6 +48,10 @@ _HEX_CHARS: Final[set[str]] = set(string.hexdigits)
 _POST_RESPONSE_DRAIN_TIMEOUT_S: Final[float] = 0.01
 _BUS_SETTLE_RETRY_S: Final[float] = 5.0
 _BUS_LOST_RETRY_S: Final[float] = 15.0
+_RECV_CHUNK_BYTES: Final[int] = 4096
+# Bounds for one command's response; ebusd command replies are far smaller.
+_MAX_RESPONSE_LINE_BYTES: Final[int] = 8192
+_MAX_RESPONSE_BYTES: Final[int] = 65536
 _RETRYABLE_TRANSPORT_ERROR_SUBSTRINGS: Final[tuple[str, ...]] = (
     "arbitration lost",
     "syn received",
@@ -91,6 +100,18 @@ def _with_retry_suffix(exc: TransportError, suffix: str) -> TransportError:
     if isinstance(exc, TransportTimeout):
         return TransportTimeout(message)
     return TransportError(message)
+
+
+def _deadline_exhausted(
+    *, request_attempts: int, reconnect_attempts: int
+) -> TransportRecoveryExhausted:
+    """Terminal outcome for an exhausted operation deadline; never retried."""
+    return TransportRecoveryExhausted(
+        cause="timeout",
+        phase="transaction",
+        request_attempts=request_attempts,
+        reconnect_attempts=reconnect_attempts,
+    )
 
 
 def _utc_ts() -> str:
@@ -245,7 +266,14 @@ def _build_info_command() -> bytes:
 @dataclass(slots=True)
 class _EbusdTcpSession:
     sock: socket.socket
-    sock_file: io.BufferedRWPair
+    # Bytes read past the current line.  They belong to this session and the
+    # command being read; a session whose tail is not isolated is closed.
+    rx: bytearray = field(default_factory=bytearray)
+    received: int = 0
+
+
+class _RequestLocal(threading.local):
+    root: RequestDeadline | None = None
 
 
 class EbusdTcpTransport(TransportInterface):
@@ -257,6 +285,8 @@ class EbusdTcpTransport(TransportInterface):
         self._trace_seq = 0
         self._session_depth = 0
         self._session: _EbusdTcpSession | None = None
+        # The active operation deadline belongs to the calling thread only.
+        self._request_local = _RequestLocal()
 
     @staticmethod
     def _validate_config(config: EbusdTcpConfig) -> None:
@@ -272,8 +302,42 @@ class EbusdTcpTransport(TransportInterface):
             raise ValueError("no_signal_poll_ms must be > 0")
         if config.no_signal_max_s <= 0:
             raise ValueError("no_signal_max_s must be > 0")
-        if config.max_command_s <= 0:
-            raise ValueError("max_command_s must be > 0")
+        try:
+            validate_budget_seconds(config.max_command_s)
+        except (TypeError, ValueError) as exc:
+            raise type(exc)(f"max_command_s: {exc}") from exc
+
+    def _active_root(self) -> RequestDeadline | None:
+        return self._request_local.root
+
+    @contextlib.contextmanager
+    def _operation_root(self) -> Iterator[RequestDeadline]:
+        """Start one deadline for an independent operation, or reuse the active one."""
+        active = self._active_root()
+        if active is not None:
+            yield active
+            return
+        root = RequestDeadline(self._config.max_command_s, clock=time.monotonic)
+        self._request_local.root = root
+        try:
+            yield root
+        finally:
+            self._request_local.root = None
+
+    def _check_root(self) -> None:
+        root = self._active_root()
+        if root is not None:
+            root.remaining_s()
+
+    def _phase_timeout_s(self, local_s: float) -> float:
+        """Cap a local phase limit by the active root; unchanged without one."""
+        root = self._active_root()
+        if root is None:
+            return local_s
+        return min(local_s, root.remaining_s())
+
+    def _sleep(self, delay_s: float) -> None:
+        time.sleep(delay_s)
 
     def _trace(self, message: str) -> None:
         trace_path = self._config.trace_path
@@ -300,8 +364,7 @@ class EbusdTcpTransport(TransportInterface):
         if session is None:
             return
         self._session = None
-        with contextlib.suppress(OSError):
-            session.sock_file.close()
+        session.rx.clear()
         with contextlib.suppress(OSError):
             session.sock.close()
 
@@ -312,7 +375,7 @@ class EbusdTcpTransport(TransportInterface):
         self._session_depth += 1
         if self._session_depth == 1:
             try:
-                self._open_session()
+                self._open_standalone_session()
             except Exception:
                 self._session_depth -= 1
                 if self._session_depth < 0:
@@ -326,18 +389,39 @@ class EbusdTcpTransport(TransportInterface):
                 self._session_depth = 0
                 self.close()
 
-    def _open_session(self) -> None:
-        addr = (self._config.host, self._config.port)
+    def _open_standalone_session(self) -> None:
+        # Standalone setup gets its own budget; it ends before the session body.
+        with self._operation_root():
+            try:
+                self._open_session()
+            except RequestDeadlineExpired as exc:
+                self.close()
+                raise _deadline_exhausted(request_attempts=0, reconnect_attempts=0) from exc
+
+    def _connect(self, timeout_s: float) -> socket.socket:
+        return socket.create_connection((self._config.host, self._config.port), timeout=timeout_s)
+
+    def _connect_session(self) -> _EbusdTcpSession:
+        sock = self._connect(self._phase_timeout_s(self._config.timeout_s))
         try:
-            sock = socket.create_connection(addr, timeout=self._config.timeout_s)
-            sock.settimeout(self._config.timeout_s)
-            sock_file = sock.makefile("rwb")
-            self._session = _EbusdTcpSession(sock=sock, sock_file=sock_file)
+            # Resolution and connect cannot be interrupted; refuse a late result.
+            self._check_root()
+        except BaseException:
+            with contextlib.suppress(OSError):
+                sock.close()
+            raise
+        return _EbusdTcpSession(sock=sock)
+
+    def _open_session(self) -> None:
+        try:
+            self._session = self._connect_session()
         except TimeoutError as exc:
+            self._check_root()
             raise TransportTimeout(
                 f"Timed out talking to ebusd at {self._config.host}:{self._config.port}"
             ) from exc
         except OSError as exc:
+            self._check_root()
             raise TransportError(
                 f"Failed talking to ebusd at {self._config.host}:{self._config.port}: {exc}"
             ) from exc
@@ -369,110 +453,147 @@ class EbusdTcpTransport(TransportInterface):
         *,
         attempt_hook: AttemptHook | None,
     ) -> bytes:
-        self._trace_seq += 1
-        seq = self._trace_seq
+        with self._operation_root():
+            self._trace_seq += 1
+            seq = self._trace_seq
 
-        def _send_attempt() -> bytes:
-            if attempt_hook is not None:
-                attempt_hook()
-            return self._send_once(seq, dst, payload)
+            def _send_attempt(attempt_admitted: AttemptHook) -> bytes:
+                # The policy confirmed the deadline just before this call.  A hook
+                # that overruns it (it cannot be interrupted) does not admit its attempt.
+                if attempt_hook is not None:
+                    attempt_hook()
+                    self._check_root()
+                attempt_admitted()
+                return self._send_once(seq, dst, payload)
 
-        return self._send_with_policy(
-            seq,
-            _send_attempt,
-            retry_safe=_is_retry_safe_b524_read(payload),
-        )
+            return self._send_with_policy(
+                seq,
+                _send_attempt,
+                retry_safe=_is_retry_safe_b524_read(payload),
+            )
 
     def _send_with_policy(
         self,
         seq: int,
-        send_once: Callable[[], bytes],
+        send_once: Callable[[AttemptHook], bytes],
         *,
         retry_safe: bool = True,
     ) -> bytes:
+        root = self._active_root()
+        if root is None:
+            # Direct internal use: one root spans this whole policy run.
+            with self._operation_root():
+                return self._send_with_policy(seq, send_once, retry_safe=retry_safe)
         timeout_retries = 0
         collision_retries = 0
         no_signal_start_monotonic: float | None = None
         connection_retried = False
-        command_started = time.monotonic()
-        max_command_s = self._config.max_command_s
+        reconnect_pending = False
+        request_attempts = 0
+        reconnect_attempts = 0
 
-        while True:
-            if time.monotonic() - command_started >= max_command_s:
-                raise TransportTimeout(f"Command exceeded {max_command_s:.1f}s retry budget")
-            try:
-                return send_once()
-            except TransportTimeout as exc:
-                if not retry_safe:
-                    raise
-                if _is_connection_level_timeout(exc):
-                    # Preserve previous behavior: one reconnect attempt in persistent-session mode.
-                    if self._session_depth > 0:
-                        self.close()
-                    if not connection_retried:
-                        connection_retried = True
-                        self._trace(f"#{seq} RETRY type=connection_timeout n=1/1")
-                        continue
-                    raise _with_retry_suffix(exc, "connection retry exhausted") from exc
+        def _attempt_admitted() -> None:
+            nonlocal request_attempts, reconnect_attempts, reconnect_pending
+            request_attempts += 1
+            # Count only reconnects actually begun before the deadline.
+            if reconnect_pending:
+                reconnect_pending = False
+                reconnect_attempts += 1
 
-                timeout_retries += 1
-                if timeout_retries > self._config.timeout_max_retries:
-                    raise _with_retry_suffix(
-                        exc,
-                        f"timeout retries exhausted ({self._config.timeout_max_retries})",
-                    ) from exc
-                self._trace(
-                    "#"
-                    f"{seq} RETRY type=timeout "
-                    f"n={timeout_retries}/{self._config.timeout_max_retries} "
-                    f"sleep_ms={int(_BUS_SETTLE_RETRY_S * 1000)}"
-                )
-                time.sleep(_BUS_SETTLE_RETRY_S)
-                continue
-            except TransportError as exc:
-                if not retry_safe:
-                    raise
-                if _is_connection_level_error(exc):
-                    if self._session_depth > 0:
-                        self.close()
-                    if not connection_retried:
-                        connection_retried = True
-                        self._trace(f"#{seq} RETRY type=connection_error n=1/1")
-                        continue
-                    raise _with_retry_suffix(exc, "connection retry exhausted") from exc
+        try:
+            while True:
+                # No attempt, hook, retry or reconnect begins at or after the deadline.
+                root.remaining_s()
+                try:
+                    result = send_once(_attempt_admitted)
+                    # A response completed at or after the deadline is refused.
+                    root.remaining_s()
+                    return result
+                except TransportTimeout as exc:
+                    if not retry_safe:
+                        raise
+                    if _is_connection_level_timeout(exc):
+                        # Preserve previous behavior: one reconnect attempt in persistent mode.
+                        if self._session_depth > 0:
+                            self.close()
+                        if not connection_retried:
+                            connection_retried = True
+                            reconnect_pending = True
+                            self._trace(f"#{seq} RETRY type=connection_timeout n=1/1")
+                            continue
+                        raise _with_retry_suffix(exc, "connection retry exhausted") from exc
 
-                if _is_no_signal_error(exc):
-                    if no_signal_start_monotonic is None:
-                        no_signal_start_monotonic = time.monotonic()
-                    elapsed_s = time.monotonic() - no_signal_start_monotonic
-                    if elapsed_s >= self._config.no_signal_max_s:
+                    timeout_retries += 1
+                    if timeout_retries > self._config.timeout_max_retries:
                         raise _with_retry_suffix(
                             exc,
-                            f"no-signal polling exceeded {self._config.no_signal_max_s:.1f}s",
+                            f"timeout retries exhausted ({self._config.timeout_max_retries})",
                         ) from exc
                     self._trace(
-                        f"#{seq} RETRY type=no_signal elapsed_ms={int(elapsed_s * 1000)} "
-                        f"sleep_ms={int(_BUS_LOST_RETRY_S * 1000)}"
-                    )
-                    time.sleep(_BUS_LOST_RETRY_S)
-                    continue
-
-                no_signal_start_monotonic = None
-                if _is_retryable_transport_error(exc):
-                    collision_retries += 1
-                    if collision_retries > self._config.collision_max_retries:
-                        raise _with_retry_suffix(
-                            exc,
-                            f"collision retries exhausted ({self._config.collision_max_retries})",
-                        ) from exc
-                    self._trace(
-                        f"#{seq} RETRY type=collision "
-                        f"n={collision_retries}/{self._config.collision_max_retries} "
+                        "#"
+                        f"{seq} RETRY type=timeout "
+                        f"n={timeout_retries}/{self._config.timeout_max_retries} "
                         f"sleep_ms={int(_BUS_SETTLE_RETRY_S * 1000)}"
                     )
-                    time.sleep(_BUS_SETTLE_RETRY_S)
+                    # Truncated to the remainder; expiry here is terminal, not a resend.
+                    root.sleep(_BUS_SETTLE_RETRY_S, sleep=self._sleep)
                     continue
-                raise
+                except TransportError as exc:
+                    if not retry_safe:
+                        raise
+                    if _is_connection_level_error(exc):
+                        if self._session_depth > 0:
+                            self.close()
+                        if not connection_retried:
+                            connection_retried = True
+                            reconnect_pending = True
+                            self._trace(f"#{seq} RETRY type=connection_error n=1/1")
+                            continue
+                        raise _with_retry_suffix(exc, "connection retry exhausted") from exc
+
+                    if _is_no_signal_error(exc):
+                        if no_signal_start_monotonic is None:
+                            no_signal_start_monotonic = time.monotonic()
+                        elapsed_s = time.monotonic() - no_signal_start_monotonic
+                        if elapsed_s >= self._config.no_signal_max_s:
+                            raise _with_retry_suffix(
+                                exc,
+                                f"no-signal polling exceeded {self._config.no_signal_max_s:.1f}s",
+                            ) from exc
+                        self._trace(
+                            f"#{seq} RETRY type=no_signal elapsed_ms={int(elapsed_s * 1000)} "
+                            f"sleep_ms={int(_BUS_LOST_RETRY_S * 1000)}"
+                        )
+                        root.sleep(_BUS_LOST_RETRY_S, sleep=self._sleep)
+                        continue
+
+                    no_signal_start_monotonic = None
+                    if _is_retryable_transport_error(exc):
+                        collision_retries += 1
+                        if collision_retries > self._config.collision_max_retries:
+                            limit = self._config.collision_max_retries
+                            raise _with_retry_suffix(
+                                exc, f"collision retries exhausted ({limit})"
+                            ) from exc
+                        self._trace(
+                            f"#{seq} RETRY type=collision "
+                            f"n={collision_retries}/{self._config.collision_max_retries} "
+                            f"sleep_ms={int(_BUS_SETTLE_RETRY_S * 1000)}"
+                        )
+                        root.sleep(_BUS_SETTLE_RETRY_S, sleep=self._sleep)
+                        continue
+                    raise
+        except RequestDeadlineExpired as exc:
+            # Translated before any retry handler can see it; never retried.
+            self.close()
+            self._trace(
+                f"#{seq} REQUEST_FAILED cause=timeout phase=transaction "
+                f"request_attempts={request_attempts} reconnect_attempts={reconnect_attempts}"
+            )
+            raise _deadline_exhausted(
+                request_attempts=request_attempts,
+                reconnect_attempts=reconnect_attempts,
+            ) from exc
 
     def _send_once(self, seq: int, dst: int, payload: bytes) -> bytes:
         cmd = _build_hex_command(self._config, dst, payload)
@@ -488,108 +609,177 @@ class EbusdTcpTransport(TransportInterface):
             self._trace(f"#{seq} STRIP in={_short_hex(parsed)} out={_short_hex(stripped)}")
         return stripped
 
-    @staticmethod
-    def _read_command_response_lines(
-        sock: socket.socket,
-        sock_file: io.BufferedRWPair,
-    ) -> list[str]:
+    def _mandatory_timeout_s(self) -> float:
+        return self._phase_timeout_s(self._config.timeout_s)
+
+    def _recv_line(
+        self,
+        session: _EbusdTcpSession,
+        timeout_s: Callable[[], float],
+        *,
+        mandatory: bool,
+    ) -> bytes:
+        """Return one line with its terminator, the unterminated tail at EOF, or b"" at EOF.
+
+        Every socket read gets a freshly clamped timeout, so a slow trickle cannot
+        renew a wait past the operation deadline the way a buffered readline can.
+        """
+
+        while True:
+            newline = session.rx.find(b"\n")
+            if newline >= 0:
+                line = bytes(session.rx[: newline + 1])
+                del session.rx[: newline + 1]
+                return line
+            if len(session.rx) > _MAX_RESPONSE_LINE_BYTES:
+                raise TransportError(
+                    f"ebusd response line exceeded {_MAX_RESPONSE_LINE_BYTES} bytes"
+                )
+            session.sock.settimeout(timeout_s())
+            chunk = session.sock.recv(_RECV_CHUNK_BYTES)
+            if mandatory:
+                self._check_root()
+            if not chunk:
+                tail = bytes(session.rx)
+                session.rx.clear()
+                return tail
+            session.received += len(chunk)
+            if session.received > _MAX_RESPONSE_BYTES:
+                raise TransportError(f"ebusd response exceeded {_MAX_RESPONSE_BYTES} bytes")
+            session.rx.extend(chunk)
+
+    def _drain_trailing_lines(self, session: _EbusdTcpSession, lines: list[str]) -> bool:
+        """Best-effort: collect trailing lines (e.g. spurious ERR lines).
+
+        Returns whether the session tail is isolated.  A drain timeout must not be
+        treated as a request timeout, and the drain never reaches the operation
+        deadline: it is skipped when it could consume the remainder.
+        """
+
+        window_s = min(self._config.timeout_s, _POST_RESPONSE_DRAIN_TIMEOUT_S)
+        root = self._active_root()
+        if root is not None:
+            try:
+                if root.remaining_s() <= window_s:
+                    return False
+            except RequestDeadlineExpired:
+                # The final success check refuses this reply.
+                return False
+        drain_until = time.monotonic() + window_s
+        received_before = session.received
+
+        def _window_timeout_s() -> float:
+            left = drain_until - time.monotonic()
+            if left <= 0:
+                raise TimeoutError
+            return left
+
+        try:
+            while True:
+                raw = self._recv_line(session, _window_timeout_s, mandatory=False)
+                if not raw:
+                    return False
+                text = raw.decode("ascii", errors="replace").rstrip("\r\n")
+                if text == "":
+                    return not session.rx
+                if text.strip() == "":
+                    continue
+                lines.append(text)
+        except TimeoutError:
+            # Silence for the whole window isolates the tail; a trickle does not.
+            return session.received == received_before and not session.rx
+        except (OSError, TransportError):
+            return False
+
+    def _read_command_response_lines(self, session: _EbusdTcpSession) -> tuple[list[str], bool]:
         lines: list[str] = []
         # ebusd typically terminates responses with a blank line. Some versions keep the socket
         # open after sending a single payload/ERR line; do not block on waiting for the terminator
         # after we've received a non-empty line.
         while True:
-            raw = sock_file.readline()
+            raw = self._recv_line(session, self._mandatory_timeout_s, mandatory=True)
             if not raw:
-                break
+                return lines, False
             text = raw.decode("ascii", errors="replace").rstrip("\r\n")
             if text == "":
-                break
+                return lines, not session.rx
             if text.strip() == "":
                 continue
             lines.append(text)
             break
+        return lines, self._drain_trailing_lines(session, lines)
 
-        if lines:
-            # Best-effort: drain any trailing lines (e.g. spurious ERR lines) using a short timeout.
-            # A drain timeout must not be treated as a request timeout.
-            prev_timeout = sock.gettimeout()
-            drain_timeout = _POST_RESPONSE_DRAIN_TIMEOUT_S
-            if prev_timeout is not None:
-                drain_timeout = min(prev_timeout, drain_timeout)
-            sock.settimeout(drain_timeout)
-            try:
-                while True:
-                    try:
-                        raw = sock_file.readline()
-                    except TimeoutError:
-                        break
-                    if not raw:
-                        break
-                    text = raw.decode("ascii", errors="replace").rstrip("\r\n")
-                    if text == "":
-                        break
-                    if text.strip() == "":
-                        continue
-                    lines.append(text)
-            finally:
-                sock.settimeout(prev_timeout)
-
-        return lines
-
-    @staticmethod
-    def _read_command_response_lines_all(
-        _sock: socket.socket,
-        sock_file: io.BufferedRWPair,
-    ) -> list[str]:
+    def _read_command_response_lines_all(self, session: _EbusdTcpSession) -> tuple[list[str], bool]:
         lines: list[str] = []
         while True:
             try:
-                raw = sock_file.readline()
+                raw = self._recv_line(session, self._mandatory_timeout_s, mandatory=True)
             except TimeoutError:
-                break
+                # A wait clamped to the remainder is expiry, not end of response.
+                self._check_root()
+                return lines, False
             if not raw:
-                break
+                return lines, False
             text = raw.decode("ascii", errors="replace").rstrip("\r\n")
             if text == "":
-                break
+                return lines, not session.rx
             if text.strip() == "":
                 continue
             lines.append(text)
-        return lines
 
     def _send_command_lines(self, cmd: bytes, *, read_all: bool) -> list[str]:
-        addr = (self._config.host, self._config.port)
         reader = (
             self._read_command_response_lines_all if read_all else self._read_command_response_lines
         )
+        persistent = self._session_depth > 0
+        session: _EbusdTcpSession | None = None
 
         try:
-            if self._session_depth > 0:
+            self._check_root()
+            if persistent:
                 session = self._ensure_session()
-                session.sock_file.write(cmd)
-                session.sock_file.flush()
-                return reader(session.sock, session.sock_file)
-
-            with socket.create_connection(addr, timeout=self._config.timeout_s) as sock:
-                sock.settimeout(self._config.timeout_s)
-                with sock.makefile("rwb") as sock_file:
-                    sock_file.write(cmd)
-                    sock_file.flush()
-                    return reader(sock, sock_file)
+                if session.rx:
+                    # Bytes left from an earlier command never reach this one.
+                    self.close()
+                    session = self._ensure_session()
+            else:
+                session = self._connect_session()
+            session.received = 0
+            # sendall's timeout bounds the whole write, not each partial send.
+            session.sock.settimeout(self._mandatory_timeout_s())
+            session.sock.sendall(cmd)
+            self._check_root()
+            lines, isolated = reader(session)
+            # A reply completed at or after the deadline is not accepted.
+            self._check_root()
+            if persistent and not isolated:
+                # Never lend an unread tail to the next command.
+                self.close()
+            return lines
         except TimeoutError as exc:
             # This catches socket read timeouts too: `socket.timeout` is an alias of
-            # builtin `TimeoutError` on Python 3.12+ (including `sock.makefile().readline()`).
-            if self._session_depth > 0:
+            # builtin `TimeoutError` on Python 3.12+.
+            if persistent:
                 self.close()
+            self._check_root()
             raise TransportTimeout(
                 f"Timed out talking to ebusd at {self._config.host}:{self._config.port}"
             ) from exc
         except OSError as exc:
-            if self._session_depth > 0:
+            if persistent:
                 self.close()
+            self._check_root()
             raise TransportError(
                 f"Failed talking to ebusd at {self._config.host}:{self._config.port}: {exc}"
             ) from exc
+        except BaseException:
+            if persistent:
+                self.close()
+            raise
+        finally:
+            if not persistent and session is not None:
+                with contextlib.suppress(OSError):
+                    session.sock.close()
 
     def command_lines(self, command: str, *, read_all: bool = False) -> list[str]:
         """Run an arbitrary ebusd command and return response lines."""
@@ -597,7 +787,17 @@ class EbusdTcpTransport(TransportInterface):
         if not isinstance(command, str):
             raise TypeError(f"command must be a str, got {type(command).__name__}")
         cmd = command.encode("ascii", errors="strict") + _EBUSD_COMMAND_TERMINATOR
-        return self._send_command_lines(cmd, read_all=read_all)
+        with self._operation_root() as root:
+            admitted = 0
+            try:
+                root.remaining_s()
+                admitted = 1
+                lines = self._send_command_lines(cmd, read_all=read_all)
+                root.remaining_s()
+                return lines
+            except RequestDeadlineExpired as exc:
+                self.close()
+                raise _deadline_exhausted(request_attempts=admitted, reconnect_attempts=0) from exc
 
     def send_proto(
         self,
@@ -617,17 +817,20 @@ class EbusdTcpTransport(TransportInterface):
         self._trace_seq += 1
         seq = self._trace_seq
         cmd = _build_hex_command_custom(self._config, dst, primary, secondary, payload)
-        return self._send_with_policy(
-            seq,
-            lambda: self._send_proto_once(
+
+        def _send_attempt(attempt_admitted: AttemptHook) -> bytes:
+            attempt_admitted()
+            return self._send_proto_once(
                 seq,
                 cmd,
                 primary=primary,
                 secondary=secondary,
                 payload=payload,
                 expect_response=expect_response,
-            ),
-        )
+            )
+
+        with self._operation_root():
+            return self._send_with_policy(seq, _send_attempt)
 
     def _send_proto_once(
         self,
