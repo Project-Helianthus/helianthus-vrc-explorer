@@ -6,12 +6,19 @@ already satisfy parity. Identically named `/v1` files currently differ.
 
 ## Artifact kinds and sources of truth
 
-- Scan artifacts belong to the explorer. Their `schema_version` is `2.x`
-  (currently `2.3`); readers continue migration on read as described in the
-  [fixture guide](../fixtures/README.md). This version space is independent
-  of the native evidence schemas.
-- The application baseline belongs to the explorer. Its integer version
-  (currently `1`) is defined in
+Current scan artifact schema: `2.4`.
+
+- Scan artifacts belong to the explorer. Their `schema_version` is a `2.x`
+  string. Version `2.4` retains the `2.3` operations-first layout, uses neutral
+  `DATE_DMY_U8X3` and `TIME_HMS_U8X3` codec names, and retains independent
+  `api_version_raw` and `api_revision_raw` strings. Readers migrate unversioned
+  and `2.0`–`2.3` scans in memory; known legacy Explorer codec interpretations
+  migrate on a copy with provenance, preserving raw bytes and stored values.
+  Source files and historical fixture versions are not rewritten. See the
+  [fixture guide](../fixtures/README.md) for migration and native-export
+  boundaries. This records existing behavior, not a release or qualification.
+  This version space is independent of the native evidence schemas.
+- The application baseline belongs to the explorer. Its integer version is defined in
   `src/helianthus_vrc_explorer/schema/parameter_descriptions.py`.
   Application policy, including validation scope, lives here rather than
   in shared native evidence.

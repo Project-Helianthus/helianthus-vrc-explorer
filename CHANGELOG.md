@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+Current scan artifact schema: `2.4`.
+
+- Document the existing scan schema `2.4`: it retains the `2.3` operations-first
+  layout, uses neutral `DATE_DMY_U8X3` and `TIME_HMS_U8X3` codec names, and keeps
+  `api_version_raw` and `api_revision_raw` independent. These interpretations
+  remain Hypothesis; the schema version does not establish device qualification.
+- Readers migrate unversioned and `2.0`–`2.3` scans in memory. Known legacy
+  Explorer codec interpretations migrate on a copy with provenance, preserving
+  raw bytes and stored values without rewriting source files. Historical
+  fixtures retain their original versions. See the [fixture guide](fixtures/README.md)
+  for migration and native-export boundaries. This records existing behavior;
+  it does not announce a release or deployed qualification.
+
 ## 0.6.2
 
 - Add an exact `BASV0` / SW `0217` / HW `8803` / API 1 description profile. Its qualified local description rows preserve the observed raw description and supported min/max/step metadata, including the DHW bivalence maximum of 20 rather than the BASV2 profile's maximum of 50. The profile makes no circuit-index, installed-slot, or remote-device assumption.
