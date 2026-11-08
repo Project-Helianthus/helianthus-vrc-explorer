@@ -1,0 +1,12 @@
+# Inherit every existing lint, source, target and formatting setting.
+extend = "pyproject.toml"
+required-version = "==0.15.10"
+# Local handoff scratch is not a repository source input.
+extend-exclude = [".tmp"]
+
+# Initial review defaults; revisit explicitly when reducing measured debt.
+[lint.mccabe]
+max-complexity = 10
+
+[lint.pylint]
+max-statements = 50

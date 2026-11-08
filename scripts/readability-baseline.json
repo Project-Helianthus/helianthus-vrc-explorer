@@ -1,0 +1,947 @@
+{
+  "version": 1,
+  "records": [
+    {
+      "path": "scripts/check_offline_acceptance_evidence.py",
+      "symbol": "validate_offline_acceptance_evidence",
+      "rule": "C901",
+      "count": 15
+    },
+    {
+      "path": "scripts/validate_artifact.py",
+      "symbol": "_validate_schema_shape",
+      "rule": "C901",
+      "count": 19
+    },
+    {
+      "path": "scripts/validate_artifact.py",
+      "symbol": "main",
+      "rule": "C901",
+      "count": 11
+    },
+    {
+      "path": "scripts/validate_artifact.py",
+      "symbol": "validate_scan_artifact",
+      "rule": "C901",
+      "count": 31
+    },
+    {
+      "path": "scripts/validate_artifact.py",
+      "symbol": "validate_scan_artifact",
+      "rule": "PLR0915",
+      "count": 82
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/artifact_schema.py",
+      "symbol": "_derive_response_state",
+      "rule": "C901",
+      "count": 12
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/artifact_schema.py",
+      "symbol": "_migrate_entry",
+      "rule": "C901",
+      "count": 16
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/artifact_schema.py",
+      "symbol": "_migrate_v22_to_v23",
+      "rule": "C901",
+      "count": 39
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/artifact_schema.py",
+      "symbol": "_migrate_v22_to_v23",
+      "rule": "PLR0915",
+      "count": 84
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/artifact_schema.py",
+      "symbol": "iter_register_entries",
+      "rule": "C901",
+      "count": 31
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/artifact_schema.py",
+      "symbol": "iter_register_entries",
+      "rule": "PLR0915",
+      "count": 52
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/artifact_schema.py",
+      "symbol": "migrate_artifact_schema",
+      "rule": "C901",
+      "count": 17
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/cli.py",
+      "symbol": "_resolve_scan_destination",
+      "rule": "C901",
+      "count": 11
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/cli.py",
+      "symbol": "_scan_configured",
+      "rule": "C901",
+      "count": 43
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/cli.py",
+      "symbol": "_scan_configured",
+      "rule": "PLR0915",
+      "count": 185
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/cli.py",
+      "symbol": "discover",
+      "rule": "C901",
+      "count": 22
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/cli.py",
+      "symbol": "discover",
+      "rule": "PLR0915",
+      "count": 78
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/commands/b524.py",
+      "symbol": "apply_operation",
+      "rule": "C901",
+      "count": 13
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/evidence_export.py",
+      "symbol": "build_native_evidence",
+      "rule": "C901",
+      "count": 12
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/protocol/b524.py",
+      "symbol": "parse_b524_id",
+      "rule": "C901",
+      "count": 16
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/protocol/b524_metadata.py",
+      "symbol": "decode_parameter_description",
+      "rule": "C901",
+      "count": 14
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/protocol/b524_metadata.py",
+      "symbol": "validate_parameter_edit",
+      "rule": "C901",
+      "count": 15
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/protocol/parser.py",
+      "symbol": "encode_typed_value",
+      "rule": "C901",
+      "count": 16
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/protocol/parser.py",
+      "symbol": "parse_typed_value",
+      "rule": "C901",
+      "count": 16
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/replay_trace.py",
+      "symbol": "_decode_register_read_entry",
+      "rule": "C901",
+      "count": 13
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/replay_trace.py",
+      "symbol": "_enrich_register_names",
+      "rule": "C901",
+      "count": 20
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/replay_trace.py",
+      "symbol": "_parse_enhanced_trace_lines",
+      "rule": "C901",
+      "count": 35
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/replay_trace.py",
+      "symbol": "_parse_enhanced_trace_lines",
+      "rule": "PLR0915",
+      "count": 158
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/replay_trace.py",
+      "symbol": "_replay_operation_read",
+      "rule": "C901",
+      "count": 17
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/replay_trace.py",
+      "symbol": "_replay_operation_read",
+      "rule": "PLR0915",
+      "count": 54
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/replay_trace.py",
+      "symbol": "replay_trace_to_artifact",
+      "rule": "C901",
+      "count": 34
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/replay_trace.py",
+      "symbol": "replay_trace_to_artifact",
+      "rule": "PLR0915",
+      "count": 144
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/scanner/b509.py",
+      "symbol": "scan_b509",
+      "rule": "C901",
+      "count": 14
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/scanner/b509.py",
+      "symbol": "scan_b509",
+      "rule": "PLR0915",
+      "count": 59
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/scanner/b516.py",
+      "symbol": "scan_b516",
+      "rule": "C901",
+      "count": 14
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/scanner/b516.py",
+      "symbol": "scan_b516",
+      "rule": "PLR0915",
+      "count": 59
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/scanner/b524_operation_edit.py",
+      "symbol": "parse_operation_edit",
+      "rule": "C901",
+      "count": 11
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/scanner/b524_operation_reads.py",
+      "symbol": "acquire_operation_reads",
+      "rule": "C901",
+      "count": 30
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/scanner/b524_operation_reads.py",
+      "symbol": "acquire_operation_reads",
+      "rule": "PLR0915",
+      "count": 113
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/scanner/b524_operation_writes.py",
+      "symbol": "B524WriteRetryBlocked",
+      "rule": "N818",
+      "count": 1
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/scanner/b524_operation_writes.py",
+      "symbol": "_read_snapshot",
+      "rule": "C901",
+      "count": 11
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/scanner/b524_operation_writes.py",
+      "symbol": "execute_controlled_write",
+      "rule": "C901",
+      "count": 17
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/scanner/b524_operation_writes.py",
+      "symbol": "execute_controlled_write",
+      "rule": "PLR0915",
+      "count": 69
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/scanner/b524_orchestration.py",
+      "symbol": "run_b524_scan",
+      "rule": "C901",
+      "count": 162
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/scanner/b524_orchestration.py",
+      "symbol": "run_b524_scan",
+      "rule": "PLR0915",
+      "count": 626
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/scanner/b524_parameter_writes.py",
+      "symbol": "_validate_description",
+      "rule": "C901",
+      "count": 12
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/scanner/b524_parameter_writes.py",
+      "symbol": "_validate_profile",
+      "rule": "C901",
+      "count": 11
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/scanner/b524_parameter_writes.py",
+      "symbol": "execute_parameter_write",
+      "rule": "C901",
+      "count": 13
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/scanner/b524_probe.py",
+      "symbol": "_parse_constraint_entry",
+      "rule": "C901",
+      "count": 11
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/scanner/b524_probe.py",
+      "symbol": "_probe_present_instances",
+      "rule": "C901",
+      "count": 17
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/scanner/b524_probe.py",
+      "symbol": "_probe_unknown_present_instances",
+      "rule": "C901",
+      "count": 18
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/scanner/b555.py",
+      "symbol": "scan_b555",
+      "rule": "C901",
+      "count": 37
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/scanner/b555.py",
+      "symbol": "scan_b555",
+      "rule": "PLR0915",
+      "count": 125
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/scanner/description_acquisition.py",
+      "symbol": "_DescriptionAttemptDeferred",
+      "rule": "N818",
+      "count": 1
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/scanner/description_acquisition.py",
+      "symbol": "acquire_descriptions",
+      "rule": "C901",
+      "count": 18
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/scanner/description_acquisition.py",
+      "symbol": "acquire_descriptions",
+      "rule": "PLR0915",
+      "count": 72
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/scanner/director.py",
+      "symbol": "discover_groups",
+      "rule": "C901",
+      "count": 21
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/scanner/director.py",
+      "symbol": "discover_groups",
+      "rule": "PLR0915",
+      "count": 76
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/scanner/identity.py",
+      "symbol": "operation_label",
+      "rule": "C901",
+      "count": 12
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/scanner/plan.py",
+      "symbol": "parse_int_set",
+      "rule": "C901",
+      "count": 14
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/scanner/register.py",
+      "symbol": "_parse_inferred_value",
+      "rule": "C901",
+      "count": 14
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/scanner/register.py",
+      "symbol": "namespace_availability_contract",
+      "rule": "C901",
+      "count": 12
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/scanner/register.py",
+      "symbol": "probe_instance_availability",
+      "rule": "C901",
+      "count": 28
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/scanner/register.py",
+      "symbol": "probe_instance_availability",
+      "rule": "PLR0915",
+      "count": 59
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/scanner/register.py",
+      "symbol": "read_register",
+      "rule": "C901",
+      "count": 16
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/scanner/scan.py",
+      "symbol": "_apply_contextual_enum_annotations",
+      "rule": "C901",
+      "count": 20
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/scanner/scan.py",
+      "symbol": "_apply_contextual_enum_annotations",
+      "rule": "PLR0915",
+      "count": 54
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/scanner/scan.py",
+      "symbol": "scan_vrc",
+      "rule": "C901",
+      "count": 15
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/scanner/scan_policy.py",
+      "symbol": "parse_scan_plan",
+      "rule": "C901",
+      "count": 11
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/schema/b524_register_names.py",
+      "symbol": "apply_b524_canonical_register_names",
+      "rule": "C901",
+      "count": 16
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/schema/ebusd_csv.py",
+      "symbol": "EbusdCsvSchema.from_path",
+      "rule": "C901",
+      "count": 11
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/schema/ebusd_csv.py",
+      "symbol": "_extract_b509_id_hex",
+      "rule": "C901",
+      "count": 11
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/schema/myvaillant_map.py",
+      "symbol": "MyvaillantRegisterMap.from_path",
+      "rule": "C901",
+      "count": 12
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/schema/parameter_descriptions.py",
+      "symbol": "_enrich_bundle_profiles",
+      "rule": "C901",
+      "count": 13
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/schema/parameter_descriptions.py",
+      "symbol": "export_description_baseline",
+      "rule": "C901",
+      "count": 12
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/transport/base.py",
+      "symbol": "TransportCommandNotEnabled",
+      "rule": "N818",
+      "count": 1
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/transport/base.py",
+      "symbol": "TransportDisconnected",
+      "rule": "N818",
+      "count": 1
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/transport/base.py",
+      "symbol": "TransportNack",
+      "rule": "N818",
+      "count": 1
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/transport/base.py",
+      "symbol": "TransportProtocolFailure",
+      "rule": "N818",
+      "count": 1
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/transport/base.py",
+      "symbol": "TransportRecoveryExhausted",
+      "rule": "N818",
+      "count": 1
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/transport/base.py",
+      "symbol": "TransportTimeout",
+      "rule": "N818",
+      "count": 1
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/transport/dummy.py",
+      "symbol": "DummyTransport._load_fixture",
+      "rule": "C901",
+      "count": 33
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/transport/dummy.py",
+      "symbol": "DummyTransport._load_fixture",
+      "rule": "PLR0915",
+      "count": 82
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/transport/dummy.py",
+      "symbol": "DummyTransport._load_instances",
+      "rule": "C901",
+      "count": 30
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/transport/dummy.py",
+      "symbol": "DummyTransport._load_instances",
+      "rule": "PLR0915",
+      "count": 63
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/transport/dummy.py",
+      "symbol": "DummyTransport._load_parameter_description",
+      "rule": "C901",
+      "count": 18
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/transport/ebusd_tcp.py",
+      "symbol": "EbusdTcpTransport._drain_trailing_lines",
+      "rule": "C901",
+      "count": 12
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/transport/ebusd_tcp.py",
+      "symbol": "EbusdTcpTransport._send_command_lines",
+      "rule": "C901",
+      "count": 11
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/transport/ebusd_tcp.py",
+      "symbol": "EbusdTcpTransport._send_with_policy",
+      "rule": "C901",
+      "count": 22
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/transport/ebusd_tcp.py",
+      "symbol": "EbusdTcpTransport._send_with_policy",
+      "rule": "PLR0915",
+      "count": 76
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/transport/ebusd_tcp.py",
+      "symbol": "_parse_ebusd_response_lines",
+      "rule": "C901",
+      "count": 11
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/transport/enhanced_tcp.py",
+      "symbol": "EnhancedTcpTransport._recv_bus_symbol",
+      "rule": "C901",
+      "count": 12
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/transport/enhanced_tcp.py",
+      "symbol": "EnhancedTcpTransport._request_info_once",
+      "rule": "C901",
+      "count": 21
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/transport/enhanced_tcp.py",
+      "symbol": "EnhancedTcpTransport._request_info_once",
+      "rule": "PLR0915",
+      "count": 64
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/transport/enhanced_tcp.py",
+      "symbol": "EnhancedTcpTransport._send_proto_once",
+      "rule": "C901",
+      "count": 19
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/transport/enhanced_tcp.py",
+      "symbol": "EnhancedTcpTransport._send_proto_once",
+      "rule": "PLR0915",
+      "count": 67
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/transport/enhanced_tcp.py",
+      "symbol": "EnhancedTcpTransport._send_with_policy",
+      "rule": "C901",
+      "count": 40
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/transport/enhanced_tcp.py",
+      "symbol": "EnhancedTcpTransport._send_with_policy",
+      "rule": "PLR0915",
+      "count": 155
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/transport/enhanced_tcp.py",
+      "symbol": "EnhancedTcpTransport._start_arbitration",
+      "rule": "C901",
+      "count": 11
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/transport/enhanced_tcp.py",
+      "symbol": "_EnhancedCollision",
+      "rule": "N818",
+      "count": 1
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/transport/enhanced_tcp.py",
+      "symbol": "_EnhancedCommandNotAcknowledgedBeforeSyn",
+      "rule": "N818",
+      "count": 1
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/transport/enhanced_tcp.py",
+      "symbol": "_EnhancedCrcMismatch",
+      "rule": "N818",
+      "count": 1
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/transport/instrumented.py",
+      "symbol": "ScanRequestBudgetExceeded",
+      "rule": "N818",
+      "count": 1
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/transport/request_deadline.py",
+      "symbol": "RequestDeadlineExpired",
+      "rule": "N818",
+      "count": 1
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/ui/b524_operation_reads.py",
+      "symbol": "operation_edit_document",
+      "rule": "C901",
+      "count": 13
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/ui/b524_operation_reads.py",
+      "symbol": "operation_read_views",
+      "rule": "C901",
+      "count": 14
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/ui/browse_detail.py",
+      "symbol": "_gates_section",
+      "rule": "C901",
+      "count": 11
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/ui/browse_detail.py",
+      "symbol": "_names_section",
+      "rule": "C901",
+      "count": 11
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/ui/browse_detail.py",
+      "symbol": "register_detail_sections",
+      "rule": "C901",
+      "count": 13
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/ui/browse_hydration.py",
+      "symbol": "_HydratedBrowseStore.from_artifact",
+      "rule": "C901",
+      "count": 78
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/ui/browse_hydration.py",
+      "symbol": "_HydratedBrowseStore.from_artifact",
+      "rule": "PLR0915",
+      "count": 305
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/ui/browse_hydration.py",
+      "symbol": "_format_b555_value",
+      "rule": "C901",
+      "count": 11
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/ui/browse_hydration.py",
+      "symbol": "_group_namespace_views",
+      "rule": "C901",
+      "count": 12
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/ui/browse_hydration.py",
+      "symbol": "_single_namespace_key",
+      "rule": "C901",
+      "count": 16
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/ui/browse_query.py",
+      "symbol": "_has_navigation_children",
+      "rule": "C901",
+      "count": 16
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/ui/browse_query.py",
+      "symbol": "rows_for_selection",
+      "rule": "C901",
+      "count": 14
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/ui/browse_textual.py",
+      "symbol": "_BrowseApp._build_tree",
+      "rule": "C901",
+      "count": 21
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/ui/browse_textual.py",
+      "symbol": "_BrowseApp._build_tree",
+      "rule": "PLR0915",
+      "count": 76
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/ui/browse_textual.py",
+      "symbol": "_BrowseApp._entry_for_row",
+      "rule": "C901",
+      "count": 15
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/ui/browse_textual.py",
+      "symbol": "_BrowseApp._on_edit_value_entered",
+      "rule": "C901",
+      "count": 11
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/ui/browse_textual.py",
+      "symbol": "_BrowseApp._parse_new_value",
+      "rule": "C901",
+      "count": 14
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/ui/browse_textual.py",
+      "symbol": "_BrowseApp.action_edit_selected",
+      "rule": "C901",
+      "count": 12
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/ui/browse_textual.py",
+      "symbol": "_build_identity_header_renderable",
+      "rule": "C901",
+      "count": 12
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/ui/html_report.py",
+      "symbol": "render_html_report",
+      "rule": "C901",
+      "count": 17
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/ui/parameter_editor.py",
+      "symbol": "parameter_enum_choices",
+      "rule": "C901",
+      "count": 15
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/ui/planner.py",
+      "symbol": "_prompt_operation_selection",
+      "rule": "C901",
+      "count": 21
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/ui/planner.py",
+      "symbol": "_prompt_operation_selection",
+      "rule": "PLR0915",
+      "count": 54
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/ui/planner.py",
+      "symbol": "prompt_scan_plan",
+      "rule": "C901",
+      "count": 26
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/ui/planner.py",
+      "symbol": "prompt_scan_plan",
+      "rule": "PLR0915",
+      "count": 82
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/ui/planner_textual.py",
+      "symbol": "run_textual_scan_plan",
+      "rule": "C901",
+      "count": 103
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/ui/register_semantics.py",
+      "symbol": "entry_status_kind",
+      "rule": "C901",
+      "count": 11
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/ui/regulator_identity.py",
+      "symbol": "regulator_profile_label",
+      "rule": "C901",
+      "count": 15
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/ui/summary.py",
+      "symbol": "_compute_summary_rows",
+      "rule": "C901",
+      "count": 16
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/ui/summary.py",
+      "symbol": "_infer_single_namespace_key",
+      "rule": "C901",
+      "count": 12
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/ui/summary.py",
+      "symbol": "_iter_register_entries_with_op_hint",
+      "rule": "C901",
+      "count": 13
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/ui/summary.py",
+      "symbol": "render_summary",
+      "rule": "C901",
+      "count": 31
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/ui/summary.py",
+      "symbol": "render_summary",
+      "rule": "PLR0915",
+      "count": 111
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/ui/transport_retry_textual.py",
+      "symbol": "run_transport_retry_modal",
+      "rule": "C901",
+      "count": 11
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/ui/viewer.py",
+      "symbol": "_read_key",
+      "rule": "C901",
+      "count": 12
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/ui/viewer.py",
+      "symbol": "run_results_viewer",
+      "rule": "C901",
+      "count": 19
+    },
+    {
+      "path": "src/helianthus_vrc_explorer/ui/viewer.py",
+      "symbol": "run_results_viewer",
+      "rule": "PLR0915",
+      "count": 59
+    },
+    {
+      "path": "tests/basv2_full_scan.py",
+      "symbol": "Regulator.send",
+      "rule": "C901",
+      "count": 12
+    },
+    {
+      "path": "tests/test_af03_enhanced_request_deadline.py",
+      "symbol": "Peer.on_send",
+      "rule": "C901",
+      "count": 11
+    },
+    {
+      "path": "tests/test_artifact_schema.py",
+      "symbol": "test_migration_preserves_register_identities_for_fixture_legacy_copies",
+      "rule": "C901",
+      "count": 11
+    },
+    {
+      "path": "tests/test_browser_numeric_editor.py",
+      "symbol": "test_numeric_editor_keeps_opening_key_out_of_submission",
+      "rule": "PLR0915",
+      "count": 62
+    },
+    {
+      "path": "tests/test_browser_numeric_editor.py",
+      "symbol": "test_numeric_editor_keeps_opening_key_out_of_submission.exercise",
+      "rule": "PLR0915",
+      "count": 52
+    },
+    {
+      "path": "tests/test_bundled_data_sanitization.py",
+      "symbol": "block_violations",
+      "rule": "C901",
+      "count": 13
+    },
+    {
+      "path": "tests/test_bundled_data_sanitization.py",
+      "symbol": "fixture_violations",
+      "rule": "C901",
+      "count": 13
+    },
+    {
+      "path": "tests/test_cli.py",
+      "symbol": "_ui_owned_scan_and_browse_setup",
+      "rule": "C901",
+      "count": 14
+    },
+    {
+      "path": "tests/test_cli.py",
+      "symbol": "_ui_owned_scan_and_browse_setup.wrapped",
+      "rule": "C901",
+      "count": 13
+    },
+    {
+      "path": "tests/test_cli.py",
+      "symbol": "test_scan_dry_run_writes_scan_artifact",
+      "rule": "C901",
+      "count": 12
+    },
+    {
+      "path": "tests/test_issue_270_retry_budget.py",
+      "symbol": "test_enhanced_local_nack_hook_cleanup_failure_preserves_hook_error.HookRejected",
+      "rule": "N818",
+      "count": 1
+    },
+    {
+      "path": "tests/test_transport_concurrency_characterization.py",
+      "symbol": "_exercise_schedule",
+      "rule": "C901",
+      "count": 22
+    },
+    {
+      "path": "tests/test_transport_concurrency_characterization.py",
+      "symbol": "_exercise_schedule",
+      "rule": "PLR0915",
+      "count": 84
+    },
+    {
+      "path": "tests/test_transport_enhanced_tcp.py",
+      "symbol": "test_adv_four_threads_hammering_send_proto",
+      "rule": "C901",
+      "count": 12
+    },
+    {
+      "path": "tests/test_transport_enhanced_tcp.py",
+      "symbol": "test_xr1_info_serialized_with_send_proto",
+      "rule": "C901",
+      "count": 12
+    },
+    {
+      "path": "tests/test_transport_enhanced_tcp.py",
+      "symbol": "test_xr1_info_serialized_with_send_proto",
+      "rule": "PLR0915",
+      "count": 56
+    }
+  ]
+}

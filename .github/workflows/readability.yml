@@ -1,0 +1,35 @@
+name: Python readability
+
+on:
+  pull_request:
+    paths:
+      - '**/*.py'
+      - '**/*.toml'
+      - 'scripts/readability-baseline.json'
+      - '.github/workflows/readability.yml'
+  push:
+    branches: [main]
+    paths:
+      - '**/*.py'
+      - '**/*.toml'
+      - 'scripts/readability-baseline.json'
+      - '.github/workflows/readability.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  readability:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Set up pinned Ruff
+        run: python -m pip install ruff==0.15.10
+      - name: Test readability ratchet
+        run: python scripts/check_readability.py --self-test
+      - name: Check readability debt
+        run: python scripts/check_readability.py --check
