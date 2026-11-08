@@ -11,7 +11,6 @@ from helianthus_vrc_explorer.schema.b524_register_name_correspondence import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
-DOCS = Path(os.environ.get("DOCS_EBUS_CHECKOUT", ROOT.parent / "parity-07/docs-ebus"))
 ANNOTATIONS = (
     "vaillant_friendly_name",
     "vaillant_name_vrc720",
@@ -22,13 +21,31 @@ ANNOTATIONS = (
 )
 
 
+def docs_checkout():
+    checkout = os.environ.get("DOCS_EBUS_CHECKOUT")
+    if not checkout:
+        pytest.skip("Set DOCS_EBUS_CHECKOUT to compare the external docs catalog")
+    return Path(checkout)
+
+
+def test_docs_checkout_requires_explicit_environment(monkeypatch, tmp_path):
+    monkeypatch.delenv("DOCS_EBUS_CHECKOUT", raising=False)
+    with pytest.raises(pytest.skip.Exception, match="Set DOCS_EBUS_CHECKOUT"):
+        docs_checkout()
+    monkeypatch.setenv("DOCS_EBUS_CHECKOUT", "")
+    with pytest.raises(pytest.skip.Exception, match="Set DOCS_EBUS_CHECKOUT"):
+        docs_checkout()
+    monkeypatch.setenv("DOCS_EBUS_CHECKOUT", str(tmp_path))
+    assert docs_checkout() == tmp_path
+
+
 def rows(path):
     with path.open(newline="", encoding="utf-8") as handle:
         return list(csv.DictReader(handle))
 
 
 def test_shared_annotations_match_docs():
-    path = DOCS / "protocols/vaillant/fixtures/b524-register-name-correspondence.csv"
+    path = docs_checkout() / "protocols/vaillant/fixtures/b524-register-name-correspondence.csv"
     if not path.exists():
         pytest.skip("Set DOCS_EBUS_CHECKOUT to compare the external docs correspondence")
 
@@ -73,10 +90,11 @@ def test_generator_reproduces_packaged_catalog(tmp_path):
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    if not (DOCS / module.SOURCE).exists():
+    checkout = docs_checkout()
+    if not (checkout / module.SOURCE).exists():
         pytest.skip("Set DOCS_EBUS_CHECKOUT for catalog regeneration parity")
     output = tmp_path / "names.csv"
-    module.generate(DOCS, output)
+    module.generate(checkout, output)
     assert (
         output.read_bytes()
         == (ROOT / "src/helianthus_vrc_explorer/data/b524_docs_catalog_names.csv").read_bytes()
