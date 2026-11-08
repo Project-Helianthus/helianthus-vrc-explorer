@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import tempfile
@@ -68,11 +69,15 @@ def hygiene_violations(root: Path) -> list[str]:
             relative.parts[0] in {".git", ".tmp"} or relative.as_posix() in LOCAL_HANDOFFS
         ):
             continue
-        if not path.is_file():
-            continue
         if WORK_REPORT.fullmatch(path.name):
             violations.append(f"{relative.as_posix()}: work report")
-        content = path.read_bytes()
+        if path.is_symlink():
+            # Inspect the stored link target; it may dangle in a fresh checkout.
+            content = os.readlink(path).encode("utf-8", errors="replace")
+        elif path.is_file():
+            content = path.read_bytes()
+        else:
+            continue
         if b"\0" in content:
             continue
         text = content.decode("utf-8", errors="replace")
@@ -150,6 +155,13 @@ class PublicRepositoryHygieneTests(unittest.TestCase):
             violations = hygiene_violations(root)
             for name in names:
                 self.assertIn(f"{name}: private checkout path", violations)
+
+    def test_dangling_symlink_targets_are_inspected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for index, target in enumerate((PRIVATE_ROOTS[2] + "alice/project", ".." + "/docs-ebus")):
+                (root / f"link{index}").symlink_to(target)
+            self.assertEqual(len(hygiene_violations(root)), 2)
 
     def test_public_docs_and_legal_text_are_inspected(self):
         with tempfile.TemporaryDirectory() as directory:
