@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -20,9 +21,32 @@ SIBLING_CHECKOUT = re.compile(r"\bROOT\s*\.\s*parent\s*/|(?:\.\./)+(?:[^\s\"']*/
 WORK_REPORT = re.compile(r"\.(?:PART.*|(?:REPORT.*|pr-body.*)\.md)$", re.IGNORECASE)
 
 
+def candidate_paths(root: Path) -> list[Path]:
+    """Return tracked and untracked-but-not-ignored files, or every file outside a checkout."""
+    if (root / ".git").exists():
+        result = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(root),
+                "ls-files",
+                "-z",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+            ],
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode == 0:
+            names = result.stdout.decode("utf-8", errors="replace").split("\0")
+            return sorted({root / name for name in names if name})
+    return sorted(root.rglob("*"))
+
+
 def hygiene_violations(root: Path) -> list[str]:
     violations = []
-    for path in sorted(root.rglob("*")):
+    for path in candidate_paths(root):
         relative = path.relative_to(root)
         if relative.parts[0] in {".git", ".tmp"} or relative.as_posix() in LOCAL_HANDOFFS:
             continue
