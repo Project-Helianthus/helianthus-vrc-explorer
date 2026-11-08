@@ -21,6 +21,20 @@ SIBLING_CHECKOUT = re.compile(r"\bROOT\s*\.\s*parent\s*/|(?:\.\./)+(?:[^\s\"']*/
 WORK_REPORT = re.compile(r"\.(?:PART.*|(?:REPORT.*|pr-body.*)\.md)$", re.IGNORECASE)
 
 
+def tracked_paths(root: Path) -> set[Path]:
+    """Return files tracked by git; empty outside a checkout."""
+    if (root / ".git").exists():
+        result = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "-z", "--cached"],
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode == 0:
+            names = result.stdout.decode("utf-8", errors="replace").split("\0")
+            return {root / name for name in names if name}
+    return set()
+
+
 def candidate_paths(root: Path) -> list[Path]:
     """Return tracked and untracked-but-not-ignored files, or every file outside a checkout."""
     if (root / ".git").exists():
@@ -46,9 +60,13 @@ def candidate_paths(root: Path) -> list[Path]:
 
 def hygiene_violations(root: Path) -> list[str]:
     violations = []
+    tracked = tracked_paths(root)
     for path in candidate_paths(root):
         relative = path.relative_to(root)
-        if relative.parts[0] in {".git", ".tmp"} or relative.as_posix() in LOCAL_HANDOFFS:
+        # Local-artifact exemptions apply to untracked files only.
+        if path not in tracked and (
+            relative.parts[0] in {".git", ".tmp"} or relative.as_posix() in LOCAL_HANDOFFS
+        ):
             continue
         if not path.is_file():
             continue
@@ -114,6 +132,24 @@ class PublicRepositoryHygieneTests(unittest.TestCase):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(PRIVATE_ROOTS[0] + "example/project")
             self.assertEqual(len(hygiene_violations(root)), 4)
+
+    def test_tracked_local_artifacts_are_inspected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            subprocess.run(["git", "-C", str(root), "init", "-q"], check=True)
+            names = (".tmp/example.md", *sorted(LOCAL_HANDOFFS))
+            for name in names:
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(PRIVATE_ROOTS[0] + "example/project")
+            self.assertEqual(hygiene_violations(root), [])
+            subprocess.run(
+                ["git", "-C", str(root), "add", "-f", "--", *names],
+                check=True,
+            )
+            violations = hygiene_violations(root)
+            for name in names:
+                self.assertIn(f"{name}: private checkout path", violations)
 
     def test_public_docs_and_legal_text_are_inspected(self):
         with tempfile.TemporaryDirectory() as directory:
