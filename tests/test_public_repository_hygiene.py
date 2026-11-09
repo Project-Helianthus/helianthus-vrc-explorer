@@ -159,7 +159,8 @@ class PublicRepositoryHygieneTests(unittest.TestCase):
     def test_dangling_symlink_targets_are_inspected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            for index, target in enumerate((PRIVATE_ROOTS[2] + "alice/project", ".." + "/docs-ebus")):
+            targets = (PRIVATE_ROOTS[2] + "alice/project", ".." + "/docs-ebus")
+            for index, target in enumerate(targets):
                 (root / f"link{index}").symlink_to(target)
             self.assertEqual(len(hygiene_violations(root)), 2)
 
