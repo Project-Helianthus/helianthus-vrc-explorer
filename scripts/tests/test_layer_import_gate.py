@@ -262,12 +262,39 @@ from typing import Any as Exported
             "function = lambda: (missing := 1)",
             "def function():\n    missing = 1",
             "class Container:\n    missing = 1",
+            "def function():\n    match subject:\n        case missing: pass",
+            "class Container:\n    match subject:\n        case missing: pass",
         ):
             with self.subTest(source=source):
                 self.write("schema.item", source)
                 self.write("scanner.item", "from ..schema.item import missing")
                 with self.assertRaisesRegex(ValueError, "unresolved.*missing"):
                     self.collect()
+
+    def test_match_pattern_binding_exports(self):
+        for pattern, exports in (
+            ('{"key": value}', {"value"}),
+            ('{"key": value, **rest}', {"value", "rest"}),
+            ("[value, *rest]", {"value", "rest"}),
+            ("[value] as whole", {"value", "whole"}),
+            ("Container(value, field=other)", {"value", "other"}),
+            ("[value] | (value,)", {"value"}),
+            ("[_, *_]", set()),
+        ):
+            with self.subTest(pattern=pattern):
+                source = f"match subject:\n    case {pattern}: pass\n"
+                self.write("schema.item", source)
+                tree = self.gate.ast.parse(source)
+                self.assertEqual(self.gate.declared_names(tree), exports)
+                if exports:
+                    self.write(
+                        "scanner.item", "from ..schema.item import " + ", ".join(sorted(exports))
+                    )
+                    edge = (
+                        f"{self.gate.PACKAGE}.scanner.item",
+                        f"{self.gate.PACKAGE}.schema.item",
+                    )
+                    self.assertEqual(self.collect()[edge], 1)
 
     def test_baseline_validation(self):
         valid = {"importer": "pkg.a", "imported": "pkg.b", "count": 1}

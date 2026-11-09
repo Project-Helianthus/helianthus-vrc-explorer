@@ -66,6 +66,11 @@ def declared_names(tree):
             continue  # a bare annotation binds nothing at runtime
         elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
             names.add(node.id)
+        elif isinstance(node, (ast.MatchAs, ast.MatchStar, ast.MatchMapping)):
+            capture = node.rest if isinstance(node, ast.MatchMapping) else node.name
+            if capture is not None:
+                names.add(capture)
+            pending.extend(ast.iter_child_nodes(node))
         elif isinstance(node, ast.Lambda):
             continue
         elif isinstance(node, ast.comprehension):
