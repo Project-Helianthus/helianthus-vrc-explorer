@@ -20,6 +20,7 @@ PRIVATE_ROOTS = (
 )
 SIBLING_CHECKOUT = re.compile(r"\bROOT\s*\.\s*parent\s*/|(?:\.\./)+(?:[^\s\"']*/)?docs-ebus\b")
 WORK_REPORT = re.compile(r"\.(?:PART.*|(?:REPORT.*|pr-body.*)\.md)$", re.IGNORECASE)
+BINARY_HOME_PATH = re.compile(rb"~" + rb"/[A-Za-z0-9_.-]+(?:[/\s\x00]|$)")
 
 
 def tracked_paths(root: Path) -> set[Path]:
@@ -76,11 +77,18 @@ def hygiene_violations(root: Path) -> list[str]:
             content = path.read_bytes()
         else:
             continue
-        if b"\0" in content:
+        binary = b"\0" in content
+        # The two-byte home marker can occur by chance in compressed data.
+        private_path = any(
+            marker.encode("utf-8").lower() in content.lower()
+            for marker in PRIVATE_ROOTS
+            if not binary or marker != "~" + "/"
+        )
+        if private_path or (binary and BINARY_HOME_PATH.search(content)):
+            violations.append(f"{relative.as_posix()}: private checkout path")
+        if binary:
             continue
         text = content.decode("utf-8", errors="replace")
-        if any(marker.casefold() in text.casefold() for marker in PRIVATE_ROOTS):
-            violations.append(f"{relative.as_posix()}: private checkout path")
         if SIBLING_CHECKOUT.search(text):
             violations.append(f"{relative.as_posix()}: sibling checkout path")
     return violations
@@ -113,6 +121,23 @@ class PublicRepositoryHygieneTests(unittest.TestCase):
                     path.write_text("Local notes")
                     self.assertEqual(len(hygiene_violations(root)), 1)
                     path.unlink()
+
+    def test_tracked_binary_private_paths_are_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            subprocess.run(["git", "-C", str(root), "init", "-q"], check=True)
+            path = root / "example.bin"
+            path.write_bytes(b"\0\xffpublic content~" + b"/\xff~" + b"/e\x95")
+            subprocess.run(["git", "-C", str(root), "add", path.name], check=True)
+            self.assertEqual(hygiene_violations(root), [])
+            for marker in PRIVATE_ROOTS:
+                for variant in (marker, marker.upper()):
+                    with self.subTest(marker=variant):
+                        path.write_bytes(b"\0\xff" + variant.encode("utf-8") + b"example/project")
+                        self.assertEqual(
+                            hygiene_violations(root),
+                            ["example.bin: private checkout path"],
+                        )
 
     def test_sibling_checkout_paths_are_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
