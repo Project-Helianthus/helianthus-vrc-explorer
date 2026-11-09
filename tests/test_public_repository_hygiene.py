@@ -37,7 +37,7 @@ def tracked_paths(root: Path) -> set[Path]:
 
 
 def candidate_paths(root: Path) -> list[Path]:
-    """Return tracked and untracked-but-not-ignored files, or every file outside a checkout."""
+    """Return tracked files, or every file outside a checkout."""
     if (root / ".git").exists():
         result = subprocess.run(
             [
@@ -47,8 +47,6 @@ def candidate_paths(root: Path) -> list[Path]:
                 "ls-files",
                 "-z",
                 "--cached",
-                "--others",
-                "--exclude-standard",
             ],
             capture_output=True,
             check=False,
@@ -156,13 +154,38 @@ class PublicRepositoryHygieneTests(unittest.TestCase):
             for name in names:
                 self.assertIn(f"{name}: private checkout path", violations)
 
+    def test_untracked_and_ignored_checkout_files_are_excluded(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            subprocess.run(["git", "-C", str(root), "init", "-q"], check=True)
+            (root / ".gitignore").write_text(".venv/\n.tox/\nartifacts/\nlocal.conf\n")
+            subprocess.run(["git", "-C", str(root), "add", ".gitignore"], check=True)
+            for name in (
+                ".venv/bin/example",
+                ".tox/bin/example",
+                "artifacts/example.md",
+                "local.conf",
+                "untracked.md",
+            ):
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(PRIVATE_ROOTS[2] + "example/project")
+            self.assertEqual(hygiene_violations(root), [])
+            subprocess.run(["git", "-C", str(root), "add", "untracked.md"], check=True)
+            self.assertEqual(hygiene_violations(root), ["untracked.md: private checkout path"])
+
     def test_dangling_symlink_targets_are_inspected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+            subprocess.run(["git", "-C", str(root), "init", "-q"], check=True)
             targets = (PRIVATE_ROOTS[2] + "alice/project", ".." + "/docs-ebus")
             for index, target in enumerate(targets):
                 (root / f"link{index}").symlink_to(target)
-            self.assertEqual(len(hygiene_violations(root)), 2)
+            subprocess.run(["git", "-C", str(root), "add", "link0", "link1"], check=True)
+            self.assertEqual(
+                hygiene_violations(root),
+                ["link0: private checkout path", "link1: sibling checkout path"],
+            )
 
     def test_public_docs_and_legal_text_are_inspected(self):
         with tempfile.TemporaryDirectory() as directory:
