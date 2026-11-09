@@ -61,6 +61,8 @@ def declared_names(tree):
             names.add(node.name)
         elif isinstance(node, ast.TypeAlias):
             names.add(node.name.id)
+        elif isinstance(node, ast.AnnAssign) and node.value is None:
+            continue  # a bare annotation binds nothing at runtime
         elif isinstance(node, (ast.Assign, ast.AnnAssign)):
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
             for target in targets:

@@ -228,6 +228,14 @@ from typing import Any as Exported
             edges[(f"{self.gate.PACKAGE}.scanner.item", f"{self.gate.PACKAGE}.schema.item")], 1
         )
 
+    def test_annotation_only_declaration_is_not_an_export(self):
+        self.write("schema.item", "missing: int\nbound: int = 1\n")
+        self.write("scanner.item", "from ..schema.item import bound")
+        self.collect()
+        self.write("scanner.item", "from ..schema.item import missing")
+        with self.assertRaisesRegex(ValueError, "unresolved"):
+            self.collect()
+
     def test_baseline_validation(self):
         valid = {"importer": "pkg.a", "imported": "pkg.b", "count": 1}
         self.assertEqual(len(self.gate.index([valid])), 1)
