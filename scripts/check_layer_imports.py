@@ -53,6 +53,7 @@ def layer(module):
 
 
 def declared_names(tree):
+    """Collect possible module bindings without evaluating control flow."""
     names = set()
     pending = list(tree.body)
     while pending:
@@ -63,10 +64,14 @@ def declared_names(tree):
             names.add(node.name.id)
         elif isinstance(node, ast.AnnAssign) and node.value is None:
             continue  # a bare annotation binds nothing at runtime
-        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            for target in targets:
-                names.update(n.id for n in ast.walk(target) if isinstance(n, ast.Name))
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            names.add(node.id)
+        elif isinstance(node, ast.Lambda):
+            continue
+        elif isinstance(node, ast.comprehension):
+            # Iteration targets belong to the comprehension's scope. Assignment
+            # expressions in its iterable/filters can still bind module names.
+            pending.extend([node.iter, *node.ifs])
         elif isinstance(node, (ast.Import, ast.ImportFrom)):
             names.update(a.asname or a.name.split(".")[0] for a in node.names)
         else:

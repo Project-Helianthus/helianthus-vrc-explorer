@@ -236,6 +236,39 @@ from typing import Any as Exported
         with self.assertRaisesRegex(ValueError, "unresolved"):
             self.collect()
 
+    def test_module_scope_binding_exports(self):
+        for source in (
+            "for value in (1,): pass",
+            "for value, *rest in ((1, 2),): pass",
+            "with manager() as value: pass",
+            "if (value := 1): pass",
+            "value, *rest = (1, 2)",
+        ):
+            with self.subTest(source=source):
+                self.write("schema.item", source)
+                self.write("scanner.item", "from ..schema.item import value")
+                self.assertIn(
+                    (f"{self.gate.PACKAGE}.scanner.item", f"{self.gate.PACKAGE}.schema.item"),
+                    self.collect(),
+                )
+
+    def test_references_and_nested_scope_bindings_are_not_exports(self):
+        for source in (
+            "table[False and missing] = 1",
+            "obj.missing = 1",
+            "table[missing] += 1",
+            "values = [missing for missing in (1,)]",
+            "values = (missing for missing in (1,))",
+            "function = lambda: (missing := 1)",
+            "def function():\n    missing = 1",
+            "class Container:\n    missing = 1",
+        ):
+            with self.subTest(source=source):
+                self.write("schema.item", source)
+                self.write("scanner.item", "from ..schema.item import missing")
+                with self.assertRaisesRegex(ValueError, "unresolved.*missing"):
+                    self.collect()
+
     def test_baseline_validation(self):
         valid = {"importer": "pkg.a", "imported": "pkg.b", "count": 1}
         self.assertEqual(len(self.gate.index([valid])), 1)
