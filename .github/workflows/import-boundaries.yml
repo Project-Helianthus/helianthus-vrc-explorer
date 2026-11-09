@@ -1,0 +1,35 @@
+name: Python import boundaries
+
+on:
+  pull_request:
+    paths:
+      - 'src/**/*.py'
+      - 'scripts/check_layer_imports.py'
+      - 'scripts/layer-import-baseline.json'
+      - 'scripts/tests/test_layer_import_gate.py'
+      - '.github/workflows/import-boundaries.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/**/*.py'
+      - 'scripts/check_layer_imports.py'
+      - 'scripts/layer-import-baseline.json'
+      - 'scripts/tests/test_layer_import_gate.py'
+      - '.github/workflows/import-boundaries.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  import-boundaries:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test static import guard
+        run: python3 -m unittest discover -s scripts/tests -p 'test_layer_import_gate.py' -v
+      - name: Check import boundaries
+        run: python3 scripts/check_layer_imports.py --check

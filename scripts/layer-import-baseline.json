@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "violations": [
+    {
+      "importer": "helianthus_vrc_explorer.scanner.b524_orchestration",
+      "imported": "helianthus_vrc_explorer.ui.planner",
+      "count": 1
+    },
+    {
+      "importer": "helianthus_vrc_explorer.scanner.b524_orchestration",
+      "imported": "helianthus_vrc_explorer.ui.planner_selection",
+      "count": 1
+    },
+    {
+      "importer": "helianthus_vrc_explorer.scanner.b524_orchestration",
+      "imported": "helianthus_vrc_explorer.ui.planner_textual",
+      "count": 2
+    },
+    {
+      "importer": "helianthus_vrc_explorer.scanner.b524_plan",
+      "imported": "helianthus_vrc_explorer.ui.planner",
+      "count": 1
+    },
+    {
+      "importer": "helianthus_vrc_explorer.scanner.scan",
+      "imported": "helianthus_vrc_explorer.ui.planner",
+      "count": 1
+    },
+    {
+      "importer": "helianthus_vrc_explorer.schema.b524_constraints",
+      "imported": "helianthus_vrc_explorer.scanner.identity",
+      "count": 1
+    },
+    {
+      "importer": "helianthus_vrc_explorer.transport.dummy",
+      "imported": "helianthus_vrc_explorer.artifact_schema",
+      "count": 1
+    },
+    {
+      "importer": "helianthus_vrc_explorer.transport.dummy",
+      "imported": "helianthus_vrc_explorer.scanner.director",
+      "count": 1
+    }
+  ],
+  "cycle_edges": [
+    {
+      "importer": "helianthus_vrc_explorer.scanner.b524_orchestration",
+      "imported": "helianthus_vrc_explorer.scanner.scan",
+      "count": 1
+    },
+    {
+      "importer": "helianthus_vrc_explorer.scanner.scan",
+      "imported": "helianthus_vrc_explorer.scanner.b524_orchestration",
+      "count": 1
+    },
+    {
+      "importer": "helianthus_vrc_explorer.ui.planner",
+      "imported": "helianthus_vrc_explorer.ui.planner_textual",
+      "count": 2
+    },
+    {
+      "importer": "helianthus_vrc_explorer.ui.planner_textual",
+      "imported": "helianthus_vrc_explorer.ui.planner",
+      "count": 1
+    }
+  ]
+}
