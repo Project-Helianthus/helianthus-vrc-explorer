@@ -1,6 +1,6 @@
 """Bundled installation observations for the BASV2 profile (issue 323, change B).
 
-The catalogue entry of `basv2_sw0507_hw1704_api1` records what one reference installation
+The catalog entry of `basv2_sw0507_hw1704_api1` records what one reference installation
 showed in a Full scan: per-group instance capacities and observed counts, and the present
 remote devices with their class and firmware. They are installation observations, never
 profile limits. They let a Recommended scan bound circuit and zone slots by the live
@@ -92,10 +92,10 @@ def _profile(catalog: dict[str, Any], profile_id: str = PROFILE_ID) -> dict[str,
     return next(row for row in catalog["profiles"] if row["id"] == profile_id)
 
 
-# --- the catalogue entry ----------------------------------------------------------------
+# --- the catalog entry ----------------------------------------------------------------
 
 
-def test_catalogue_records_every_count_group_as_an_installation_observation() -> None:
+def test_catalog_records_every_count_group_as_an_installation_observation() -> None:
     profile = _profile(load_description_profile_catalog())
     block = profile["instance_observations"]
 
@@ -126,7 +126,7 @@ def test_catalogue_records_every_count_group_as_an_installation_observation() ->
     )
 
 
-def test_catalogue_records_the_six_present_remote_devices_with_their_identity() -> None:
+def test_catalog_records_the_six_present_remote_devices_with_their_identity() -> None:
     block = _profile(load_description_profile_catalog())["remote_device_observations"]
 
     assert block["observed_instance_qualification"] == INSTALLATION_OBSERVATION_QUALIFICATION
@@ -213,7 +213,7 @@ def test_malformed_rows_are_ignored_rather_than_trusted(monkeypatch: pytest.Monk
 
 def test_the_same_remote_tuple_under_another_controller_profile_is_not_recognised() -> None:
     artifact = remote_artifact()
-    artifact["meta"]["identity"]["hw"] = "9999"  # not a catalogued controller
+    artifact["meta"]["identity"]["hw"] = "9999"  # not a cataloged controller
     selector = {"read_opcode": "0x06", "group": "0x0a", "instance": "0x01", "register": "0x0009"}
 
     assert description_catalog_status(artifact, selector)["status"] == "unknown"
@@ -222,7 +222,7 @@ def test_the_same_remote_tuple_under_another_controller_profile_is_not_recognise
 # --- the importer reproduces the data ---------------------------------------------------
 
 
-def test_exporting_a_recommended_scan_reproduces_the_catalogue_blocks() -> None:
+def test_exporting_a_recommended_scan_reproduces_the_catalog_blocks() -> None:
     artifact, _ = scan("recommended")
 
     observations = export_installation_observations(artifact)
@@ -233,11 +233,11 @@ def test_exporting_a_recommended_scan_reproduces_the_catalogue_blocks() -> None:
     assert observations["remote_device_observations"] == profile["remote_device_observations"]
 
 
-def test_exporting_requires_an_exact_catalogued_controller() -> None:
+def test_exporting_requires_an_exact_cataloged_controller() -> None:
     artifact, _ = scan("recommended")
     artifact["meta"]["identity"]["hw"] = "9999"
 
-    with pytest.raises(ValueError, match="exact catalogued controller profile"):
+    with pytest.raises(ValueError, match="exact cataloged controller profile"):
         export_installation_observations(artifact)
 
 
@@ -445,7 +445,7 @@ def test_merge_refuses_an_unknown_profile_and_an_unqualified_existing_block() ->
         merge_installation_observations(unqualified, observations)
 
 
-def test_the_importer_cli_leaves_the_checked_in_catalogue_unchanged(tmp_path: Path) -> None:
+def test_the_importer_cli_leaves_the_checked_in_catalog_unchanged(tmp_path: Path) -> None:
     artifact, _ = scan("recommended")
     source = tmp_path / "scan.json"
     source.write_text(json.dumps(artifact), encoding="utf-8")
@@ -501,7 +501,7 @@ def test_the_full_preset_still_audits_every_declared_slot() -> None:
 
 
 def _bundle_with_capacity(capacity: int | None):
-    """A stand-in catalogue lookup that records `capacity` for circuits and zones only."""
+    """A stand-in catalog lookup that records `capacity` for circuits and zones only."""
 
     def lookup(profile_id: object, *, read_opcode: int, group: int) -> dict | None:
         if capacity is None or (read_opcode, group) not in {(2, 0x02), (2, 0x03)}:

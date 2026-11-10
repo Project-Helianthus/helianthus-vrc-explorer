@@ -16,12 +16,12 @@ Remote slot presence (`remote_slot_not_connected`, used by `description_catalog_
 - group, instance: a probe stored under another group or instance does not make this slot
   absent. Catches looking the probe up with a fixed or wrong key.
 
-Present device identity (catalogue match for an exact remote row):
-- group: the same class/firmware in a group the catalogue does not list is unknown.
+Present device identity (catalog match for an exact remote row):
+- group: the same class/firmware in a group the catalog does not list is unknown.
   Catches matching on class and firmware only.
 - device class, device firmware: either one changed is unknown. Catches matching on a
   single field.
-- instance: another instance of a catalogued group/class/firmware stays exact. Catches
+- instance: another instance of a cataloged group/class/firmware stays exact. Catches
   requiring the observed instance.
 """
 
@@ -236,7 +236,7 @@ def test_an_unreadable_presence_probe_is_neither_absent_nor_silent() -> None:
 def test_each_identity_field_decides_whether_a_present_device_is_exact(
     field: str, moved: tuple[str, str], expected: str
 ) -> None:
-    # The boiler's group has no bundled description rows, so only the catalogue's remote
+    # The boiler's group has no bundled description rows, so only the catalog's remote
     # device observations can recognise it: the variations isolate that match.
     class_raw, firmware_raw = PRESENT_DEVICES[BOILER]
     if field == "class":
