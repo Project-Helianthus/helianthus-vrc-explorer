@@ -52,35 +52,55 @@ def layer(module):
     raise ValueError(f"unclassified in-repository module: {module}")
 
 
+def binding_names(node):
+    """Return the names bound directly by a node."""
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return {node.name}
+    if isinstance(node, ast.TypeAlias):
+        return {node.name.id}
+    if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+        return {node.id}
+    if isinstance(node, (ast.MatchAs, ast.MatchStar)):
+        return {node.name} if node.name is not None else set()
+    if isinstance(node, ast.MatchMapping):
+        return {node.rest} if node.rest is not None else set()
+    if isinstance(node, (ast.Import, ast.ImportFrom)):
+        return {a.asname or a.name.split(".")[0] for a in node.names}
+    return set()
+
+
+def pending_children(node):
+    """Continue the binding walk without entering nested binding scopes."""
+    if isinstance(
+        node,
+        (
+            ast.FunctionDef,
+            ast.AsyncFunctionDef,
+            ast.ClassDef,
+            ast.TypeAlias,
+            ast.Lambda,
+            ast.Import,
+            ast.ImportFrom,
+        ),
+    ):
+        return []
+    if isinstance(node, ast.AnnAssign) and node.value is None:
+        return []  # a bare annotation binds nothing at runtime
+    if isinstance(node, ast.comprehension):
+        # Iteration targets belong to the comprehension's scope. Assignment
+        # expressions in its iterable/filters can still bind module names.
+        return [node.iter, *node.ifs]
+    return ast.iter_child_nodes(node)
+
+
 def declared_names(tree):
     """Collect possible module bindings without evaluating control flow."""
     names = set()
     pending = list(tree.body)
     while pending:
         node = pending.pop()
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            names.add(node.name)
-        elif isinstance(node, ast.TypeAlias):
-            names.add(node.name.id)
-        elif isinstance(node, ast.AnnAssign) and node.value is None:
-            continue  # a bare annotation binds nothing at runtime
-        elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
-            names.add(node.id)
-        elif isinstance(node, (ast.MatchAs, ast.MatchStar, ast.MatchMapping)):
-            capture = node.rest if isinstance(node, ast.MatchMapping) else node.name
-            if capture is not None:
-                names.add(capture)
-            pending.extend(ast.iter_child_nodes(node))
-        elif isinstance(node, ast.Lambda):
-            continue
-        elif isinstance(node, ast.comprehension):
-            # Iteration targets belong to the comprehension's scope. Assignment
-            # expressions in its iterable/filters can still bind module names.
-            pending.extend([node.iter, *node.ifs])
-        elif isinstance(node, (ast.Import, ast.ImportFrom)):
-            names.update(a.asname or a.name.split(".")[0] for a in node.names)
-        else:
-            pending.extend(ast.iter_child_nodes(node))
+        names.update(binding_names(node))
+        pending.extend(pending_children(node))
     return names
 
 
