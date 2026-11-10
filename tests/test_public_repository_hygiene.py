@@ -23,11 +23,12 @@ PRIVATE_ROOTS = (
 )
 SIBLING_CHECKOUT = re.compile(r"\bROOT\s*\.\s*parent\s*/|(?:\.\./)+(?:[^\s\"']*/)?docs-ebus\b")
 WORK_REPORT = re.compile(r"\.(?:PART.*|(?:REPORT.*|pr-body.*)\.md)$", re.IGNORECASE)
-# A path starts at a token boundary, not within a URL or another path, and
-# contains a component below the root marker. Bare roots are generic prose.
+# A path starts at a token boundary, optionally after a local-file URL prefix,
+# and contains a component below the root marker. Bare roots are generic prose.
 PATH_BOUNDARY = rb"(?<![A-Za-z0-9_./~:%\\-])"
 PRIVATE_PATH = re.compile(
     PATH_BOUNDARY
+    + rb"(?:file://(?:[A-Za-z0-9_.-]+)?|vscode://file)?"
     + rb"(?:"
     + b"|".join(re.escape(marker.encode()) for marker in PRIVATE_ROOTS if marker != "~" + "/")
     + rb")[A-Za-z0-9_.-]+",
@@ -139,6 +140,23 @@ class PublicRepositoryHygieneTests(unittest.TestCase):
                         (root / "example.md").write_text(
                             template.format(marker + "example/project")
                         )
+                        self.assertEqual(
+                            hygiene_violations(root), ["example.md: private checkout path"]
+                        )
+
+    def test_tracked_local_file_urls_are_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            subprocess.run(["git", "-C", str(root), "init", "-q"], check=True)
+            path = root / "example.md"
+            path.touch()
+            subprocess.run(["git", "-C", str(root), "add", path.name], check=True)
+            for prefix in ("file://", "file://localhost", "vscode://file", "FILE://"):
+                for marker in PRIVATE_ROOTS:
+                    if not marker.startswith("/"):
+                        continue
+                    with self.subTest(prefix=prefix, marker=marker):
+                        path.write_text(prefix + marker + "example/project")
                         self.assertEqual(
                             hygiene_violations(root), ["example.md: private checkout path"]
                         )
