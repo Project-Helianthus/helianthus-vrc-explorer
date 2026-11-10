@@ -23,7 +23,18 @@ PRIVATE_ROOTS = (
 )
 SIBLING_CHECKOUT = re.compile(r"\bROOT\s*\.\s*parent\s*/|(?:\.\./)+(?:[^\s\"']*/)?docs-ebus\b")
 WORK_REPORT = re.compile(r"\.(?:PART.*|(?:REPORT.*|pr-body.*)\.md)$", re.IGNORECASE)
-BINARY_HOME_PATH = re.compile(rb"~" + rb"/[A-Za-z0-9_.-]+(?:[/\s\x00]|$)")
+# A path starts at a token boundary, not within a URL or another path, and
+# contains a component below the root marker. Bare roots are generic prose.
+PATH_BOUNDARY = rb"(?<![A-Za-z0-9_./~:%\\-])"
+PRIVATE_PATH = re.compile(
+    PATH_BOUNDARY
+    + rb"(?:"
+    + b"|".join(re.escape(marker.encode()) for marker in PRIVATE_ROOTS if marker != "~" + "/")
+    + rb")[A-Za-z0-9_.-]+",
+    re.IGNORECASE,
+)
+HOME_PATH = re.compile(PATH_BOUNDARY + rb"~" + rb"/[A-Za-z0-9_.-]+")
+BINARY_HOME_PATH = re.compile(PATH_BOUNDARY + rb"~" + rb"/[A-Za-z0-9_.-]+(?:[/\s\x00]|$)")
 
 
 def tracked_paths(root: Path) -> set[Path]:
@@ -82,12 +93,8 @@ def hygiene_violations(root: Path) -> list[str]:
             continue
         binary = b"\0" in content
         # The two-byte home marker can occur by chance in compressed data.
-        private_path = any(
-            marker.encode("utf-8").lower() in content.lower()
-            for marker in PRIVATE_ROOTS
-            if not binary or marker != "~" + "/"
-        )
-        if private_path or (binary and BINARY_HOME_PATH.search(content)):
+        home_path = BINARY_HOME_PATH if binary else HOME_PATH
+        if PRIVATE_PATH.search(content) or home_path.search(content):
             violations.append(f"{relative.as_posix()}: private checkout path")
         if binary:
             continue
@@ -108,6 +115,33 @@ class PublicRepositoryHygieneTests(unittest.TestCase):
                 with self.subTest(root=marker):
                     (root / "example.md").write_text(marker + "example/project")
                     self.assertEqual(len(hygiene_violations(root)), 1)
+
+    def test_public_urls_and_generic_roots_are_allowed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for marker in PRIVATE_ROOTS:
+                examples = (
+                    f"The generic root `{marker}` is platform dependent.",
+                    "https://example.com" + marker + "help",
+                    "https://example.com/docs" + marker + "help",
+                )
+                for text in examples:
+                    with self.subTest(text=text):
+                        (root / "example.md").write_text(text)
+                        self.assertEqual(hygiene_violations(root), [])
+
+    def test_private_paths_in_prose_are_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for marker in PRIVATE_ROOTS:
+                for template in ('Path: "{}"', "path={}", "Use `{}` here"):
+                    with self.subTest(marker=marker, template=template):
+                        (root / "example.md").write_text(
+                            template.format(marker + "example/project")
+                        )
+                        self.assertEqual(
+                            hygiene_violations(root), ["example.md: private checkout path"]
+                        )
 
     def test_work_report_names_are_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
