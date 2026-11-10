@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 LOCAL_HANDOFFS = {".REPORT-344.md", ".pr-body-344.md"}
@@ -17,6 +18,8 @@ PRIVATE_ROOTS = (
     "/" + "home/",
     "~" + "/",
     "C:" + "\\Users\\",
+    "/" + "workspace/",
+    "/" + "root/",
 )
 SIBLING_CHECKOUT = re.compile(r"\bROOT\s*\.\s*parent\s*/|(?:\.\./)+(?:[^\s\"']*/)?docs-ebus\b")
 WORK_REPORT = re.compile(r"\.(?:PART.*|(?:REPORT.*|pr-body.*)\.md)$", re.IGNORECASE)
@@ -32,7 +35,7 @@ def tracked_paths(root: Path) -> set[Path]:
             check=False,
         )
         if result.returncode == 0:
-            names = result.stdout.decode("utf-8", errors="replace").split("\0")
+            names = os.fsdecode(result.stdout).split("\0")
             return {root / name for name in names if name}
     return set()
 
@@ -53,7 +56,7 @@ def candidate_paths(root: Path) -> list[Path]:
             check=False,
         )
         if result.returncode == 0:
-            names = result.stdout.decode("utf-8", errors="replace").split("\0")
+            names = os.fsdecode(result.stdout).split("\0")
             return sorted({root / name for name in names if name})
     return sorted(root.rglob("*"))
 
@@ -121,6 +124,43 @@ class PublicRepositoryHygieneTests(unittest.TestCase):
                     path.write_text("Local notes")
                     self.assertEqual(len(hygiene_violations(root)), 1)
                     path.unlink()
+
+    def test_non_home_workspace_paths_are_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for workspace in ("workspace", "root"):
+                with self.subTest(workspace=workspace):
+                    (root / "example.md").write_text(
+                        "/" + workspace + "/example-project/artifact.json"
+                    )
+                    self.assertEqual(
+                        hygiene_violations(root), ["example.md: private checkout path"]
+                    )
+
+    @unittest.skipUnless(os.name == "posix", "Non-UTF-8 filenames require POSIX")
+    def test_tracked_non_utf8_filenames_are_inspected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".git").mkdir()
+            name = os.fsdecode(b"example-\xff.txt")
+            path = root / name
+            result = subprocess.CompletedProcess([], 0, stdout=b"example-\xff.txt\0")
+            # Some POSIX filesystems reject these names; simulate Git's raw output
+            # and the file read while exercising both enumeration helpers.
+            with patch.object(subprocess, "run", return_value=result):
+                self.assertEqual(tracked_paths(root), {path})
+                self.assertEqual(candidate_paths(root), [path])
+                with (
+                    patch.object(Path, "is_file", return_value=True),
+                    patch.object(
+                        Path,
+                        "read_bytes",
+                        autospec=True,
+                        return_value=(PRIVATE_ROOTS[2] + "example/project").encode(),
+                    ) as read_bytes,
+                ):
+                    self.assertEqual(hygiene_violations(root), [f"{name}: private checkout path"])
+                    read_bytes.assert_called_once_with(path)
 
     def test_tracked_binary_private_paths_are_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
