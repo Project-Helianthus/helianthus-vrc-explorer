@@ -166,6 +166,21 @@ from .. import ui as screens
         cycle = (f"{self.gate.PACKAGE}.ui.self_import",) * 2
         self.assertIn(cycle, self.gate.cycle_edges(self.collect()))
 
+    def test_package_attribute_and_submodule_ambiguity_retains_cycle(self):
+        self.write("schema.__init__", "value = 1\nfrom . import consumer")
+        self.write("schema.consumer", "from . import value")
+        self.write("schema.value")
+        edges = self.collect()
+        package = f"{self.gate.PACKAGE}.schema"
+        consumer = package + ".consumer"
+        self.assertEqual(edges[consumer, package], 1)
+        self.assertEqual(edges[consumer, package + ".value"], 1)
+        cycles = self.gate.cycle_edges(edges)
+        self.assertIn((package, consumer), cycles)
+        self.assertIn((consumer, package), cycles)
+        with self.assertRaisesRegex(ValueError, "new or grown"):
+            self.gate.compare(cycles, {})
+
     def test_missing_initializer_and_ambiguous_module_fail_closed(self):
         (self.root / "__init__.py").unlink()
         with self.assertRaisesRegex(ValueError, "missing package"):

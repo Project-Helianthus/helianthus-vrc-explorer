@@ -153,9 +153,11 @@ def from_targets(node, parent, known, symbols):
             raise ValueError(f"unresolved star import: {parent} -> {base}")
         if candidate in known:
             targets.add(candidate)
-        elif alias.name in symbols.get(base, set()):
+        if alias.name in symbols.get(base, set()):
+            # A package attribute can shadow a same-named submodule. Keep both
+            # possible dependencies because static bindings ignore control flow.
             targets.add(base)
-        else:
+        if candidate not in known and alias.name not in symbols.get(base, set()):
             raise ValueError(f"unresolved in-repository import: {parent} -> {candidate}")
     return targets
 
