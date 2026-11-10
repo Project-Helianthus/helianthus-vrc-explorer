@@ -3,7 +3,7 @@
 The committed observation data comes from a private scan through the repository's own
 projections: `scripts/export_controller_observations.py` (fixture inventory),
 `scripts/import_b524_descriptions.py` (description baseline) and the importer's
-installation-observation export (catalogue blocks). The exporter documents what it omits;
+installation-observation export (catalog blocks). The exporter documents what it omits;
 this test keeps the committed files within that contract, and proves it can fail by
 running the same checks on deliberately poisoned copies.
 """
@@ -56,7 +56,7 @@ OMITTED_KEYS = frozenset(
         "raw_description_hex",
     }
 )
-# The catalogue predates this check and keeps one retained raw description per BASV0 row
+# The catalog predates this check and keeps one retained raw description per BASV0 row
 # (public local-constraint evidence, documented in docs/basv0-metadata.md).
 RAW_DESCRIPTION_SOURCE = "sanitized_read_only_basv0_observation"
 IMPORTER_SOURCE = "read_only_observed_baseline"
@@ -287,7 +287,7 @@ def test_no_key_the_exporter_omits_in_the_bundled_observation_data(name: str) ->
     assert omitted_key_violations(_load(FILES[name])) == []
 
 
-def test_catalogue_observation_blocks_hold_only_numbers_and_allowlisted_tokens() -> None:
+def test_catalog_observation_blocks_hold_only_numbers_and_allowlisted_tokens() -> None:
     profiles = _load(CATALOG)["profiles"]
 
     assert [p["id"] for p in profiles if "instance_observations" in p] == [

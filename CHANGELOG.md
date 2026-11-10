@@ -4,6 +4,11 @@
 
 Current scan artifact schema: `2.4`.
 
+- Use the catalog spelling consistently in parameter-description documentation,
+  internal names and tests. The installation-observation export error now says
+  "exact cataloged controller profile". Bundled data, artifact keys and admission
+  behavior are unchanged.
+
 - Document the existing scan schema `2.4`: it retains the `2.3` operations-first
   layout, uses neutral `DATE_DMY_U8X3` and `TIME_HMS_U8X3` codec names, and keeps
   `api_version_raw` and `api_revision_raw` independent. These interpretations

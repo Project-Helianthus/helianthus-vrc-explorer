@@ -36,7 +36,7 @@ _OBSERVED_CONTROLLER_PROFILE_KEYS = (
 )
 _CONTROLLER_PROFILE_KEYS = (*_OBSERVED_CONTROLLER_PROFILE_KEYS, "profile_id")
 _REMOTE_PROFILE_KEYS = ("device_class_raw", "device_firmware_raw")
-# Catalogue blocks that record what a reference installation showed. They plan scans and
+# Catalog blocks that record what a reference installation showed. They plan scans and
 # recognise remote devices; they are never a profile limit.
 INSTALLATION_OBSERVATION_QUALIFICATION = "installation_observation_not_profile_limit"
 _INSTANCE_OBSERVATIONS = "instance_observations"
@@ -69,7 +69,7 @@ def load_description_profile_catalog() -> dict[str, Any]:
 
 
 def _installation_block(profile_id: object, key: str) -> dict[str, Any] | None:
-    """Return one installation-observation block of a catalogue profile, or ``None``.
+    """Return one installation-observation block of a catalog profile, or ``None``.
 
     A block counts only when it carries the installation-observation qualification, so a
     malformed or unqualified block is ignored rather than trusted.
@@ -96,7 +96,7 @@ def _count_field(value: object) -> int | None:
 def bundled_instance_observation(
     profile_id: str | None, *, read_opcode: int, group: int
 ) -> dict[str, Any] | None:
-    """Return the catalogue's installation observation for one OP/GG, or ``None``.
+    """Return the catalog's installation observation for one OP/GG, or ``None``.
 
     The result has ``semantics`` (``capacity`` for the OP00 supported-capacity groups,
     ``expected_population`` for the count groups) plus ``capacity``, ``expected`` and
@@ -397,7 +397,7 @@ def _remote_group_in_baseline(profile: dict[str, Any], selector: dict[str, str])
 def _remote_device_in_catalog(profile: dict[str, Any], selector: dict[str, str]) -> bool:
     """Match a remote class/firmware tuple against the devices a reference scan observed.
 
-    The catalogue records which remote devices were present, with their class and
+    The catalog records which remote devices were present, with their class and
     firmware, under the controller profile they were seen with. A tuple in the same group
     is recognised on any instance; a different class or firmware stays unknown.
     """
@@ -696,11 +696,11 @@ def _discovery_complete(
 
 
 def export_installation_observations(artifact: dict[str, Any]) -> dict[str, Any]:
-    """Project the installation a scan observed into the two catalogue blocks.
+    """Project the installation a scan observed into the two catalog blocks.
 
     Only small integers, fixed enumerations, hex selectors and the remote class/firmware
     identity are retained: no serial, no free text, no clock and no raw reply bytes.
-    The scan needs an exact catalogued controller profile, because the blocks are
+    The scan needs an exact cataloged controller profile, because the blocks are
     recorded under that profile. A remote device without a readable class or firmware
     keeps ``None`` for it and therefore never makes a row exact.
     """
@@ -708,7 +708,7 @@ def export_installation_observations(artifact: dict[str, Any]) -> dict[str, Any]
     status = description_catalog_status(artifact)
     profile_id = status.get("profile_id")
     if status.get("status") != "exact" or not isinstance(profile_id, str):
-        raise ValueError("Installation observations need an exact catalogued controller profile")
+        raise ValueError("Installation observations need an exact cataloged controller profile")
     meta = artifact.get("meta")
     counts = meta.get("instance_counts") if isinstance(meta, dict) else None
     groups: list[dict[str, Any]] = []
@@ -775,7 +775,7 @@ def export_installation_observations(artifact: dict[str, Any]) -> dict[str, Any]
 def merge_installation_observations(
     catalog: dict[str, Any], observations: dict[str, Any]
 ) -> dict[str, Any]:
-    """Add scan observations to one catalogue profile without removing other rows.
+    """Add scan observations to one catalog profile without removing other rows.
 
     A group row is replaced by the newer observation of the same OP/GG. A remote device
     row is keyed by group, instance, class and firmware, so a device seen again with

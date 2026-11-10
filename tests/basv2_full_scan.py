@@ -4,7 +4,7 @@
 `scripts/export_controller_observations.py` for one Full scan, filtered to the selectors
 these tests need. It carries selectors, response states and grades, but no value: every
 reply below is synthetic. The six present remote devices carry the class and firmware that
-the bundled catalogue records for the reference installation.
+the bundled catalog records for the reference installation.
 """
 
 from __future__ import annotations
