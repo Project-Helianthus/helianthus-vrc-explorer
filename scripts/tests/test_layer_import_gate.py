@@ -166,6 +166,20 @@ from .. import ui as screens
         cycle = (f"{self.gate.PACKAGE}.ui.self_import",) * 2
         self.assertIn(cycle, self.gate.cycle_edges(self.collect()))
 
+    def test_package_initializer_submodule_import_has_no_self_cycle(self):
+        package = f"{self.gate.PACKAGE}.schema"
+        self.write("schema.child")
+        for source in (
+            "from . import child",
+            "from . import child as renamed",
+            f"from {package} import child",
+        ):
+            with self.subTest(source=source):
+                self.write("schema.__init__", source)
+                edges = self.collect()
+                self.assertEqual(edges, {(package, package + ".child"): 1})
+                self.assertEqual(self.gate.compare(self.gate.cycle_edges(edges), {}), [])
+
     def test_package_attribute_and_submodule_ambiguity_retains_cycle(self):
         self.write("schema.__init__", "value = 1\nfrom . import consumer")
         self.write("schema.consumer", "from . import value")

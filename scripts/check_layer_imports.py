@@ -140,7 +140,7 @@ def internal(module):
     return module == PACKAGE or module.startswith(PACKAGE + ".")
 
 
-def from_targets(node, parent, known, symbols):
+def from_targets(node, parent, known, symbols, importer):
     base = import_base(node, parent)
     if not internal(base):
         return set()
@@ -153,9 +153,10 @@ def from_targets(node, parent, known, symbols):
             raise ValueError(f"unresolved star import: {parent} -> {base}")
         if candidate in known:
             targets.add(candidate)
-        if alias.name in symbols.get(base, set()):
+        if alias.name in symbols.get(base, set()) and not (base == importer and candidate in known):
             # A package attribute can shadow a same-named submodule. Keep both
             # possible dependencies because static bindings ignore control flow.
+            # An initializer importing its own submodule only depends on that child.
             targets.add(base)
         if candidate not in known and alias.name not in symbols.get(base, set()):
             raise ValueError(f"unresolved in-repository import: {parent} -> {candidate}")
@@ -171,7 +172,7 @@ def module_edges(module, tree, modules, packages, symbols):
         if isinstance(node, ast.Import):
             targets = {alias.name for alias in node.names if internal(alias.name)}
         elif isinstance(node, ast.ImportFrom):
-            targets = from_targets(node, parent, known, symbols)
+            targets = from_targets(node, parent, known, symbols, module)
         for target in targets:
             if target not in known:
                 raise ValueError(f"unresolved in-repository import: {module} -> {target}")
