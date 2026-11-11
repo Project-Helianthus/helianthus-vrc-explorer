@@ -53,6 +53,25 @@ def b524_register_name(*, opcode: int, group: int, register: int) -> str | None:
     return bundled_b524_register_names().get((opcode, group, register))
 
 
+def _apply_b524_register_names(opcode: int, group: int, registers: dict[str, Any]) -> None:
+    for register_key, entry in registers.items():
+        if not isinstance(entry, dict):
+            continue
+        if "myvaillant_name" in entry:
+            raise ValueError("Withdrawn artifact key myvaillant_name")
+        try:
+            register = int(register_key, 0)
+        except ValueError:
+            continue
+        name = b524_register_name(
+            opcode=opcode,
+            group=group,
+            register=register,
+        )
+        if name is not None:
+            entry["register_name"] = name
+
+
 def apply_b524_canonical_register_names(operations: dict[str, Any]) -> None:
     """Apply bundled names to an artifact operation tree in place.
 
@@ -86,19 +105,4 @@ def apply_b524_canonical_register_names(operations: dict[str, Any]) -> None:
                 registers = instance_obj.get("registers")
                 if not isinstance(registers, dict):
                     continue
-                for register_key, entry in registers.items():
-                    if not isinstance(entry, dict):
-                        continue
-                    if "myvaillant_name" in entry:
-                        raise ValueError("Withdrawn artifact key myvaillant_name")
-                    try:
-                        register = int(register_key, 0)
-                    except ValueError:
-                        continue
-                    name = b524_register_name(
-                        opcode=opcode,
-                        group=group,
-                        register=register,
-                    )
-                    if name is not None:
-                        entry["register_name"] = name
+                _apply_b524_register_names(opcode, group, registers)

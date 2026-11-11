@@ -386,26 +386,36 @@ def _migrate_v22_to_v23(artifact: dict[str, Any]) -> bool:
     return True
 
 
+def _reject_withdrawn_key(value: object) -> None:
+    if isinstance(value, dict):
+        if "myvaillant_name" in value:
+            raise ArtifactSchemaError(
+                "Withdrawn artifact key myvaillant_name; use the older reader or recreate the scan."
+            )
+        for child in value.values():
+            _reject_withdrawn_key(child)
+    elif isinstance(value, list):
+        for child in value:
+            _reject_withdrawn_key(child)
+
+
+def _normalize_migration_groups(artifact: dict[str, Any]) -> bool:
+    changed = False
+    groups = artifact.get("groups")
+    if isinstance(groups, dict):
+        for group_obj in groups.values():
+            if isinstance(group_obj, dict):
+                changed = _migrate_group(group_obj) or changed
+    return changed
+
+
 def migrate_artifact_schema(
     artifact: dict[str, Any],
 ) -> tuple[dict[str, Any], ArtifactMigrationReport]:
     if not isinstance(artifact, dict):
         raise ArtifactSchemaError("Artifact root must be a JSON object.")
 
-    def reject_withdrawn_key(value: object) -> None:
-        if isinstance(value, dict):
-            if "myvaillant_name" in value:
-                raise ArtifactSchemaError(
-                    "Withdrawn artifact key myvaillant_name; "
-                    "use the older reader or recreate the scan."
-                )
-            for child in value.values():
-                reject_withdrawn_key(child)
-        elif isinstance(value, list):
-            for child in value:
-                reject_withdrawn_key(child)
-
-    reject_withdrawn_key(artifact)
+    _reject_withdrawn_key(artifact)
     source_schema_version = detect_schema_version(artifact)
     if source_schema_version not in {
         LEGACY_UNVERSIONED_SCHEMA,
@@ -435,21 +445,13 @@ def migrate_artifact_schema(
     if source_schema_version in {LEGACY_UNVERSIONED_SCHEMA, "2.0", "2.1"}:
         migrated["schema_version"] = "2.2"
         changed = True
-        groups = migrated.get("groups")
-        if isinstance(groups, dict):
-            for group_obj in groups.values():
-                if isinstance(group_obj, dict):
-                    changed = _migrate_group(group_obj) or changed
+        changed = _normalize_migration_groups(migrated) or changed
 
     # Step 1b: normalize v2.2 groups that were not covered by step 1
     # (e.g. artifacts already at v2.2 need _migrate_group to repair legacy
     # shapes like dual_namespace=true with empty namespaces + populated instances)
     if source_schema_version == "2.2":
-        groups = migrated.get("groups")
-        if isinstance(groups, dict):
-            for group_obj in groups.values():
-                if isinstance(group_obj, dict):
-                    changed = _migrate_group(group_obj) or changed
+        changed = _normalize_migration_groups(migrated) or changed
 
     # Step 2: migrate 2.2 to 2.3 (groups-first to operations-first)
     if detect_schema_version(migrated) == "2.2":
