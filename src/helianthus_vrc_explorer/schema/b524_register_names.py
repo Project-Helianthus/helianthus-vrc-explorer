@@ -57,7 +57,7 @@ def apply_b524_canonical_register_names(operations: dict[str, Any]) -> None:
     """Apply bundled names to an artifact operation tree in place.
 
     Callers that need artifact immutability must pass their working copy. Only
-    ``myvaillant_name`` changes; reply data and existing metadata stay intact.
+    ``register_name`` changes; reply data and existing metadata stay intact.
     """
 
     for opcode_key, operation in operations.items():
@@ -89,6 +89,8 @@ def apply_b524_canonical_register_names(operations: dict[str, Any]) -> None:
                 for register_key, entry in registers.items():
                     if not isinstance(entry, dict):
                         continue
+                    if "myvaillant_name" in entry:
+                        raise ValueError("Withdrawn artifact key myvaillant_name")
                     try:
                         register = int(register_key, 0)
                     except ValueError:
@@ -99,4 +101,4 @@ def apply_b524_canonical_register_names(operations: dict[str, Any]) -> None:
                         register=register,
                     )
                     if name is not None:
-                        entry["myvaillant_name"] = name
+                        entry["register_name"] = name

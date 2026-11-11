@@ -27,7 +27,7 @@ def _rows() -> list[dict[str, str]]:
 def test_loader_resolves_a_known_entry_with_split_multi_values() -> None:
     entry = b524_register_name_correspondence(opcode=0x02, group=0x02, register=0x0002)
     assert entry is not None
-    assert entry.name == "circuit_mixer_type_external"
+    assert entry.name == "circuit_type"
     assert entry.vaillant_name_vrc720 == (
         "circuit_type",
         "circuit_type_of_mixed_circuit_external",

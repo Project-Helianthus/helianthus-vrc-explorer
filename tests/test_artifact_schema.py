@@ -357,7 +357,7 @@ def test_legacy_calendar_migration_requires_explorer_provenance_and_keeps_eviden
 
 def test_validator_24_rejects_legacy_codec_even_when_decode_errors_are_retained() -> None:
     artifact = {
-        "schema_version": "2.4",
+        "schema_version": "2.5",
         "meta": {"producer": "helianthus-vrc-explorer"},
         "operations": {
             "0x02": {
@@ -372,7 +372,7 @@ def test_validator_24_rejects_legacy_codec_even_when_decode_errors_are_retained(
         },
     }
     errors, _, _ = _validate_scan_artifact(artifact, allow_legacy=True)
-    assert any("schema 2.4 requires an explicit neutral codec" in error for error in errors)
+    assert any("schema 2.5 requires an explicit neutral codec" in error for error in errors)
     # An explicitly external unsupported BCD label stays raw error evidence.
     artifact["meta"]["producer"] = "external"
     errors, _, _ = _validate_scan_artifact(artifact, allow_legacy=True)
@@ -470,7 +470,7 @@ def test_legacy_calendar_does_not_infer_ambiguous_or_external_provenance(case: s
     elif case == "contract":
         source["meta"]["artifact_contract"] = {"producer": "external"}
     else:
-        source["schema_version"] = "2.4"
+        source["schema_version"] = "2.5"
     migrated, _ = migrate_artifact_schema(source)
     assert [row[-1]["type"] for row in iter_register_entries(migrated)] == ["HTI", "HDA:3"]
 
@@ -508,7 +508,7 @@ def test_demo_browse_calendar_values_match_retained_bytes() -> None:
 @pytest.mark.parametrize("status", ["00", "ff"])
 def test_status_reply_inference_is_independent_of_state(state, status):
     source = {
-        "schema_version": "2.4",
+        "schema_version": "2.5",
         "operations": {
             "0x02": {
                 "groups": {
@@ -557,7 +557,7 @@ def test_status_only_migration_preserves_raw_without_inventing_values(
         "type": None,
     }
     source = {
-        "schema_version": "2.4",
+        "schema_version": "2.5",
         "operations": {
             opcode: {"groups": {group: {"instances": {instance: {"registers": {register: entry}}}}}}
         },
@@ -589,7 +589,7 @@ def test_status_only_legacy_fields_are_retained_but_ineligible(monkeypatch, stat
         "parameter_description": {"qualification": "matched"},
     }
     source = {
-        "schema_version": "2.4",
+        "schema_version": "2.5",
         "operations": {
             "0x02": {"groups": {"0x02": {"instances": {"0x00": {"registers": {"0x1234": entry}}}}}}
         },

@@ -1317,7 +1317,7 @@ def test_type_hint_propagation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     entry = artifact_op_group(artifact, op="0x06", group="0x09")["instances"]["0x01"]["registers"][
         "0x0004"
     ]
-    assert entry["myvaillant_name"] == "device_firmware_version"
+    assert entry["register_name"] == "device_firmware_version"
     assert entry["type"] == "FWU"
     assert entry["value"] == "02.23.03"
     assert entry["register_class"] == "state"
@@ -1428,7 +1428,7 @@ def test_scan_b524_replays_dual_namespace_fixture_end_to_end(
     assert local_fw["type"] == "FW"
     assert local_fw["value"] == "03.17.02"
     assert local_fw["flags_access"] == "read_only_visible"
-    assert local_fw["myvaillant_name"] == "ventilation_status_special_operating_mode"
+    assert local_fw["register_name"] == "ventilation_status_special_operating_mode"
     assert remote_temperature["type"] == "EXP"
     assert remote_temperature["value"] == 22.5
     assert remote_temperature["flags_access"] == "read_only_visible"

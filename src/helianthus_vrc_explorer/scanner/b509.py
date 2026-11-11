@@ -33,7 +33,7 @@ class B509RegisterEntry(TypedDict):
     value: object | None
     error: str | None
     ebusd_name: str | None
-    myvaillant_name: str | None
+    register_name: str | None
 
 
 def _hex_u16(value: int) -> str:
@@ -155,7 +155,7 @@ def scan_b509(
                 value_type: str | None = None
                 error: str | None = None
                 ebusd_name: str | None = None
-                myvaillant_name: str | None = None
+                register_name: str | None = None
 
                 payload = build_b509_register_read_payload(register)
                 try:
@@ -193,7 +193,7 @@ def scan_b509(
                     value=value,
                     error=error,
                     ebusd_name=ebusd_name,
-                    myvaillant_name=myvaillant_name,
+                    register_name=register_name,
                 )
 
     except KeyboardInterrupt:

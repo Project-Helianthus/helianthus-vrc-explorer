@@ -1650,7 +1650,6 @@ def run_b524_scan(
                         opcode=lookup_opcode,
                     )
                     if mv is not None:
-                        entry["myvaillant_name"] = mv.leaf
                         if mv.register_class is not None:
                             entry["register_class"] = mv.register_class
                         if entry.get("ebusd_name") is None:
@@ -1668,7 +1667,7 @@ def run_b524_scan(
                     register=task.register,
                 )
                 if canonical_name is not None:
-                    entry["myvaillant_name"] = canonical_name
+                    entry["register_name"] = canonical_name
                 if (
                     profile_id == "basv2_sw0507_hw1704_api1"
                     and (task.opcode, task.group) == (0x02, 0x02)
@@ -1712,7 +1711,7 @@ def run_b524_scan(
                                 "instance": _hex_u8(task.instance),
                                 "register": _hex_u16(task.register),
                                 "read_opcode": str(entry.get("read_opcode")),
-                                "name": entry.get("myvaillant_name") or entry.get("ebusd_name"),
+                                "name": entry.get("register_name") or entry.get("ebusd_name"),
                                 "value": entry.get("value"),
                                 "constraint_min": constraint.min_value,
                                 "constraint_max": constraint.max_value,

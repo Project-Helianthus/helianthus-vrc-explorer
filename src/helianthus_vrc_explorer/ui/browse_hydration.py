@@ -81,7 +81,7 @@ def _fmt_group_label(group_key: str, group_name: str) -> str:
 
 
 def _fmt_register_label(register_key: str, entry: dict[str, Any]) -> str:
-    display_name = str(entry.get("myvaillant_name") or "").strip()
+    display_name = str(entry.get("register_name") or "").strip()
     if not display_name:
         display_name = str(entry.get("ebusd_name") or "").strip()
     try:
@@ -138,7 +138,7 @@ def _instance_label(
             for entry in registers.values():
                 if not isinstance(entry, dict):
                     continue
-                if str(entry.get("myvaillant_name") or "").strip() != wanted:
+                if str(entry.get("register_name") or "").strip() != wanted:
                     continue
                 value = entry.get("value")
                 if isinstance(value, str) and value.strip():
@@ -776,7 +776,7 @@ class _HydratedBrowseStore:
                     instance_key=None,
                     register_key=identifier,
                     name=name,
-                    myvaillant_name="",
+                    register_name="",
                     ebusd_name="",
                     path=path,
                     tab="state",
@@ -948,11 +948,11 @@ class _HydratedBrowseStore:
                             group=_safe_int_hex(group_key),
                             register=_safe_int_hex(register_key),
                         )
-                        myvaillant_name = (
-                            canonical_name or str(entry.get("myvaillant_name") or "").strip()
+                        register_name = (
+                            canonical_name or str(entry.get("register_name") or "").strip()
                         )
                         ebusd_name = str(entry.get("ebusd_name") or "").strip()
-                        name = myvaillant_name or register_key
+                        name = register_name or register_key
                         entry_section_key = _b524_section_key_for_opcode(entry_namespace_key)
                         if entry_section_key not in {"controller_registers", "device_slots"}:
                             continue
@@ -1019,7 +1019,7 @@ class _HydratedBrowseStore:
                             instance_key=instance_key,
                             register_key=register_key,
                             name=name,
-                            myvaillant_name=myvaillant_name,
+                            register_name=register_name,
                             ebusd_name=ebusd_name,
                             path=path,
                             tab=tab,
@@ -1041,7 +1041,7 @@ class _HydratedBrowseStore:
                             search_blob=" ".join(
                                 [
                                     path.lower(),
-                                    myvaillant_name.lower(),
+                                    register_name.lower(),
                                     ebusd_name.lower(),
                                     address.label.lower(),
                                     (entry_namespace_label or "").lower(),
@@ -1134,7 +1134,7 @@ class _HydratedBrowseStore:
                     instance_key=None,
                     register_key=field_name,
                     name=field_name,
-                    myvaillant_name="",
+                    register_name="",
                     ebusd_name="",
                     path=path,
                     tab="state",
@@ -1221,7 +1221,7 @@ class _HydratedBrowseStore:
                             if not isinstance(entry, dict):
                                 continue
                             ebusd_name = str(entry.get("ebusd_name") or "").strip()
-                            myvaillant_name = str(entry.get("myvaillant_name") or "").strip()
+                            register_name = str(entry.get("register_name") or "").strip()
                             name = ebusd_name or addr_key
                             op = entry.get("op") if isinstance(entry.get("op"), str) else None
                             address = RegisterAddress(
@@ -1248,7 +1248,7 @@ class _HydratedBrowseStore:
                                 instance_key=None,
                                 register_key=addr_key,
                                 name=name,
-                                myvaillant_name=myvaillant_name,
+                                register_name=register_name,
                                 ebusd_name=ebusd_name,
                                 path=path,
                                 tab="state",
@@ -1263,7 +1263,7 @@ class _HydratedBrowseStore:
                                 search_blob=" ".join(
                                     [
                                         path.lower(),
-                                        myvaillant_name.lower(),
+                                        register_name.lower(),
                                         ebusd_name.lower(),
                                         address.label.lower(),
                                         value_text.lower(),
@@ -1354,7 +1354,7 @@ class _HydratedBrowseStore:
                             instance_key=None,
                             register_key=register_key,
                             name=name,
-                            myvaillant_name="",
+                            register_name="",
                             ebusd_name="",
                             path=path,
                             tab=tab,
@@ -1428,7 +1428,7 @@ class _HydratedBrowseStore:
                                 instance_key=None,
                                 register_key=register_key,
                                 name=name,
-                                myvaillant_name="",
+                                register_name="",
                                 ebusd_name="",
                                 path=path,
                                 tab="state",
@@ -1538,7 +1538,7 @@ class _HydratedBrowseStore:
                         instance_key=None,
                         register_key=entry_key,
                         name=label,
-                        myvaillant_name="",
+                        register_name="",
                         ebusd_name="",
                         path=path,
                         tab="state",

@@ -38,7 +38,7 @@ def artifact():
     }
     group = {"instances": {"0x00": {"registers": {"0x0009": entry}}}}
     return {
-        "schema_version": "2.4",
+        "schema_version": "2.5",
         "meta": {"identity": {"protocol_family": "VRC720", "model": "PRIVATE_SENTINEL"}},
         "operations": {op: {"groups": {"0x02": deepcopy(group)}} for op in ("0x06", "0x02")},
     }
@@ -176,9 +176,9 @@ def test_privacy_allowlists_at_every_level():
         [],
         {},
         {"schema_version": "2.2", "operations": {}},
-        {"schema_version": "2.4", "operations": []},
-        {"schema_version": "2.4", "operations": {"0x02": {"groups": []}}},
-        {"schema_version": "2.4", "operations": {"private selector": {}}},
+        {"schema_version": "2.5", "operations": []},
+        {"schema_version": "2.5", "operations": {"0x02": {"groups": []}}},
+        {"schema_version": "2.5", "operations": {"private selector": {}}},
     ],
 )
 def test_malformed_structure_is_controlled(source):
@@ -242,7 +242,7 @@ def test_cli_determinism_help_errors_and_source_preservation(tmp_path):
     assert help_result.returncode == 0
     assert b"observation-only" in help_result.stdout
     assert b"native profile" in help_result.stdout
-    assert b"2.3/2.4" in help_result.stdout
+    assert b"2.3/2.5" in help_result.stdout
     source.write_text('{"PRIVATE_SENTINEL":', encoding="utf-8")
     failed = subprocess.run(command, capture_output=True)
     assert failed.returncode == 2
@@ -312,7 +312,7 @@ def test_transport_error_response_state_is_retained():
     assert export(source)["observations"][0]["response_state"] == "transport_error"
 
 
-@pytest.mark.parametrize("version", ["2.3", "2.4"])
+@pytest.mark.parametrize("version", ["2.3", "2.5"])
 @pytest.mark.parametrize(
     ("entry", "expected"),
     [
@@ -377,8 +377,8 @@ def test_live_transport_failure_marker_is_sanitized(state, error, expected):
 @pytest.mark.parametrize(
     "text",
     [
-        '{"schema_version":"2.4","operations":{},"operations":{}}',
-        '{"schema_version":"2.4","operations":{"0x02":{"groups":{"0x02":[]}}}}',
+        '{"schema_version":"2.5","operations":{},"operations":{}}',
+        '{"schema_version":"2.5","operations":{"0x02":{"groups":{"0x02":[]}}}}',
     ],
 )
 def test_cli_rejects_duplicate_json_fields_and_malformed_nested_objects(tmp_path, text):
@@ -444,7 +444,7 @@ def test_status_only_export_reload_retains_raw_status(
     opcode, group, instance, register, status, state
 ):
     source = {
-        "schema_version": "2.4",
+        "schema_version": "2.5",
         "operations": {
             opcode: {
                 "groups": {
@@ -511,3 +511,16 @@ def test_status_only_export_ignores_retained_description(state, status):
             "evidence_grade": "Unknown",
         }
     assert source == before
+
+
+@pytest.mark.parametrize("ambiguous", [False, True])
+def test_export_rejects_withdrawn_name_key(ambiguous):
+    source = artifact()
+    entry = source["operations"]["0x02"]["groups"]["0x02"]["instances"]["0x00"]["registers"][
+        "0x0009"
+    ]
+    entry["myvaillant_name"] = "old_annotation"
+    if ambiguous:
+        entry["register_name"] = "canonical_name"
+    with pytest.raises(ValueError, match="Withdrawn artifact key"):
+        export(source)

@@ -239,7 +239,7 @@ def remote_artifact(
         entry["instances"][instance] = {"present": connected, "registers": registers}
         entry.setdefault("availability_probes", {})[instance] = probe
     return {
-        "schema_version": "2.4",
+        "schema_version": "2.5",
         "meta": {
             "identity": {
                 "eid": "BASV2",

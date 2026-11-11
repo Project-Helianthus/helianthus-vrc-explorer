@@ -1211,7 +1211,7 @@ __ARTIFACT_JSON__
           if (!registers || typeof registers !== "object") continue;
           const entry = registers[rrKey];
           if (!entry || typeof entry !== "object") continue;
-          for (const field of ["myvaillant_name", "ebusd_name"]) {
+          for (const field of ["register_name", "ebusd_name"]) {
             const value = entry[field];
             if (typeof value === "string" && value.trim()) return true;
           }
@@ -1678,7 +1678,7 @@ __ARTIFACT_JSON__
           const rawHex = typeof entry.raw_hex === "string" ? entry.raw_hex : "";
           const replyHex = typeof entry.reply_hex === "string" ? entry.reply_hex : "";
           const ebusdName = typeof entry.ebusd_name === "string" ? entry.ebusd_name : "";
-          const myName = typeof entry.myvaillant_name === "string" ? entry.myvaillant_name : "";
+          const myName = typeof entry.register_name === "string" ? entry.register_name : "";
           const addrText = String(row.addrKey || "");
           const haystack = `${row.dstKey} ${addrText} ${ebusdName} ${myName}`.toLowerCase();
           const q = String(state.b509Filters.search || "").trim().toLowerCase();
@@ -1738,7 +1738,7 @@ __ARTIFACT_JSON__
           appendText(row.addrKey, "offset-label");
 
           const nameTd = document.createElement("td");
-          const myName = typeof entry.myvaillant_name === "string" ? entry.myvaillant_name : "";
+          const myName = typeof entry.register_name === "string" ? entry.register_name : "";
           const ebusdName = typeof entry.ebusd_name === "string" ? entry.ebusd_name : "";
           if (myName) {
             const top = document.createElement("div");
@@ -2571,8 +2571,8 @@ __ARTIFACT_JSON__
               const regs = inst.registers || {};
               const entry = regs && typeof regs === "object" ? regs[rrKey] : null;
               if (!entry || typeof entry !== "object") continue;
-              if (!rowMyvaillantName && typeof entry.myvaillant_name === "string" && entry.myvaillant_name) {
-                rowMyvaillantName = entry.myvaillant_name;
+              if (!rowMyvaillantName && typeof entry.register_name === "string" && entry.register_name) {
+                rowMyvaillantName = entry.register_name;
               }
               if (typeof entry.ebusd_name === "string" && entry.ebusd_name) {
                 rowEbusdNames.add(entry.ebusd_name);
@@ -2602,7 +2602,7 @@ __ARTIFACT_JSON__
               const nameEl = document.createElement("div");
               nameEl.className = "offset-name";
               nameEl.textContent = rowMyvaillantName;
-              nameEl.title = "Explorer canonical name where available; otherwise a myVaillant map leaf (myvaillant_name)";
+              nameEl.title = "Explorer canonical name where available; otherwise a myVaillant map leaf (register_name)";
               td0.appendChild(nameEl);
             }
             if (ebusdNameList.length) {

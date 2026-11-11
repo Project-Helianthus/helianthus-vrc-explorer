@@ -6,10 +6,8 @@ from typing import Any
 
 from .evidence_compat import has_explorer_provenance, interpret_legacy_codecs
 
-# 2.4 retains the 2.3 operations-first structure. New output uses neutral
-# DATE_DMY_U8X3/TIME_HMS_U8X3 codecs and independent raw API version/revision
-# strings. Legacy Explorer interpretations carry copy-only migration provenance.
-CURRENT_ARTIFACT_SCHEMA_VERSION = "2.4"
+# 2.5 withdraws the old canonical-name key without a read-side alias.
+CURRENT_ARTIFACT_SCHEMA_VERSION = "2.5"
 LEGACY_UNVERSIONED_SCHEMA = "legacy-unversioned"
 LEGACY_VERSIONED_SCHEMAS = frozenset({"2.0", "2.1", "2.2", "2.3"})
 
@@ -394,6 +392,20 @@ def migrate_artifact_schema(
     if not isinstance(artifact, dict):
         raise ArtifactSchemaError("Artifact root must be a JSON object.")
 
+    def reject_withdrawn_key(value: object) -> None:
+        if isinstance(value, dict):
+            if "myvaillant_name" in value:
+                raise ArtifactSchemaError(
+                    "Withdrawn artifact key myvaillant_name; "
+                    "use the older reader or recreate the scan."
+                )
+            for child in value.values():
+                reject_withdrawn_key(child)
+        elif isinstance(value, list):
+            for child in value:
+                reject_withdrawn_key(child)
+
+    reject_withdrawn_key(artifact)
     source_schema_version = detect_schema_version(artifact)
     if source_schema_version not in {
         LEGACY_UNVERSIONED_SCHEMA,

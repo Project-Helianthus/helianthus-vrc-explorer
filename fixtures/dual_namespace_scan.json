@@ -24,7 +24,7 @@
                   "flags_access": "user_rw",
                   "type": "UCH",
                   "value": 1,
-                  "myvaillant_name": "controller_mode"
+                  "register_name": "controller_mode"
                 },
                 "0x0004": {
                   "raw_hex": "0000a041",
@@ -33,7 +33,7 @@
                   "flags_access": "technical_rw",
                   "type": "EXP",
                   "value": 20.0,
-                  "myvaillant_name": "flow_temperature"
+                  "register_name": "flow_temperature"
                 }
               }
             }
@@ -53,7 +53,7 @@
                   "flags_access": "stable_ro",
                   "type": "FW",
                   "value": "03.17.02",
-                  "myvaillant_name": "radio_device_firmware_local"
+                  "register_name": "radio_device_firmware_local"
                 },
                 "0x0007": {
                   "raw_hex": "0000a041",
@@ -62,7 +62,7 @@
                   "flags_access": "stable_ro",
                   "type": "EXP",
                   "value": 20.0,
-                  "myvaillant_name": "local_room_temperature"
+                  "register_name": "local_room_temperature"
                 }
               }
             },
@@ -76,7 +76,7 @@
                   "flags_access": "volatile_ro",
                   "type": "EXP",
                   "value": 21.0,
-                  "myvaillant_name": "local_room_temperature"
+                  "register_name": "local_room_temperature"
                 }
               }
             }
@@ -100,7 +100,7 @@
                   "flags_access": "stable_ro",
                   "type": "FW",
                   "value": "02.17.03",
-                  "myvaillant_name": "radio_device_firmware"
+                  "register_name": "radio_device_firmware"
                 },
                 "0x0007": {
                   "raw_hex": "0000b041",
@@ -109,7 +109,7 @@
                   "flags_access": "user_rw",
                   "type": "EXP",
                   "value": 22.0,
-                  "myvaillant_name": "remote_room_temperature"
+                  "register_name": "remote_room_temperature"
                 }
               }
             },
@@ -123,7 +123,7 @@
                   "flags_access": "technical_rw",
                   "type": "EXP",
                   "value": 22.5,
-                  "myvaillant_name": "remote_room_temperature"
+                  "register_name": "remote_room_temperature"
                 }
               }
             }
@@ -143,7 +143,7 @@
                   "flags_access": "stable_ro",
                   "type": "FW",
                   "value": "08.05.00",
-                  "myvaillant_name": "device_firmware_version"
+                  "register_name": "device_firmware_version"
                 },
                 "0x0007": {
                   "raw_hex": "01",
@@ -152,7 +152,7 @@
                   "flags_access": "volatile_ro",
                   "type": "UCH",
                   "value": 1,
-                  "myvaillant_name": "accessory_state"
+                  "register_name": "accessory_state"
                 }
               }
             }

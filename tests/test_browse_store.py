@@ -72,7 +72,7 @@ def _sample_artifact() -> dict[str, object]:
                                 "raw_hex": "0102",
                                 "flags_access": "config_installer",
                                 "read_opcode": "0x06",
-                                "myvaillant_name": "limit_value",
+                                "register_name": "limit_value",
                             },
                             "0x0003": {
                                 "value": 3.0,
@@ -111,7 +111,7 @@ def _dual_namespace_artifact() -> dict[str, object]:
                                         "flags_access": "state_stable",
                                         "read_opcode": "0x02",
                                         "read_opcode_label": "local",
-                                        "myvaillant_name": "temperature_local",
+                                        "register_name": "temperature_local",
                                     }
                                 },
                             }
@@ -133,7 +133,7 @@ def _dual_namespace_artifact() -> dict[str, object]:
                                         "flags_access": "config_user",
                                         "read_opcode": "0x06",
                                         "read_opcode_label": "remote",
-                                        "myvaillant_name": "temperature_remote",
+                                        "register_name": "temperature_remote",
                                     }
                                 },
                             }
@@ -154,25 +154,27 @@ def test_browse_store_builds_rows_and_left_tree_uses_only_myvaillant_name() -> N
     assert by_register["0x0001"].tab == "config"
     assert by_register["0x0002"].tab == "config"
     assert by_register["0x0003"].tab == "state"
-    assert by_register["0x0001"].name == "system_dhw_bivalence_point"
+    assert by_register["0x0001"].name == "dhw_outdoor_bivalence_temperature_limit"
     assert by_register["0x0002"].name == "device_class_address"
     assert by_register["0x0002"].value_text == "HEATING_OR_COOLING (HEATING)"
-    assert by_register["0x0003"].name == "frost_protection_delay"
-    assert by_register["0x0001"].myvaillant_name == "system_dhw_bivalence_point"
+    assert by_register["0x0003"].name == "frost_protection_delay_time"
+    assert by_register["0x0001"].register_name == "dhw_outdoor_bivalence_temperature_limit"
     assert by_register["0x0001"].ebusd_name == "regulator_param_1"
-    assert by_register["0x0002"].myvaillant_name == "device_class_address"
+    assert by_register["0x0002"].register_name == "device_class_address"
     assert by_register["0x0002"].ebusd_name == ""
 
     assert by_register["0x0001"].access_flags == "config_user"
     assert by_register["0x0001"].row_id == "0x00:0x02:0x00:0x0001"
     assert by_register["0x0002"].row_id == "0x00:0x06:0x00:0x0002"
-    expected_local_path = "B524/OP02 GetParameter/System/0x00/system_dhw_bivalence_point"
+    expected_local_path = (
+        "B524/OP02 GetParameter/System/0x00/dhw_outdoor_bivalence_temperature_limit"
+    )
     expected_remote_path = "B524/OP06 GetDeviceParameter/System/0x00/device_class_address"
     assert by_register["0x0001"].path == expected_local_path
     assert by_register["0x0002"].path == expected_remote_path
     assert by_register["0x0001"].address.label == "B524 GG=0x0 RR=0x1 0x02"
     assert by_register["0x0002"].address.label == "B524 GG=0x0 RR=0x2 0x06"
-    assert by_register["0x0001"].display_label == "system_dhw_bivalence_point (0x0001)"
+    assert by_register["0x0001"].display_label == "dhw_outdoor_bivalence_temperature_limit (0x0001)"
     assert all(":single:" not in row.row_id for row in store.rows if row.protocol == "b524")
 
     by_node_id = {node.node_id: node for node in store.tree_nodes}
@@ -315,7 +317,7 @@ def test_browse_store_hydrates_read_only_system_information_and_scoped_descripti
     assert device.parameter_description["description_opcode"] == "0x07"
     assert device.parameter_description["read_opcode"] == device.address.read_opcode
     assert device.candidate_name == "ventilation_candidate"
-    assert device.myvaillant_name == ""
+    assert device.register_name == ""
 
     nodes = {node.node_id: node for node in store.tree_nodes}
     assert nodes["b524:section:system_information"].label == "OP00 ReadSystemInformation"

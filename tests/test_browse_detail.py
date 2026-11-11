@@ -22,7 +22,7 @@ def _row(
     register_key: str = "0x0002",
     unit: str = "n/a",
     ebusd_name: str = "",
-    myvaillant_name: str = "operating_mode",
+    register_name: str = "operating_mode",
 ) -> RegisterRow:
     address = RegisterAddress(
         protocol="b524",
@@ -44,7 +44,7 @@ def _row(
         instance_key=instance_key,
         register_key=register_key,
         name=register_key,
-        myvaillant_name=myvaillant_name,
+        register_name=register_name,
         ebusd_name=ebusd_name,
         path="B524/op02/ventilation/0x01/operating_mode",
         tab="config",
@@ -220,7 +220,7 @@ def test_limits_section_preserves_live_probe_scope() -> None:
 
 
 def test_unknown_register_shows_fallback_name_flags_and_raw_unqualified_description() -> None:
-    row = _row(register_key="0x0075", myvaillant_name="")
+    row = _row(register_key="0x0075", register_name="")
     entry = {
         "type": "UCH",
         "raw_hex": "00",
@@ -260,7 +260,7 @@ def test_flags_section_splits_access_into_two_facets() -> None:
 
 
 def test_gates_section_g1_flags_legacy_access_label_as_unknown_not_read_only() -> None:
-    """Pins the child_lock/user_rw observation from the plan (section 2.4): a
+    """Pins the child_lock/user_rw observation from the plan (section 2.5): a
     legacy label must be surfaced as the real reason, never silently implied
     read-only."""
     row = _row()
@@ -502,7 +502,7 @@ def test_names_section_includes_correspondence_rows_with_explorer_name_first() -
     # The section carries names only: every row uses one of the fixed labels.
     allowed = {
         "Explorer",
-        "myvaillant_name provenance",
+        "register_name provenance",
         "Observed-name identification",
         "docs-ebus catalog name",
         "docs-ebus previous name",
@@ -731,7 +731,7 @@ def test_legacy_calendar_label_and_display_only_limits_are_visible() -> None:
 
 def test_docs_catalog_names_are_labelled_secondary_provisional_annotations() -> None:
     row = _row(
-        group_key="0x00", instance_key="0x01", register_key="0x0007", myvaillant_name="system_off"
+        group_key="0x00", instance_key="0x01", register_key="0x0007", register_name="system_off"
     )
     sections = register_detail_sections(row=row, entry={}, description=None)
     names = _section(sections, "NAMES")
@@ -753,7 +753,7 @@ def test_noncanonical_explicit_opcode_keeps_concrete_selector_and_names(spelling
         group_key="0x00",
         instance_key="0x01",
         register_key="0x0007",
-        myvaillant_name="system_off",
+        register_name="system_off",
     )
     assert row.effective_opcode == "0x02"
     sections = register_detail_sections(row=row, entry={}, description=None)

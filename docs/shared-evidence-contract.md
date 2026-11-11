@@ -6,12 +6,12 @@ already satisfy parity. Identically named `/v1` files currently differ.
 
 ## Artifact kinds and sources of truth
 
-Current scan artifact schema: `2.4`.
+Current scan artifact schema: `2.5`.
 
 - Scan artifacts belong to the explorer. Their `schema_version` is a `2.x`
-  string. Version `2.4` retains the `2.3` operations-first layout, uses neutral
+  string. Version `2.5` retains the `2.3` operations-first layout, uses neutral
   `DATE_DMY_U8X3` and `TIME_HMS_U8X3` codec names, and retains independent
-  `api_version_raw` and `api_revision_raw` strings. Readers migrate unversioned
+  `api_version_raw` and `api_revision_raw` strings. For key-free structural fixtures, readers migrate unversioned
   and `2.0`–`2.3` scans in memory; known legacy Explorer codec interpretations
   migrate on a copy with provenance, preserving raw bytes and stored values.
   Source files and historical fixture versions are not rewritten. See the
@@ -65,23 +65,15 @@ does not itself change those fixtures or their exporters.
 
 ## Naming ownership
 
-Explorer canonical names are intentional and remain the display names in
-scan, replay, Browser and HTML. See
-`b524_register_name_correspondence.py` in
-`src/helianthus_vrc_explorer/schema/` for the existing correspondence.
-
-Docs-ebus owns the OP02 catalog names in
-`protocols/vaillant/fixtures/b524-op02-register-names.csv` and their
-`previous_name` migration annotations, under `architecture/naming.md`.
-Carry those names and `previous_name` as labelled correspondence keyed by
-the full native selector `(OP, GG, II, RR)`; they never replace explorer
-names or merge identities across operations or instances.
-
-Today `myvaillant_name` holds the explorer canonical name where one exists,
-otherwise a myVaillant map leaf; observed app names live only in the
-correspondence columns (`myvaillant_name_vrc720`, `myvaillant_name_vrc700`).
-Its label must state that provenance honestly; the field name alone does
-not prove an observed application name.
+Canonical names use the docs-owned catalog for exact settled OP/GG/RR matches.
+Rows with an open question keep their previous provisional spelling and question,
+including GG02 RR001D. Instance binding never merges native identities.
+`previous_name` is documentary correspondence only, never a runtime lookup key.
+`register_name` holds only a canonical display name; the source columns
+`myvaillant_name_vrc720` and `myvaillant_name_vrc700` remain distinct annotations.
+Schema 2.5 intentionally withdraws `myvaillant_name`. Older scans need their older
+reader or must be recreated. There is no old-key reader, alias or migration;
+ambiguous old/new keys are rejected. Users' scan files are never rewritten.
 
 ## Evidence grades and publication
 

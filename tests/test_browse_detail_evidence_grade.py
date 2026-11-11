@@ -51,7 +51,7 @@ def _row() -> RegisterRow:
         instance_key="0x01",
         register_key="0x0002",
         name="0x0002",
-        myvaillant_name="operating_mode",
+        register_name="operating_mode",
         ebusd_name="",
         path="B524/op02/ventilation/0x01/operating_mode",
         tab="config",

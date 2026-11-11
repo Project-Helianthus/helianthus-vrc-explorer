@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Export an offline, observation-only inventory from a 2.3/2.4 scan artifact.
+"""Export an offline, observation-only inventory from a 2.3/2.5 scan artifact.
 
 Usage: python3 scripts/export_controller_observations.py ARTIFACT > inventory.json
 Only family, full selectors, evidence grades, response states and numeric decoded
@@ -146,8 +146,8 @@ def _decoded(entry: dict, selector: tuple[str, str, str, str]) -> tuple[dict, st
 def export_observations(artifact: object) -> dict:
     """Project an artifact through fixed field and scalar-value allowlists."""
     source = _object(artifact)
-    if source.get("schema_version") not in ("2.3", "2.4"):
-        raise ValueError("Expected an operations-first 2.3/2.4 scan artifact")
+    if source.get("schema_version") not in ("2.3", "2.5"):
+        raise ValueError("Expected an operations-first 2.3/2.5 scan artifact")
     operations = _object(source.get("operations"))
     identity = _object(_object(source.get("meta", {})).get("identity", {}))
     observations = []
@@ -167,6 +167,8 @@ def export_observations(artifact: object) -> dict:
                         raise ValueError("Duplicate canonical selector")
                     seen.add(selector)
                     entry = _object(value)
+                    if "myvaillant_name" in entry:
+                        raise ValueError("Withdrawn artifact key myvaillant_name")
                     if "read_opcode" in entry and _selector(entry["read_opcode"], 2) != opcode:
                         raise ValueError("Conflicting register opcode")
                     decoded, raw = _decoded(entry, selector)

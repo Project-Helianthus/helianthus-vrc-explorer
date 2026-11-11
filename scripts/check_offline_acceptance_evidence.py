@@ -94,7 +94,7 @@ def _get_entry(
 def validate_offline_acceptance_evidence(artifact: dict[str, Any]) -> list[str]:
     """Return canonical-fixture invariant violations before compatibility migration."""
     errors: list[str] = []
-    # The committed synthetic source stays at 2.3; readers migrate a copy to 2.4.
+    # The committed synthetic source stays at 2.3; readers migrate a copy to 2.5.
     if artifact.get("schema_version") != "2.3":
         errors.append("schema_version must be 2.3")
     meta = artifact.get("meta")
