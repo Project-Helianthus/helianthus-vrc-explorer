@@ -28,7 +28,7 @@ OBSERVATIONS = "b524-basv0-register-observations-v1.json"
 NATIVE = Path("protocols/vaillant/fixtures")
 VALIDATOR = Path("scripts/validate_b524_basv0_description_profile.py.txt")
 PROFILE_PAGE = Path("protocols/vaillant/ebus-vaillant-b524-basv0-profile-v1.md")
-REGISTER_MAP = Path("protocols/vaillant/ebus-vaillant-B524-register-map.md")
+REGISTER_MAP = Path("protocols/vaillant/ebus-vaillant-b524-register-map.md")
 CALENDAR = NATIVE / "b524-op02-calendar-clock-selectors.csv"
 
 
