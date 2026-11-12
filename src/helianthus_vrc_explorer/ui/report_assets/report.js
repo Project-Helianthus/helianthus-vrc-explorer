@@ -1,0 +1,2397 @@
+      const artifact = JSON.parse(document.getElementById("artifact-data").textContent || "{}");
+      const B524_GROUP_NAMES = __B524_GROUP_NAMES__;
+      const B524_REGISTER_NAME_CORRESPONDENCE = __B524_REGISTER_NAME_CORRESPONDENCE__;
+
+      const B524_DOCS_CATALOG_NAMES = __B524_DOCS_CATALOG_NAMES__;
+      function b524CanonicalHexKey(key, width) {
+        // Accept exactly the spellings Python's int(value, 0) accepts on the server side:
+        // hexadecimal with a 0x prefix, or decimal without leading zeros.
+        if (typeof key !== "string" || !/^(0[xX][0-9a-fA-F]+|0|[1-9][0-9]*)$/.test(key.trim())) return null;
+        const value = Number(key.trim());
+        if (!Number.isSafeInteger(value) || value < 0) return null;
+        return "0x" + value.toString(16).padStart(width, "0");
+      }
+
+      function b524DocsCatalogKey(op, gg, ii, rr) {
+        const widths = [2, 2, 2, 4];
+        const parts = [op, gg, ii, rr].map((key, index) => b524CanonicalHexKey(key, widths[index]));
+        return parts.includes(null) ? "" : parts.join("/");
+      }
+
+      function b524DocsCatalogText(op, gg, ii, rr) {
+        const key = b524DocsCatalogKey(op, gg, ii, rr);
+        const entry = key ? B524_DOCS_CATALOG_NAMES[key] : null;
+        if (!entry) return "";
+        const parts = ["docs-ebus catalog name" + (entry.provisional ? " (provisional)" : "") + ": " + entry.name];
+        if (entry.previous_name) parts.push("docs-ebus previous name: " + entry.previous_name);
+        if (entry.open_question) parts.push("docs-ebus open question: " + entry.open_question);
+        return parts.join(" · ");
+      }
+
+      // The entry evidence, decoded-value grade and codec provenance of each entry are resolved
+      // server-side by the shared rules in ui/evidence_display.py. Only the interactive row
+      // override is applied here, and only to a cell whose retained bytes decode under it; a cell without one
+      // reads back as Unknown.
+      const B524_ENTRY_EVIDENCE_LABELS = __B524_ENTRY_EVIDENCE_LABELS__;
+      const B524_ENTRY_EVIDENCE = new Map(__B524_ENTRY_EVIDENCE__.map(
+        ([op, gg, ii, rr, grade, provenance, decoded, explicit]) => [
+          JSON.stringify([op, gg, ii, rr]),
+          {grade, provenance, decoded, explicit},
+        ]
+      ));
+
+      function b524EntryEvidence(op, gg, ii, rr, entry, override) {
+        const labels = B524_ENTRY_EVIDENCE_LABELS;
+        const hasEntry = !!entry && typeof entry === "object";
+        const known = hasEntry ? B524_ENTRY_EVIDENCE.get(JSON.stringify([op, gg, ii, rr])) : null;
+        const grade = known ? known.grade : labels.unknown;
+        const provenance = known ? known.provenance : labels.unknown;
+        const overridden = hasEntry && typeof override === "string";
+        const decoded = overridden ? labels.decoded_grade : (known ? known.decoded : labels.unknown);
+        const lines = [
+          `${labels.entry}: ${grade}`,
+          `${labels.decoded}: ${overridden ? labels.override_text : decoded}`,
+          `${labels.provenance}: ${provenance}`,
+        ];
+        const explicit = !!known && known.explicit === true;
+        return { grade, decoded, provenance, overridden, explicit, lines };
+      }
+
+      function b524CorrespondenceSecondaryText(opKey, groupKey, registerKey) {
+        const opHex = b524CanonicalHexKey(opKey, 2);
+        const groupHex = b524CanonicalHexKey(groupKey, 2);
+        const registerHex = b524CanonicalHexKey(registerKey, 4);
+        if (opHex === null || groupHex === null || registerHex === null) return "";
+        const byGroup = B524_REGISTER_NAME_CORRESPONDENCE && B524_REGISTER_NAME_CORRESPONDENCE[opHex];
+        const entry = byGroup && byGroup[groupHex] && byGroup[groupHex][registerHex];
+        if (!entry) return "";
+        const parts = [];
+        if (Array.isArray(entry.vaillant_friendly_name) && entry.vaillant_friendly_name.length) {
+          parts.push("Observed Vaillant friendly name: " + entry.vaillant_friendly_name.join(", "));
+        }
+        if (Array.isArray(entry.vaillant_name) && entry.vaillant_name.length) {
+          parts.push("Observed Vaillant name: " + entry.vaillant_name.join(", "));
+        }
+        if (Array.isArray(entry.ebusd_name) && entry.ebusd_name.length) {
+          parts.push("eBUSd name: " + entry.ebusd_name.join(", "));
+        }
+        for (const family of ["vrc720", "vrc700"]) {
+          const names = entry["myvaillant_name_" + family];
+          if (Array.isArray(names) && names.length) parts.push("Observed myVaillant name (" + family.toUpperCase() + "): " + names.join(", "));
+        }
+        if (parts.length) parts.push(__OBSERVED_NAME_CAVEAT__);
+        return parts.join(" · ");
+      }
+
+      const metaDst = document.getElementById("metaDst");
+      const metaTs = document.getElementById("metaTs");
+      const metaIncomplete = document.getElementById("metaIncomplete");
+
+      function safeMetaString(v) {
+        return typeof v === "string" ? v : "";
+      }
+
+      const meta = artifact && typeof artifact === "object" ? artifact.meta || {} : {};
+      const B524_CIRCUIT_II_MIN = __B524_CIRCUIT_II_MIN__;
+      metaDst.textContent = safeMetaString(meta.destination_address || meta.dest || meta.dst || "dst=?");
+      metaTs.textContent = safeMetaString(meta.scan_timestamp || meta.ts || "ts=?");
+      if (meta && meta.incomplete) {
+        metaIncomplete.style.display = "inline-flex";
+        metaIncomplete.textContent = "incomplete";
+      }
+
+      function parseHexKey(key) {
+        if (typeof key !== "string") return NaN;
+        const n = Number(key);
+        if (Number.isFinite(n)) return n;
+        try {
+          return parseInt(key, 0);
+        } catch (e) {
+          return NaN;
+        }
+      }
+
+      function sortedHexKeys(keys) {
+        return (keys || [])
+          .filter((k) => typeof k === "string")
+          .slice()
+          .sort((a, b) => {
+            const na = parseHexKey(a);
+            const nb = parseHexKey(b);
+            if (!Number.isFinite(na) && !Number.isFinite(nb)) return String(a).localeCompare(String(b));
+            if (!Number.isFinite(na)) return 1;
+            if (!Number.isFinite(nb)) return -1;
+            return na - nb;
+          });
+      }
+
+      // Look up a group directly from artifact.operations[opKey].groups[groupKey].
+      // Returns the group object or null.
+      function getOperationGroup(opKey, groupKey) {
+        const ops = artifact && typeof artifact === "object" ? artifact.operations : null;
+        const opObj = ops && typeof ops === "object" ? ops[opKey] : null;
+        const opGroups = opObj && typeof opObj === "object" ? opObj.groups : null;
+        const g = opGroups && typeof opGroups === "object" ? opGroups[groupKey] : null;
+        if (g && typeof g === "object") return g;
+        const plan = finalPlanForRoute(groupKey, opKey);
+        if (!plan || typeof plan !== "object") return null;
+        const instances = {};
+        for (const iiKey of (Array.isArray(plan.instances) ? plan.instances : [])) {
+          if (typeof iiKey === "string") instances[iiKey] = { present: false, registers: {} };
+        }
+        return { name: "Planned group", instances };
+      }
+
+      // Collect all unique group keys across all operations.
+      function allGroupKeys() {
+        const ops = artifact && typeof artifact === "object" ? artifact.operations : null;
+        if (!ops || typeof ops !== "object") return [];
+        const keys = new Set();
+        for (const opObj of Object.values(ops)) {
+          if (!opObj || typeof opObj !== "object") continue;
+          const opGroups = opObj.groups;
+          if (!opGroups || typeof opGroups !== "object") continue;
+          for (const k of Object.keys(opGroups)) keys.add(k);
+        }
+        return sortedHexKeys(Array.from(keys));
+      }
+
+      // Collect group keys that exist in a specific operation.
+      function groupKeysForOp(opKey) {
+        const ops = artifact && typeof artifact === "object" ? artifact.operations : null;
+        if (!ops || typeof ops !== "object") return [];
+        const opObj = ops[opKey];
+        if (!opObj || typeof opObj !== "object") return [];
+        const opGroups = opObj.groups;
+        if (!opGroups || typeof opGroups !== "object") return [];
+        return sortedHexKeys(Object.keys(opGroups));
+      }
+
+      function getGroupObject(groupObj) {
+        if (!groupObj || typeof groupObj !== "object") return { name: "Unknown", instances: {} };
+        // Operations-first: groups always have flat instances.
+        if (groupObj.instances && typeof groupObj.instances === "object") {
+          return groupObj;
+        }
+        // Legacy-ish: groupObj might itself be an instances map.
+        return { name: "Unknown", instances: groupObj };
+      }
+
+      function getInstanceObject(instanceObj) {
+        if (!instanceObj || typeof instanceObj !== "object") return { present: true, registers: {} };
+        // New schema: { present, registers }
+        if (instanceObj.registers && typeof instanceObj.registers === "object") return instanceObj;
+        // Legacy-ish: instanceObj might itself be registers.
+        return { present: true, registers: instanceObj };
+      }
+
+      function candidateTypeSpecsForLength(n) {
+        if (!Number.isFinite(n) || n <= 0) return [];
+        if (n === 1) return ["UCH", "I8", "BOOL", "HEX:1"];
+        if (n === 2) return ["UIN", "I16", "HEX:2"];
+        if (n === 3) return ["DATE_DMY_U8X3", "TIME_HMS_U8X3", "FWU", "FW", "HEX:3"];
+        if (n === 4) return ["EXP", "U32", "I32", "HEX:4"];
+        return [`HEX:${n}`, "STR:*"];
+      }
+
+      function bytesFromHex(rawHex) {
+        // Same acceptance as Python's bytes.fromhex: ASCII whitespace is allowed between
+        // bytes only, and every byte is exactly two hexadecimal digits.
+        if (typeof rawHex !== "string") return null;
+        const isHex = (ch) => /^[0-9a-fA-F]$/.test(ch);
+        const out = [];
+        let i = 0;
+        while (i < rawHex.length) {
+          const ch = rawHex[i];
+          if (ch === " " || ch === "\t" || ch === "\n" || ch === "\r" || ch === "\v" || ch === "\f") {
+            i += 1;
+            continue;
+          }
+          if (i + 1 >= rawHex.length || !isHex(ch) || !isHex(rawHex[i + 1])) return null;
+          out.push(parseInt(rawHex.slice(i, i + 2), 16));
+          i += 2;
+        }
+        return Uint8Array.from(out);
+      }
+
+      function decodeLatin1(bytes) {
+        if (!bytes || bytes.length === 0) return "";
+        let s = "";
+        for (let i = 0; i < bytes.length; i++) {
+          if (bytes[i] === 0x00) break;
+          s += String.fromCharCode(bytes[i]);
+        }
+        return s;
+      }
+
+      function decodeBcdByte(b) {
+        const hi = (b >> 4) & 0x0f;
+        const lo = b & 0x0f;
+        if (hi > 9 || lo > 9) return null;
+        return hi * 10 + lo;
+      }
+
+      function parseTypedValue(typeSpec, bytes) {
+        const t = String(typeSpec || "").trim().toUpperCase();
+        if (!bytes) return { value: null, error: "missing bytes" };
+
+        if (t.startsWith("STR:")) {
+          return { value: decodeLatin1(bytes), error: null };
+        }
+        if (t.startsWith("HEX:")) {
+          const parts = t.split(":", 2);
+          const expected = parseInt(parts[1] || "", 10);
+          if (bytes.length !== expected) return { value: null, error: `HEX expects ${expected} bytes` };
+          let hx = "";
+          for (let i = 0; i < bytes.length; i++) hx += bytes[i].toString(16).padStart(2, "0");
+          return { value: "0x" + hx, error: null };
+        }
+
+        function expectLen(n) {
+          if (bytes.length !== n) throw new Error(`${t} expects ${n} bytes`);
+        }
+
+        try {
+          switch (t) {
+            case "UCH": {
+              expectLen(1);
+              return { value: bytes[0], error: null };
+            }
+            case "I8": {
+              expectLen(1);
+              const v = (bytes[0] << 24) >> 24;
+              return { value: v, error: null };
+            }
+            case "BOOL": {
+              expectLen(1);
+              return { value: bytes[0] !== 0x00, error: null };
+            }
+            case "UIN": {
+              expectLen(2);
+              return { value: bytes[0] | (bytes[1] << 8), error: null };
+            }
+            case "I16": {
+              expectLen(2);
+              let v = bytes[0] | (bytes[1] << 8);
+              if (v & 0x8000) v = v - 0x10000;
+              return { value: v, error: null };
+            }
+            case "U32": {
+              expectLen(4);
+              const v = (bytes[0] | (bytes[1] << 8) | (bytes[2] << 16) | (bytes[3] << 24)) >>> 0;
+              return { value: v, error: null };
+            }
+            case "I32": {
+              expectLen(4);
+              const v = bytes[0] | (bytes[1] << 8) | (bytes[2] << 16) | (bytes[3] << 24);
+              return { value: v, error: null };
+            }
+            case "EXP": {
+              expectLen(4);
+              const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+              const f = dv.getFloat32(0, true);
+              if (Number.isNaN(f)) return { value: null, error: null };
+              return { value: f, error: null };
+            }
+            case "DATE_DMY_U8X3": {
+              expectLen(3);
+              const dd = bytes[0];
+              const mm = bytes[1];
+              const yy = bytes[2];
+              if (dd < 1 || dd > 31) throw new Error("day out of range");
+              if (mm < 1 || mm > 12) throw new Error("month out of range");
+              if (yy < 0 || yy > 99) throw new Error("year out of range");
+              const yyyy = 2000 + yy;
+              const checked = new Date(Date.UTC(yyyy, mm - 1, dd));
+              if (checked.getUTCFullYear() !== yyyy || checked.getUTCMonth() !== mm - 1 || checked.getUTCDate() !== dd) {
+                throw new Error("invalid calendar date");
+              }
+              const iso = `${yyyy.toString().padStart(4, "0")}-${mm.toString().padStart(2, "0")}-${dd
+                .toString()
+                .padStart(2, "0")}`;
+              return { value: iso, error: null };
+            }
+            case "TIME_HMS_U8X3": {
+              expectLen(3);
+              const hh = bytes[0];
+              const mi = bytes[1];
+              const ss = bytes[2];
+              if (hh > 23 || mi > 59 || ss > 59) throw new Error("time out of range");
+              const txt = `${hh.toString().padStart(2, "0")}:${mi.toString().padStart(2, "0")}:${ss
+                .toString()
+                .padStart(2, "0")}`;
+              return { value: txt, error: null };
+            }
+            case "FWU": {
+              expectLen(3);
+              if (bytes.every((value) => value === 255)) throw new Error("firmware unavailable");
+              return {value: bytes.map((value) => value.toString().padStart(2, "0")).join("."), error: null};
+            }
+            case "FW": {
+              expectLen(3);
+              const decodeFwComponent = (value) => {
+                const bcd = decodeBcdByte(value);
+                if (bcd !== null) return bcd;
+                if (Number.isInteger(value) && value >= 0 && value <= 99) return value;
+                return null;
+              };
+              const major = decodeFwComponent(bytes[0]);
+              const minor = decodeFwComponent(bytes[1]);
+              const patch = decodeFwComponent(bytes[2]);
+              if (major === null || minor === null || patch === null) {
+                throw new Error("invalid FW version");
+              }
+              return {
+                value: `${major.toString().padStart(2, "0")}.${minor
+                  .toString()
+                  .padStart(2, "0")}.${patch.toString().padStart(2, "0")}`,
+                error: null,
+              };
+            }
+            default:
+              return { value: null, error: `unknown type: ${typeSpec}` };
+          }
+        } catch (e) {
+          return { value: null, error: String(e && e.message ? e.message : e) };
+        }
+      }
+
+      function formatValue(v) {
+        if (v === null || typeof v === "undefined") return "null";
+        if (typeof v === "number" && !Number.isFinite(v)) return String(v);
+        if (typeof v === "number") return Number.isInteger(v) ? String(v) : v.toFixed(6).replace(/0+$/, "").replace(/\.$/, "");
+        return String(v);
+      }
+
+      const B524_SECTIONS = [
+        { key: "scan_coverage", label: "Scan coverage and descriptions" },
+        { key: "system_information", label: "OP00 ReadSystemInformation" },
+        { key: "controller_registers", label: "OP02 GetParameter" },
+        { key: "operation_03", label: "OP03 ReadTimer" },
+        { key: "operation_08", label: "OP08 ReadVR91" },
+        { key: "operation_09", label: "OP09 GetEvent" },
+        { key: "operation_0b", label: "OP0B GetEventSetPoint" },
+        { key: "device_slots", label: "OP06 GetDeviceParameter" },
+        { key: "register_tables", label: "OP0B GetEventSetPoint" },
+        { key: "group_directory", label: "Legacy unqualified group-directory artifacts" },
+        { key: "register_constraints", label: "Legacy unqualified constraint artifacts" },
+      ];
+
+      const state = {
+        activeTab: null,
+        activeB524Section: "controller_registers",
+        activeB524GroupBySection: {},
+        activeNamespaceByGroup: {},
+        overrides: (meta && typeof meta === "object" && meta.type_overrides) || {},
+        b524Filters: {
+          hideAbsent: true,
+          hideDormant: true,
+          hideMissingInstances: true,
+        },
+        b509Filters: {
+          search: "",
+          hideTimeout: false,
+          hideEmpty: false,
+          hideDecodeErrors: false,
+        },
+      };
+
+      const tabsEl = document.getElementById("tabs");
+      const sheetArea = document.getElementById("sheetArea");
+      function getRowOverride(groupKey, rrKey, namespaceKey = null) {
+        const g = state.overrides && state.overrides[groupKey];
+        if (!g || typeof g !== "object") return null;
+        if (namespaceKey) {
+          for (const tree of [g.operations, g.namespaces]) {
+            const ns = tree && typeof tree === "object" ? tree[namespaceKey] : null;
+            if (ns && typeof ns === "object" && typeof ns[rrKey] === "string") return ns[rrKey];
+          }
+          return null;
+        }
+        return typeof g[rrKey] === "string" ? g[rrKey] : null;
+      }
+
+      function setRowOverride(groupKey, rrKey, typeSpec, namespaceKey = null) {
+        if (!state.overrides || typeof state.overrides !== "object") state.overrides = {};
+        if (!state.overrides[groupKey] || typeof state.overrides[groupKey] !== "object") state.overrides[groupKey] = {};
+        if (namespaceKey) {
+          if (!state.overrides[groupKey].namespaces || typeof state.overrides[groupKey].namespaces !== "object") {
+            state.overrides[groupKey].namespaces = {};
+          }
+          if (!state.overrides[groupKey].namespaces[namespaceKey] || typeof state.overrides[groupKey].namespaces[namespaceKey] !== "object") {
+            state.overrides[groupKey].namespaces[namespaceKey] = {};
+          }
+          state.overrides[groupKey].namespaces[namespaceKey][rrKey] = typeSpec;
+          // getRowOverride prefers the operation-keyed tree when one was saved, so keep it in step.
+          const opsTree = state.overrides[groupKey].operations;
+          if (opsTree && typeof opsTree === "object") {
+            if (!opsTree[namespaceKey] || typeof opsTree[namespaceKey] !== "object") opsTree[namespaceKey] = {};
+            opsTree[namespaceKey][rrKey] = typeSpec;
+          }
+          return;
+        }
+        state.overrides[groupKey][rrKey] = typeSpec;
+      }
+
+      function normalizeOpcodeKey(opcodeRaw) {
+        if (typeof opcodeRaw === "number" && Number.isInteger(opcodeRaw) && opcodeRaw >= 0 && opcodeRaw <= 0xff) {
+          return `0x${opcodeRaw.toString(16).padStart(2, "0")}`;
+        }
+        if (typeof opcodeRaw !== "string") return null;
+        const trimmed = opcodeRaw.trim().toLowerCase();
+        if (!trimmed) return null;
+        if (trimmed === "local") return "0x02";
+        if (trimmed === "remote") return "0x06";
+        const parsed = Number(trimmed);
+        if (!Number.isInteger(parsed) || parsed < 0 || parsed > 0xff) return null;
+        return `0x${parsed.toString(16).padStart(2, "0")}`;
+      }
+
+      function canonicalNamespaceLabel(namespaceKey) {
+        if (namespaceKey === "0x02") return "local";
+        if (namespaceKey === "0x06") return "remote";
+        return null;
+      }
+
+      function namespaceLabel(namespaceKey, label) {
+        const raw = typeof label === "string" && label ? label : namespaceKey;
+        if (!raw) return "";
+        if (!namespaceKey) return raw;
+        const canonical = canonicalNamespaceLabel(namespaceKey);
+        if (canonical) {
+          return "";
+        }
+        if (raw.startsWith("0x")) return namespaceKey;
+        return `${raw.charAt(0).toUpperCase()}${raw.slice(1)} (${namespaceKey})`;
+      }
+
+      function groupLabelForSection(groupKey, sectionKey, fallbackName) {
+        const opcode = requiredNamespaceForSection(sectionKey);
+        if (!opcode) return fallbackName;
+        const entry = B524_GROUP_NAMES && typeof B524_GROUP_NAMES === "object" ? B524_GROUP_NAMES[groupKey] : null;
+        if (!entry || typeof entry !== "object") return fallbackName;
+        const scoped = entry[opcode];
+        if (typeof scoped === "string" && scoped) return scoped;
+        if (scoped && typeof scoped === "object" && typeof scoped.name === "string" && scoped.name) {
+          return scoped.name;
+        }
+        return fallbackName;
+      }
+
+      function groupPresentationForSection(groupKey, sectionKey) {
+        const opcode = requiredNamespaceForSection(sectionKey);
+        if (!opcode) return null;
+        const entry = B524_GROUP_NAMES && typeof B524_GROUP_NAMES === "object" ? B524_GROUP_NAMES[groupKey] : null;
+        if (!entry || typeof entry !== "object") return null;
+        const scoped = entry[opcode];
+        return scoped && typeof scoped === "object" ? scoped : null;
+      }
+
+      function operationLabelForOpcode(namespaceKey) {
+        if (namespaceKey === "0x00") return "ReadSystemInformation";
+        if (namespaceKey === "0x01") return "DescribeParameter";
+        if (namespaceKey === "0x02") return "GetParameter";
+        if (namespaceKey === "0x03") return "ReadTimer";
+        if (namespaceKey === "0x04") return "WriteTimer";
+        if (namespaceKey === "0x06") return "GetDeviceParameter";
+        if (namespaceKey === "0x0b") return "GetEventSetPoint";
+        return namespaceKey || "UnknownOperation";
+      }
+
+      function sectionLabel(sectionKey) {
+        for (const section of B524_SECTIONS) {
+          if (section.key === sectionKey) return section.label;
+        }
+        return sectionKey;
+      }
+
+      function requiredNamespaceForSection(sectionKey) {
+        if (sectionKey === "controller_registers") return "0x02";
+        if (sectionKey === "device_slots") return "0x06";
+        return null;
+      }
+
+
+
+      function oneByteHex(value) {
+        if (typeof value !== "string") return null;
+        const normalized = value.trim().toLowerCase();
+        return /^[0-9a-f]{2}$/.test(normalized) ? normalized : null;
+      }
+
+      function entryIsStatusOnly(entry) {
+        const state = typeof entry.response_state === "string"
+          ? entry.response_state.trim().toLowerCase()
+          : "";
+        if (state === "status_only") return true;
+        const rawBody = typeof entry.raw_hex === "string" && entry.raw_hex.trim().length > 0;
+        const reply = oneByteHex(entry.reply_hex);
+        return (reply === "00" || reply === "ff") && !rawBody;
+      }
+
+      function entryStatusRawByte(entry) {
+        if (!entry || typeof entry !== "object" || entryStatusKind(entry) !== "status_only") return null;
+        return oneByteHex(entry.reply_hex);
+      }
+
+      function entryStatusKind(entry) {
+        if (!entry || typeof entry !== "object") return "error";
+        const responseState = typeof entry.response_state === "string"
+          ? entry.response_state.trim().toLowerCase()
+          : "";
+        if (responseState === "empty_reply") return "dormant";
+        if (responseState === "timeout" || responseState === "nack") return "transport_failure";
+        const errTxt = typeof entry.error === "string" ? entry.error.trim() : "";
+        if (errTxt) {
+          const lower = errTxt.toLowerCase();
+          if (lower.startsWith("parse_error:") || lower.startsWith("decode_error:")) return "decode_error";
+          if (lower === "timeout" || lower.startsWith("transport_error:") || lower.startsWith("mcp_error:")) {
+            return "transport_failure";
+          }
+          return "error";
+        }
+        // A one-byte status carries no register value, so it makes no presence claim.
+        if (entryIsStatusOnly(entry)) return "status_only";
+        const access = typeof entry.flags_access === "string" ? entry.flags_access.trim().toLowerCase() : "";
+        if (access === "absent") return "absent";
+        if (access === "dormant") return "dormant";
+        return "ok";
+      }
+
+      function entryStatusLabel(entry) {
+        const kind = entryStatusKind(entry);
+        if (kind === "absent") return "Absent / no data";
+        if (kind === "dormant") return "Dormant (feature inactive)";
+        if (kind === "status_only") return "Status only";
+        if (kind === "transport_failure") return "Transport failure";
+        if (kind === "decode_error") return "Decode error";
+        if (kind === "error") return "Error";
+        return "OK";
+      }
+
+      function statusChipClass(kind) {
+        if (kind === "absent") return "status-chip status-absent";
+        if (kind === "dormant") return "status-chip status-dormant";
+        if (kind === "status_only") return "status-chip status-only";
+        if (kind === "transport_failure") return "status-chip status-transport";
+        if (kind === "decode_error") return "status-chip status-decode";
+        return "status-chip status-error";
+      }
+
+      function rowHasExplicitName(instancesObj, rrKey) {
+        if (!instancesObj || typeof instancesObj !== "object") return false;
+        for (const instanceObj of Object.values(instancesObj)) {
+          if (!instanceObj || typeof instanceObj !== "object") continue;
+          const registers = instanceObj.registers;
+          if (!registers || typeof registers !== "object") continue;
+          const entry = registers[rrKey];
+          if (!entry || typeof entry !== "object") continue;
+          for (const field of ["register_name", "ebusd_name"]) {
+            const value = entry[field];
+            if (typeof value === "string" && value.trim()) return true;
+          }
+        }
+        return false;
+      }
+
+      function rowIsAbsent(instancesObj, rrKey) {
+        if (!instancesObj || typeof instancesObj !== "object") return false;
+        let sawEntry = false;
+        for (const instanceObj of Object.values(instancesObj)) {
+          if (!instanceObj || typeof instanceObj !== "object") continue;
+          const registers = instanceObj.registers;
+          if (!registers || typeof registers !== "object") continue;
+          const entry = registers[rrKey];
+          if (!entry || typeof entry !== "object") continue;
+          sawEntry = true;
+          if (entryStatusKind(entry) !== "absent") return false;
+        }
+        return sawEntry;
+      }
+
+      function rowIsDormant(instancesObj, rrKey) {
+        if (!instancesObj || typeof instancesObj !== "object") return false;
+        let sawEntry = false;
+        for (const instanceObj of Object.values(instancesObj)) {
+          if (!instanceObj || typeof instanceObj !== "object") continue;
+          const registers = instanceObj.registers;
+          if (!registers || typeof registers !== "object") continue;
+          const entry = registers[rrKey];
+          if (!entry || typeof entry !== "object") continue;
+          sawEntry = true;
+          const kind = entryStatusKind(entry);
+          if (kind !== "dormant" && kind !== "absent") return false;
+        }
+        return sawEntry;
+      }
+
+      function visibleRegisterKeys(instancesObj) {
+        const rrSet = new Set();
+        if (!instancesObj || typeof instancesObj !== "object") return [];
+        for (const instanceObj of Object.values(instancesObj)) {
+          if (!instanceObj || typeof instanceObj !== "object") continue;
+          const registers = instanceObj.registers;
+          if (!registers || typeof registers !== "object") continue;
+          for (const rrKey of Object.keys(registers)) rrSet.add(rrKey);
+        }
+        const rrKeys = sortedHexKeys(Array.from(rrSet)).filter((rrKey) => rrKey !== "0x0000");
+        let lastKeep = -1;
+        for (let idx = 0; idx < rrKeys.length; idx += 1) {
+          const rrKey = rrKeys[idx];
+          if (rowHasExplicitName(instancesObj, rrKey) || !rowIsAbsent(instancesObj, rrKey)) {
+            lastKeep = idx;
+          }
+        }
+        if (lastKeep < 0) return [];
+        return rrKeys.slice(0, lastKeep + 1);
+      }
+
+      // Raw attributes provide profile-scoped annotations, not privilege or storage.
+      function flagBadges(accessValue) {
+        switch (accessValue) {
+          case "read_only_not_visible": return [{text:"read-only",cls:"flag-state"},{text:"not-visible",cls:"flag-other"}];
+          case "read_only_visible": return [{text:"read-only",cls:"flag-state"},{text:"visible",cls:"flag-other"}];
+          case "writable_not_visible": return [{text:"writable",cls:"flag-config"},{text:"not-visible",cls:"flag-other"}];
+          case "writable_visible": return [{text:"writable",cls:"flag-config"},{text:"visible",cls:"flag-other"}];
+          case "state_volatile": case "state_stable": case "config_installer": case "config_user":
+          case "valid": case "invalid": case "config_valid": case "config_sentinel":
+            return [{text:"legacy attribute interpretation (unqualified)",cls:"flag-other"}];
+          default:                  return [{text: accessValue, cls: "flag-other"}];
+        }
+      }
+
+      function appendAccessBadges(cell, accessValues) {
+        if (!accessValues.length) {
+          cell.innerHTML = "<div class='cell-missing'>—</div>";
+          return;
+        }
+        // Collect unique individual badges across all instances
+        const seen = new Set();
+        const badges = [];
+        for (const av of accessValues) {
+          for (const b of flagBadges(av)) {
+            if (!seen.has(b.text)) { seen.add(b.text); badges.push(b); }
+          }
+        }
+        for (const b of badges) {
+          const el = document.createElement("span");
+          el.className = "access-chip " + b.cls;
+          el.textContent = b.text;
+          cell.appendChild(el);
+        }
+      }
+
+      function countRegisters(instancesObj) {
+        let count = 0;
+        if (!instancesObj || typeof instancesObj !== "object") return 0;
+        for (const instanceObj of Object.values(instancesObj)) {
+          if (!instanceObj || typeof instanceObj !== "object") continue;
+          const registers = instanceObj.registers;
+          if (!registers || typeof registers !== "object") continue;
+          count += Object.keys(registers).length;
+        }
+        return count;
+      }
+
+      function _isB509Tab(tabId) {
+        return tabId === "b509";
+      }
+
+      function _isB555Tab(tabId) {
+        return tabId === "b555";
+      }
+
+      function _isB516Tab(tabId) {
+        return tabId === "b516";
+      }
+
+      function _isB524Tab(tabId) {
+        return tabId === "b524";
+      }
+
+      function _syncActiveTabClasses() {
+        for (const el of tabsEl.querySelectorAll(".tab")) {
+          if (el.dataset && el.dataset.tabId === state.activeTab) el.classList.add("active");
+          else el.classList.remove("active");
+        }
+      }
+
+      function buildTabs(hasB524, hasB555, hasB516, hasB509) {
+        tabsEl.innerHTML = "";
+        const orderedTabIds = [];
+
+        const pbsbTabs = [
+          { id: "b524", has: hasB524, label: "PB=B5 SB=24 - Vaillant Regulator Params" },
+          { id: "b509", has: hasB509, label: "PB=B5 SB=09 - Vaillant BAI Identity" },
+          { id: "b555", has: hasB555, label: "PB=B5 SB=55 - Vaillant Timer Programs" },
+          { id: "b516", has: hasB516, label: "PB=B5 SB=16 - Vaillant Energy Counters" },
+        ];
+        for (const def of pbsbTabs) {
+          if (!def.has) continue;
+          const btn = document.createElement("div");
+          btn.className = "tab";
+          btn.textContent = def.label;
+          btn.dataset.tabId = def.id;
+          btn.addEventListener("click", () => {
+            state.activeTab = def.id;
+            _syncActiveTabClasses();
+            renderActiveTab();
+          });
+          tabsEl.appendChild(btn);
+          orderedTabIds.push(def.id);
+        }
+
+        if (!state.activeTab || !orderedTabIds.includes(state.activeTab)) {
+          state.activeTab = orderedTabIds[0] || null;
+        }
+        _syncActiveTabClasses();
+      }
+
+      function renderB555Tab() {
+        const b555 = artifact && typeof artifact === "object" ? artifact.b555_dump : null;
+        if (!b555 || typeof b555 !== "object") {
+          sheetArea.innerHTML = "<div class='subtitle'>No B555 dump in artifact.</div>";
+          return;
+        }
+
+        const programs = b555.programs && typeof b555.programs === "object" ? b555.programs : {};
+        const rows = [];
+
+        for (const programKey of Object.keys(programs).sort()) {
+          const program = programs[programKey];
+          if (!program || typeof program !== "object") continue;
+          const label = typeof program.label === "string" && program.label ? program.label : programKey;
+          const selector = program.selector && typeof program.selector === "object" ? program.selector : {};
+          const zone = typeof selector.zone === "string" ? selector.zone : "n/a";
+          const hc = typeof selector.hc === "string" ? selector.hc : "n/a";
+
+          function pushRow(kind, key, entry, valueText) {
+            if (!entry || typeof entry !== "object") return;
+            rows.push({
+              programKey,
+              label,
+              selector: `zone=${zone} hc=${hc}`,
+              kind,
+              key,
+              valueText,
+              requestHex: typeof entry.request_hex === "string" ? entry.request_hex : "",
+              replyHex: typeof entry.reply_hex === "string" ? entry.reply_hex : "",
+              error: typeof entry.error === "string" ? entry.error : "",
+              status: typeof entry.status_label === "string" ? entry.status_label : (typeof entry.status === "string" ? entry.status : ""),
+            });
+          }
+
+          const config = program.config;
+          if (config && typeof config === "object") {
+            const parts = [];
+            if (typeof config.max_slots === "number") parts.push(`max_slots=${config.max_slots}`);
+            const setpointCount = typeof config.setpoint_count === "number" ? config.setpoint_count : config.temp_slots;
+            if (typeof setpointCount === "number") parts.push(`setpoints=${setpointCount}`);
+            if (typeof config.time_resolution_min === "number") parts.push(`resolution=${config.time_resolution_min}m`);
+            pushRow("A3", "config", config, parts.join(", ") || "config");
+          }
+
+          const slots = program.slots_per_weekday;
+          if (slots && typeof slots === "object") {
+            const dayMap = slots.days && typeof slots.days === "object" ? slots.days : {};
+            const valueText = Object.entries(dayMap).map(([day, count]) => `${day.slice(0, 3)}=${count}`).join(", ") || "slots/weekday";
+            pushRow("A4", "slots_per_weekday", slots, valueText);
+          }
+
+          const weekdays = program.weekdays && typeof program.weekdays === "object" ? program.weekdays : {};
+          for (const dayName of Object.keys(weekdays).sort()) {
+            const dayObj = weekdays[dayName];
+            if (!dayObj || typeof dayObj !== "object") continue;
+            const slotMap = dayObj.slots && typeof dayObj.slots === "object" ? dayObj.slots : {};
+            for (const slotKey of sortedHexKeys(Object.keys(slotMap))) {
+              const entry = slotMap[slotKey];
+              if (!entry || typeof entry !== "object") continue;
+              let valueText = typeof entry.status_label === "string" && entry.status_label && entry.status_label !== "available"
+                ? entry.status_label
+                : "entry";
+              if (typeof entry.start_text === "string" && typeof entry.end_text === "string") {
+                valueText = `${entry.start_text}-${entry.end_text}`;
+                if (typeof entry.temperature_c === "number") valueText += ` @ ${formatValue(entry.temperature_c)}C`;
+              }
+              pushRow("A5", `${dayName}:${slotKey}`, entry, valueText);
+            }
+          }
+        }
+
+        const card = document.createElement("div");
+        if (!rows.length) {
+          const msg = document.createElement("div");
+          msg.className = "subtitle";
+          msg.textContent = "No B555 rows in artifact.";
+          card.appendChild(msg);
+          sheetArea.innerHTML = "";
+          sheetArea.appendChild(card);
+          return;
+        }
+
+        const wrap = document.createElement("div");
+        wrap.className = "table-wrap";
+        const table = document.createElement("table");
+        const thead = document.createElement("thead");
+        const trHead = document.createElement("tr");
+        for (const col of ["Program", "Selector", "Entry", "Value", "Reply", "Error"]) {
+          const th = document.createElement("th");
+          th.textContent = col;
+          trHead.appendChild(th);
+        }
+        thead.appendChild(trHead);
+        table.appendChild(thead);
+
+        const tbody = document.createElement("tbody");
+        for (const row of rows) {
+          const tr = document.createElement("tr");
+          for (const value of [
+            row.label,
+            row.selector,
+            `${row.kind} ${row.key}`,
+            row.status ? `${row.valueText} (${row.status})` : row.valueText,
+            row.replyHex || "—",
+            row.error || "—",
+          ]) {
+            const td = document.createElement("td");
+            td.textContent = value;
+            tr.appendChild(td);
+          }
+          if (row.requestHex) {
+            tr.title = `request_hex=${row.requestHex}${row.replyHex ? `\nreply_hex=${row.replyHex}` : ""}`;
+          }
+          tbody.appendChild(tr);
+        }
+
+        table.appendChild(tbody);
+        wrap.appendChild(table);
+        card.appendChild(wrap);
+        sheetArea.innerHTML = "";
+        sheetArea.appendChild(card);
+      }
+
+      function renderB516Tab() {
+        const b516 = artifact && typeof artifact === "object" ? artifact.b516_dump : null;
+        if (!b516 || typeof b516 !== "object") {
+          sheetArea.innerHTML = "<div class='subtitle'>No B516 dump in artifact.</div>";
+          return;
+        }
+
+        const entries = b516.entries && typeof b516.entries === "object" ? b516.entries : {};
+        const rows = [];
+        for (const entryKey of Object.keys(entries).sort()) {
+          const entry = entries[entryKey];
+          if (!entry || typeof entry !== "object") continue;
+          rows.push({ entryKey, entry });
+        }
+
+        const card = document.createElement("div");
+        if (!rows.length) {
+          const msg = document.createElement("div");
+          msg.className = "subtitle";
+          msg.textContent = "No B516 entries in artifact.";
+          card.appendChild(msg);
+          sheetArea.innerHTML = "";
+          sheetArea.appendChild(card);
+          return;
+        }
+
+        const wrap = document.createElement("div");
+        wrap.className = "table-wrap";
+        const table = document.createElement("table");
+        const thead = document.createElement("thead");
+        const trHead = document.createElement("tr");
+        for (const col of ["Label", "Selector", "Status", "kWh", "Wh", "Request", "Reply", "Error"]) {
+          const th = document.createElement("th");
+          th.textContent = col;
+          trHead.appendChild(th);
+        }
+        thead.appendChild(trHead);
+        table.appendChild(thead);
+
+        const tbody = document.createElement("tbody");
+        for (const row of rows) {
+          const tr = document.createElement("tr");
+          const entry = row.entry;
+          const label = typeof entry.label === "string" && entry.label ? entry.label : row.entryKey;
+          const period = typeof entry.period === "string" ? entry.period : "n/a";
+          const source = typeof entry.source === "string" ? entry.source : "n/a";
+          const usage = typeof entry.usage === "string" ? entry.usage : "n/a";
+          const requestHex = typeof entry.request_hex === "string" ? entry.request_hex : "";
+          const replyHex = typeof entry.reply_hex === "string" ? entry.reply_hex : "";
+          const error = typeof entry.error === "string" ? entry.error : "";
+          const status = typeof entry.status === "string" ? entry.status : "";
+          const unavailable = status === "not_ok";
+          const valueKwh = unavailable
+            ? "unavailable"
+            : typeof entry.value_kwh === "number"
+              ? formatValue(entry.value_kwh)
+              : "—";
+          const valueWh = unavailable
+            ? "unavailable"
+            : typeof entry.value_wh === "number"
+              ? formatValue(entry.value_wh)
+              : "—";
+          const statusText = status === "ok" ? "OK" : status === "not_ok" ? "not OK" : "—";
+
+          const labelTd = document.createElement("td");
+          const nameEl = document.createElement("div");
+          nameEl.className = "offset-name";
+          nameEl.textContent = label;
+          labelTd.appendChild(nameEl);
+          const keyEl = document.createElement("div");
+          keyEl.className = "offset-name-secondary";
+          keyEl.textContent = row.entryKey;
+          labelTd.appendChild(keyEl);
+          tr.appendChild(labelTd);
+
+          const selectorTd = document.createElement("td");
+          selectorTd.textContent = `${period} / ${source} / ${usage}`;
+          const echoParts = [];
+          if (typeof entry.echo_period === "string") echoParts.push(`p=${entry.echo_period}`);
+          if (typeof entry.echo_source === "string") echoParts.push(`s=${entry.echo_source}`);
+          if (typeof entry.echo_usage === "string") echoParts.push(`u=${entry.echo_usage}`);
+          // echo_window/echo_qualifier are the pre-0.6.1 field names, kept
+          // readable here so artifacts written by 0.6.0 still render.
+          if (typeof entry.echo_window === "string") echoParts.push(`w=${entry.echo_window}`);
+          if (typeof entry.echo_qualifier === "string") echoParts.push(`q=${entry.echo_qualifier}`);
+          if (echoParts.length) {
+            const echoEl = document.createElement("div");
+            echoEl.className = "offset-name-secondary";
+            echoEl.textContent = `echo ${echoParts.join(" ")}`;
+            selectorTd.appendChild(echoEl);
+          }
+          const replyDate = entry.reply_date && typeof entry.reply_date === "object" ? entry.reply_date : null;
+          if (replyDate) {
+            const dateEl = document.createElement("div");
+            dateEl.className = "offset-name-secondary";
+            dateEl.textContent = `reply date ${replyDate.year}-${String(replyDate.month).padStart(2, "0")}-${String(replyDate.day).padStart(2, "0")}`;
+            selectorTd.appendChild(dateEl);
+          }
+          tr.appendChild(selectorTd);
+
+          const statusTd = document.createElement("td");
+          statusTd.textContent = statusText;
+          if (unavailable) statusTd.className = "cell-error";
+          tr.appendChild(statusTd);
+
+          for (const value of [valueKwh, valueWh, requestHex || "—", replyHex || "—", error || "—"]) {
+            const td = document.createElement("td");
+            td.textContent = value;
+            if (value === requestHex || value === replyHex) td.className = "cell-raw";
+            if (value === error && error) td.className = "cell-error";
+            tr.appendChild(td);
+          }
+
+          tbody.appendChild(tr);
+        }
+
+        table.appendChild(tbody);
+        wrap.appendChild(table);
+        card.appendChild(wrap);
+        sheetArea.innerHTML = "";
+        sheetArea.appendChild(card);
+      }
+
+      function renderB509Tab() {
+        const b509 = artifact && typeof artifact === "object" ? artifact.b509_dump : null;
+        if (!b509 || typeof b509 !== "object") {
+          sheetArea.innerHTML = "<div class='subtitle'>No B509 dump in artifact.</div>";
+          return;
+        }
+        const devices = b509.devices && typeof b509.devices === "object" ? b509.devices : {};
+        const rows = [];
+        for (const dstKey of sortedHexKeys(Object.keys(devices))) {
+          const dev = devices[dstKey];
+          if (!dev || typeof dev !== "object") continue;
+          const regs = dev.registers && typeof dev.registers === "object" ? dev.registers : {};
+          for (const addrKey of sortedHexKeys(Object.keys(regs))) {
+            const entry = regs[addrKey];
+            if (!entry || typeof entry !== "object") continue;
+            rows.push({ dstKey, addrKey, entry });
+          }
+        }
+
+        const card = document.createElement("div");
+
+        const filters = document.createElement("div");
+        filters.className = "filters";
+
+        const search = document.createElement("input");
+        search.className = "filter-input";
+        search.type = "text";
+        search.placeholder = "Search by register or name...";
+        search.value = state.b509Filters.search || "";
+        search.addEventListener("input", () => {
+          state.b509Filters.search = search.value || "";
+          renderB509Tab();
+        });
+        filters.appendChild(search);
+
+        function mkCheck(labelText, key) {
+          const label = document.createElement("label");
+          label.className = "filter-chip";
+          const cb = document.createElement("input");
+          cb.type = "checkbox";
+          cb.checked = !!state.b509Filters[key];
+          cb.addEventListener("change", () => {
+            state.b509Filters[key] = !!cb.checked;
+            renderB509Tab();
+          });
+          label.appendChild(cb);
+          label.appendChild(document.createTextNode(labelText));
+          filters.appendChild(label);
+        }
+        mkCheck("Hide timeouts", "hideTimeout");
+        mkCheck("Hide empty", "hideEmpty");
+        mkCheck("Hide decode errors", "hideDecodeErrors");
+        card.appendChild(filters);
+
+        const filtered = rows.filter((row) => {
+          const entry = row.entry;
+          const errTxt = typeof entry.error === "string" ? entry.error : "";
+          const rawHex = typeof entry.raw_hex === "string" ? entry.raw_hex : "";
+          const replyHex = typeof entry.reply_hex === "string" ? entry.reply_hex : "";
+          const ebusdName = typeof entry.ebusd_name === "string" ? entry.ebusd_name : "";
+          const myName = typeof entry.register_name === "string" ? entry.register_name : "";
+          const addrText = String(row.addrKey || "");
+          const haystack = `${row.dstKey} ${addrText} ${ebusdName} ${myName}`.toLowerCase();
+          const q = String(state.b509Filters.search || "").trim().toLowerCase();
+          if (q && !haystack.includes(q)) return false;
+          if (state.b509Filters.hideTimeout && errTxt.toLowerCase().includes("timeout")) return false;
+          if (state.b509Filters.hideEmpty && !rawHex && !replyHex) return false;
+          if (
+            state.b509Filters.hideDecodeErrors &&
+            (errTxt.toLowerCase().startsWith("parse_error:") || errTxt.toLowerCase().startsWith("decode_error:"))
+          ) {
+            return false;
+          }
+          return true;
+        });
+
+        if (!filtered.length) {
+          const msg = document.createElement("div");
+          msg.className = "subtitle";
+          msg.textContent = "No B509 rows match current filters.";
+          card.appendChild(msg);
+          sheetArea.innerHTML = "";
+          sheetArea.appendChild(card);
+          return;
+        }
+
+        const wrap = document.createElement("div");
+        wrap.className = "table-wrap";
+
+        const table = document.createElement("table");
+        const thead = document.createElement("thead");
+        const trHead = document.createElement("tr");
+        for (const col of ["Dst", "Register", "Name", "Type", "Value", "Raw", "Error"]) {
+          const th = document.createElement("th");
+          th.textContent = col;
+          trHead.appendChild(th);
+        }
+        thead.appendChild(trHead);
+        table.appendChild(thead);
+
+        const tbody = document.createElement("tbody");
+        for (const row of filtered) {
+          const tr = document.createElement("tr");
+          const entry = row.entry;
+          const errTxt = typeof entry.error === "string" ? entry.error : "";
+          const rawHex = typeof entry.raw_hex === "string" ? entry.raw_hex : "";
+          const replyHex = typeof entry.reply_hex === "string" ? entry.reply_hex : "";
+
+          function appendText(value, klass) {
+            const td = document.createElement("td");
+            if (klass) td.className = klass;
+            td.textContent = value;
+            tr.appendChild(td);
+            return td;
+          }
+
+          appendText(row.dstKey, "offset-label");
+          appendText(row.addrKey, "offset-label");
+
+          const nameTd = document.createElement("td");
+          const myName = typeof entry.register_name === "string" ? entry.register_name : "";
+          const ebusdName = typeof entry.ebusd_name === "string" ? entry.ebusd_name : "";
+          if (myName) {
+            const top = document.createElement("div");
+            top.className = "offset-name";
+            top.textContent = myName;
+            nameTd.appendChild(top);
+          }
+          if (ebusdName) {
+            const sub = document.createElement("div");
+            sub.className = myName ? "offset-name-secondary" : "offset-name";
+            sub.textContent = myName ? `ebusd: ${ebusdName}` : ebusdName;
+            nameTd.appendChild(sub);
+          }
+          if (!myName && !ebusdName) {
+            nameTd.innerHTML = "<div class='cell-missing'>—</div>";
+          }
+          tr.appendChild(nameTd);
+
+          appendText(typeof entry.type === "string" ? entry.type : "—");
+          appendText(formatValue(entry.value));
+          appendText(rawHex || replyHex || "—", "cell-raw");
+
+          const errTd = appendText(errTxt || "—", errTxt ? "cell-error" : "");
+          if (errTxt) errTd.parentElement.classList.add("cell-bad");
+          if (replyHex && rawHex && replyHex !== rawHex) {
+            tr.title = `reply_hex=${replyHex}\nraw_hex=${rawHex}`;
+          }
+          tbody.appendChild(tr);
+        }
+
+        table.appendChild(tbody);
+        wrap.appendChild(table);
+        card.appendChild(wrap);
+
+        sheetArea.innerHTML = "";
+        sheetArea.appendChild(card);
+      }
+
+      function b524GroupKeysForSection(sectionKey) {
+        const required = requiredNamespaceForSection(sectionKey);
+        if (!required) return [];
+        const all = groupKeysForOp(required);
+        const groups = finalPlanGroups();
+        if (groups === null) return all;
+        return Object.keys(groups)
+          .filter((groupKey) => finalPlanForRoute(groupKey, required) !== null)
+          .sort((a, b) => Number(a) - Number(b));
+      }
+
+      function finalPlanGroups() {
+        const scanPlan = meta && typeof meta === "object" ? meta.scan_plan : null;
+        if (!scanPlan || typeof scanPlan !== "object" || !("groups" in scanPlan)) return null;
+        return scanPlan.groups && typeof scanPlan.groups === "object" ? scanPlan.groups : null;
+      }
+
+      function finalPlanForRoute(groupKey, opcode) {
+        const groups = finalPlanGroups();
+        if (groups === null) return undefined;
+        const groupPlan = groups[groupKey];
+        if (!groupPlan || typeof groupPlan !== "object") return null;
+        const operations = groupPlan.operations;
+        if (operations && typeof operations === "object") {
+          const operationPlan = operations[opcode];
+          return operationPlan && typeof operationPlan === "object" ? operationPlan : null;
+        }
+        return normalizeOpcodeKey(groupPlan.opcode) === opcode ? groupPlan : null;
+      }
+
+      // Observed Vaillant addressing of the system timer row: 0x01 = noise
+      // reduction, 0x02 = ventilation, 0x03 = tariff.
+      const B524_TIMER_CHANNELS = {
+        "ventilation": [0x00, 0x02],
+        "noise-reduction": [0x00, 0x01],
+        "tariff": [0x00, 0x03],
+        "dhw": [0x01, 0x01],
+        "circulation": [0x01, 0x02],
+        "zone-cooling": [0x03, 0x01],
+        "zone-heating": [0x03, 0x02],
+      };
+      const B524_EVENT_SYSTEM_TYPES = {system: 0x00, dhw: 0x01, zone: 0x03};
+      const B524_TIMER_CHANNEL_BY_REQUEST_SELECTOR = Object.fromEntries(
+        Object.entries(B524_TIMER_CHANNELS).map(([name, pair]) => [`${pair[0]},${pair[1]}`, name])
+      );
+
+      // Derive a stored OP03 record's timer channel strictly from its request
+      // bytes, not from the recorded selector name (0.6.0 swapped two names
+      // for the same two addresses). Returns null when the bytes are missing
+      // or do not decode as an OP03 request.
+      function b524TimerChannelFromRequest(requestPayloadHex) {
+        const bytes = b524HexBytes(requestPayloadHex, 5);
+        if (!bytes || bytes[0] !== 0x03) return null;
+        return B524_TIMER_CHANNEL_BY_REQUEST_SELECTOR[`${bytes[1]},${bytes[3]}`] || null;
+      }
+
+      // Returns {selector, storedChannel, channelSource} with the OP03 timer
+      // channel corrected from request bytes when it is decodable; storedChannel
+      // is set only when the correction changes the displayed/used name.
+      function b524EffectiveSelector(row) {
+        const selector = row && row.selector && typeof row.selector === "object" && !Array.isArray(row.selector)
+          ? {...row.selector} : null;
+        if (!selector || typeof selector.channel !== "string") {
+          return {selector, storedChannel: null, channelSource: null};
+        }
+        const requestChannel = b524TimerChannelFromRequest(row.request_payload_hex);
+        if (requestChannel === null) {
+          return {selector, storedChannel: null, channelSource: "stored_selector_unverified"};
+        }
+        const storedChannel = selector.channel !== requestChannel ? selector.channel : null;
+        selector.channel = requestChannel;
+        return {selector, storedChannel, channelSource: "request_bytes"};
+      }
+
+      function b524HexBytes(raw, expectedLength) {
+        if (typeof raw !== "string" || !new RegExp(`^[0-9a-fA-F]{${expectedLength * 2}}$`).test(raw)) return null;
+        return raw.match(/../g).map((value) => parseInt(value, 16));
+      }
+
+      function b524BytesHex(values) {
+        return values.map((value) => value.toString(16).padStart(2, "0")).join("");
+      }
+
+      function b524SelectorKey(selector) {
+        if (!selector || typeof selector !== "object" || Array.isArray(selector)) return null;
+        return JSON.stringify(Object.keys(selector).sort().map((key) => [key, typeof selector[key], selector[key]]));
+      }
+
+      function b524CanonicalSelector(selector, operation) {
+        if (!selector || typeof selector !== "object" || Array.isArray(selector)) return null;
+        const byte = (value) => Number.isInteger(value) && value >= 0 && value <= 0xff;
+        if (operation === "WriteTimer") {
+          if (Object.keys(selector).sort().join(",") !== "channel,instance,weekday") return null;
+          if (!(selector.channel in B524_TIMER_CHANNELS) || !byte(selector.instance)
+              || !Number.isInteger(selector.weekday) || selector.weekday < 0 || selector.weekday > 6) return null;
+          if (!selector.channel.startsWith("zone-") && selector.instance !== 0) return null;
+          return {channel: selector.channel, instance: selector.instance, weekday: selector.weekday};
+        }
+        if (Object.keys(selector).sort().join(",") !== "address,instance,profile,weekday_code") return null;
+        if (!(selector.profile in B524_EVENT_SYSTEM_TYPES) || !byte(selector.instance)
+            || !byte(selector.address) || !byte(selector.weekday_code)) return null;
+        const addresses = selector.profile === "system" ? [1, 2, 3] : [1, 2];
+        if (!addresses.includes(selector.address)) return null;
+        return {
+          profile: selector.profile,
+          instance: selector.instance,
+          address: selector.address,
+          weekday_code: selector.weekday_code,
+        };
+      }
+
+      function b524OperationForSection(sectionKey) {
+        return {operation_03: "WriteTimer", operation_09: "SetEvent", operation_0b: "SetEventSetPoint"}[sectionKey] || null;
+      }
+
+      function b524BaselineReason(row, opcode, operation) {
+        if (!row || typeof row !== "object") return "record is missing";
+        if (row.response_state !== "value") return `response state is ${String(row.response_state || "unknown")}`;
+        if (!row.decoded || typeof row.decoded !== "object" || Array.isArray(row.decoded)) {
+          return "a decoded canonical baseline is required";
+        }
+        if (!b524CanonicalSelector(b524EffectiveSelector(row).selector, operation)) return "selector is not canonical for this operation";
+        const expectedLength = opcode === "0x03" ? 7 : 8;
+        if (!b524HexBytes(row.response_raw_hex, expectedLength)) return `raw baseline must contain ${expectedLength} bytes`;
+        return null;
+      }
+
+      function b524EditAvailability(row, operation, reads) {
+        const sourceOpcode = operation === "WriteTimer" ? "0x03" : operation === "SetEvent" ? "0x09" : "0x0b";
+        const sourceReason = b524BaselineReason(row, sourceOpcode, operation);
+        if (sourceReason) return {available: false, reason: sourceReason};
+        if (operation === "WriteTimer") return {available: true, reason: "complete decoded timer baseline"};
+        const key = b524SelectorKey(row.selector);
+        const matching = (opcode) => reads.filter((candidate) => candidate && typeof candidate === "object"
+          && normalizeOpcodeKey(candidate.opcode_hex || candidate.opcode) === opcode
+          && b524SelectorKey(candidate.selector) === key);
+        const events = matching("0x09");
+        const setpoints = matching("0x0b");
+        if (events.length !== 1 || setpoints.length !== 1) {
+          return {available: false, reason: "exactly one OP09 and one OP0B baseline are required for this selector"};
+        }
+        const eventReason = b524BaselineReason(events[0], "0x09", operation);
+        const setpointReason = b524BaselineReason(setpoints[0], "0x0b", operation);
+        if (eventReason || setpointReason) {
+          return {available: false, reason: `paired baseline is incomplete: ${eventReason || setpointReason}`};
+        }
+        return {available: true, reason: "complete decoded OP09/OP0B pair"};
+      }
+
+      function b524EditDocumentForRow(row, operation, reads, metaObj) {
+        const availability = b524EditAvailability(row, operation, reads);
+        if (!availability.available) throw new Error(availability.reason);
+        const destinationAddress = b524DestinationAddress(metaObj);
+        // The exported selector's channel must name the same address the
+        // baseline below was actually read from, not the stored label on a
+        // 0.6.0 artifact (see b524EffectiveSelector).
+        const selector = b524CanonicalSelector(b524EffectiveSelector(row).selector, operation);
+        if (operation === "WriteTimer") {
+          const raw = b524HexBytes(row.response_raw_hex, 7);
+          const values = [];
+          for (const offset of [1, 3, 5]) {
+            values.push(raw[offset] === 0x90 && raw[offset + 1] === 0x90 ? null : [raw[offset], raw[offset + 1]]);
+          }
+          return {schema_version: 1, destination_address: destinationAddress, operation, selector, values, expected_before_raw_hex: [row.response_raw_hex.toLowerCase()]};
+        }
+        const key = b524SelectorKey(row.selector);
+        const event = reads.find((candidate) => normalizeOpcodeKey(candidate && (candidate.opcode_hex || candidate.opcode)) === "0x09"
+          && b524SelectorKey(candidate.selector) === key);
+        const setpoint = reads.find((candidate) => normalizeOpcodeKey(candidate && (candidate.opcode_hex || candidate.opcode)) === "0x0b"
+          && b524SelectorKey(candidate.selector) === key);
+        const eventRaw = b524HexBytes(event.response_raw_hex, 8);
+        const setpointRaw = b524HexBytes(setpoint.response_raw_hex, 8);
+        const values = (operation === "SetEvent" ? eventRaw : setpointRaw).slice(1);
+        return {
+          schema_version: 1,
+          destination_address: destinationAddress,
+          operation,
+          selector,
+          values,
+          expected_before_raw_hex: [event.response_raw_hex.toLowerCase(), setpoint.response_raw_hex.toLowerCase()],
+        };
+      }
+
+      function b524ReadUint8(input, label) {
+        const text = String(input.value || "").trim();
+        const value = text ? Number(text) : NaN;
+        if (!Number.isInteger(value) || value < 0 || value > 0xff) throw new Error(`${label} must be an integer from 0 to 255 (decimal or 0xNN)`);
+        return value;
+      }
+
+      function b524DestinationAddress(metaObj) {
+        const raw = metaObj && (metaObj.destination_address ?? metaObj.dest ?? metaObj.dst);
+        const parsed = typeof raw === "number" ? raw : typeof raw === "string" && raw.trim() ? Number(raw) : NaN;
+        return Number.isInteger(parsed) && parsed >= 0 && parsed <= 0xff ? parsed : null;
+      }
+
+      function b524Destination(metaObj) {
+        const parsed = b524DestinationAddress(metaObj);
+        return parsed === null ? "unknown" : `0x${parsed.toString(16).padStart(2, "0")}`;
+      }
+
+      function b524BuildPreview(documentValue, metaObj) {
+        const destination = b524Destination(metaObj);
+        if (destination === "unknown") throw new Error("artifact destination is missing or invalid");
+        const destinationAddress = b524DestinationAddress(metaObj);
+        if (documentValue.destination_address !== destinationAddress) throw new Error("edit document destination does not match artifact target");
+        const operation = documentValue.operation;
+        const selector = b524CanonicalSelector(documentValue.selector, operation);
+        if (!selector) throw new Error("selector is not canonical for this operation");
+        const before = documentValue.expected_before_raw_hex.map((raw, index) => {
+          const length = operation === "WriteTimer" ? 7 : 8;
+          const parsed = b524HexBytes(raw, length);
+          if (!parsed) throw new Error(`baseline ${index + 1} is not a complete ${length}-byte value`);
+          return parsed;
+        });
+        let opcode;
+        let payload;
+        let after;
+        if (operation === "WriteTimer") {
+          if (!Array.isArray(documentValue.values) || documentValue.values.length !== 3) throw new Error("exactly three timer slots are required");
+          const channel = B524_TIMER_CHANNELS[selector.channel];
+          const slots = [];
+          for (let index = 0; index < 3; index += 1) {
+            const slot = documentValue.values[index];
+            if (slot === null) { slots.push(0x90, 0x90); continue; }
+            if (!Array.isArray(slot) || slot.length !== 2) throw new Error(`slot ${index + 1} must be a pair or unused`);
+            const [start, stop] = slot;
+            if (!Number.isInteger(start) || !Number.isInteger(stop) || start < 0 || start > 0x8f || stop < 0 || stop > 0x90 || start >= stop) {
+              throw new Error(`slot ${index + 1} must satisfy 0 <= start < stop <= 0x90`);
+            }
+            slots.push(start, stop);
+          }
+          opcode = 0x04;
+          payload = [opcode, channel[0], selector.instance, channel[1], selector.weekday, ...slots];
+          after = [[before[0][0], ...slots]];
+        } else {
+          if (!Array.isArray(documentValue.values) || documentValue.values.length !== 7
+              || documentValue.values.some((value) => !Number.isInteger(value) || value < 0 || value > 0xff)) {
+            throw new Error("exactly seven uint8 raw values are required");
+          }
+          opcode = operation === "SetEvent" ? 0x0a : 0x0c;
+          payload = [opcode, B524_EVENT_SYSTEM_TYPES[selector.profile], selector.instance, selector.address, selector.weekday_code, ...documentValue.values];
+          after = operation === "SetEvent"
+            ? [[before[0][0], ...documentValue.values], before[1].slice()]
+            : [before[0].slice(), [before[1][0], ...documentValue.values]];
+        }
+        const beforeHex = before.map(b524BytesHex);
+        const afterHex = after.map(b524BytesHex);
+        return {
+          schema_version: 1,
+          operation,
+          opcode_hex: `0x${opcode.toString(16).toUpperCase().padStart(2, "0")}`,
+          destination,
+          selector,
+          payload_hex: b524BytesHex(payload),
+          expected_before_raw_hex: beforeHex,
+          expected_after_raw_hex: afterHex,
+          diff: beforeHex.map((raw, index) => ({before_raw_hex: raw, after_raw_hex: afterHex[index], changed: raw !== afterHex[index]})),
+          live_send: false,
+          live_write: false,
+          native_write_available: false,
+        };
+      }
+
+      function b524DownloadEditDocument(documentValue) {
+        const blob = new Blob([JSON.stringify(documentValue, null, 2) + "\n"], {type: "application/json"});
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = "b524-operation-edit.json";
+        link.click();
+        URL.revokeObjectURL(link.href);
+      }
+
+      function b524AppendValueField(parent, labelText, value, onChange, index) {
+        const label = document.createElement("label");
+        label.className = "operation-editor-field";
+        label.textContent = labelText;
+        const input = document.createElement("input");
+        input.type = "text";
+        input.value = String(value);
+        input.dataset.role = "operation-value";
+        input.dataset.valueIndex = String(index);
+        input.addEventListener("input", onChange);
+        label.appendChild(input);
+        parent.appendChild(label);
+        return input;
+      }
+
+      function renderB524OperationEditor(sectionKey, rows, reads, container, metaObj) {
+        const operation = b524OperationForSection(sectionKey);
+        const table = document.createElement("table");
+        table.innerHTML = "<thead><tr><th>Selector</th><th>State</th><th>Raw response</th><th>Decoded</th><th>Qualification</th><th>Correlation</th><th>Attempts</th><th>Offline edit</th></tr></thead>";
+        const tbody = document.createElement("tbody");
+        const editorHost = document.createElement("div");
+
+        const openEditor = (row) => {
+          editorHost.innerHTML = "";
+          const documentValue = b524EditDocumentForRow(row, operation, reads, metaObj);
+          const editor = document.createElement("div"); editor.className = "operation-editor";
+          const heading = document.createElement("div"); heading.className = "table-title";
+          heading.textContent = `${operation} offline editor — ${Object.entries(documentValue.selector).map(([key, value]) => `${key}=${String(value)}`).join(", ")}`;
+          editor.appendChild(heading);
+          const boundary = document.createElement("div"); boundary.className = "subtitle";
+          boundary.textContent = `Recorded qualification: ${String(row.decode_qualification || "unknown")}. Candidate labels remain offline hints. No native write or network action is available.`;
+          editor.appendChild(boundary);
+          const grid = document.createElement("div"); grid.className = "operation-editor-grid";
+          const inputs = [];
+          const invalidate = () => { exportButton.disabled = true; previewBox.textContent = "Change pending. Preview again before export."; };
+          let timerSlots = null;
+          if (operation === "WriteTimer") {
+            timerSlots = documentValue.values.map((slot, index) => {
+              const cell = document.createElement("div"); cell.className = "operation-editor-field";
+              const unusedLabel = document.createElement("label"); unusedLabel.textContent = `Slot ${index + 1} unused (0x90/0x90)`;
+              const unused = document.createElement("input"); unused.type = "checkbox"; unused.checked = slot === null;
+              unused.dataset.role = "timer-slot-unused"; unused.dataset.slotIndex = String(index);
+              unused.addEventListener("change", invalidate); unusedLabel.appendChild(unused); cell.appendChild(unusedLabel);
+              const start = b524AppendValueField(cell, `Slot ${index + 1} start raw`, slot === null ? 0x90 : slot[0], invalidate, index * 2);
+              const stop = b524AppendValueField(cell, `Slot ${index + 1} stop raw`, slot === null ? 0x90 : slot[1], invalidate, index * 2 + 1);
+              grid.appendChild(cell);
+              return {unused, start, stop};
+            });
+          } else {
+            for (let index = 0; index < 7; index += 1) {
+              let label;
+              if (operation === "SetEvent") {
+                label = index === 0 ? "Event value 1 raw (meaning unknown; edit explicitly)" : `Event start ${index + 1} raw (candidate 10-minute code)`;
+              } else if (documentValue.selector.profile === "dhw") {
+                label = `Setpoint ${index + 1} raw (candidate states: 253 enable, 254 disable, 255 replacement)`;
+              } else {
+                label = `Setpoint ${index + 1} raw (candidate temperature = raw / 2 °C)`;
+              }
+              inputs.push(b524AppendValueField(grid, label, documentValue.values[index], invalidate, index));
+            }
+          }
+          editor.appendChild(grid);
+          const status = document.createElement("div"); status.className = "subtitle"; status.dataset.role = "operation-validation";
+          const previewBox = document.createElement("pre"); previewBox.className = "operation-preview"; previewBox.dataset.role = "operation-preview";
+          previewBox.textContent = "Preview has not been built.";
+          const actions = document.createElement("div"); actions.className = "operation-editor-actions";
+          const previewButton = document.createElement("button"); previewButton.type = "button"; previewButton.dataset.role = "operation-preview-button"; previewButton.textContent = "Preview encoded payload";
+          const exportButton = document.createElement("button"); exportButton.type = "button"; exportButton.dataset.role = "operation-export-button"; exportButton.textContent = "Export offline edit document"; exportButton.disabled = true;
+          let lastDocument = null;
+          previewButton.addEventListener("click", () => {
+            try {
+              const next = {...documentValue, values: []};
+              if (operation === "WriteTimer") {
+                next.values = timerSlots.map((slot, index) => slot.unused.checked ? null : [
+                  b524ReadUint8(slot.start, `slot ${index + 1} start`),
+                  b524ReadUint8(slot.stop, `slot ${index + 1} stop`),
+                ]);
+              } else {
+                next.values = inputs.map((input, index) => b524ReadUint8(input, `value ${index + 1}`));
+              }
+              const preview = b524BuildPreview(next, metaObj);
+              lastDocument = next;
+              previewBox.textContent = JSON.stringify(preview, null, 2);
+              status.textContent = "Offline preview validated. Export contains values and recorded baselines only; it cannot write to a device.";
+              exportButton.disabled = false;
+            } catch (error) {
+              lastDocument = null; exportButton.disabled = true;
+              status.textContent = String(error && error.message ? error.message : error);
+              previewBox.textContent = "Preview rejected.";
+            }
+          });
+          exportButton.addEventListener("click", () => { if (lastDocument) b524DownloadEditDocument(lastDocument); });
+          actions.appendChild(previewButton); actions.appendChild(exportButton);
+          editor.appendChild(actions); editor.appendChild(status); editor.appendChild(previewBox);
+          editorHost.appendChild(editor);
+        };
+
+        rows.forEach((row, index) => {
+          const effective = b524EffectiveSelector(row);
+          const displaySelector = effective.selector || row.selector;
+          let selector = displaySelector && typeof displaySelector === "object" ? Object.entries(displaySelector).map(([key, value]) => `${key}=${String(value)}`).join(", ") : "unqualified selector";
+          if (effective.storedChannel) selector += ` (stored_channel=${effective.storedChannel}, channel_source=request_bytes)`;
+          else if (effective.channelSource) selector += ` (channel_source=${effective.channelSource})`;
+          const decoded = row.decoded === null || typeof row.decoded === "undefined" ? "—" : JSON.stringify(row.decoded);
+          const values = [selector, row.response_state || "unknown", row.response_raw_hex || "—", decoded, row.decode_qualification || "unknown", row.selector_correlation || "unknown", row.request_attempts ?? "—"];
+          const tr = document.createElement("tr");
+          for (const value of values) { const td = document.createElement("td"); td.textContent = String(value); tr.appendChild(td); }
+          const action = document.createElement("td");
+          if (operation) {
+            const availability = b524EditAvailability(row, operation, reads);
+            const button = document.createElement("button"); button.type = "button"; button.textContent = "Edit offline";
+            button.dataset.role = "operation-edit-select"; button.dataset.operationEditIndex = String(index);
+            button.disabled = !availability.available; button.title = availability.reason;
+            button.addEventListener("click", () => openEditor(row)); action.appendChild(button);
+          } else {
+            action.textContent = "Read-only";
+          }
+          tr.appendChild(action); tbody.appendChild(tr);
+        });
+        table.appendChild(tbody); container.appendChild(table);
+        const note = document.createElement("div"); note.className = "subtitle";
+        note.textContent = "Offline editors require complete decoded canonical baselines. Event edits require one exact-selector OP09/OP0B pair in this artifact. This report cannot send a native write; no fetch, network call, or native writer is present.";
+        container.appendChild(note); container.appendChild(editorHost);
+      }
+
+      function b524SectionHasContent(sectionKey, operations, metaObj) {
+        if (sectionKey.startsWith("operation_")) {
+          const opcode = `0x${sectionKey.slice("operation_".length)}`;
+          const reads = artifact && Array.isArray(artifact.b524_operation_reads) ? artifact.b524_operation_reads : [];
+          return reads.some((row) => normalizeOpcodeKey(row && (row.opcode_hex || row.opcode)) === opcode);
+        }
+        if (sectionKey === "scan_coverage") {
+          return !!(metaObj && (metaObj.scan_coverage || metaObj.parameter_description_coverage));
+        }
+        if (sectionKey === "controller_registers" || sectionKey === "device_slots") {
+          return b524GroupKeysForSection(sectionKey).length > 0;
+        }
+        if (sectionKey === "system_information") {
+          return !!(metaObj && typeof metaObj === "object" && Array.isArray(metaObj.system_information) && metaObj.system_information.length);
+        }
+        if (sectionKey === "group_directory") {
+          return !!(operations && typeof operations === "object" && Array.isArray(operations.group_directory) && operations.group_directory.length);
+        }
+        if (sectionKey === "register_constraints") {
+          return !!(metaObj && typeof metaObj === "object" && metaObj.constraint_dictionary && Object.keys(metaObj.constraint_dictionary).length)
+            || !!(operations && typeof operations === "object" && Array.isArray(operations.register_constraints) && operations.register_constraints.length);
+        }
+        if (sectionKey === "register_tables") {
+          const reads = artifact && Array.isArray(artifact.b524_operation_reads) ? artifact.b524_operation_reads : [];
+          if (reads.some((row) => normalizeOpcodeKey(row && (row.opcode_hex || row.opcode)) === "0x0b")) return false;
+        }
+        return !!(operations && typeof operations === "object" && Array.isArray(operations[sectionKey]) && operations[sectionKey].length);
+      }
+
+      function visibleB524Sections(operations, metaObj) {
+        return B524_SECTIONS.filter((section) => b524SectionHasContent(section.key, operations, metaObj));
+      }
+
+      function renderB524OperationRows(sectionKey, mountTarget) {
+        const operations = artifact && typeof artifact === "object" ? artifact.b524_operations : null;
+        const metaObj = artifact && typeof artifact === "object" ? artifact.meta : null;
+        const container = document.createElement("div");
+        const title = document.createElement("div");
+        title.className = "section-title";
+        title.textContent = sectionLabel(sectionKey);
+        container.appendChild(title);
+
+        if (sectionKey.startsWith("operation_")) {
+          const opcode = `0x${sectionKey.slice("operation_".length)}`;
+          const reads = artifact && Array.isArray(artifact.b524_operation_reads) ? artifact.b524_operation_reads : [];
+          const rows = reads.filter((row) => row && typeof row === "object" && normalizeOpcodeKey(row.opcode_hex || row.opcode) === opcode);
+          renderB524OperationEditor(sectionKey, rows, reads, container, metaObj);
+          mountTarget.innerHTML = ""; mountTarget.appendChild(container); return;
+        }
+
+        if (sectionKey === "scan_coverage") {
+          const scan = metaObj && metaObj.scan_coverage || {};
+          const descriptions = metaObj && metaObj.parameter_description_coverage || {};
+          const rows = [
+            ["Preset", scan.preset], ["Configured scope", scan.scope],
+            ["Request budget", scan.request_budget], ["Actual requests", scan.actual_requests],
+            ["Scan completed", scan.completed], ["Unknown groups", Array.isArray(scan.unknown_groups) ? scan.unknown_groups.join(", ") : "unknown"],
+            ["Device discovery qualified", scan.device_discovery_complete], ["Qualification incomplete", scan.qualification_incomplete],
+            ["Description request budget", descriptions.request_budget], ["Effective description budget", descriptions.effective_request_budget],
+            ["Description candidates", descriptions.eligible], ["Descriptions scheduled", descriptions.scheduled], ["Descriptions attempted", descriptions.attempted],
+            ["Descriptions received", descriptions.received], ["Descriptions interpreted", descriptions.interpreted], ["Descriptions omitted", descriptions.omitted],
+            ["Descriptions matched", descriptions.matched], ["Descriptions unavailable", descriptions.unavailable],
+            ["Descriptions unqualified", descriptions.unqualified], ["Descriptions skipped by budget", descriptions.budget_skipped],
+            ["Descriptions not attempted", descriptions.not_attempted],
+            ["Description request attempts", descriptions.request_attempts], ["Description retries", descriptions.retries],
+          ];
+          const families = descriptions.by_read_operation || {};
+          for (const opcode of Object.keys(families).sort()) {
+            const stats = families[opcode];
+            if (!stats || typeof stats !== "object") continue;
+            for (const name of ["eligible", "planned", "scheduled", "attempted", "received", "interpreted", "matched", "unavailable", "unqualified", "budget_skipped", "omitted", "not_attempted", "request_attempts", "retries"]) {
+              rows.push([`${opcode} ${name}`, stats[name]]);
+            }
+          }
+          const table = document.createElement("table");
+          table.innerHTML = "<thead><tr><th>Coverage</th><th>Observation</th></tr></thead>";
+          const tbody = document.createElement("tbody");
+          for (const [label, value] of rows) {
+            const tr = document.createElement("tr");
+            for (const cellValue of [label, value]) {
+              const td = document.createElement("td");
+              td.textContent = typeof cellValue === "undefined" || cellValue === null ? "unknown" : String(cellValue);
+              tr.appendChild(td);
+            }
+            tbody.appendChild(tr);
+          }
+          table.appendChild(tbody);
+          container.appendChild(table);
+          mountTarget.innerHTML = "";
+          mountTarget.appendChild(container);
+          return;
+        }
+
+        if (sectionKey === "system_information") {
+          const rows = metaObj && typeof metaObj === "object" && Array.isArray(metaObj.system_information)
+            ? metaObj.system_information
+            : [];
+          if (!rows.length) {
+            container.innerHTML += "<div class='subtitle'>No ReadSystemInformation entries in artifact.</div>";
+            mountTarget.innerHTML = "";
+            mountTarget.appendChild(container);
+            return;
+          }
+          const wrap = document.createElement("div");
+          wrap.className = "table-wrap";
+          const table = document.createElement("table");
+          table.innerHTML = "<thead><tr><th>Identifier</th><th>Name</th><th>Value</th><th>Raw reply</th><th>State</th></tr></thead>";
+          const tbody = document.createElement("tbody");
+          for (const row of rows) {
+            if (!row || typeof row !== "object") continue;
+            const tr = document.createElement("tr");
+            for (const value of [
+              typeof row.identifier === "string" ? row.identifier : "n/a",
+              typeof row.name === "string" ? row.name : "unknown",
+              typeof row.value === "number" ? formatValue(row.value) : "—",
+              typeof row.raw_hex === "string" && row.raw_hex ? row.raw_hex : "—",
+              typeof row.state === "string" ? row.state : "unknown",
+            ]) {
+              const td = document.createElement("td");
+              td.textContent = value;
+              tr.appendChild(td);
+            }
+            tbody.appendChild(tr);
+          }
+          table.appendChild(tbody);
+          wrap.appendChild(table);
+          container.appendChild(wrap);
+          mountTarget.innerHTML = "";
+          mountTarget.appendChild(container);
+          return;
+        }
+
+        if (sectionKey === "group_directory") {
+          const rows = [];
+          if (operations && typeof operations === "object" && Array.isArray(operations.group_directory)) {
+            for (const row of operations.group_directory) rows.push(row);
+          } else {
+            // Derive from operations-first structure: each unique group key
+            // gets one directory row, picking the first operation that has it.
+            for (const groupKey of allGroupKeys()) {
+              let groupObj = null;
+              const artOps = artifact && typeof artifact === "object" ? artifact.operations : null;
+              if (artOps && typeof artOps === "object") {
+                for (const opObj of Object.values(artOps)) {
+                  if (!opObj || typeof opObj !== "object") continue;
+                  const g = opObj.groups && typeof opObj.groups === "object" ? opObj.groups[groupKey] : null;
+                  if (g && typeof g === "object") { groupObj = getGroupObject(g); break; }
+                }
+              }
+              if (!groupObj) continue;
+              rows.push({
+                group: groupKey,
+                descriptor: groupObj.descriptor_observed,
+                reply_hex: null,
+              });
+            }
+          }
+          if (!rows.length) {
+            container.innerHTML += "<div class='subtitle'>No legacy group-directory entries in artifact.</div>";
+            mountTarget.innerHTML = "";
+            mountTarget.appendChild(container);
+            return;
+          }
+          const wrap = document.createElement("div");
+          wrap.className = "table-wrap";
+          const table = document.createElement("table");
+          table.innerHTML =
+            "<thead><tr><th>Group</th><th>Descriptor</th><th>Reply</th></tr></thead>";
+          const tbody = document.createElement("tbody");
+          for (const row of rows) {
+            const tr = document.createElement("tr");
+            for (const value of [
+              String(row.group || "n/a"),
+              typeof row.descriptor === "number" ? formatValue(row.descriptor) : "n/a",
+              typeof row.reply_hex === "string" && row.reply_hex ? row.reply_hex : "—",
+            ]) {
+              const td = document.createElement("td");
+              td.textContent = value;
+              tr.appendChild(td);
+            }
+            tbody.appendChild(tr);
+          }
+          table.appendChild(tbody);
+          wrap.appendChild(table);
+          container.appendChild(wrap);
+          mountTarget.innerHTML = "";
+          mountTarget.appendChild(container);
+          return;
+        }
+
+        if (sectionKey === "register_constraints") {
+          const dict = metaObj && typeof metaObj === "object" ? metaObj.constraint_dictionary : null;
+          const rows = [];
+          if (dict && typeof dict === "object") {
+            for (const groupKey of sortedHexKeys(Object.keys(dict))) {
+              const groupObj = dict[groupKey];
+              if (!groupObj || typeof groupObj !== "object") continue;
+              for (const rrKey of sortedHexKeys(Object.keys(groupObj))) {
+                const constraint = groupObj[rrKey];
+                if (!constraint || typeof constraint !== "object") continue;
+                rows.push({
+                  group: groupKey,
+                  register: rrKey,
+                  type: constraint.type || "n/a",
+                  min: typeof constraint.min !== "undefined" ? formatValue(constraint.min) : "n/a",
+                  max: typeof constraint.max !== "undefined" ? formatValue(constraint.max) : "n/a",
+                  step: typeof constraint.step !== "undefined" ? formatValue(constraint.step) : "n/a",
+                });
+              }
+            }
+          } else if (
+            operations
+            && typeof operations === "object"
+            && Array.isArray(operations.register_constraints)
+          ) {
+            for (const row of operations.register_constraints) {
+              if (!row || typeof row !== "object") continue;
+              rows.push({
+                group: typeof row.group === "string" ? row.group : "n/a",
+                register: typeof row.register_selector === "string" ? row.register_selector : "n/a",
+                type: typeof row.kind === "string" ? row.kind : (typeof row.reply_hex === "string" && row.reply_hex ? "raw" : "—"),
+                min: (typeof row.min_value === "number" || typeof row.min_value === "string") ? String(row.min_value) : "—",
+                max: (typeof row.max_value === "number" || typeof row.max_value === "string") ? String(row.max_value) : "—",
+                step: (typeof row.step_value === "number" || typeof row.step_value === "string") ? String(row.step_value) : "—",
+              });
+            }
+          }
+          if (!rows.length) {
+            container.innerHTML += "<div class='subtitle'>No legacy constraint rows in artifact.</div>";
+            mountTarget.innerHTML = "";
+            mountTarget.appendChild(container);
+            return;
+          }
+          const wrap = document.createElement("div");
+          wrap.className = "table-wrap";
+          const table = document.createElement("table");
+          table.innerHTML =
+            "<thead><tr><th>Group</th><th>Register</th><th>Type</th><th>Min</th><th>Max</th><th>Step</th></tr></thead>";
+          const tbody = document.createElement("tbody");
+          for (const row of rows) {
+            const tr = document.createElement("tr");
+            for (const value of [row.group, row.register, row.type, row.min, row.max, row.step]) {
+              const td = document.createElement("td");
+              td.textContent = String(value);
+              tr.appendChild(td);
+            }
+            tbody.appendChild(tr);
+          }
+          table.appendChild(tbody);
+          wrap.appendChild(table);
+          container.appendChild(wrap);
+          mountTarget.innerHTML = "";
+          mountTarget.appendChild(container);
+          return;
+        }
+
+        const opRows = operations && typeof operations === "object" ? operations[sectionKey] : null;
+        if (!Array.isArray(opRows) || !opRows.length) {
+          container.innerHTML += `<div class='subtitle'>No ${sectionLabel(sectionKey)} entries in artifact.</div>`;
+          mountTarget.innerHTML = "";
+          mountTarget.appendChild(container);
+          return;
+        }
+        const pre = document.createElement("pre");
+        pre.className = "cell-raw";
+        pre.textContent = JSON.stringify(opRows, null, 2);
+        container.appendChild(pre);
+        mountTarget.innerHTML = "";
+        mountTarget.appendChild(container);
+      }
+
+      function renderActiveGroup(groupKey, opKey, mountTarget = sheetArea) {
+        const rawGroup = getOperationGroup(opKey, groupKey);
+        if (!groupKey || !rawGroup) {
+          mountTarget.innerHTML = "<div class='subtitle'>No groups.</div>";
+          return;
+        }
+
+        const groupObj = getGroupObject(rawGroup);
+        const groupName = typeof groupObj.name === "string" && groupObj.name ? groupObj.name : "Unknown";
+        const resolvedGroupName = opKey === "0x02"
+          ? groupLabelForSection(groupKey, "controller_registers", groupName)
+          : opKey === "0x06"
+            ? groupLabelForSection(groupKey, "device_slots", groupName)
+            : groupName;
+
+        function instanceIsConnected(instancesObj, iiKey, namespaceKey) {
+          const inst = instancesObj[iiKey];
+          if (!inst || typeof inst !== "object") return false;
+          if (Object.prototype.hasOwnProperty.call(inst, "present")) return inst.present === true;
+          const regs = inst.registers;
+          if (!regs || typeof regs !== "object") return false;
+          if (namespaceKey === "0x06" || opKey === "0x06") {
+            // OP=0x06: RR=0x0001 (device_connected) is the universal indicator
+            const r1 = regs["0x0001"];
+            if (!r1 || typeof r1 !== "object") return false;
+            const kind = entryStatusKind(r1);
+            if (kind === "absent" || kind === "transport_failure") return false;
+            return !!r1.value;
+          }
+          // OP=0x02: group-specific presence heuristics
+          if (groupKey === "0x02") {
+            // GG=0x02 Heating Circuits: RR=0x0002 (circuit_type) != 0
+            const circuitType = regs["0x0002"];
+            if (circuitType && typeof circuitType === "object" && entryStatusKind(circuitType) === "ok") {
+              return !!circuitType.value;
+            }
+          }
+          if (groupKey === "0x03") {
+            // GG=0x03 Zones: RR=0x001C (zone_index) == 0xFF means absent
+            const zoneIdx = regs["0x001c"];
+            if (zoneIdx && typeof zoneIdx === "object" && entryStatusKind(zoneIdx) === "ok") {
+              return zoneIdx.value !== 255 && zoneIdx.value !== 0xFF;
+            }
+          }
+          // Generic: instance is connected if present=true and has non-dormant data
+          if (inst.present === false) return false;
+          for (const entry of Object.values(regs)) {
+            if (!entry || typeof entry !== "object") continue;
+            if (entryStatusKind(entry) === "ok") return true;
+          }
+          return false;
+        }
+
+        function buildGroupTable(instancesObj, namespaceKey = null) {
+          let instanceKeys = sortedHexKeys(Object.keys(instancesObj || {})).filter((iiKey) => {
+            const ii = parseInt(iiKey, 16);
+            if (namespaceKey === "0x06" || opKey === "0x06") return ii >= 1 && ii <= 8;
+            if (groupKey === "0x02") return ii >= B524_CIRCUIT_II_MIN && ii <= 9;
+            return true;
+          });
+          if (state.b524Filters.hideMissingInstances) {
+            instanceKeys = instanceKeys.filter((iiKey) => instanceIsConnected(instancesObj, iiKey, namespaceKey));
+          }
+          // Build a filtered view with only visible instances for row filtering
+          const visibleInstances = {};
+          for (const iiKey of instanceKeys) {
+            if (instancesObj[iiKey]) visibleInstances[iiKey] = instancesObj[iiKey];
+          }
+          let rrKeys = visibleRegisterKeys(visibleInstances);
+          if (groupKey === "0x00") {
+            rrKeys = rrKeys.filter((rrKey) => parseHexKey(rrKey) <= 0x00FF);
+          }
+          if (state.b524Filters.hideAbsent) {
+            rrKeys = rrKeys.filter((rrKey) => !rowIsAbsent(visibleInstances, rrKey));
+          }
+          if (state.b524Filters.hideDormant) {
+            rrKeys = rrKeys.filter((rrKey) => !rowIsDormant(visibleInstances, rrKey));
+          }
+
+          if (!rrKeys.length) {
+            const empty = document.createElement("div");
+            empty.className = "subtitle";
+            empty.textContent = "No visible registers.";
+            return empty;
+          }
+
+          const table = document.createElement("table");
+          const thead = document.createElement("thead");
+          const trHead = document.createElement("tr");
+          const th0 = document.createElement("th");
+          th0.className = "offset-cell";
+          const ggNum = parseInt(groupKey, 16);
+          const ggHex = ggNum.toString(16).toUpperCase().padStart(2, "0") + "h";
+          const nameStr = resolvedGroupName !== "Unknown" ? ` ${resolvedGroupName}` : "";
+          const presentation = groupPresentationForSection(
+            groupKey,
+            opKey === "0x02" ? "controller_registers" : "device_slots",
+          );
+          const rrMax = presentation && typeof presentation.rr_max === "string"
+            ? `; declared RR_max ${presentation.rr_max}`
+            : "";
+          th0.innerHTML = `Register <span style="opacity:.7;font-weight:500">(${ggHex}${nameStr}${rrMax})</span>`;
+          trHead.appendChild(th0);
+
+          for (const iiKey of instanceKeys) {
+            const th = document.createElement("th");
+            const inst = getInstanceObject(instancesObj[iiKey]);
+            const present = inst.present === false ? " (absent)" : "";
+            th.textContent = `${iiKey}${present}`;
+            trHead.appendChild(th);
+          }
+          thead.appendChild(trHead);
+          table.appendChild(thead);
+
+          const tbody = document.createElement("tbody");
+          for (const rrKey of rrKeys) {
+            let rowMyvaillantName = "";
+            let rowEbusdNames = new Set();
+            let rowTypeDefault = null;
+            let rowLen = null;
+            for (const iiKey of instanceKeys) {
+              const inst = getInstanceObject(instancesObj[iiKey]);
+              const regs = inst.registers || {};
+              const entry = regs && typeof regs === "object" ? regs[rrKey] : null;
+              if (!entry || typeof entry !== "object") continue;
+              if (!rowMyvaillantName && typeof entry.register_name === "string" && entry.register_name) {
+                rowMyvaillantName = entry.register_name;
+              }
+              if (typeof entry.ebusd_name === "string" && entry.ebusd_name) {
+                rowEbusdNames.add(entry.ebusd_name);
+              }
+              if (!rowTypeDefault && typeof entry.type === "string" && entry.type) rowTypeDefault = entry.type;
+              if (rowLen === null && typeof entry.raw_hex === "string" && entry.raw_hex) {
+                const b = bytesFromHex(entry.raw_hex);
+                if (b) rowLen = b.length;
+              }
+            }
+
+            const ebusdNameList = Array.from(rowEbusdNames).sort();
+            const override = getRowOverride(groupKey, rrKey, namespaceKey);
+            const rowType = override || rowTypeDefault;
+            const candidates = candidateTypeSpecsForLength(rowLen || 0);
+            const selectedType = rowType || (candidates[0] || null);
+
+            const tr = document.createElement("tr");
+            const td0 = document.createElement("td");
+            td0.className = "offset-cell";
+            const label = document.createElement("div");
+            label.className = "offset-label";
+            label.textContent = rrKey;
+            td0.appendChild(label);
+
+            if (rowMyvaillantName) {
+              const nameEl = document.createElement("div");
+              nameEl.className = "offset-name";
+              nameEl.textContent = rowMyvaillantName;
+              nameEl.title = "Canonical register name where available (register_name)";
+              td0.appendChild(nameEl);
+            }
+            if (ebusdNameList.length) {
+              const ebusdEl = document.createElement("div");
+              ebusdEl.className = rowMyvaillantName ? "offset-name-secondary" : "offset-name";
+              let txt = ebusdNameList[0];
+              if (ebusdNameList.length > 1) {
+                const head = ebusdNameList.slice(0, 3).join(", ");
+                txt = head + (ebusdNameList.length > 3 ? ", …" : "");
+                ebusdEl.title = ebusdNameList.join(", ");
+              }
+              if (rowMyvaillantName) txt = "ebusd: " + txt;
+              ebusdEl.textContent = txt;
+              td0.appendChild(ebusdEl);
+            }
+
+            const correspondenceText = b524CorrespondenceSecondaryText(opKey, groupKey, rrKey);
+            if (correspondenceText) {
+              const corrEl = document.createElement("div");
+              corrEl.className = "offset-name-secondary";
+              corrEl.textContent = correspondenceText;
+              corrEl.title = correspondenceText;
+              td0.appendChild(corrEl);
+            }
+
+            for (const iiKey of instanceKeys) {
+              const docsText = b524DocsCatalogText(opKey, groupKey, iiKey, rrKey);
+              if (!docsText) continue;
+              const docsEl = document.createElement("div");
+              docsEl.className = "offset-name-secondary";
+              docsEl.textContent = iiKey + " · " + docsText;
+              td0.appendChild(docsEl);
+            }
+
+            if (candidates.length) {
+              const sel = document.createElement("select");
+              sel.className = "type-select";
+              for (const t of candidates) {
+                const opt = document.createElement("option");
+                opt.value = t;
+                opt.textContent = t;
+                sel.appendChild(opt);
+              }
+              if (selectedType) sel.value = selectedType;
+              sel.addEventListener("change", () => {
+                setRowOverride(groupKey, rrKey, sel.value, opKey);
+                renderActiveGroup(groupKey, opKey, mountTarget);
+              });
+              td0.appendChild(sel);
+            }
+            tr.appendChild(td0);
+
+
+            for (const iiKey of instanceKeys) {
+              const td = document.createElement("td");
+              const inst = getInstanceObject(instancesObj[iiKey]);
+              const regs = inst.registers || {};
+              const entry = regs && typeof regs === "object" ? regs[rrKey] : null;
+
+              if (!entry) {
+                td.innerHTML = "<div class='cell-missing'>—</div>";
+                tr.appendChild(td);
+                continue;
+              }
+
+              const rawHex = typeof entry.raw_hex === "string" ? entry.raw_hex : "";
+              const valueBytes = rawHex ? bytesFromHex(rawHex) : null;
+              const displayValue = (typeof entry.value_display === "string" && entry.value_display.length)
+                ? entry.value_display
+                : entry.value;
+              const hasQualifiedValueLabel = (
+                typeof entry.enum_resolved_name === "string" && entry.enum_resolved_name.length
+                && typeof entry.value_label_qualification === "string" && entry.value_label_qualification.length
+              );
+              const statusKind = entryStatusKind(entry);
+              const statusLabel = entryStatusLabel(entry);
+              const decoded = (override || (!entry.codec_migration && !hasQualifiedValueLabel)) && selectedType && valueBytes
+                ? parseTypedValue(selectedType, valueBytes)
+                : { value: displayValue, error: null };
+
+              const statusRawByte = entryStatusRawByte(entry);
+              const valueTxt = statusKind === "status_only"
+                ? "status only"
+                : (statusKind === "absent" || statusKind === "dormant")
+                  ? statusKind
+                  : formatValue(decoded.value);
+              const valueEl = document.createElement("div");
+              valueEl.className = "cell-value";
+              if (statusKind === "absent" || statusKind === "dormant" || statusKind === "status_only") {
+                valueEl.classList.add("cell-value-muted");
+              }
+              valueEl.textContent = valueTxt;
+              td.appendChild(valueEl);
+
+              if (statusKind === "status_only") {
+                const rawEl = document.createElement("div");
+                rawEl.className = "cell-raw";
+                rawEl.textContent = statusRawByte ? `status byte ${statusRawByte}` : "status byte not retained";
+                td.appendChild(rawEl);
+              } else if (rawHex) {
+                const rawEl = document.createElement("div");
+                rawEl.className = "cell-raw";
+                rawEl.textContent = rawHex;
+                td.appendChild(rawEl);
+              }
+
+              if (typeof entry.candidate_name === "string" && entry.candidate_name) {
+                const candidateEl = document.createElement("div");
+                candidateEl.className = "cell-raw";
+                const evidence = typeof entry.candidate_evidence === "string"
+                  ? ` (${entry.candidate_evidence})`
+                  : "";
+                candidateEl.textContent = `Candidate annotation: ${entry.candidate_name}${evidence}`;
+                td.appendChild(candidateEl);
+              }
+
+              if (entry.codec_migration) {
+                const legacyEl = document.createElement("div");
+                legacyEl.className = "cell-raw";
+                legacyEl.textContent = `Legacy Explorer label: ${entry.codec_migration.source_label}; historical value retained. Overrides are separate interpretations.`;
+                td.appendChild(legacyEl);
+              }
+              const description = entry.parameter_description;
+              const bundled = entry.bundled_parameter_description;
+              if (bundled && typeof bundled === "object"
+                  && !["matches", "profile_mismatch", "profile_unqualified"].includes(bundled.verification)) {
+                const bundledEl = document.createElement("div");
+                bundledEl.className = "cell-raw";
+                const verification = typeof bundled.verification === "string"
+                  ? bundled.verification
+                  : "not_verified";
+                const isMismatch = verification === "differs";
+                const comparison = isMismatch
+                  ? "Description mismatch"
+                  : `Cached description ${verification}`;
+                bundledEl.textContent = `${comparison}: ${bundled.type || "unknown"} · min=${formatValue(bundled.min)} · max=${formatValue(bundled.max)} · step=${formatValue(bundled.step)}.`;
+                td.appendChild(bundledEl);
+              }
+              if (description && typeof description === "object") {
+                const descriptionEl = document.createElement("div");
+                descriptionEl.className = "cell-raw";
+                const codecQualified = !description.codec_provenance || description.codec_provenance === "selector_qualified";
+                if (description.qualification === "matched" && codecQualified) {
+                  const step = description.step_qualification === "unknown"
+                    ? "unknown"
+                    : formatValue(description.step);
+                  const codec = typeof description.type === "string" && description.type
+                    ? description.type
+                    : "unknown";
+                  descriptionEl.textContent = `Describe: min=${formatValue(description.min)}, max=${formatValue(description.max)}, step=${step}, ${codec}`;
+                } else if (description.reply_hex) {
+                  const step = description.step_qualification === "unknown"
+                    ? "unknown"
+                    : formatValue(description.step);
+                  const codec = typeof description.type === "string" && description.type
+                    ? description.type
+                    : "unknown";
+                  const provenance = typeof description.codec_provenance === "string"
+                    ? description.codec_provenance
+                    : "legacy_unknown";
+                  descriptionEl.textContent = `Describe raw evidence (unqualified): min=${formatValue(description.min)}, max=${formatValue(description.max)}, step=${step}, ${codec}, provenance=${provenance}.`;
+                } else {
+                  if (!(selectedType && selectedType.startsWith("STR:"))) {
+                    const reason = typeof description.reason === "string" ? `: ${description.reason}` : "";
+                    descriptionEl.textContent = `Parameter description unavailable${reason}; offline edit confirmation remains unvalidated.`;
+                  }
+                }
+                if (["DATE_DMY_U8X3", "TIME_HMS_U8X3"].includes(description.type)) {
+                  descriptionEl.textContent += " Candidate calendar/clock limits: display-only; range unvalidated.";
+                }
+                if (description.codec_migration) {
+                  descriptionEl.textContent += ` Legacy Explorer label: ${description.codec_migration.source_label}.`;
+                }
+                if (descriptionEl.textContent) td.appendChild(descriptionEl);
+              }
+
+              const evidence = b524EntryEvidence(
+                opKey, groupKey, iiKey, rrKey, entry,
+                (override && valueBytes && !decoded.error && decoded.value !== null && decoded.value !== undefined)
+                  ? override : null
+              );
+              if (evidence.explicit || evidence.overridden) {
+                // An explicit grade or an override is always visible; the full lines, including
+                // Unknown, are in the cell's hover details below.
+                const evidenceEl = document.createElement("div");
+                evidenceEl.className = "cell-raw";
+                evidenceEl.textContent = evidence.lines.join(" · ");
+                td.appendChild(evidenceEl);
+              }
+
+              if (typeof entry.flags_access === "string" && entry.flags_access && statusKind === "ok") {
+                const flagsEl = document.createElement("div");
+                flagsEl.className = "cell-flags";
+                appendAccessBadges(flagsEl, [entry.flags_access]);
+                td.appendChild(flagsEl);
+              }
+
+              const errTxt = typeof entry.error === "string" ? entry.error : decoded.error;
+              if (statusKind !== "ok") {
+                const statusEl = document.createElement("div");
+                statusEl.className = "cell-status";
+                const badge = document.createElement("span");
+                badge.className = statusChipClass(statusKind);
+                badge.textContent = statusLabel;
+                statusEl.appendChild(badge);
+                td.appendChild(statusEl);
+              }
+              if (statusKind !== "transport_failure" && errTxt && statusKind !== "absent") {
+                td.classList.add("cell-bad");
+                const errEl = document.createElement("div");
+                errEl.className = "cell-error";
+                errEl.textContent = errTxt;
+                td.appendChild(errEl);
+              }
+
+              const tipParts = [];
+              if (typeof entry.flags !== "undefined" && entry.flags !== null) tipParts.push(`flags=${entry.flags}`);
+              if (entry.flags_access) tipParts.push(`flags_access=${entry.flags_access}`);
+              if (entry.reply_hex) tipParts.push(`reply_hex=${entry.reply_hex}`);
+              if (entry.type) tipParts.push(`original_type=${entry.type}`);
+              if (typeof entry.value !== "undefined") tipParts.push(`original_value=${formatValue(entry.value)}`);
+              if (entry.enum_raw_name) tipParts.push(`enum_raw_name=${entry.enum_raw_name}`);
+              if (entry.enum_resolved_name) tipParts.push(`enum_resolved_name=${entry.enum_resolved_name}`);
+              if (entry.value_label_qualification) tipParts.push(`value_label_qualification=${entry.value_label_qualification} (presentation only; no write authority)`);
+              const constraintLiveProbe = entry.constraint_source === "opcode_0x01" || entry.constraint_source === "probe" || entry.constraint_scope === "opcode_0x01_probe";
+              if (entry.constraint_type && (entry.constraint_source === "static_catalog" || (entry.constraint_qualification === "legacy_unqualified" && !constraintLiveProbe))) tipParts.push("unscoped_catalog (unqualified): historical short-probe hints, not profile-scoped bounds or write-validation authority");
+              if (typeof entry.constraint_qualified === "boolean") tipParts.push(`constraint_qualified=${entry.constraint_qualified}`);
+              if (entry.constraint_type) tipParts.push(`constraint_type=${entry.constraint_type}`);
+              if (typeof entry.constraint_min !== "undefined") tipParts.push(`constraint_min=${formatValue(entry.constraint_min)}`);
+              if (typeof entry.constraint_max !== "undefined") tipParts.push(`constraint_max=${formatValue(entry.constraint_max)}`);
+              if (typeof entry.constraint_step !== "undefined") tipParts.push(`constraint_step=${formatValue(entry.constraint_step)}`);
+              if (entry.constraint_tt) tipParts.push(`constraint_tt=${entry.constraint_tt}`);
+              if (entry.constraint_scope) tipParts.push(`constraint_scope=${entry.constraint_scope}`);
+              if (entry.constraint_provenance) tipParts.push(`constraint_provenance=${entry.constraint_provenance}`);
+              if (entry.candidate_name) tipParts.push(`candidate_name=${entry.candidate_name}`);
+              if (description && typeof description === "object") tipParts.push(`parameter_description_qualification=${description.qualification || "unknown"}`);
+              tipParts.push(...evidence.lines);
+              if (tipParts.length) td.title = tipParts.join("\n");
+
+              tr.appendChild(td);
+            }
+
+            tbody.appendChild(tr);
+          }
+
+          table.appendChild(tbody);
+          return table;
+        }
+
+        mountTarget.innerHTML = "";
+
+        const filters = document.createElement("div");
+        filters.className = "filters";
+        const hideAbsentLabel = document.createElement("label");
+        hideAbsentLabel.className = "filter-chip";
+        const hideAbsentCb = document.createElement("input");
+        hideAbsentCb.type = "checkbox";
+        hideAbsentCb.checked = !!state.b524Filters.hideAbsent;
+        hideAbsentCb.addEventListener("change", () => {
+          state.b524Filters.hideAbsent = !!hideAbsentCb.checked;
+          renderActiveGroup(groupKey, opKey, mountTarget);
+        });
+        hideAbsentLabel.appendChild(hideAbsentCb);
+        hideAbsentLabel.appendChild(document.createTextNode("Hide absent"));
+        filters.appendChild(hideAbsentLabel);
+
+        const hideDormantLabel = document.createElement("label");
+        hideDormantLabel.className = "filter-chip";
+        const hideDormantCb = document.createElement("input");
+        hideDormantCb.type = "checkbox";
+        hideDormantCb.checked = !!state.b524Filters.hideDormant;
+        hideDormantCb.addEventListener("change", () => {
+          state.b524Filters.hideDormant = !!hideDormantCb.checked;
+          renderActiveGroup(groupKey, opKey, mountTarget);
+        });
+        hideDormantLabel.appendChild(hideDormantCb);
+        hideDormantLabel.appendChild(document.createTextNode("Hide dormant"));
+        filters.appendChild(hideDormantLabel);
+
+        const hideMissingLabel = document.createElement("label");
+        hideMissingLabel.className = "filter-chip";
+        const hideMissingCb = document.createElement("input");
+        hideMissingCb.type = "checkbox";
+        hideMissingCb.checked = !!state.b524Filters.hideMissingInstances;
+        hideMissingCb.addEventListener("change", () => {
+          state.b524Filters.hideMissingInstances = !!hideMissingCb.checked;
+          renderActiveGroup(groupKey, opKey, mountTarget);
+        });
+        hideMissingLabel.appendChild(hideMissingCb);
+        hideMissingLabel.appendChild(document.createTextNode("Hide missing instances"));
+        filters.appendChild(hideMissingLabel);
+
+        mountTarget.appendChild(filters);
+
+        // Operations-first: instances come directly from the operation's group.
+        // No merging or namespace splitting needed.
+        const finalPlan = finalPlanForRoute(groupKey, opKey);
+        const sourceInstances = groupObj.instances || {};
+        const activeInstances = finalPlan && Array.isArray(finalPlan.instances)
+          ? Object.fromEntries(finalPlan.instances.map((key) => [key, sourceInstances[key]]).filter(([, value]) => value && typeof value === "object"))
+          : sourceInstances;
+        mountTarget.appendChild(buildGroupTable(activeInstances, opKey));
+      }
+
+      function renderB524Tab() {
+        const operations = artifact && typeof artifact === "object" ? artifact.b524_operations : null;
+        const metaObj = artifact && typeof artifact === "object" ? artifact.meta : null;
+        const host = document.createElement("div");
+        const sectionTabs = document.createElement("div");
+        sectionTabs.className = "subtabs";
+        sectionTabs.id = "b524-section-tabs";
+
+        const renderedSections = visibleB524Sections(operations, metaObj);
+        const allowedSections = renderedSections.map((item) => item.key);
+        if (!allowedSections.length) {
+          host.innerHTML = "<div class='subtitle'>No B524 sections with scanned content in artifact.</div>";
+          sheetArea.innerHTML = "";
+          sheetArea.appendChild(host);
+          return;
+        }
+        if (!allowedSections.includes(state.activeB524Section)) {
+          state.activeB524Section = allowedSections[0];
+        }
+
+        for (const section of renderedSections) {
+          const btn = document.createElement("div");
+          btn.className = "tab";
+          if (state.activeB524Section === section.key) btn.classList.add("active");
+          btn.textContent = section.label;
+          btn.addEventListener("click", () => {
+            state.activeB524Section = section.key;
+            renderB524Tab();
+          });
+          sectionTabs.appendChild(btn);
+        }
+
+        host.appendChild(sectionTabs);
+        const sectionBody = document.createElement("div");
+        host.appendChild(sectionBody);
+        sheetArea.innerHTML = "";
+        sheetArea.appendChild(host);
+
+        const sectionKey = state.activeB524Section;
+        const requiredOp = requiredNamespaceForSection(sectionKey);
+        if (requiredOp) {
+          const groupKeys = b524GroupKeysForSection(sectionKey);
+          if (!groupKeys.length) {
+            sectionBody.innerHTML = `<div class='subtitle'>No ${sectionLabel(sectionKey)} groups in artifact.</div>`;
+            return;
+          }
+
+          let activeGroup = state.activeB524GroupBySection[sectionKey];
+          if (!groupKeys.includes(activeGroup)) activeGroup = groupKeys[0];
+          state.activeB524GroupBySection[sectionKey] = activeGroup;
+
+          const groupTabs = document.createElement("div");
+          groupTabs.className = "subtabs";
+          groupTabs.id = "b524-group-tabs";
+          for (const groupKey of groupKeys) {
+            const btn = document.createElement("div");
+            btn.className = "tab";
+            if (groupKey === activeGroup) btn.classList.add("active");
+            const rawGroup = getOperationGroup(requiredOp, groupKey);
+            const groupObj = rawGroup ? getGroupObject(rawGroup) : { name: "Unknown", instances: {} };
+            const groupName = typeof groupObj.name === "string" && groupObj.name ? groupObj.name : "Unknown";
+            const friendlyName = groupLabelForSection(groupKey, sectionKey, groupName);
+            const ggNum = parseInt(groupKey, 16);
+            const ggHex = ggNum.toString(16).toUpperCase().padStart(2, "0") + "h";
+            btn.textContent = friendlyName !== "Unknown" ? `${ggHex} ${friendlyName}` : ggHex;
+            btn.addEventListener("click", () => {
+              state.activeB524GroupBySection[sectionKey] = groupKey;
+              renderB524Tab();
+            });
+            groupTabs.appendChild(btn);
+          }
+          sectionBody.appendChild(groupTabs);
+
+          const groupMount = document.createElement("div");
+          sectionBody.appendChild(groupMount);
+          renderActiveGroup(activeGroup, requiredOp, groupMount);
+          return;
+        }
+
+        renderB524OperationRows(sectionKey, sectionBody);
+      }
+
+      function renderActiveTab() {
+        if (_isB524Tab(state.activeTab)) {
+          renderB524Tab();
+          return;
+        }
+        if (_isB555Tab(state.activeTab)) {
+          renderB555Tab();
+          return;
+        }
+        if (_isB516Tab(state.activeTab)) {
+          renderB516Tab();
+          return;
+        }
+        if (_isB509Tab(state.activeTab)) {
+          renderB509Tab();
+          return;
+        }
+        sheetArea.innerHTML = "<div class='subtitle'>No tab selected.</div>";
+      }
+
+      const hasB524 = !!(
+        allGroupKeys().length > 0
+        || (artifact && typeof artifact === "object" && artifact.b524_operations && typeof artifact.b524_operations === "object")
+        || (artifact && typeof artifact === "object" && Array.isArray(artifact.b524_operation_reads) && artifact.b524_operation_reads.length)
+        || (meta && typeof meta === "object" && meta.constraint_dictionary && typeof meta.constraint_dictionary === "object")
+      );
+      const hasB555 = !!(artifact && typeof artifact === "object" && artifact.b555_dump && typeof artifact.b555_dump === "object");
+      const hasB516 = !!(artifact && typeof artifact === "object" && artifact.b516_dump && typeof artifact.b516_dump === "object");
+      const hasB509 = !!(artifact && typeof artifact === "object" && artifact.b509_dump && typeof artifact.b509_dump === "object");
+      buildTabs(hasB524, hasB555, hasB516, hasB509);
+      renderActiveTab();
