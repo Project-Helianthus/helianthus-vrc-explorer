@@ -275,7 +275,7 @@ opcode,group,register,name,previous_name,vaillant_friendly_name,vaillant_name_vr
 0x02,0x02,0x001A,circuit_mixer_movement,circuit_status_heating_circuit_mixer,Status Heating Circuit Mixer,circuit_status_heating_circuit_mixer,,,,Hc{hc}MixerMovement
 0x02,0x02,0x001B,circuit_pump_unknown_8,circuit_pump_status,Status Pump,,,,,Hc{hc}Status
 0x02,0x02,0x001C,circuit_adaptive_heating_curve_offset,circuit_adaptive_heating_curve_offset,Adaptive heating curve offset,circuit_adaptive_heating_curve_offset,,,,Hc{hc}HeatCurveAdaption
-0x02,0x02,0x001D,circuit_unknown_9,circuit_dhw_quick_mode,Quick Mode DHW,,,,,Hc{hc}FrostProtThreshold
+0x02,0x02,0x001D,circuit_special_function_mode,circuit_dhw_quick_mode,Current circuit special function,,,,,Hc{hc}FrostProtThreshold (unconfirmed correspondence)
 0x02,0x02,0x001E,circuit_state,circuit_status_circuit,Status circuit,circuit_status_circuit,circuit_status_circuit,,circuitState,Hc{hc}PumpStatus
 0x02,0x02,0x001F,cooling_circuit_outdoor_temperature_limit_minimum,circuit_minimum_outside_temperature_cooling,Minimum outside temperature cooling,circuit_minimum_outside_temperature_cooling,circuit_minimum_outside_temperature_cooling,,,Hc{hc}RoomSetpoint
 0x02,0x02,0x0020,circuit_unknown_10,circuit_status_automatic_heating_cooling,Status automatic heatingcooling,,,,,Hc{hc}FlowTempCalc

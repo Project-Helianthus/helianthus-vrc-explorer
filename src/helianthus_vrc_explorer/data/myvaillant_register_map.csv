@@ -140,7 +140,7 @@ group,instance,register,leaf,ebusd_name,register_class,type_hint,opcode
 0x02,*,0x001A,mixer_movement,Hc{hc}MixerMovement,,,
 0x02,*,0x001B,circuit_state,Hc{hc}Status,,,
 0x02,*,0x001C,epsilon,Hc{hc}HeatCurveAdaption,,,
-0x02,*,0x001D,frost_protection_threshold,Hc{hc}FrostProtThreshold,config_limits,,
+0x02,*,0x001D,circuit_special_function_mode,,config,U8,0x02
 0x02,*,0x001E,pump_status,Hc{hc}PumpStatus,,,
 0x02,*,0x001F,room_temperature_setpoint,Hc{hc}RoomSetpoint,config_limits,,
 0x02,*,0x0020,calculated_flow_temperature,Hc{hc}FlowTempCalc,state,,

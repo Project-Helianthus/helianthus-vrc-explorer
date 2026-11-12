@@ -99,14 +99,15 @@ def test_default_hc_new_register_mappings_include_class_hints() -> None:
     csv_path = _CSV_PATH
     schema = MyvaillantRegisterMap.from_path(csv_path)
 
-    frost = schema.lookup(group=0x02, instance=0x00, register=0x001D)
+    frost = schema.lookup(group=0x02, instance=0x00, register=0x001D, opcode=0x02)
     mixer_pos = schema.lookup(group=0x02, instance=0x00, register=0x0021)
     pump_starts = schema.lookup(group=0x02, instance=0x00, register=0x0025)
     assert frost is not None
     assert mixer_pos is not None
     assert pump_starts is not None
-    assert frost.leaf == "frost_protection_threshold"
-    assert frost.register_class == "config_limits"
+    assert frost.leaf == "circuit_special_function_mode"
+    assert frost.register_class == "config"
+    assert frost.type_hint == "U8"
     assert mixer_pos.leaf == "mixer_position_percentage"
     assert mixer_pos.register_class == "state"
     assert pump_starts.leaf == "pump_starts_count"
