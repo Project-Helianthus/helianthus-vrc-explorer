@@ -144,7 +144,7 @@ def test_leaf_tree_node_renders_no_glyph_and_selecting_it_does_not_toggle() -> N
 
 
 @pytest.mark.parametrize("size", [(120, 40), (160, 30)])
-@pytest.mark.parametrize("long_value", [False, True], ids=["fits-width", "needs-hscroll"])
+@pytest.mark.parametrize("long_value", [False, True], ids=["short-value", "needs-hscroll"])
 def test_last_table_row_is_visible_when_the_table_does_not_fit(
     size: tuple[int, int], long_value: bool
 ) -> None:
@@ -167,7 +167,10 @@ def test_last_table_row_is_visible_when_the_table_does_not_fit(
             table.focus()
             table.move_cursor(row=table.row_count - 1)
             await pilot.pause()
-            assert table.show_horizontal_scrollbar is long_value
+            # Full canonical labels require horizontal scrolling at 120 columns.
+            assert table.show_horizontal_scrollbar is (long_value or size[0] == 120)
+            for index, row in enumerate(app._table_rows):
+                assert str(table.get_row_at(index)[0]) == row.display_label
             assert table.cursor_row == table.row_count - 1
             # The cursor row is the last scroll position and lies inside the clipped pane.
             assert table.scroll_y == table.max_scroll_y
@@ -184,7 +187,8 @@ def test_last_table_row_is_visible_when_the_table_does_not_fit(
 def test_scrollbars_follow_the_palette_and_horizontal_bar_hides_when_content_fits() -> None:
     async def exercise() -> None:
         app = browse_textual._BrowseApp(_tall_artifact(), allow_write=False)
-        async with app.run_test(size=(120, 40)) as pilot:
+        # At this width the full canonical labels fit without horizontal scrolling.
+        async with app.run_test(size=(160, 40)) as pilot:
             await _select_local_instance(app, pilot)
             table = app.query_one("#browse-table", DataTable)
             detail = app.query_one("#detail-pane")

@@ -43,6 +43,8 @@ def test_full_selector_separation(axis):
     # Each native identity field varies independently; dropping any axis conflates the rows.
     args = dict(opcode=2, group=0, instance=0, register=0xE)
     first = b524_docs_catalog_correspondence(**args)
+    assert first is not None
+    assert first.selector == (2, 0, 0, 0xE)
     args[axis] += 1
     second = b524_docs_catalog_correspondence(**args)
     assert second is None or first.selector != second.selector
@@ -59,6 +61,7 @@ def test_full_selector_separation(axis):
     if template is None:
         assert second is None
     else:
+        assert second is not None
         assert second.name == template["name"]
         assert second.selector == tuple(args.values())
 

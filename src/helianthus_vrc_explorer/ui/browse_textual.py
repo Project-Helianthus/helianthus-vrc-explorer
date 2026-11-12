@@ -1064,11 +1064,8 @@ if _TEXTUAL_IMPORT_ERROR is None:
                         change_indicator = f"{_WRITE_MARK}{change_indicator}"
                 marker = "" if change_indicator == "-" else change_indicator
                 value_cell = f"{value_text} {marker}".rstrip()
-                # Keep list labels compact; the detail pane retains the full name.
-                label = Text(row.display_label)
-                label.truncate(30, overflow="ellipsis")
                 table.add_row(
-                    label,
+                    row.display_label,
                     value_cell,
                     key=row.row_id,
                 )

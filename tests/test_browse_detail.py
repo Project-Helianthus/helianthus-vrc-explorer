@@ -260,7 +260,7 @@ def test_flags_section_splits_access_into_two_facets() -> None:
 
 
 def test_gates_section_g1_flags_legacy_access_label_as_unknown_not_read_only() -> None:
-    """Pins the child_lock/user_rw observation from the plan (section 2.5): a
+    """Pins the child_lock/user_rw observation from the plan (section 2.4): a
     legacy label must be surfaced as the real reason, never silently implied
     read-only."""
     row = _row()
