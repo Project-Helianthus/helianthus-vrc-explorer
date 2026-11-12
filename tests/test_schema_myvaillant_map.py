@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from helianthus_vrc_explorer.protocol.parser import parse_typed_value
 from helianthus_vrc_explorer.scanner.director import GROUP_CONFIG
 from helianthus_vrc_explorer.schema.myvaillant_map import MyvaillantRegisterMap
 
@@ -99,19 +100,29 @@ def test_default_hc_new_register_mappings_include_class_hints() -> None:
     csv_path = _CSV_PATH
     schema = MyvaillantRegisterMap.from_path(csv_path)
 
-    frost = schema.lookup(group=0x02, instance=0x00, register=0x001D)
+    frost = schema.lookup(group=0x02, instance=0x00, register=0x001D, opcode=0x02)
     mixer_pos = schema.lookup(group=0x02, instance=0x00, register=0x0021)
     pump_starts = schema.lookup(group=0x02, instance=0x00, register=0x0025)
     assert frost is not None
     assert mixer_pos is not None
     assert pump_starts is not None
-    assert frost.leaf == "frost_protection_threshold"
-    assert frost.register_class == "config_limits"
+    assert frost.leaf == "circuit_special_function_mode"
+    assert frost.register_class == "config"
+    assert frost.type_hint == "UCH"
     assert mixer_pos.leaf == "mixer_position_percentage"
     assert mixer_pos.register_class == "state"
     assert pump_starts.leaf == "pump_starts_count"
     assert pump_starts.register_class == "state"
     assert pump_starts.type_hint == "U32"
+
+
+@pytest.mark.parametrize("raw, expected", [(b"\x00", 0), (b"\x02", 2), (b"\xfe", 254)])
+def test_circuit_special_function_mode_decodes_unsigned_byte(raw: bytes, expected: int) -> None:
+    schema = MyvaillantRegisterMap.from_path(_CSV_PATH)
+    entry = schema.lookup(group=0x02, instance=0x00, register=0x001D, opcode=0x02)
+    assert entry is not None
+    assert entry.type_hint is not None
+    assert parse_typed_value(entry.type_hint, raw) == expected
 
 
 def test_loader_accepts_legacy_six_column_rows(tmp_path: Path) -> None:

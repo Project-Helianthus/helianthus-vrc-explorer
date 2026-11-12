@@ -275,7 +275,7 @@ opcode,group,register,name,previous_name,open_question
 0x02,0x02,0x001A,circuit_mixer_movement,circuit_status_heating_circuit_mixer,
 0x02,0x02,0x001B,circuit_pump_unknown_8,circuit_pump_status,A raw two-byte value related to the circuit pump; value class and meaning are not established.
 0x02,0x02,0x001C,circuit_adaptive_heating_curve_offset,circuit_adaptive_heating_curve_offset,
-0x02,0x02,0x001D,circuit_unknown_9,circuit_dhw_quick_mode,"Candidate interpretations, unconfirmed on the wire: a DHW quick mode, or a frost protection threshold; the catalog decodes a float32 in °C; unresolved."
+0x02,0x02,0x001D,circuit_special_function_mode,circuit_dhw_quick_mode,Hypothesis: candidate circuit special function mode and family enumeration; meaning and value table remain unconfirmed on the wire.
 0x02,0x02,0x001E,circuit_state,circuit_status_circuit,"Candidate interpretation, unconfirmed on the wire: an enumeration of the circuit state (0 standby, 1 heating, 2 cooling, 3 DHW); the assignment rests on observed naming and the hardware confirmation is pending."
 0x02,0x02,0x001F,cooling_circuit_outdoor_temperature_limit_minimum,circuit_minimum_outside_temperature_cooling,
 0x02,0x02,0x0020,circuit_unknown_10,circuit_status_automatic_heating_cooling,An observed one-byte raw value related to automatic heating and cooling; the meaning is not established.
