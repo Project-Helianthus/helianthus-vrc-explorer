@@ -467,7 +467,7 @@ def _names_section(
         DetailRow("Explorer", _explorer_name(row)),
         DetailRow(
             "register_name provenance",
-            "Explorer canonical name where available; otherwise a myVaillant map leaf",
+            "Canonical register name where available",
         ),
     ]
 

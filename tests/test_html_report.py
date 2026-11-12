@@ -913,7 +913,8 @@ console.log(JSON.stringify([
         ]
         assert entry["register_name"] == "system_off"
         assert "docs" not in str(entry)
-    assert "otherwise a myVaillant map leaf" in html
+    assert "Canonical register name where available" in html
+    assert "otherwise a myVaillant map leaf" not in html
 
 
 def _status_helpers_script(html: str, expression: str) -> str:

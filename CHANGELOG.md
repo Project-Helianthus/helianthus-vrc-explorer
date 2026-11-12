@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Rows without a canonical name show the register key (31 rows at this change).
+  The map-leaf display fallback is removed; map leaves remain in their own
+  correspondence columns and never supply `register_name`.
+
 - Breaking scan contract: schema 2.5 replaces `myvaillant_name` with
   `register_name` across scanner, replay, Browser and HTML. Older scans need
   their older reader or must be recreated; no migration, alias or dual key is

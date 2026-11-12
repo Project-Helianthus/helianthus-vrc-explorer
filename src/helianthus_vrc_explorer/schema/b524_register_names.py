@@ -1,7 +1,7 @@
 """Bundled, opcode-scoped semantic names for B524 registers.
 
 This is deliberately separate from the optional myVaillant/ebusd mappings:
-it carries only the VRC Explorer display name and cannot change a register's
+it carries the canonical register name and cannot change a register's
 codec, class, or ebusd alias.
 """
 

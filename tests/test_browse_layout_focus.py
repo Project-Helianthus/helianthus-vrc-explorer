@@ -143,8 +143,7 @@ def test_leaf_tree_node_renders_no_glyph_and_selecting_it_does_not_toggle() -> N
 # --- 1. the last table row is visible -----------------------------------------------------
 
 
-# Allow the full canonical catalog labels to fit; long values still overflow.
-@pytest.mark.parametrize("size", [(160, 40), (180, 30)])
+@pytest.mark.parametrize("size", [(120, 40), (160, 30)])
 @pytest.mark.parametrize("long_value", [False, True], ids=["fits-width", "needs-hscroll"])
 def test_last_table_row_is_visible_when_the_table_does_not_fit(
     size: tuple[int, int], long_value: bool
@@ -185,7 +184,7 @@ def test_last_table_row_is_visible_when_the_table_does_not_fit(
 def test_scrollbars_follow_the_palette_and_horizontal_bar_hides_when_content_fits() -> None:
     async def exercise() -> None:
         app = browse_textual._BrowseApp(_tall_artifact(), allow_write=False)
-        async with app.run_test(size=(160, 40)) as pilot:
+        async with app.run_test(size=(120, 40)) as pilot:
             await _select_local_instance(app, pilot)
             table = app.query_one("#browse-table", DataTable)
             detail = app.query_one("#detail-pane")
@@ -214,7 +213,7 @@ def test_scrollbars_follow_the_palette_and_horizontal_bar_hides_when_content_fit
 def test_horizontal_scrollbar_is_thin_and_inside_the_table_when_content_is_wider() -> None:
     async def exercise() -> None:
         app = browse_textual._BrowseApp(_tall_artifact(long_value=True), allow_write=False)
-        async with app.run_test(size=(160, 40)) as pilot:
+        async with app.run_test(size=(120, 40)) as pilot:
             await _select_local_instance(app, pilot)
             table = app.query_one("#browse-table", DataTable)
             assert table.virtual_size.width > table.size.width
@@ -286,7 +285,7 @@ def _assert_only_focused(app: Any, widget_id: str, pane: str, tabs_lit: bool, cu
 def test_every_section_gets_a_focused_look_while_the_others_are_dimmed() -> None:
     async def exercise() -> None:
         app = browse_textual._BrowseApp(_tall_artifact(), allow_write=False)
-        async with app.run_test(size=(160, 40)) as pilot:
+        async with app.run_test(size=(120, 40)) as pilot:
             await _select_local_instance(app, pilot)
             app._focus_tree()
             await pilot.pause()
@@ -353,7 +352,7 @@ def test_long_detail_values_wrap_at_the_pane_width_without_an_ellipsis() -> None
 def test_detail_pane_shows_the_full_register_name_on_screen() -> None:
     async def exercise() -> None:
         app = browse_textual._BrowseApp(_tall_artifact(), allow_write=False)
-        async with app.run_test(size=(160, 40)) as pilot:
+        async with app.run_test(size=(120, 40)) as pilot:
             await _select_local_instance(app, pilot)
             table = app.query_one("#browse-table", DataTable)
             table.focus()

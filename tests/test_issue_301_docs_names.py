@@ -1,3 +1,9 @@
+"""Compare against DOCS_EBUS_CHECKOUT when non-empty; invalid paths fail.
+
+Unset or empty selects the vendored snapshot. With an external checkout, both
+vendored tables must be byte-identical to their external source files.
+"""
+
 from __future__ import annotations
 
 import csv
@@ -23,18 +29,30 @@ ANNOTATIONS = (
 
 def docs_checkout():
     checkout = os.environ.get("DOCS_EBUS_CHECKOUT")
-    if not checkout:
-        return ROOT / "fixtures/docs-naming"
-    return Path(checkout)
+    path = Path(checkout) if checkout else ROOT / "fixtures/docs-naming"
+    assert path.is_dir(), f"Docs checkout does not exist: {path}"
+    return path
 
 
-def test_docs_checkout_uses_offline_snapshot_unless_explicit(monkeypatch, tmp_path):
+def test_docs_checkout_selects_snapshot(monkeypatch, tmp_path):
     monkeypatch.delenv("DOCS_EBUS_CHECKOUT", raising=False)
     assert docs_checkout() == ROOT / "fixtures/docs-naming"
     monkeypatch.setenv("DOCS_EBUS_CHECKOUT", "")
     assert docs_checkout() == ROOT / "fixtures/docs-naming"
     monkeypatch.setenv("DOCS_EBUS_CHECKOUT", str(tmp_path))
     assert docs_checkout() == tmp_path
+    monkeypatch.setenv("DOCS_EBUS_CHECKOUT", str(tmp_path / "missing"))
+    with pytest.raises(AssertionError, match="does not exist"):
+        docs_checkout()
+
+
+def test_vendored_tables_match_selected_checkout():
+    checkout = docs_checkout()
+    for name in ("b524-op02-register-names.csv", "b524-register-name-correspondence.csv"):
+        relative = Path("protocols/vaillant/fixtures") / name
+        assert (ROOT / "fixtures/docs-naming" / relative).read_bytes() == (
+            checkout / relative
+        ).read_bytes()
 
 
 def rows(path):

@@ -2602,7 +2602,7 @@ __ARTIFACT_JSON__
               const nameEl = document.createElement("div");
               nameEl.className = "offset-name";
               nameEl.textContent = rowMyvaillantName;
-              nameEl.title = "Explorer canonical name where available; otherwise a myVaillant map leaf (register_name)";
+              nameEl.title = "Canonical register name where available (register_name)";
               td0.appendChild(nameEl);
             }
             if (ebusdNameList.length) {
