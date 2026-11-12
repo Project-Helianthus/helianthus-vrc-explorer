@@ -73,6 +73,21 @@ FORBIDDEN_PATTERNS: tuple[ForbiddenPattern, ...] = (
         pattern=re.compile(r'read_opcode[^\n]*:\s*"0x00"'),
     ),
     ForbiddenPattern(
+        description="B524 namespace sentinel fallback ('single') in the HTML report client script",
+        path="src/helianthus_vrc_explorer/ui/report_assets/report.js",
+        pattern=re.compile(r'\|\|\s*"single"'),
+    ),
+    ForbiddenPattern(
+        description="B524 namespace sentinel fallback ('0x00') in the HTML report client script",
+        path="src/helianthus_vrc_explorer/ui/report_assets/report.js",
+        pattern=re.compile(r'namespaceKey\s*\|\|\s*"0x00"'),
+    ),
+    ForbiddenPattern(
+        description="B524 read opcode sentinel fallback ('0x00') in the HTML report client script",
+        path="src/helianthus_vrc_explorer/ui/report_assets/report.js",
+        pattern=re.compile(r'read_opcode[^\n]*:\s*"0x00"'),
+    ),
+    ForbiddenPattern(
         description="B524 namespace sentinel fallback ('0x00') in summary view",
         path="src/helianthus_vrc_explorer/ui/summary.py",
         pattern=re.compile(
