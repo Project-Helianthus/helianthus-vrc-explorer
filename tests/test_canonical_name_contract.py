@@ -30,18 +30,12 @@ def test_exact_settled_names_and_all_provisional_rows():
         )
         if row["open_question"]:
             provisional += 1
-            if (op, group, register) == (2, 2, 0x1D):
-                # Adopt the circuit mode name while retaining its wire uncertainty.
-                assert row["name"] == "circuit_special_function_mode"
-                assert row["previous_name"] == "circuit_dhw_quick_mode"
-                assert names[op, group, register] == row["name"]
-            else:
-                assert names[op, group, register] == row["previous_name"]
+            assert names[op, group, register] == row["previous_name"]
             assert annotation.provisional and annotation.open_question == row["open_question"]
         else:
             assert names[op, group, register] == row["name"]
     assert provisional == 142
-    assert names[2, 2, 0x1D] == "circuit_special_function_mode"
+    assert names[2, 2, 0x1D] == "circuit_dhw_quick_mode"
 
 
 @pytest.mark.parametrize("axis", ["opcode", "group", "instance", "register"])
