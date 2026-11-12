@@ -2,7 +2,20 @@
 
 ## Unreleased
 
-Current scan artifact schema: `2.4`.
+- Rows without a canonical name show the register key (31 rows at this change).
+  The map-leaf display fallback is removed; map leaves remain in their own
+  correspondence columns and never supply `register_name`.
+
+- Breaking scan contract: schema 2.5 replaces `myvaillant_name` with
+  `register_name` across scanner, replay, Browser and HTML. Older scans need
+  their older reader or must be recreated; no migration, alias or dual key is
+  provided. Old/new ambiguous keys are rejected without rewriting source files.
+- Adopt settled docs-owned names by exact selector. Open-question rows retain
+  provisional spellings and questions, including GG02 RR001D. Source annotation
+  columns remain separate. This artifact-changing contract requires renewed
+  affected security, hardware and candidate evidence before release.
+
+Current scan artifact schema: `2.5`.
 
 - Use the catalog spelling consistently in parameter-description documentation,
   internal names and tests. The installation-observation export error now says

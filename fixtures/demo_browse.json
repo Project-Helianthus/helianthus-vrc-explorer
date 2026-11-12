@@ -33,7 +33,7 @@
                 "0x0035": {
                   "ebusd_name": null,
                   "error": null,
-                  "myvaillant_name": "time",
+                  "register_name": "time",
                   "raw_hex": "122109",
                   "read_opcode": "0x02",
                   "reply_hex": null,
@@ -45,7 +45,7 @@
                 "0x0040": {
                   "ebusd_name": null,
                   "error": null,
-                  "myvaillant_name": "child_lock",
+                  "register_name": "child_lock",
                   "raw_hex": "01",
                   "read_opcode": "0x02",
                   "reply_hex": null,
@@ -57,7 +57,7 @@
                 "0x00da": {
                   "ebusd_name": null,
                   "error": null,
-                  "myvaillant_name": "commissioning_date",
+                  "register_name": "commissioning_date",
                   "raw_hex": "010113",
                   "read_opcode": "0x02",
                   "reply_hex": null,
@@ -80,7 +80,7 @@
                 "0x0000": {
                   "ebusd_name": "DhwMode",
                   "error": null,
-                  "myvaillant_name": "dhw_mode",
+                  "register_name": "dhw_mode",
                   "raw_hex": "01",
                   "read_opcode": "0x02",
                   "reply_hex": null,
@@ -92,7 +92,7 @@
                 "0x0001": {
                   "ebusd_name": "DhwTempDesired",
                   "error": null,
-                  "myvaillant_name": "dhw_temperature_setpoint",
+                  "register_name": "dhw_temperature_setpoint",
                   "raw_hex": "00004842",
                   "read_opcode": "0x02",
                   "reply_hex": null,
@@ -104,7 +104,7 @@
                 "0x0002": {
                   "ebusd_name": "DhwTemp",
                   "error": null,
-                  "myvaillant_name": "dhw_temperature",
+                  "register_name": "dhw_temperature",
                   "raw_hex": "00004242",
                   "read_opcode": "0x02",
                   "reply_hex": null,
@@ -127,7 +127,7 @@
                 "0x0007": {
                   "ebusd_name": "Hc1FlowTempDesired",
                   "error": null,
-                  "myvaillant_name": "heating_circuit_flow_setpoint",
+                  "register_name": "heating_circuit_flow_setpoint",
                   "raw_hex": "00003642",
                   "read_opcode": "0x02",
                   "reply_hex": null,
@@ -139,7 +139,7 @@
                 "0x000f": {
                   "ebusd_name": "Hc1HeatingCurve",
                   "error": null,
-                  "myvaillant_name": "heating_curve",
+                  "register_name": "heating_curve",
                   "raw_hex": "9a99d93f",
                   "read_opcode": "0x02",
                   "reply_hex": null,
@@ -151,7 +151,7 @@
                 "0x0010": {
                   "ebusd_name": "Hc1FlowTempMax",
                   "error": null,
-                  "myvaillant_name": "max_flow_temperature",
+                  "register_name": "max_flow_temperature",
                   "raw_hex": "00008c42",
                   "read_opcode": "0x02",
                   "reply_hex": null,
@@ -174,7 +174,7 @@
                 "0x0007": {
                   "ebusd_name": "Zone1RoomTempDesired",
                   "error": null,
-                  "myvaillant_name": "room_setpoint",
+                  "register_name": "room_setpoint",
                   "raw_hex": "0000b041",
                   "read_opcode": "0x02",
                   "reply_hex": null,
@@ -186,7 +186,7 @@
                 "0x000f": {
                   "ebusd_name": "Zone1RoomTemp",
                   "error": null,
-                  "myvaillant_name": "current_room_temperature",
+                  "register_name": "current_room_temperature",
                   "raw_hex": "0000a841",
                   "read_opcode": "0x02",
                   "reply_hex": null,
@@ -198,7 +198,7 @@
                 "0x0016": {
                   "ebusd_name": "Zone1Name",
                   "error": null,
-                  "myvaillant_name": "name",
+                  "register_name": "name",
                   "raw_hex": "5a6f6e65203100",
                   "read_opcode": "0x02",
                   "reply_hex": null,

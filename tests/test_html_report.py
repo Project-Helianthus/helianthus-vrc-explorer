@@ -121,7 +121,7 @@ def test_html_report_supports_b509_tab_and_dual_naming() -> None:
                                 "type": "EXP",
                                 "value": 0.0,
                                 "error": None,
-                                "myvaillant_name": "heating_circuit_flow_setpoint",
+                                "register_name": "heating_circuit_flow_setpoint",
                                 "ebusd_name": "Hc1FlowTempDesired",
                             }
                         },
@@ -475,7 +475,7 @@ def test_html_report_renders_flags_access_for_multi_operation_groups() -> None:
                                         "flags_access": "state_stable",
                                         "read_opcode": "0x02",
                                         "read_opcode_label": "local",
-                                        "myvaillant_name": "temperature_local",
+                                        "register_name": "temperature_local",
                                     }
                                 }
                             }
@@ -498,7 +498,7 @@ def test_html_report_renders_flags_access_for_multi_operation_groups() -> None:
                                         "flags_access": "config_user",
                                         "read_opcode": "0x06",
                                         "read_opcode_label": "remote",
-                                        "myvaillant_name": "temperature_remote",
+                                        "register_name": "temperature_remote",
                                     }
                                 }
                             }
@@ -911,9 +911,10 @@ console.log(JSON.stringify([
         entry = stored["operations"]["0x02"]["groups"]["0x00"]["instances"][ii]["registers"][
             "0x0007"
         ]
-        assert entry["myvaillant_name"] == "system_off"
+        assert entry["register_name"] == "system_off"
         assert "docs" not in str(entry)
-    assert "otherwise a myVaillant map leaf" in html
+    assert "Canonical register name where available" in html
+    assert "otherwise a myVaillant map leaf" not in html
 
 
 def _status_helpers_script(html: str, expression: str) -> str:

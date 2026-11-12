@@ -9,13 +9,18 @@ This directory contains **scan artifact fixtures** used for deterministic, offli
 
 A fixture is a JSON object with:
 
-- `schema_version`: Artifact schema version. Current writer: `2.4`.
+- `schema_version`: Artifact schema version. Current writer: `2.5`.
 - `meta`: arbitrary metadata about the scan (timestamps, device info, etc.).
 - `operations`: mapping of opcode -> operation data (operations-first structure).
 
 ## Schema Compatibility Strategy
 
-- Writers emit `schema_version: "2.4"` (operations-first contract, neutral codecs and independent raw API identity).
+Schema 2.5 uses `register_name`. The withdrawn `myvaillant_name` key is rejected,
+including when both keys occur. Older scans need their older reader or must be
+recreated; no key migration, alias or duplicate field is provided. The structural
+legacy support below applies only to inputs without that withdrawn key.
+
+- Writers emit `schema_version: "2.5"` (operations-first contract, neutral codecs and independent raw API identity).
 - Readers support legacy artifacts by in-memory migration:
   - unversioned fixtures (no `schema_version`)
   - `schema_version: "2.0"`
@@ -25,7 +30,7 @@ A fixture is a JSON object with:
 - Migration preserves register counts and register payload entries; no registers are dropped or
   synthesized during migration.
 - Checked-in fixtures remain historical input; #299 owns the native fixture refresh.
-  Readers migrate copies to `2.4` without rewriting source files.
+  Readers migrate copies to `2.5` without rewriting source files.
 
 ### `operations`
 
@@ -55,7 +60,7 @@ Each register entry contains:
 
 ```json
 {
-  "schema_version": "2.4",
+  "schema_version": "2.5",
   "meta": {},
   "operations": {
     "0x02": {
@@ -114,9 +119,9 @@ state, and an optional reference to the description catalog. Current values and
 raw value payloads are intentionally omitted. In particular, an echoed payload
 with FLAGS `00` stays distinct from a status-only `00` response.
 
-## 2.4 interpretations and native export boundary
+## 2.5 interpretations and native export boundary
 
-Version `2.4` keeps the operations-first structure and changes the output codec
+Version `2.5` keeps the operations-first structure and changes the output codec
 vocabulary and API identity representation. For established Explorer provenance
 only, scans through `2.3` and known application-baseline `1` inputs use this
 migration-on-read mapping:
@@ -143,7 +148,7 @@ requires `--allow-legacy-interpretation`. API version and revision are observed
 independently as `api_version_raw` and `api_revision_raw`; an `API1` display label
 cannot reconstruct missing identity.
 
-The three version domains are scan string `2.4`, application-baseline integer `2`
+The three version domains are scan string `2.5`, application-baseline integer `2`
 (readers accept `1`/`2`), and native evidence `/v1`. Export with
 `scripts/export_b524_evidence.py` from the retained sanitized source pair and
 independent identity manifest. Its output matches the docs native schemas:
@@ -166,3 +171,8 @@ The #297 exporter pins byte parity with docs-ebus. The optional
 vendoring them. The checked-in public and packaged native JSON files remain
 unchanged here; regenerate both pairs and distribute the application overlay in
 #299, including its licensing and package location.
+
+`docs-naming/` retains the public docs naming and correspondence CSV inputs for
+offline parity and generator regression tests. Set `DOCS_EBUS_CHECKOUT` to compare
+a current external docs checkout instead. These tables carry annotations and open
+questions, not device qualification evidence.

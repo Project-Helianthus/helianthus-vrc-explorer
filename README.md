@@ -104,7 +104,7 @@ Transport note:
 - Legacy artifacts that still carry mixed opcodes inside a single non-dual group are rendered per-namespace in browse/report surfaces to prevent local/remote intermixing and override bleed.
 - Persisted per-operation namespace topology is authoritative for consumers. Do not infer or rewrite namespace shape from descriptors.
 - B524 browse/report row identity is namespace-aware even for single-namespace groups: dedupe key `<group>:<namespace>:<instance>:<register>` and path format `B524/<section>/<operation>/<group-name>/<namespace-display>/<instance>/<register-name>` are round-trip stable.
-- Artifact schema contract is versioned (`schema_version: "2.4"` current, operations-first layout). Readers keep backward compatibility by migrating unversioned, `2.0`, `2.1`, `2.2`, and `2.3` artifacts in-memory.
+- Artifact schema contract is versioned (`schema_version: "2.5"` current, operations-first layout). Older scans containing the withdrawn `myvaillant_name` key require their older reader or must be recreated; no migration or alias is provided.
 - CI enforces these rules with `python scripts/check_b524_namespace_guardrails.py`.
 
 Coverage and parameter-description note:
@@ -118,7 +118,7 @@ Coverage and parameter-description note:
 - OP06 group-family labels GG01..GG0F are supplied by the packaged `b524_remote_group_names.json` display map, consistently across the planner, scan output, summary, browser, HTML and classic viewer, including previously saved artifacts. These labels do not change scan targets, bounds, remote-header predicates or OP02 names. `unused` is a display designation; it does not suppress a probe or establish universal absence.
 - Browser parent selections show navigation without aggregating descendant registers. Select a leaf to inspect its registers. HTML uses compact descriptions and access/visibility tags, and shows transport failures without duplicate exception text.
 - Config/State tabs apply to OP02/OP06 registers; OP00 system information is displayed directly. The recommended profile uses supported capacities for circuits and zones, and qualified population counts for solar circuits, cylinders and DeltaT. Empty replies and hidden default solar temperatures do not establish instance presence.
-- The `b524` command group provides Event/EventSetPoint reads (OP09/0B), VRC700 timer and VR91 reads (OP03/08), and offline payload previews for OP04/0A/0C. Timer/VR91 reads require manufacturer B5 and controller identity `70000` or `B7S00`. Event decoding remains experimental (`schema_unqualified`); an expected-length response does not establish native support. Event commands require an explicit `--weekday-code`. See the [CLI reference](docs/cli-reference.md) and [public operation specification](https://github.com/Project-Helianthus/helianthus-docs-ebus/blob/main/protocols/vaillant/ebus-vaillant-B524.md).
+- The `b524` command group provides Event/EventSetPoint reads (OP09/0B), VRC700 timer and VR91 reads (OP03/08), and offline payload previews for OP04/0A/0C. Timer/VR91 reads require manufacturer B5 and controller identity `70000` or `B7S00`. Event decoding remains experimental (`schema_unqualified`); an expected-length response does not establish native support. Event commands require an explicit `--weekday-code`. See the [CLI reference](docs/cli-reference.md) and [public operation specification](https://github.com/Project-Helianthus/helianthus-docs-ebus/blob/main/protocols/vaillant/ebus-vaillant-b524.md).
 - Bundled descriptions remain prior observations. Every entry keeps the native read opcode, GG, II and RR selector, so OP02 and OP06 never share same-numbered group limits. BASV0 reuse requires the exact controller identity; remote reuse additionally requires the independently observed remote group/address/firmware tuple. Compatible qualified live descriptions are compared by codec, width, min, max and step. Missing required identity or codec provenance remains unqualified. Known profile contradictions and actual description differences remain distinct from unavailable evidence. Sanitized baseline updates can be merged with `scripts/import_b524_descriptions.py ARTIFACT OUTPUT --merge` without erasing other observations. Adding `--catalog CATALOG` also merges the scan's instance capacities, observed counts and present remote device identities into the matching description-profile catalog entry; the catalog and baseline keep no serial, ESN, clock, free text or raw reply bytes. A remote device whose group, class and firmware are in the catalog entry is `exact`; a slot whose presence probe found no connected device is `absent`, stored with the other rows but not counted in `remote descriptions: N of M exact`, and never named in the description-profile reminder.
 - OP00 API version/revision and other count classes remain profile context. Ventilation hints can annotate known candidates; they do not establish a same-numbered GG route or prove absence.
 
@@ -142,7 +142,7 @@ Output:
 - HTML report: `b524_scan_0x??_<timestamp>.html`
 - Interactive terminals: after scan, the new fullscreen browse UI opens automatically (`q` to exit back to summary).
 
-Replay an ENH/ENS trace (no live bus I/O) into a fresh schema-2.4 JSON artifact plus matching HTML:
+Replay an ENH/ENS trace (no live bus I/O) into a fresh schema-2.5 JSON artifact plus matching HTML:
 ```bash
 python -m helianthus_vrc_explorer replay-trace /path/to/captured.trace --output-dir .
 ```
@@ -321,8 +321,8 @@ These naming annotations do not change codecs, attribute bytes, enrichment
 aliases, discovery limits or transport behavior. Browser and HTML apply them to
 a working copy of a saved artifact; the input file remains unchanged.
 
-`myvaillant_name` stores the Explorer canonical name where one exists,
-otherwise a myVaillant map leaf. It is not necessarily an observed app name.
+`register_name` stores the canonical register name, adopting the docs-owned
+name for exact settled selectors. Source map leaves never supply this field.
 Observed app names live only in the correspondence columns
 `myvaillant_name_vrc720` and `myvaillant_name_vrc700` (VRC720/VRC700 families).
 All observed-name identifications are **Hypothesis**: their source is not
@@ -335,7 +335,8 @@ docs names retain their open question: `unknown_11` and previous name
 `system_off` are correspondence, not a correction to Explorer `system_off`.
 The docs catalog has no instance column. Its instance-independent naming
 templates are bound at render time to each full `(OP, GG, II, RR)` selector;
-instances and operation namespaces remain distinct. No artifact fields change.
+instances and operation namespaces remain distinct. Schema 2.5 intentionally
+renames the canonical artifact key to `register_name`.
 Browser details use the migrated operation namespace for legacy rows without
 an explicit read opcode, preserving their docs catalog and observed-name
 annotations. The edit action uses the same namespace fallback, so writable, typed legacy rows can
@@ -450,7 +451,7 @@ invalid or non-Boolean responses remain unknown.
 
 ### Sanitized evidence export
 
-Three version domains are independent: scans emit string `2.4`; application
+Three version domains are independent: scans emit string `2.5`; application
 baselines emit integer `2` (readers accept `1` and `2`); native evidence retains
 its `b524-basv0-…/v1` schemas. API `api_version_raw` and `api_revision_raw` are
 independent identity strings. An `API1` display label cannot supply either field.

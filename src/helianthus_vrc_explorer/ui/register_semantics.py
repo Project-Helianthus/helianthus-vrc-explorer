@@ -148,7 +148,7 @@ def row_has_explicit_name(instances_obj: dict[str, Any], rr_key: str) -> bool:
         entry = registers.get(rr_key)
         if not isinstance(entry, dict):
             continue
-        for field in ("myvaillant_name", "ebusd_name"):
+        for field in ("register_name", "ebusd_name"):
             value = entry.get(field)
             if isinstance(value, str) and value.strip():
                 return True

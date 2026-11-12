@@ -1,7 +1,7 @@
 """Bundled, opcode-scoped semantic names for B524 registers.
 
 This is deliberately separate from the optional myVaillant/ebusd mappings:
-it carries only the VRC Explorer display name and cannot change a register's
+it carries the canonical register name and cannot change a register's
 codec, class, or ebusd alias.
 """
 
@@ -53,11 +53,30 @@ def b524_register_name(*, opcode: int, group: int, register: int) -> str | None:
     return bundled_b524_register_names().get((opcode, group, register))
 
 
+def _apply_b524_register_names(opcode: int, group: int, registers: dict[str, Any]) -> None:
+    for register_key, entry in registers.items():
+        if not isinstance(entry, dict):
+            continue
+        if "myvaillant_name" in entry:
+            raise ValueError("Withdrawn artifact key myvaillant_name")
+        try:
+            register = int(register_key, 0)
+        except ValueError:
+            continue
+        name = b524_register_name(
+            opcode=opcode,
+            group=group,
+            register=register,
+        )
+        if name is not None:
+            entry["register_name"] = name
+
+
 def apply_b524_canonical_register_names(operations: dict[str, Any]) -> None:
     """Apply bundled names to an artifact operation tree in place.
 
     Callers that need artifact immutability must pass their working copy. Only
-    ``myvaillant_name`` changes; reply data and existing metadata stay intact.
+    ``register_name`` changes; reply data and existing metadata stay intact.
     """
 
     for opcode_key, operation in operations.items():
@@ -86,17 +105,4 @@ def apply_b524_canonical_register_names(operations: dict[str, Any]) -> None:
                 registers = instance_obj.get("registers")
                 if not isinstance(registers, dict):
                     continue
-                for register_key, entry in registers.items():
-                    if not isinstance(entry, dict):
-                        continue
-                    try:
-                        register = int(register_key, 0)
-                    except ValueError:
-                        continue
-                    name = b524_register_name(
-                        opcode=opcode,
-                        group=group,
-                        register=register,
-                    )
-                    if name is not None:
-                        entry["myvaillant_name"] = name
+                _apply_b524_register_names(opcode, group, registers)

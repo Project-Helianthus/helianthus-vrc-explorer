@@ -95,7 +95,7 @@ explicit incomplete-validation exception still applies to a live write.
 
 Both `api_version_raw` and `api_revision_raw` are independently retained strings.
 Never infer one from the other or from the display identifier `API1`. The three
-version domains are scan schema string `2.4`, application baseline integer `2`
+version domains are scan schema string `2.5`, application baseline integer `2`
 (readers accept `1` and `2`), and native evidence `/v1`. Legacy known Explorer
 inputs migrate on copies with source labels/version retained; external BCD
 meanings are not guessed and historical decoded values are not replaced.

@@ -166,16 +166,16 @@ def validate_scan_artifact(
         value = entry.get("value")
         error = entry.get("error")
 
-        # Schema 2.4 introduces neutral plain-byte codec names. A new-version
+        # Schema 2.5 introduces neutral plain-byte codec names. A new-version
         # Explorer artifact must not silently publish a legacy interpretation;
         # <=2.3 readers use the provenance-gated adapter before reaching here.
         if (
-            source_schema_version == "2.4"
+            source_schema_version == "2.5"
             and has_explorer_provenance(artifact)
             and isinstance(type_spec, str)
             and type_spec in {"HDA:3", "HTI"}
         ):
-            errors.append(f"{loc}: schema 2.4 requires an explicit neutral codec")
+            errors.append(f"{loc}: schema 2.5 requires an explicit neutral codec")
 
         if isinstance(reply_hex, str) and reply_hex:
             try:

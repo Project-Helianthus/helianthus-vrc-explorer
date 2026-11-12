@@ -272,7 +272,7 @@ def _row() -> RegisterRow:
         instance_key="0x01",
         register_key="0x0005",
         name="0x0005",
-        myvaillant_name="name",
+        register_name="name",
         ebusd_name="",
         path="path",
         tab="config",

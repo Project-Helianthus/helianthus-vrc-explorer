@@ -90,7 +90,7 @@ def test_visible_rr_keys_keeps_named_absent_rows_and_trims_per_namespace() -> No
         "0x01": {
             "registers": {
                 "0x0035": {
-                    "myvaillant_name": "named_absent_remote",
+                    "register_name": "named_absent_remote",
                     "flags_access": "absent",
                     "error": None,
                 },
@@ -205,7 +205,7 @@ def test_status_only_flows_into_unchanged_grade_and_metadata() -> None:
         "evidence_grade": "Hypothesis",
         "acquisition_state": "completed",
         "read_opcode": "0x06",
-        "myvaillant_name": "synthetic_name",
+        "register_name": "synthetic_name",
     }
     before = copy.deepcopy(entry)
 

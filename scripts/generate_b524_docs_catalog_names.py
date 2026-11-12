@@ -32,6 +32,27 @@ def generate(checkout: Path, output: Path) -> None:
         writer.writerows(rows)
 
 
+def generate_register_names(checkout: Path, output: Path) -> None:
+    """Adopt exact settled selectors; retain every open-question spelling."""
+    with (checkout / SOURCE).open(newline="", encoding="utf-8") as handle:
+        catalog = {
+            tuple(int(row[field], 0) for field in FIELDS[:3]): row for row in csv.DictReader(handle)
+        }
+    with output.open(newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        fields = reader.fieldnames
+        rows = list(reader)
+    for row in rows:
+        selector = tuple(int(row[field], 0) for field in FIELDS[:3])
+        source = catalog.get(selector)
+        if source and not source["open_question"] and "unknown_" not in source["name"]:
+            row["name"] = source["name"]
+    with output.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields, lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(rows)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("docs_checkout", type=Path)
@@ -41,8 +62,15 @@ def main() -> None:
         default=Path(__file__).resolve().parents[1]
         / "src/helianthus_vrc_explorer/data/b524_docs_catalog_names.csv",
     )
+    parser.add_argument(
+        "--register-names-output",
+        type=Path,
+        help="Existing canonical table to update for settled selectors only",
+    )
     args = parser.parse_args()
     generate(args.docs_checkout, args.output)
+    if args.register_names_output is not None:
+        generate_register_names(args.docs_checkout, args.register_names_output)
 
 
 if __name__ == "__main__":

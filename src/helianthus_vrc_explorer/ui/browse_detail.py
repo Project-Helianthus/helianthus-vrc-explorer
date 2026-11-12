@@ -98,7 +98,7 @@ class DetailSection:
 
 
 def _explorer_name(row: RegisterRow) -> str:
-    return row.myvaillant_name or row.name or row.register_key
+    return row.register_name or row.name or row.register_key
 
 
 def _has_concrete_selector(row: RegisterRow) -> bool:
@@ -466,8 +466,8 @@ def _names_section(
     rows: list[DetailRow] = [
         DetailRow("Explorer", _explorer_name(row)),
         DetailRow(
-            "myvaillant_name provenance",
-            "Explorer canonical name where available; otherwise a myVaillant map leaf",
+            "register_name provenance",
+            "Canonical register name where available",
         ),
     ]
 

@@ -55,7 +55,7 @@ class RegisterRow:
     instance_key: str | None
     register_key: str
     name: str
-    myvaillant_name: str
+    register_name: str
     ebusd_name: str
     path: str
     tab: BrowseTab
@@ -104,7 +104,7 @@ class RegisterRow:
             rr_label = f"0x{register:04x}"
         except ValueError:
             rr_label = self.register_key
-        semantic_name = self.myvaillant_name or self.name
+        semantic_name = self.register_name or self.name
         compact_register = f"0x{register:x}" if "register" in locals() else self.register_key
         if not semantic_name or semantic_name in {self.register_key, compact_register}:
             return rr_label

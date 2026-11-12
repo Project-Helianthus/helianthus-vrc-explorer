@@ -82,7 +82,7 @@ def test_offline_acceptance_evidence_checker_cli_accepts_canonical_fixture() -> 
 
     assert result.returncode == 0
     assert result.stderr == ""
-    assert result.stdout == "offline acceptance evidence passed: 5 entries, schema 2.4\n"
+    assert result.stdout == "offline acceptance evidence passed: 5 entries, schema 2.5\n"
     assert json.loads(original)["schema_version"] == "2.3"
     assert _FIXTURE_PATH.read_bytes() == original
 

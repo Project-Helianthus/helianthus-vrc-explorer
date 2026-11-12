@@ -233,14 +233,14 @@ def test_application_baseline_rejects_unknown_or_noninteger_version(version):
         _enrich_bundle_profiles({"schema_version": version, "descriptions": []})
 
 
-def test_scan_24_version_boundary_and_23_copy_migration():
+def test_scan_25_version_boundary_and_23_copy_migration():
     from helianthus_vrc_explorer.artifact_schema import ArtifactSchemaError
 
     artifact = {"schema_version": "2.3", "operations": {}, "meta": {}}
     adapted, report = migrate_artifact_schema(artifact)
-    assert adapted["schema_version"] == "2.4" and report.changed
+    assert adapted["schema_version"] == "2.5" and report.changed
     assert artifact["schema_version"] == "2.3"
     again, report = migrate_artifact_schema(adapted)
     assert again == adapted and not report.changed
     with pytest.raises(ArtifactSchemaError, match="Unsupported schema_version"):
-        migrate_artifact_schema({"schema_version": "2.5"})
+        migrate_artifact_schema({"schema_version": "2.6"})

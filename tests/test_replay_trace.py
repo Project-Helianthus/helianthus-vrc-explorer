@@ -79,8 +79,8 @@ def test_replay_trace_to_artifact_reconstructs_b524_register_reads(tmp_path: Pat
     )
 
     artifact = replay_trace_to_artifact(trace_path)
-    # 2.4 output distinguishes the neutral codec/independent API identity contract.
-    assert artifact["schema_version"] == "2.4"
+    # 2.5 output distinguishes the neutral codec/independent API identity contract.
+    assert artifact["schema_version"] == "2.5"
     assert artifact["meta"]["destination_address"] == "0x15"
     assert artifact["meta"]["replay_trace"]["format"] == "enhanced_v1"
 
@@ -94,11 +94,11 @@ def test_replay_trace_to_artifact_reconstructs_b524_register_reads(tmp_path: Pat
     assert local_entry["read_opcode_label"] == "GetParameter"
     assert local_entry["response_state"] == "active"
     assert local_entry["value"] == 1
-    assert local_entry["myvaillant_name"] == "circuit_circuit_type"
+    assert local_entry["register_name"] == "circuit_circuit_type"
     assert remote_entry["read_opcode_label"] == "GetDeviceParameter"
     assert remote_entry["response_state"] == "active"
     assert remote_entry["value"] == 1
-    assert remote_entry["myvaillant_name"] == "device_connected"
+    assert remote_entry["register_name"] == "device_connected"
 
 
 def test_replay_preserves_historical_system_registers_above_current_scan_ceiling(
@@ -178,7 +178,7 @@ def test_replay_canonical_names_preserve_legacy_metadata_enrichment() -> None:
                                 "0x003d": {"raw_hex": "01000000"},
                                 "0x0001": {
                                     "raw_hex": "00000000",
-                                    "myvaillant_name": "stale_leaf",
+                                    "register_name": "stale_leaf",
                                     "type": "OPAQUE",
                                     "value": "keep",
                                     "register_class": "config",
@@ -213,7 +213,7 @@ def test_replay_canonical_names_preserve_legacy_metadata_enrichment() -> None:
     typed_op02 = operations["0x02"]["groups"]["0x00"]["instances"]["0x00"]["registers"]["0x003d"]
     assert typed_op02 == {
         "raw_hex": "01000000",
-        "myvaillant_name": "system_yield_solar_total",
+        "register_name": "solar_yield_total",
         "register_class": "state",
         "ebusd_name": "SolarYieldTotal",
         "type": "U32",
@@ -224,7 +224,7 @@ def test_replay_canonical_names_preserve_legacy_metadata_enrichment() -> None:
     assert op06_header == {
         "raw_hex": "021703",
         "ebusd_name": "existing_alias",
-        "myvaillant_name": "device_firmware_version",
+        "register_name": "device_firmware_version",
         "register_class": "state",
         "type": "FW",
         "value": "02.17.03",
@@ -233,7 +233,7 @@ def test_replay_canonical_names_preserve_legacy_metadata_enrichment() -> None:
     stale = operations["0x02"]["groups"]["0x00"]["instances"]["0x00"]["registers"]["0x0001"]
     assert stale == {
         "raw_hex": "00000000",
-        "myvaillant_name": "system_dhw_bivalence_point",
+        "register_name": "dhw_outdoor_bivalence_temperature_limit",
         "type": "OPAQUE",
         "value": "keep",
         "register_class": "config",
@@ -288,8 +288,8 @@ def test_cli_replay_trace_generates_json_and_html(tmp_path: Path) -> None:
     assert html_path.exists()
 
     artifact = json.loads(json_path.read_text(encoding="utf-8"))
-    # 2.4 output distinguishes the neutral codec/independent API identity contract.
-    assert artifact["schema_version"] == "2.4"
+    # 2.5 output distinguishes the neutral codec/independent API identity contract.
+    assert artifact["schema_version"] == "2.5"
     assert artifact["meta"]["replay_trace"]["format"] == "enhanced_v1"
 
 
@@ -313,8 +313,8 @@ def test_replay_trace_accepts_truncated_hex_and_records_limitation(tmp_path: Pat
     )
 
     artifact = replay_trace_to_artifact(trace_path)
-    # 2.4 output distinguishes the neutral codec/independent API identity contract.
-    assert artifact["schema_version"] == "2.4"
+    # 2.5 output distinguishes the neutral codec/independent API identity contract.
+    assert artifact["schema_version"] == "2.5"
     limitations = artifact["meta"]["replay_trace"]["limitations"]
     assert any("truncated ('...')" in item for item in limitations)
 

@@ -504,7 +504,7 @@ def _decode_register_read_entry(
         "flags_access": None,
         "response_state": None,
         "ebusd_name": None,
-        "myvaillant_name": None,
+        "register_name": None,
         "raw_hex": None,
         "type": None,
         "value": None,
@@ -1095,7 +1095,7 @@ def _enrich_register_names(operations: dict[str, Any]) -> None:
                     if not isinstance(entry, dict):
                         continue
                     register = int(rr_key, 16)
-                    if entry.get("myvaillant_name") is None:
+                    if entry.get("register_name") is None:
                         mv = mv_map.lookup(
                             group=group,
                             instance=instance,
@@ -1103,7 +1103,6 @@ def _enrich_register_names(operations: dict[str, Any]) -> None:
                             opcode=opcode,
                         )
                         if mv is not None:
-                            entry["myvaillant_name"] = mv.leaf
                             if mv.register_class is not None:
                                 entry.setdefault("register_class", mv.register_class)
                             if entry.get("ebusd_name") is None:
@@ -1131,4 +1130,4 @@ def _enrich_register_names(operations: dict[str, Any]) -> None:
                         register=register,
                     )
                     if canonical_name is not None:
-                        entry["myvaillant_name"] = canonical_name
+                        entry["register_name"] = canonical_name
