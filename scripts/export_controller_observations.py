@@ -13,7 +13,7 @@ are source claims, never qualification by this tool. This is not native profile
 input or write-bound evidence; decoded limits cannot authorize writes. The source
 is never modified. Legacy groups-first artifacts must be handled separately.
 
-Selector contract: protocols/vaillant/ebus-vaillant-B524.md in docs-ebus,
+Selector contract: protocols/vaillant/ebus-vaillant-b524.md in docs-ebus,
 section 3.1: (opcode, GG, II, RR), with independent operation namespaces.
 """
 

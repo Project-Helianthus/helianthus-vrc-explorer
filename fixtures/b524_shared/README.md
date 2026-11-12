@@ -27,7 +27,7 @@ Paths below are relative to that repository and mirrored here:
 - [Observation fixture](protocols/vaillant/fixtures/b524-basv0-register-observations-v1.json)
   and [schema](protocols/vaillant/fixtures/b524-basv0-register-observations-schema-v1.json):
   copied verbatim, CC0.
-- [Wire-column projection](protocols/vaillant/ebus-vaillant-B524-register-map.md):
+- [Wire-column projection](protocols/vaillant/ebus-vaillant-b524-register-map.md):
   only selector headings and Wire columns from that public register map, CC0.
 - [Calendar/clock projection](protocols/vaillant/fixtures/b524-op02-calendar-clock-selectors.csv):
   only opcode, group, instance, register, payload_bytes and name columns, CC0.
