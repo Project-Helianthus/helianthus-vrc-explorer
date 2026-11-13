@@ -7,10 +7,18 @@ import pytest
 from rich.console import Console
 
 from helianthus_vrc_explorer.scanner.b524_operation_reads import parse_operation_read_plan
+from helianthus_vrc_explorer.scanner.collaborators import ScanPlanners
 from helianthus_vrc_explorer.scanner.observer import ScanObserver
 from helianthus_vrc_explorer.scanner.plan import GroupScanPlan, make_plan_key
 from helianthus_vrc_explorer.scanner.scan import scan_b524
 from helianthus_vrc_explorer.transport.base import TransportInterface
+from helianthus_vrc_explorer.ui.planner import prompt_scan_plan
+from helianthus_vrc_explorer.ui.planner_textual import run_textual_scan_plan
+
+
+def _planners(*, classic=prompt_scan_plan, textual=run_textual_scan_plan) -> ScanPlanners:
+    """Offer the interactive planners as the command layer does, with optional fakes."""
+    return ScanPlanners(prompt_scan_plan=classic, load_textual_scan_plan=lambda: textual)
 
 
 class OperationTransport(TransportInterface):
@@ -112,7 +120,6 @@ def test_planner_can_deselect_every_explicit_operation(monkeypatch):
         return kwargs["default_plan"]
 
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
-    monkeypatch.setattr("helianthus_vrc_explorer.ui.planner_textual.run_textual_scan_plan", planner)
     monkeypatch.setattr(
         scan_module,
         "_PlannerHotkeyReader",
@@ -122,7 +129,11 @@ def test_planner_can_deselect_every_explicit_operation(monkeypatch):
     observer.suspend.return_value = nullcontext()
     transport = OperationTransport()
     artifact = scan(
-        transport, planner_ui="textual", console=Console(force_terminal=True), observer=observer
+        transport,
+        planner_ui="textual",
+        console=Console(force_terminal=True),
+        observer=observer,
+        planners=_planners(textual=planner),
     )
     assert not any(payload[0] in {9, 11} for payload in transport.payloads)
     assert artifact["b524_operation_reads"] == []
@@ -146,7 +157,6 @@ def test_partial_scalar_scan_preserves_selected_and_deselected_operations(monkey
             return super().send(dst, payload)
 
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
-    monkeypatch.setattr("helianthus_vrc_explorer.ui.planner_textual.run_textual_scan_plan", planner)
     monkeypatch.setattr(
         scan_module,
         "_PlannerHotkeyReader",
@@ -160,6 +170,7 @@ def test_partial_scalar_scan_preserves_selected_and_deselected_operations(monkey
         console=Console(force_terminal=True),
         observer=observer,
         request_budget=18 if failure == "budget" else None,
+        planners=_planners(textual=planner),
     )
     assert artifact["meta"]["incomplete"] is True
     plan = artifact["meta"]["b524_operation_read_plan"]

@@ -10,6 +10,7 @@ from helianthus_vrc_explorer.scanner.b524_orchestration import (
 )
 from helianthus_vrc_explorer.scanner.b524_probe import probe_parameter_description
 from helianthus_vrc_explorer.scanner.description_scheduler import DescriptionCandidate
+from helianthus_vrc_explorer.scanner.planner_selection import default_description_policy
 from helianthus_vrc_explorer.scanner.register import probe_instance_availability, read_register
 from helianthus_vrc_explorer.schema.parameter_descriptions import (
     attach_bundled_descriptions,
@@ -18,7 +19,6 @@ from helianthus_vrc_explorer.schema.parameter_descriptions import (
     load_description_baseline,
 )
 from helianthus_vrc_explorer.transport.base import TransportInterface, TransportTimeout
-from helianthus_vrc_explorer.ui.planner_selection import default_description_policy
 
 
 class _Reply(TransportInterface):

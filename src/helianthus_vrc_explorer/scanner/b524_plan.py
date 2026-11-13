@@ -6,10 +6,10 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from ..protocol.b524 import RegisterOpcode
-from ..ui.planner import PlannerPreset
 from .director import GROUP_CONFIG, ClassifiedGroup, group_name_for_opcode, group_namespace_profiles
 from .identity import opcode_label, operation_label
 from .plan import GroupScanPlan, PlanKey, make_plan_key
+from .planner_model import PlannerPreset
 from .register import opcodes_for_group
 from .scan_policy import profile_opcodes
 

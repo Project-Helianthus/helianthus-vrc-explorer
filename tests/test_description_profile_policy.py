@@ -2,7 +2,7 @@ from helianthus_vrc_explorer.scanner.b524_orchestration import (
     _select_live_description_candidates,
 )
 from helianthus_vrc_explorer.scanner.description_scheduler import DescriptionCandidate
-from helianthus_vrc_explorer.ui.planner_selection import default_description_policy
+from helianthus_vrc_explorer.scanner.planner_selection import default_description_policy
 from tests.test_effective_parameter_descriptions import _artifact
 
 

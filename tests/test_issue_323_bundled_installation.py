@@ -642,7 +642,7 @@ def test_device_observation_without_bundled_description_still_schedules_describe
         _select_live_description_candidates,
     )
     from helianthus_vrc_explorer.scanner.description_scheduler import DescriptionCandidate
-    from helianthus_vrc_explorer.ui.planner_selection import default_description_policy
+    from helianthus_vrc_explorer.scanner.planner_selection import default_description_policy
     from tests.test_description_profile_policy import _with_known_remote
     from tests.test_effective_parameter_descriptions import _artifact
 

@@ -7,7 +7,7 @@ import math
 import sys
 import time
 from collections import deque
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -44,13 +44,6 @@ from ..schema.parameter_descriptions import (
 )
 from ..transport.base import TransportInterface, TransportRecoveryExhausted, emit_trace_label
 from ..transport.instrumented import CountingTransport, ScanRequestBudgetExceeded
-from ..ui.planner import PlannerGroup, PlannerPreset, build_plan_from_preset
-from ..ui.planner_selection import (
-    DescriptionPolicySelection,
-    PlannerSelection,
-    default_description_policy,
-    description_probe_required,
-)
 from .b524_artifact import (
     _artifact_contract_metadata,
     _ensure_group_artifact,
@@ -105,10 +98,23 @@ from .b524_probe import (
     _probe_unknown_present_instances,
     _unknown_instance_candidates,
 )
+from .collaborators import (
+    GroupDiscovery,
+    InstanceAvailabilityProber,
+    PlannerHotkeyReaderFactory,
+    ScanPlanners,
+)
 from .description_acquisition import acquire_descriptions, finish_description_coverage
 from .description_scheduler import DescriptionCandidate
 from .director import GROUP_CONFIG, DiscoveredGroup, classify_groups
 from .plan import GroupScanPlan, PlanKey, RegisterTask, build_work_queue, estimate_register_requests
+from .planner_model import PlannerGroup, PlannerPreset, build_plan_from_preset
+from .planner_selection import (
+    DescriptionPolicySelection,
+    PlannerSelection,
+    default_description_policy,
+    description_probe_required,
+)
 from .register import (
     CONNECTED_DEVICE_GROUPS,
     InstanceAvailabilityProbe,
@@ -125,7 +131,7 @@ from .scan import (
 from .scan_policy import profile_opcodes
 
 
-def _planner_kwargs(planner_fn: Any, options: dict[str, Any]) -> dict[str, Any]:
+def _planner_kwargs(planner_fn: Callable[..., object], options: dict[str, Any]) -> dict[str, Any]:
     """Keep injected legacy planner fakes readable while passing typed UI state."""
 
     try:
@@ -282,10 +288,10 @@ def run_b524_scan(
     request_budget: int | None = None,
     operation_requests: Sequence[B524OperationReadRequest] = (),
     operation_identity: Mapping[str, Any] | None = None,
-    discover_groups_fn: Any,
-    prompt_scan_plan_fn: Any,
-    hotkey_reader_cls: Any,
-    probe_instance_availability_fn: Any,
+    discover_groups_fn: GroupDiscovery,
+    planners: ScanPlanners | None,
+    hotkey_reader_cls: PlannerHotkeyReaderFactory,
+    probe_instance_availability_fn: InstanceAvailabilityProber,
 ) -> dict[str, Any]:
     """Scan a VRC regulator using B524 and return a JSON-serializable artifact.
 
@@ -296,6 +302,7 @@ def run_b524_scan(
     - Phase D: register scan RR=0..rr_max for each present instance
 
     Partial scans are supported: Ctrl+C yields `meta.incomplete=true`.
+    Without ``planners`` no interactive planner is offered.
     """
 
     planner_preset = _normalize_planner_preset(planner_preset)
@@ -614,6 +621,7 @@ def run_b524_scan(
             and console.is_terminal
             and sys.stdin.isatty()
             and observer is not None
+            and planners is not None
         )
         planner_mode = _resolve_planner_mode(
             interactive=interactive,
@@ -1372,12 +1380,17 @@ def run_b524_scan(
         elif explicit_plan is not None:
             plan = dict(explicit_plan)
 
-        if planner_mode != "disabled" and console is not None and observer is not None:
+        if (
+            planner_mode != "disabled"
+            and console is not None
+            and observer is not None
+            and planners is not None
+        ):
             with observer.suspend():
                 planner_default_plan = dict(plan)
                 if planner_mode == "textual":
                     try:
-                        from ..ui.planner_textual import run_textual_scan_plan
+                        run_textual_scan_plan = planners.load_textual_scan_plan()
                     except Exception as exc:
                         if planner_ui == "textual":
                             raise RuntimeError(
@@ -1418,14 +1431,14 @@ def run_b524_scan(
                             else:
                                 plan = dict(selected)
                 if planner_mode == "classic":
-                    selected = prompt_scan_plan_fn(
+                    selected = planners.prompt_scan_plan(
                         console,
                         planner_groups,
                         request_rate_rps=request_rate_rps,
                         default_plan=planner_default_plan,
                         default_preset=planner_preset,
                         system_information=artifact["meta"]["system_information"],
-                        **_planner_kwargs(prompt_scan_plan_fn, operation_planner_options),
+                        **_planner_kwargs(planners.prompt_scan_plan, operation_planner_options),
                     )
                     if isinstance(selected, PlannerSelection):
                         plan = selected.plan
@@ -1477,6 +1490,7 @@ def run_b524_scan(
                     planner_mode != "disabled"
                     and console is not None
                     and observer is not None
+                    and planners is not None
                     and hotkeys.poll()
                 ):
                     # Pause progress rendering and allow replanning without rewriting scanned data.
@@ -1485,7 +1499,7 @@ def run_b524_scan(
                         operation_planner_options["description_policy"] = description_policy
                         if planner_mode == "textual":
                             try:
-                                from ..ui.planner_textual import run_textual_scan_plan
+                                run_textual_scan_plan = planners.load_textual_scan_plan()
                             except Exception as exc:
                                 if planner_ui == "textual":
                                     raise RuntimeError(
@@ -1529,14 +1543,16 @@ def run_b524_scan(
                                     else:
                                         plan = dict(selected)
                         if planner_mode == "classic":
-                            selected = prompt_scan_plan_fn(
+                            selected = planners.prompt_scan_plan(
                                 console,
                                 planner_groups,
                                 request_rate_rps=request_rate_rps,
                                 default_plan=plan,
                                 default_preset=planner_preset,
                                 system_information=artifact["meta"]["system_information"],
-                                **_planner_kwargs(prompt_scan_plan_fn, operation_planner_options),
+                                **_planner_kwargs(
+                                    planners.prompt_scan_plan, operation_planner_options
+                                ),
                             )
                             if isinstance(selected, PlannerSelection):
                                 plan = selected.plan

@@ -6,7 +6,8 @@ import pytest
 from rich.console import Console
 
 from helianthus_vrc_explorer.scanner.plan import GroupScanPlan, make_plan_key
-from helianthus_vrc_explorer.ui.planner import PlannerGroup, prompt_scan_plan
+from helianthus_vrc_explorer.scanner.planner_model import PlannerGroup
+from helianthus_vrc_explorer.ui.planner import prompt_scan_plan
 
 
 def test_classic_custom_override_replaces_exact_register_selection(

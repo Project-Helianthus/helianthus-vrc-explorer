@@ -34,7 +34,9 @@ from .replay_trace import (
     replay_trace_to_artifact,
 )
 from .scanner.b509 import parse_b509_range
+from .scanner.collaborators import ScanPlanners, TextualScanPlanner
 from .scanner.director import GROUP_CONFIG, classify_groups, discover_groups
+from .scanner.planner_model import PlannerPreset
 from .scanner.register import is_instance_present
 from .scanner.scan import PlannerUiMode, default_output_filename, scan_vrc
 from .schema.ebusd_csv import EbusdCsvSchema
@@ -53,7 +55,7 @@ from .ui.browse_textual import run_browse_from_artifact
 from .ui.emphasis import rich_star_bold_text
 from .ui.html_report import render_html_report
 from .ui.live import ScanSessionPreface, make_scan_observer
-from .ui.planner import PlannerPreset
+from .ui.planner import prompt_scan_plan
 from .ui.scan_setup import ScanSetup, run_artifact_open_modal, run_scan_setup
 from .ui.summary import render_summary
 
@@ -69,6 +71,18 @@ _DEFAULT_TRANSPORT_PROTOCOL = "tcp"
 _DEFAULT_EBUSD_HOST = "127.0.0.1"
 _DEFAULT_EBUSD_PORT = 8888
 _SCAN_IDENT_RETRIES = 1
+
+
+def _load_textual_scan_plan() -> TextualScanPlanner:
+    from .ui.planner_textual import run_textual_scan_plan
+
+    return run_textual_scan_plan
+
+
+SCAN_PLANNERS = ScanPlanners(
+    prompt_scan_plan=prompt_scan_plan,
+    load_textual_scan_plan=_load_textual_scan_plan,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -848,6 +862,7 @@ def _scan_configured(
                         planner_ui=cast(PlannerUiMode, planner_ui_value),
                         planner_preset=cast(PlannerPreset, preset_value),
                         probe_constraints=True,
+                        planners=SCAN_PLANNERS,
                         **scan_options,
                     )
                 artifact["meta"]["dry_run"] = True
@@ -937,6 +952,7 @@ def _scan_configured(
                             planner_ui=cast(PlannerUiMode, planner_ui_value),
                             planner_preset=cast(PlannerPreset, preset_value),
                             probe_constraints=True,
+                            planners=SCAN_PLANNERS,
                             **scan_options,
                         )
                 break

@@ -13,7 +13,8 @@ from helianthus_vrc_explorer.scanner.plan import (
     parse_int_set,
     parse_int_token,
 )
-from helianthus_vrc_explorer.ui.planner import PlannerGroup, _format_seconds, build_plan_from_preset
+from helianthus_vrc_explorer.scanner.planner_model import PlannerGroup, build_plan_from_preset
+from helianthus_vrc_explorer.ui.planner import _format_seconds
 
 
 def test_native_planner_inventory_and_rr_qualification_are_operation_scoped() -> None:

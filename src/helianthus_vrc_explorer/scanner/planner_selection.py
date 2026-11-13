@@ -6,7 +6,7 @@ from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
-from ..scanner.plan import GroupScanPlan, PlanKey
+from .plan import GroupScanPlan, PlanKey
 
 type DescriptionSource = Literal["profile", "live"]
 type DescriptionClass = Literal["local", "remote"]

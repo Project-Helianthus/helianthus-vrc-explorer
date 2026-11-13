@@ -4,12 +4,8 @@ import pytest
 from rich.console import Console
 
 from helianthus_vrc_explorer.scanner.plan import GroupScanPlan, make_plan_key
-from helianthus_vrc_explorer.ui.planner import (
-    PlannerGroup,
-    _print_plan_breakdown,
-    build_plan_from_preset,
-    prompt_scan_plan,
-)
+from helianthus_vrc_explorer.scanner.planner_model import PlannerGroup, build_plan_from_preset
+from helianthus_vrc_explorer.ui.planner import _print_plan_breakdown, prompt_scan_plan
 
 
 def test_prompt_scan_plan_disables_unknown_groups_by_default(monkeypatch) -> None:

@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from .b524_operation_reads import B524OperationReadRequest
+    from .collaborators import ScanPlanners
 
 from rich.console import Console
 
@@ -20,7 +21,6 @@ from ..schema.myvaillant_map import MyvaillantRegisterMap
 from ..transport.base import (
     TransportInterface,
 )
-from ..ui.planner import PlannerPreset, prompt_scan_plan
 from . import b524_plan, b524_probe
 from .b509 import scan_b509
 from .b516 import scan_b516
@@ -31,6 +31,7 @@ from .director import (
 )
 from .observer import ScanObserver
 from .plan import GroupScanPlan, PlanKey
+from .planner_model import PlannerPreset
 from .register import (
     RegisterEntry,
     probe_instance_availability,
@@ -370,6 +371,7 @@ def scan_b524(
     request_budget: int | None = None,
     operation_requests: Sequence[B524OperationReadRequest] = (),
     operation_identity: Mapping[str, Any] | None = None,
+    planners: ScanPlanners | None = None,
 ) -> dict[str, Any]:
     """Scan a VRC regulator using B524 and return a JSON-serializable artifact.
 
@@ -380,6 +382,7 @@ def scan_b524(
     - Phase D: register scan RR=0..rr_max for each present instance
 
     Partial scans are supported: Ctrl+C yields `meta.incomplete=true`.
+    Interactive planners are offered only when the caller supplies ``planners``.
     """
     from .b524_orchestration import run_b524_scan
 
@@ -401,7 +404,7 @@ def scan_b524(
         operation_requests=operation_requests,
         operation_identity=operation_identity,
         discover_groups_fn=discover_groups,
-        prompt_scan_plan_fn=prompt_scan_plan,
+        planners=planners,
         hotkey_reader_cls=_PlannerHotkeyReader,
         probe_instance_availability_fn=probe_instance_availability,
     )
@@ -429,6 +432,7 @@ def scan_vrc(
     request_budget: int | None = None,
     operation_requests: Sequence[B524OperationReadRequest] = (),
     operation_identity: Mapping[str, Any] | None = None,
+    planners: ScanPlanners | None = None,
 ) -> dict[str, Any]:
     """Run VRC scan flow: B524 primary scan, optional B555/B516/B509 dumps."""
 
@@ -449,6 +453,7 @@ def scan_vrc(
         request_budget=request_budget,
         operation_requests=operation_requests,
         operation_identity=operation_identity,
+        planners=planners,
     )
     meta = artifact.get("meta")
     if isinstance(meta, dict) and bool(meta.get("incomplete", False)):

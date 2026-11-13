@@ -14,13 +14,13 @@ from helianthus_vrc_explorer.artifact_schema import (
 )
 from helianthus_vrc_explorer.scanner.identity import make_register_identity
 from helianthus_vrc_explorer.scanner.plan import make_plan_key
+from helianthus_vrc_explorer.scanner.planner_model import PlannerGroup, build_plan_from_preset
 from helianthus_vrc_explorer.schema.b524_constraints import (
     STATIC_CONSTRAINT_SCOPE,
     load_b524_constraints_catalog_from_path,
     lookup_static_constraint,
 )
 from helianthus_vrc_explorer.ui.html_report import render_html_report
-from helianthus_vrc_explorer.ui.planner import PlannerGroup, build_plan_from_preset
 from helianthus_vrc_explorer.ui.summary import render_summary
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]

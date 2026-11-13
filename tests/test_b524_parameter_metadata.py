@@ -254,7 +254,7 @@ def test_missing_zero_or_unmet_count_keeps_bounded_fallback(count: int | None) -
 
 
 def test_full_preset_audits_slots_while_recommended_uses_sparse_count() -> None:
-    from helianthus_vrc_explorer.ui.planner import PlannerGroup, build_plan_from_preset
+    from helianthus_vrc_explorer.scanner.planner_model import PlannerGroup, build_plan_from_preset
 
     group = PlannerGroup(
         group=2,

@@ -9,10 +9,10 @@ from helianthus_vrc_explorer.protocol.parser import (
 )
 from helianthus_vrc_explorer.scanner.b524_probe import _probe_present_instances
 from helianthus_vrc_explorer.scanner.plan import GroupScanPlan, estimate_register_requests
+from helianthus_vrc_explorer.scanner.planner_model import PlannerGroup, build_plan_from_preset
 from helianthus_vrc_explorer.scanner.register import probe_instance_availability, read_register
 from helianthus_vrc_explorer.scanner.scan_policy import parse_scan_plan
 from helianthus_vrc_explorer.transport.base import TransportInterface, TransportTimeout
-from helianthus_vrc_explorer.ui.planner import PlannerGroup, build_plan_from_preset
 
 
 class ConnectedSlots(TransportInterface):

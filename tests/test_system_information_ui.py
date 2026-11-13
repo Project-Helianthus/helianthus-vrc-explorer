@@ -5,10 +5,10 @@ from pathlib import Path
 
 from rich.console import Console
 
+from helianthus_vrc_explorer.scanner.planner_model import PlannerGroup
 from helianthus_vrc_explorer.ui.live import RichScanObserver
 from helianthus_vrc_explorer.ui.planner import (
     OP00_GROUP_COUNT_NAMES,
-    PlannerGroup,
     _render_table,
     format_planner_op00_count,
     prompt_scan_plan,

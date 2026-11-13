@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 
-from helianthus_vrc_explorer.ui.planner import PlannerGroup
+from helianthus_vrc_explorer.scanner.planner_model import PlannerGroup
 from helianthus_vrc_explorer.ui.planner_textual import run_textual_scan_plan
 
 

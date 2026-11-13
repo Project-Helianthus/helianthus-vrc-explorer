@@ -6,7 +6,8 @@ from dataclasses import dataclass
 import pytest
 
 from helianthus_vrc_explorer.scanner.plan import GroupScanPlan
-from helianthus_vrc_explorer.ui.planner import PlannerGroup, split_planner_groups_by_namespace
+from helianthus_vrc_explorer.scanner.planner_model import PlannerGroup
+from helianthus_vrc_explorer.ui.planner import split_planner_groups_by_namespace
 from helianthus_vrc_explorer.ui.planner_textual import (
     PLANNER_TABLE_COLUMNS,
     _EditableGroup,
