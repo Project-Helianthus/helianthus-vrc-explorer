@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 from rich.console import Console
 
+from helianthus_vrc_explorer.scanner.collaborators import ScanPlanners
 from helianthus_vrc_explorer.scanner.observer import ScanObserver
 from helianthus_vrc_explorer.scanner.plan import GroupScanPlan, make_plan_key
 from helianthus_vrc_explorer.scanner.scan import scan_b524
@@ -21,6 +22,13 @@ from helianthus_vrc_explorer.transport.enhanced_tcp import (
     EnhancedTcpTransport,
     _EnhancedSessionError,
 )
+from helianthus_vrc_explorer.ui.planner import prompt_scan_plan
+from helianthus_vrc_explorer.ui.planner_textual import run_textual_scan_plan
+
+
+def _planners(*, classic=prompt_scan_plan, textual=run_textual_scan_plan) -> ScanPlanners:
+    """Offer the interactive planners as the command layer does, with optional fakes."""
+    return ScanPlanners(prompt_scan_plan=classic, load_textual_scan_plan=lambda: textual)
 
 
 class InterruptedScan(TransportInterface):
@@ -164,7 +172,6 @@ def test_failed_discovery_selector_remains_unknown_and_planner_is_reached(monkey
         planner_calls.append(groups)
         return kwargs["default_plan"]
 
-    monkeypatch.setattr("helianthus_vrc_explorer.ui.planner_textual.run_textual_scan_plan", planner)
     artifact = scan_b524(
         inner,
         dst=0x15,
@@ -172,6 +179,7 @@ def test_failed_discovery_selector_remains_unknown_and_planner_is_reached(monkey
         observer=MagicMock(spec=ScanObserver),
         console=Console(force_terminal=True),
         probe_constraints=False,
+        planners=_planners(textual=planner),
     )
     assert len(planner_calls) == 1
     assert artifact["meta"]["incomplete"] is False

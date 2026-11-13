@@ -11,11 +11,19 @@ import pytest
 from rich.console import Console
 
 from helianthus_vrc_explorer.protocol.b524 import build_register_read_payload
+from helianthus_vrc_explorer.scanner.collaborators import ScanPlanners
 from helianthus_vrc_explorer.scanner.observer import ScanObserver
 from helianthus_vrc_explorer.scanner.plan import GroupScanPlan, make_plan_key
 from helianthus_vrc_explorer.scanner.scan import scan_b524
 from helianthus_vrc_explorer.transport.base import TransportInterface, TransportTimeout
 from helianthus_vrc_explorer.transport.dummy import DummyTransport
+from helianthus_vrc_explorer.ui.planner import prompt_scan_plan
+from helianthus_vrc_explorer.ui.planner_textual import run_textual_scan_plan
+
+
+def _planners(*, classic=prompt_scan_plan, textual=run_textual_scan_plan) -> ScanPlanners:
+    """Offer the interactive planners as the command layer does, with optional fakes."""
+    return ScanPlanners(prompt_scan_plan=classic, load_textual_scan_plan=lambda: textual)
 
 
 class RecordingTransport(TransportInterface):
@@ -158,10 +166,6 @@ def test_cli_and_interactive_defaults_send_identical_selectors(
     )
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr(
-        "helianthus_vrc_explorer.ui.planner_textual.run_textual_scan_plan",
-        lambda groups, **kwargs: kwargs["default_plan"],
-    )
-    monkeypatch.setattr(
         scan,
         "_PlannerHotkeyReader",
         lambda **kwargs: nullcontext(SimpleNamespace(poll=lambda: False)),
@@ -176,6 +180,7 @@ def test_cli_and_interactive_defaults_send_identical_selectors(
         probe_constraints=False,
         observer=MagicMock(spec=ScanObserver),
         console=Console(force_terminal=True),
+        planners=_planners(textual=lambda groups, **kwargs: kwargs["default_plan"]),
     )
     assert cli["meta"]["scan_plan"]["groups"] == ui["meta"]["scan_plan"]["groups"]
     assert cli_transport.payloads == ui_transport.payloads

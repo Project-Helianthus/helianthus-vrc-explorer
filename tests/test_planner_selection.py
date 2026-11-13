@@ -1,5 +1,5 @@
 from helianthus_vrc_explorer.scanner.plan import GroupScanPlan, make_plan_key
-from helianthus_vrc_explorer.ui.planner_selection import (
+from helianthus_vrc_explorer.scanner.planner_selection import (
     default_description_policy,
     description_probe_required,
     make_planner_selection,

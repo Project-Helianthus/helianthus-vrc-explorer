@@ -279,7 +279,7 @@ def remote_status_rows(artifact: dict[str, Any]) -> list[dict[str, Any]]:
     from helianthus_vrc_explorer.scanner.b524_orchestration import (
         _select_live_description_candidates,
     )
-    from helianthus_vrc_explorer.ui.planner_selection import default_description_policy
+    from helianthus_vrc_explorer.scanner.planner_selection import default_description_policy
 
     candidates = description_candidates(artifact)
     entries = {candidate.native_identity: {} for candidate in candidates}

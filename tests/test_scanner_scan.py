@@ -8,6 +8,7 @@ import pytest
 from rich.console import Console
 
 from helianthus_vrc_explorer.artifact_schema import CURRENT_ARTIFACT_SCHEMA_VERSION
+from helianthus_vrc_explorer.scanner.collaborators import ScanPlanners
 from helianthus_vrc_explorer.scanner.observer import ScanObserver
 from helianthus_vrc_explorer.scanner.plan import GroupScanPlan, make_plan_key
 from helianthus_vrc_explorer.scanner.scan import (
@@ -19,7 +20,14 @@ from helianthus_vrc_explorer.scanner.scan import (
 )
 from helianthus_vrc_explorer.transport.base import TransportInterface
 from helianthus_vrc_explorer.transport.dummy import DummyTransport
+from helianthus_vrc_explorer.ui.planner import prompt_scan_plan
+from helianthus_vrc_explorer.ui.planner_textual import run_textual_scan_plan
 from tests.conftest import artifact_groups, artifact_op_group
+
+
+def _planners(*, classic=prompt_scan_plan, textual=run_textual_scan_plan) -> ScanPlanners:
+    """Offer the interactive planners as the command layer does, with optional fakes."""
+    return ScanPlanners(prompt_scan_plan=classic, load_textual_scan_plan=lambda: textual)
 
 
 class RecordingTransport(TransportInterface):
@@ -688,14 +696,11 @@ def test_scan_b524_continues_when_first_directory_probe_is_status_only(
 ) -> None:
     import sys
 
-    import helianthus_vrc_explorer.scanner.scan as scan_mod
-
     transport = _TransientFirstProbeTransport(DummyTransport(_write_fixture_group_02(tmp_path)))
 
     def _unexpected_planner(*_args, **_kwargs):
         raise AssertionError("planner should not run for non-interactive scan")
 
-    monkeypatch.setattr(scan_mod, "prompt_scan_plan", _unexpected_planner)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
 
     artifact = scan_b524(
@@ -704,6 +709,7 @@ def test_scan_b524_continues_when_first_directory_probe_is_status_only(
         observer=_NoopObserver(),
         console=Console(force_terminal=False),
         planner_ui="classic",
+        planners=_planners(classic=_unexpected_planner),
     )
 
     assert artifact["meta"]["incomplete"] is False
@@ -873,8 +879,6 @@ def test_scan_b524_group_bounds_come_from_profile_defaults(tmp_path: Path) -> No
 def test_scan_b524_scans_enabled_unknown_group_via_planner(monkeypatch, tmp_path: Path) -> None:
     import sys
 
-    import helianthus_vrc_explorer.scanner.scan as scan_mod
-
     transport = DummyTransport(_write_fixture_unknown_group_69(tmp_path))
 
     def fake_prompt_scan_plan(*_args, **_kwargs):
@@ -893,7 +897,6 @@ def test_scan_b524_scans_enabled_unknown_group_via_planner(monkeypatch, tmp_path
             ),
         }
 
-    monkeypatch.setattr(scan_mod, "prompt_scan_plan", fake_prompt_scan_plan)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
     artifact = scan_b524(
@@ -902,6 +905,7 @@ def test_scan_b524_scans_enabled_unknown_group_via_planner(monkeypatch, tmp_path
         observer=_NoopObserver(),
         console=Console(force_terminal=True),
         planner_ui="classic",
+        planners=_planners(classic=fake_prompt_scan_plan),
     )
 
     assert "0x69" in artifact_groups(artifact)
@@ -927,8 +931,6 @@ def test_scan_b524_scans_absent_instances_when_planner_overrides(
 ) -> None:
     import sys
 
-    import helianthus_vrc_explorer.scanner.scan as scan_mod
-
     transport = RecordingTransport(DummyTransport(_write_fixture_group_02(tmp_path)))
 
     def fake_prompt_scan_plan(*_args, **_kwargs):
@@ -944,7 +946,6 @@ def test_scan_b524_scans_absent_instances_when_planner_overrides(
             )
         }
 
-    monkeypatch.setattr(scan_mod, "prompt_scan_plan", fake_prompt_scan_plan)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
     artifact = scan_b524(
@@ -953,6 +954,7 @@ def test_scan_b524_scans_absent_instances_when_planner_overrides(
         observer=_NoopObserver(),
         console=Console(force_terminal=True),
         planner_ui="classic",
+        planners=_planners(classic=fake_prompt_scan_plan),
     )
 
     group = artifact_op_group(artifact, op="0x02", group="0x02")
@@ -1027,8 +1029,6 @@ def test_artifact_schema_version(tmp_path: Path) -> None:
 def test_artifact_dual_namespace_structure(monkeypatch, tmp_path: Path) -> None:
     import sys
 
-    import helianthus_vrc_explorer.scanner.scan as scan_mod
-
     transport = RecordingTransport(DummyTransport(_write_fixture_group_09(tmp_path)))
 
     def fake_prompt_scan_plan(*_args, **_kwargs):
@@ -1047,7 +1047,6 @@ def test_artifact_dual_namespace_structure(monkeypatch, tmp_path: Path) -> None:
             ),
         }
 
-    monkeypatch.setattr(scan_mod, "prompt_scan_plan", fake_prompt_scan_plan)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
     artifact = scan_b524(
@@ -1056,6 +1055,7 @@ def test_artifact_dual_namespace_structure(monkeypatch, tmp_path: Path) -> None:
         observer=_NoopObserver(),
         console=Console(force_terminal=True),
         planner_ui="classic",
+        planners=_planners(classic=fake_prompt_scan_plan),
     )
 
     # v2.3: each OP has its own group entry
@@ -1102,8 +1102,6 @@ def test_dual_namespace_presence_is_independent_and_retains_raw_probe_evidence(
 ) -> None:
     import sys
 
-    import helianthus_vrc_explorer.scanner.scan as scan_mod
-
     transport = RecordingTransport(
         DummyTransport(_write_fixture_group_09_presence_divergence(tmp_path))
     )
@@ -1124,7 +1122,6 @@ def test_dual_namespace_presence_is_independent_and_retains_raw_probe_evidence(
             ),
         }
 
-    monkeypatch.setattr(scan_mod, "prompt_scan_plan", fake_prompt_scan_plan)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
     artifact = scan_b524(
@@ -1133,6 +1130,7 @@ def test_dual_namespace_presence_is_independent_and_retains_raw_probe_evidence(
         observer=_NoopObserver(),
         console=Console(force_terminal=True),
         planner_ui="classic",
+        planners=_planners(classic=fake_prompt_scan_plan),
     )
 
     local_ns = artifact_op_group(artifact, op="0x02", group="0x09")
@@ -1206,8 +1204,6 @@ def test_group_08_remote_namespace_only_marks_present_instances(
 ) -> None:
     import sys
 
-    import helianthus_vrc_explorer.scanner.scan as scan_mod
-
     transport = DummyTransport(_write_fixture_group_08(tmp_path))
 
     def fake_prompt_scan_plan(*_args, **_kwargs):
@@ -1226,7 +1222,6 @@ def test_group_08_remote_namespace_only_marks_present_instances(
             ),
         }
 
-    monkeypatch.setattr(scan_mod, "prompt_scan_plan", fake_prompt_scan_plan)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
     artifact = scan_b524(
@@ -1235,6 +1230,7 @@ def test_group_08_remote_namespace_only_marks_present_instances(
         observer=_NoopObserver(),
         console=Console(force_terminal=True),
         planner_ui="classic",
+        planners=_planners(classic=fake_prompt_scan_plan),
     )
 
     # v2.3: each OP has its own group entry
@@ -1254,7 +1250,6 @@ def test_group_08_remote_namespace_only_marks_present_instances(
 def test_type_hint_propagation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import sys
 
-    import helianthus_vrc_explorer.scanner.scan as scan_mod
     from helianthus_vrc_explorer.schema.myvaillant_map import MyvaillantRegisterMap
 
     fixture = {
@@ -1302,7 +1297,6 @@ def test_type_hint_propagation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
             ),
         }
 
-    monkeypatch.setattr(scan_mod, "prompt_scan_plan", fake_prompt_scan_plan)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
     artifact = scan_b524(
@@ -1312,6 +1306,7 @@ def test_type_hint_propagation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
         console=Console(force_terminal=True),
         planner_ui="classic",
         myvaillant_map=MyvaillantRegisterMap.from_path(map_path),
+        planners=_planners(classic=fake_prompt_scan_plan),
     )
 
     entry = artifact_op_group(artifact, op="0x06", group="0x09")["instances"]["0x01"]["registers"][
@@ -1368,7 +1363,6 @@ def test_scan_b524_replays_dual_namespace_fixture_end_to_end(
             ),
         }
 
-    monkeypatch.setattr(scan_mod, "prompt_scan_plan", fake_prompt_scan_plan)
     monkeypatch.setattr(
         scan_mod,
         "discover_groups",
@@ -1417,6 +1411,7 @@ def test_scan_b524_replays_dual_namespace_fixture_end_to_end(
         console=Console(force_terminal=True),
         planner_ui="classic",
         myvaillant_map=MyvaillantRegisterMap.from_path(map_path),
+        planners=_planners(classic=fake_prompt_scan_plan),
     )
 
     assert artifact["schema_version"] == CURRENT_ARTIFACT_SCHEMA_VERSION
@@ -1465,10 +1460,6 @@ def test_scan_b524_normalizes_legacy_aggressive_preset_to_full_for_textual_defau
         captured["system_information"] = system_information
         return {}
 
-    monkeypatch.setattr(
-        "helianthus_vrc_explorer.ui.planner_textual.run_textual_scan_plan",
-        fake_run_textual_scan_plan,
-    )
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
     scan_b524(
@@ -1478,6 +1469,7 @@ def test_scan_b524_normalizes_legacy_aggressive_preset_to_full_for_textual_defau
         console=Console(force_terminal=True),
         planner_ui="textual",
         planner_preset="aggressive",
+        planners=_planners(textual=fake_run_textual_scan_plan),
     )
 
     assert captured["default_preset"] == "full"
@@ -1516,10 +1508,6 @@ def test_scan_b524_normalizes_exhaustive_preset_to_research_for_textual_default_
         captured["system_information"] = system_information
         return {}
 
-    monkeypatch.setattr(
-        "helianthus_vrc_explorer.ui.planner_textual.run_textual_scan_plan",
-        fake_run_textual_scan_plan,
-    )
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
     scan_b524(
@@ -1529,6 +1517,7 @@ def test_scan_b524_normalizes_exhaustive_preset_to_research_for_textual_default_
         console=Console(force_terminal=True),
         planner_ui="textual",
         planner_preset="exhaustive",
+        planners=_planners(textual=fake_run_textual_scan_plan),
     )
 
     assert captured["default_preset"] == "research"
@@ -1566,10 +1555,6 @@ def test_scan_b524_normalizes_conservative_preset_to_recommended_for_textual_def
         captured["system_information"] = system_information
         return {}
 
-    monkeypatch.setattr(
-        "helianthus_vrc_explorer.ui.planner_textual.run_textual_scan_plan",
-        fake_run_textual_scan_plan,
-    )
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
     scan_b524(
@@ -1579,6 +1564,7 @@ def test_scan_b524_normalizes_conservative_preset_to_recommended_for_textual_def
         console=Console(force_terminal=True),
         planner_ui="textual",
         planner_preset="conservative",
+        planners=_planners(textual=fake_run_textual_scan_plan),
     )
 
     assert captured["default_preset"] == "recommended"
@@ -1678,7 +1664,6 @@ def test_scan_b524_instance_discovery_runs_local_namespace_before_remote(
             DiscoveredGroup(group=0x0A, descriptor=1.0),
         ],
     )
-    monkeypatch.setattr(scan_mod, "prompt_scan_plan", lambda *_args, **_kwargs: {})
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
     scan_b524(
@@ -1687,6 +1672,7 @@ def test_scan_b524_instance_discovery_runs_local_namespace_before_remote(
         observer=_NoopObserver(),
         console=Console(force_terminal=True),
         planner_ui="classic",
+        planners=_planners(classic=lambda *_args, **_kwargs: {}),
     )
 
     presence_reads = [
@@ -1732,19 +1718,11 @@ def test_scan_b524_disabled_planner_skips_interactive_planner_even_on_tty(
 ) -> None:
     import sys
 
-    import helianthus_vrc_explorer.scanner.scan as scan_mod
-
     transport = DummyTransport(_write_fixture_unknown_group_69(tmp_path))
 
     def _unexpected(*_args, **_kwargs):
         raise AssertionError("planner should stay disabled")
 
-    monkeypatch.setattr(scan_mod, "prompt_scan_plan", _unexpected)
-    monkeypatch.setattr(
-        "helianthus_vrc_explorer.ui.planner_textual.run_textual_scan_plan",
-        _unexpected,
-        raising=False,
-    )
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
     artifact = scan_b524(
@@ -1754,6 +1732,7 @@ def test_scan_b524_disabled_planner_skips_interactive_planner_even_on_tty(
         console=Console(force_terminal=True),
         planner_ui="disabled",
         planner_preset="recommended",
+        planners=_planners(classic=_unexpected, textual=_unexpected),
     )
 
     assert artifact["meta"]["incomplete"] is False
@@ -1890,7 +1869,6 @@ def test_interactive_planner_preserves_explicit_routes_outside_native_inventory(
 
     from textual.app import App
 
-    import helianthus_vrc_explorer.scanner.scan as scan_mod
     from helianthus_vrc_explorer.ui.planner import _build_default_plan
 
     transport = RecordingTransport(DummyTransport(_write_fixture_groups_00_and_01(tmp_path)))
@@ -1915,7 +1893,6 @@ def test_interactive_planner_preserves_explicit_routes_outside_native_inventory(
         return original_run(app, headless=True, auto_pilot=save_plan)
 
     monkeypatch.setattr(App, "run", headless_run)
-    monkeypatch.setattr(scan_mod, "prompt_scan_plan", classic_accept_default)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
     artifact = scan_b524(
         transport,
@@ -1926,6 +1903,7 @@ def test_interactive_planner_preserves_explicit_routes_outside_native_inventory(
         planner_preset="custom",
         explicit_plan={key: requested},
         probe_constraints=False,
+        planners=_planners(classic=classic_accept_default),
     )
     operation_plan = artifact["meta"]["scan_plan"]["groups"][f"0x{group:02x}"]["operations"]["0x02"]
     assert operation_plan["registers"] == ["0x0001", "0x0003"]
@@ -1941,8 +1919,6 @@ def test_scan_b524_textual_failure_falls_back_to_classic_in_auto_mode(
 ) -> None:
     import sys
 
-    import helianthus_vrc_explorer.scanner.scan as scan_mod
-
     transport = DummyTransport(_write_fixture_unknown_group_69(tmp_path))
     classic_called = {"count": 0}
 
@@ -1955,11 +1931,6 @@ def test_scan_b524_textual_failure_falls_back_to_classic_in_auto_mode(
         assert isinstance(default_plan, dict)
         return default_plan
 
-    monkeypatch.setattr(
-        "helianthus_vrc_explorer.ui.planner_textual.run_textual_scan_plan",
-        fake_run_textual_scan_plan,
-    )
-    monkeypatch.setattr(scan_mod, "prompt_scan_plan", fake_prompt_scan_plan)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
     artifact = scan_b524(
@@ -1969,10 +1940,180 @@ def test_scan_b524_textual_failure_falls_back_to_classic_in_auto_mode(
         console=Console(force_terminal=True),
         planner_ui="auto",
         planner_preset="recommended",
+        planners=_planners(classic=fake_prompt_scan_plan, textual=fake_run_textual_scan_plan),
     )
 
     assert artifact["meta"]["incomplete"] is False
     assert classic_called["count"] >= 1
+
+
+def _unloadable_textual_planner():
+    raise ImportError("textual planner module unavailable")
+
+
+def test_scan_b524_unloadable_textual_planner_falls_back_to_classic_in_auto_mode(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    import sys
+
+    transport = DummyTransport(_write_fixture_unknown_group_69(tmp_path))
+    classic_calls: list[object] = []
+    logs: list[tuple[str, str]] = []
+
+    class _LoggingObserver(_NoopObserver):
+        def log(self, message: str, *, level: str = "info") -> None:
+            logs.append((level, message))
+
+    def fake_prompt_scan_plan(*_args, **kwargs):
+        classic_calls.append(kwargs["default_plan"])
+        return kwargs["default_plan"]
+
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
+    artifact = scan_b524(
+        transport,
+        dst=0x15,
+        observer=_LoggingObserver(),
+        console=Console(force_terminal=True),
+        planner_ui="auto",
+        planners=ScanPlanners(
+            prompt_scan_plan=fake_prompt_scan_plan,
+            load_textual_scan_plan=_unloadable_textual_planner,
+        ),
+    )
+
+    assert artifact["meta"]["incomplete"] is False
+    assert len(classic_calls) == 1
+    assert ("warn", "Textual planner unavailable; falling back to classic planner.") in logs
+
+
+def test_scan_b524_unloadable_textual_planner_raises_in_forced_textual_mode(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    import sys
+
+    transport = DummyTransport(_write_fixture_unknown_group_69(tmp_path))
+
+    def _unexpected(*_args, **_kwargs):
+        raise AssertionError("forced textual mode must not fall back to the classic planner")
+
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
+    with pytest.raises(RuntimeError, match="Textual planner requested but unavailable"):
+        scan_b524(
+            transport,
+            dst=0x15,
+            observer=_NoopObserver(),
+            console=Console(force_terminal=True),
+            planner_ui="textual",
+            planners=ScanPlanners(
+                prompt_scan_plan=_unexpected,
+                load_textual_scan_plan=_unloadable_textual_planner,
+            ),
+        )
+
+
+@pytest.mark.parametrize("planner_ui", ["auto", "classic", "textual"])
+def test_scan_b524_without_planners_scans_default_plan_on_tty(
+    monkeypatch,
+    tmp_path: Path,
+    planner_ui: str,
+) -> None:
+    import sys
+
+    import helianthus_vrc_explorer.scanner.scan as scan_mod
+
+    fixture = _write_fixture_group_02(tmp_path)
+    baseline = scan_b524(DummyTransport(fixture), dst=0x15, planner_ui="disabled")
+    hotkey_states: list[bool] = []
+
+    class _Hotkeys:
+        def __init__(self, *, enabled: bool) -> None:
+            hotkey_states.append(enabled)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc: object) -> None:
+            return None
+
+        def poll(self) -> bool:
+            raise AssertionError("replanning needs planners")
+
+    monkeypatch.setattr(scan_mod, "_PlannerHotkeyReader", _Hotkeys)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
+    artifact = scan_b524(
+        DummyTransport(fixture),
+        dst=0x15,
+        observer=_NoopObserver(),
+        console=Console(force_terminal=True),
+        planner_ui=planner_ui,
+    )
+
+    assert hotkey_states == [False]
+    assert artifact["meta"]["incomplete"] is False
+    assert artifact["meta"]["scan_plan"]["groups"] == baseline["meta"]["scan_plan"]["groups"]
+    assert artifact["operations"] == baseline["operations"]
+
+
+def test_cli_planners_are_the_ui_planner_surfaces() -> None:
+    from helianthus_vrc_explorer import cli
+    from helianthus_vrc_explorer.ui import planner_textual
+
+    assert cli.SCAN_PLANNERS.prompt_scan_plan is prompt_scan_plan
+    assert cli.SCAN_PLANNERS.load_textual_scan_plan() is planner_textual.run_textual_scan_plan
+
+
+def test_cli_scan_offers_its_planners_to_the_scanner(tmp_path: Path, monkeypatch) -> None:
+    from contextlib import contextmanager
+
+    from typer.testing import CliRunner
+
+    import helianthus_vrc_explorer.cli as cli
+    from helianthus_vrc_explorer.ui.scan_setup import ScanSetup
+    from tests.scan_ui_helpers import invoke_scan
+
+    class _Transport:
+        @contextmanager
+        def session(self):
+            yield self
+
+    @contextmanager
+    def observer(*_args, **_kwargs):
+        yield None
+
+    captured: dict[str, object] = {}
+
+    def scan_vrc(*_args, **kwargs):
+        captured.update(kwargs)
+        return {
+            "meta": {
+                "scan_timestamp": "2026-10-09T00:00:00Z",
+                "destination_address": "0x15",
+                "incomplete": False,
+                "schema_sources": [],
+            },
+            "operations": {},
+        }
+
+    monkeypatch.setattr(cli, "_build_transport", lambda *_args, **_kwargs: _Transport())
+    identity = {"manufacturer": "0xB5", "device_id": "BASV0", "eid": "BASV0"}
+    monkeypatch.setattr(cli, "_probe_scan_identity", lambda *_args, **_kwargs: dict(identity))
+    monkeypatch.setattr(cli, "make_scan_observer", observer)
+    monkeypatch.setattr(cli, "scan_vrc", scan_vrc)
+
+    result = invoke_scan(
+        CliRunner(),
+        monkeypatch,
+        ["--preset", "recommended"],
+        setup=ScanSetup(dst="0x15", output_dir=tmp_path),
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["planners"] is cli.SCAN_PLANNERS
 
 
 def test_scan_b524_textual_planner_receives_remote_heating_source_rows(
@@ -1988,10 +2129,6 @@ def test_scan_b524_textual_planner_receives_remote_heating_source_rows(
         captured["default_plan"] = kwargs["default_plan"]
         return {}
 
-    monkeypatch.setattr(
-        "helianthus_vrc_explorer.ui.planner_textual.run_textual_scan_plan",
-        fake_run_textual_scan_plan,
-    )
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
     artifact = scan_b524(
@@ -2001,6 +2138,7 @@ def test_scan_b524_textual_planner_receives_remote_heating_source_rows(
         console=Console(force_terminal=True),
         planner_ui="textual",
         planner_preset="recommended",
+        planners=_planners(textual=fake_run_textual_scan_plan),
     )
 
     planner_groups = captured["groups"]
@@ -2045,10 +2183,6 @@ def test_scan_b524_textual_planner_shows_unqualified_named_remote_rows_unselecte
         captured["default_plan"] = kwargs["default_plan"]
         return {}
 
-    monkeypatch.setattr(
-        "helianthus_vrc_explorer.ui.planner_textual.run_textual_scan_plan",
-        fake_run_textual_scan_plan,
-    )
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
     artifact = scan_b524(
@@ -2058,6 +2192,7 @@ def test_scan_b524_textual_planner_shows_unqualified_named_remote_rows_unselecte
         console=Console(force_terminal=True),
         planner_ui="textual",
         planner_preset="recommended",
+        planners=_planners(textual=fake_run_textual_scan_plan),
     )
 
     planner_groups = captured["groups"]
@@ -2101,14 +2236,10 @@ def test_interactive_recommended_keeps_empty_known_rows_visible_but_unselected(
         return {}
 
     if planner_ui == "textual":
-        monkeypatch.setattr(
-            "helianthus_vrc_explorer.ui.planner_textual.run_textual_scan_plan",
-            accept_empty_plan,
-        )
+        planners = _planners(textual=accept_empty_plan)
     else:
-        monkeypatch.setattr(
-            "helianthus_vrc_explorer.scanner.scan.prompt_scan_plan",
-            lambda _console, groups, **kwargs: accept_empty_plan(groups, **kwargs),
+        planners = _planners(
+            classic=lambda _console, groups, **kwargs: accept_empty_plan(groups, **kwargs)
         )
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
@@ -2119,6 +2250,7 @@ def test_interactive_recommended_keeps_empty_known_rows_visible_but_unselected(
         console=Console(force_terminal=True),
         planner_ui=planner_ui,
         planner_preset="recommended",
+        planners=planners,
     )
 
     planner_groups = captured["groups"]
@@ -2145,10 +2277,6 @@ def test_scan_b524_textual_planner_uses_remote_presence_for_remote_namespace_row
         captured["groups"] = groups
         return {}
 
-    monkeypatch.setattr(
-        "helianthus_vrc_explorer.ui.planner_textual.run_textual_scan_plan",
-        fake_run_textual_scan_plan,
-    )
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
     scan_b524(
@@ -2158,6 +2286,7 @@ def test_scan_b524_textual_planner_uses_remote_presence_for_remote_namespace_row
         console=Console(force_terminal=True),
         planner_ui="textual",
         planner_preset="recommended",
+        planners=_planners(textual=fake_run_textual_scan_plan),
     )
 
     planner_groups = captured["groups"]
@@ -2180,10 +2309,6 @@ def test_scan_b524_textual_full_preset_keeps_exploratory_rows_visible_but_unsele
         captured["default_plan"] = kwargs["default_plan"]
         return {}
 
-    monkeypatch.setattr(
-        "helianthus_vrc_explorer.ui.planner_textual.run_textual_scan_plan",
-        fake_run_textual_scan_plan,
-    )
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
     scan_b524(
@@ -2193,6 +2318,7 @@ def test_scan_b524_textual_full_preset_keeps_exploratory_rows_visible_but_unsele
         console=Console(force_terminal=True),
         planner_ui="textual",
         planner_preset="full",
+        planners=_planners(textual=fake_run_textual_scan_plan),
     )
 
     planner_groups = captured["groups"]
@@ -2231,10 +2357,6 @@ def test_scan_b524_textual_full_preset_keeps_remote_only_group_selected_on_remot
         captured["default_plan"] = kwargs["default_plan"]
         return {}
 
-    monkeypatch.setattr(
-        "helianthus_vrc_explorer.ui.planner_textual.run_textual_scan_plan",
-        fake_run_textual_scan_plan,
-    )
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
     scan_b524(
@@ -2244,6 +2366,7 @@ def test_scan_b524_textual_full_preset_keeps_remote_only_group_selected_on_remot
         console=Console(force_terminal=True),
         planner_ui="textual",
         planner_preset="full",
+        planners=_planners(textual=fake_run_textual_scan_plan),
     )
 
     planner_groups = captured["groups"]
@@ -2272,10 +2395,6 @@ def test_scan_b524_textual_planner_does_not_reuse_remote_presence_for_local_spec
         captured["groups"] = groups
         return {}
 
-    monkeypatch.setattr(
-        "helianthus_vrc_explorer.ui.planner_textual.run_textual_scan_plan",
-        fake_run_textual_scan_plan,
-    )
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
     scan_b524(
@@ -2285,6 +2404,7 @@ def test_scan_b524_textual_planner_does_not_reuse_remote_presence_for_local_spec
         console=Console(force_terminal=True),
         planner_ui="textual",
         planner_preset="recommended",
+        planners=_planners(textual=fake_run_textual_scan_plan),
     )
 
     planner_groups = captured["groups"]
@@ -2307,10 +2427,6 @@ def test_scan_b524_textual_planner_models_group_08_as_instanced_on_local_and_rem
         captured["default_plan"] = kwargs["default_plan"]
         return {}
 
-    monkeypatch.setattr(
-        "helianthus_vrc_explorer.ui.planner_textual.run_textual_scan_plan",
-        fake_run_textual_scan_plan,
-    )
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
     scan_b524(
@@ -2320,6 +2436,7 @@ def test_scan_b524_textual_planner_models_group_08_as_instanced_on_local_and_rem
         console=Console(force_terminal=True),
         planner_ui="textual",
         planner_preset="recommended",
+        planners=_planners(textual=fake_run_textual_scan_plan),
     )
 
     planner_groups = captured["groups"]
@@ -2344,10 +2461,6 @@ def test_scan_b524_textual_planner_uses_namespace_owned_labels_for_groups_09_and
         captured["default_plan"] = kwargs["default_plan"]
         return {}
 
-    monkeypatch.setattr(
-        "helianthus_vrc_explorer.ui.planner_textual.run_textual_scan_plan",
-        fake_run_textual_scan_plan,
-    )
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
     artifact = scan_b524(
@@ -2357,6 +2470,7 @@ def test_scan_b524_textual_planner_uses_namespace_owned_labels_for_groups_09_and
         console=Console(force_terminal=True),
         planner_ui="textual",
         planner_preset="recommended",
+        planners=_planners(textual=fake_run_textual_scan_plan),
     )
 
     planner_groups = captured["groups"]
@@ -2426,10 +2540,6 @@ def test_scan_b524_textual_planner_uses_remote_presence_for_op06_rows(
         )
 
     monkeypatch.setattr(
-        "helianthus_vrc_explorer.ui.planner_textual.run_textual_scan_plan",
-        fake_run_textual_scan_plan,
-    )
-    monkeypatch.setattr(
         scan_mod,
         "discover_groups",
         lambda *_args, **_kwargs: [
@@ -2453,6 +2563,7 @@ def test_scan_b524_textual_planner_uses_remote_presence_for_op06_rows(
         console=Console(force_terminal=True),
         planner_ui="textual",
         planner_preset="recommended",
+        planners=_planners(textual=fake_run_textual_scan_plan),
     )
 
     planner_groups = captured["groups"]
@@ -2497,10 +2608,6 @@ def test_scan_b524_textual_planner_does_not_leak_remote_presence_into_local_mirr
         captured["default_plan"] = kwargs["default_plan"]
         return {}
 
-    monkeypatch.setattr(
-        "helianthus_vrc_explorer.ui.planner_textual.run_textual_scan_plan",
-        fake_run_textual_scan_plan,
-    )
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
     scan_b524(
@@ -2510,6 +2617,7 @@ def test_scan_b524_textual_planner_does_not_leak_remote_presence_into_local_mirr
         console=Console(force_terminal=True),
         planner_ui="textual",
         planner_preset="recommended",
+        planners=_planners(textual=fake_run_textual_scan_plan),
     )
 
     planner_groups = captured["groups"]
@@ -2530,10 +2638,6 @@ def test_scan_b524_textual_failure_raises_in_forced_textual_mode(
     def fake_run_textual_scan_plan(*_args, **_kwargs):
         raise RuntimeError("textual init failed")
 
-    monkeypatch.setattr(
-        "helianthus_vrc_explorer.ui.planner_textual.run_textual_scan_plan",
-        fake_run_textual_scan_plan,
-    )
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
     with pytest.raises(RuntimeError, match="Textual planner requested but failed to start"):
@@ -2543,6 +2647,7 @@ def test_scan_b524_textual_failure_raises_in_forced_textual_mode(
             observer=_NoopObserver(),
             console=Console(force_terminal=True),
             planner_ui="textual",
+            planners=_planners(textual=fake_run_textual_scan_plan),
         )
 
 
@@ -2584,7 +2689,6 @@ def test_scan_b524_replan_before_first_completed_task_does_not_divide_by_zero(
         return default_plan
 
     monkeypatch.setattr(scan_mod, "_PlannerHotkeyReader", _FakeHotkeys)
-    monkeypatch.setattr(scan_mod, "prompt_scan_plan", fake_prompt_scan_plan)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
     artifact = scan_b524(
@@ -2593,6 +2697,7 @@ def test_scan_b524_replan_before_first_completed_task_does_not_divide_by_zero(
         observer=_NoopObserver(),
         console=Console(force_terminal=True),
         planner_ui="classic",
+        planners=_planners(classic=fake_prompt_scan_plan),
     )
 
     assert artifact["meta"]["incomplete"] is False
@@ -2658,7 +2763,6 @@ def test_scan_b524_replan_promotes_group_01_to_dual_namespace_before_queue_rebui
         }
 
     monkeypatch.setattr(scan_mod, "_PlannerHotkeyReader", _FakeHotkeys)
-    monkeypatch.setattr(scan_mod, "prompt_scan_plan", fake_prompt_scan_plan)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
     artifact = scan_b524(
@@ -2667,6 +2771,7 @@ def test_scan_b524_replan_promotes_group_01_to_dual_namespace_before_queue_rebui
         observer=_NoopObserver(),
         console=Console(force_terminal=True),
         planner_ui="classic",
+        planners=_planners(classic=fake_prompt_scan_plan),
     )
 
     # v2.3: each OP has its own group entry
@@ -2740,7 +2845,6 @@ def test_scan_b524_replan_back_to_single_preserves_promoted_dual_namespace_data(
         }
 
     monkeypatch.setattr(scan_mod, "_PlannerHotkeyReader", _FakeHotkeys)
-    monkeypatch.setattr(scan_mod, "prompt_scan_plan", fake_prompt_scan_plan)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
     artifact = scan_b524(
@@ -2749,6 +2853,7 @@ def test_scan_b524_replan_back_to_single_preserves_promoted_dual_namespace_data(
         observer=_NoopObserver(),
         console=Console(force_terminal=True),
         planner_ui="classic",
+        planners=_planners(classic=fake_prompt_scan_plan),
     )
 
     # v2.3: the data scanned under OP=0x02 is preserved even if replanned
@@ -2811,11 +2916,6 @@ def test_scan_b524_replan_textual_failure_prompts_classic_immediately(
         }
 
     monkeypatch.setattr(scan_mod, "_PlannerHotkeyReader", _FakeHotkeys)
-    monkeypatch.setattr(
-        "helianthus_vrc_explorer.ui.planner_textual.run_textual_scan_plan",
-        fake_run_textual_scan_plan,
-    )
-    monkeypatch.setattr(scan_mod, "prompt_scan_plan", fake_prompt_scan_plan)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
     artifact = scan_b524(
@@ -2824,6 +2924,7 @@ def test_scan_b524_replan_textual_failure_prompts_classic_immediately(
         observer=_NoopObserver(),
         console=Console(force_terminal=True),
         planner_ui="auto",
+        planners=_planners(classic=fake_prompt_scan_plan, textual=fake_run_textual_scan_plan),
     )
 
     grp = artifact_op_group(artifact, op="0x02", group="0x02")

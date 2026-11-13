@@ -2,31 +2,6 @@
   "version": 1,
   "violations": [
     {
-      "importer": "helianthus_vrc_explorer.scanner.b524_orchestration",
-      "imported": "helianthus_vrc_explorer.ui.planner",
-      "count": 1
-    },
-    {
-      "importer": "helianthus_vrc_explorer.scanner.b524_orchestration",
-      "imported": "helianthus_vrc_explorer.ui.planner_selection",
-      "count": 1
-    },
-    {
-      "importer": "helianthus_vrc_explorer.scanner.b524_orchestration",
-      "imported": "helianthus_vrc_explorer.ui.planner_textual",
-      "count": 2
-    },
-    {
-      "importer": "helianthus_vrc_explorer.scanner.b524_plan",
-      "imported": "helianthus_vrc_explorer.ui.planner",
-      "count": 1
-    },
-    {
-      "importer": "helianthus_vrc_explorer.scanner.scan",
-      "imported": "helianthus_vrc_explorer.ui.planner",
-      "count": 1
-    },
-    {
       "importer": "helianthus_vrc_explorer.schema.b524_constraints",
       "imported": "helianthus_vrc_explorer.scanner.identity",
       "count": 1
