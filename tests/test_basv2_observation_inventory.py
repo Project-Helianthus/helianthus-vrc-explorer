@@ -14,6 +14,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import re
+from functools import lru_cache
 from collections.abc import Iterator
 from copy import deepcopy
 from pathlib import Path
@@ -128,6 +129,7 @@ def _load(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+@lru_cache(maxsize=None)
 def baseline_rows() -> dict[tuple[str, ...], dict[str, Any]]:
     rows = _load(BASELINE)["descriptions"]
     return {
@@ -137,10 +139,12 @@ def baseline_rows() -> dict[tuple[str, ...], dict[str, Any]]:
     }
 
 
+@lru_cache(maxsize=None)
 def selector_inventory() -> dict[str, Any]:
     return _load(SELECTOR_INVENTORY)
 
 
+@lru_cache(maxsize=None)
 def inventory_rows() -> dict[tuple[str, ...], dict[str, Any]]:
     return {
         tuple(row["selector"][field] for field in SELECTOR_FIELDS): row
