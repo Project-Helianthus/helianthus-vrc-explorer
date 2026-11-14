@@ -263,13 +263,13 @@
       "path": "src/helianthus_vrc_explorer/scanner/b524_orchestration.py",
       "symbol": "run_b524_scan",
       "rule": "C901",
-      "count": 162
+      "count": 121
     },
     {
       "path": "src/helianthus_vrc_explorer/scanner/b524_orchestration.py",
       "symbol": "run_b524_scan",
       "rule": "PLR0915",
-      "count": 625
+      "count": 461
     },
     {
       "path": "src/helianthus_vrc_explorer/scanner/b524_parameter_writes.py",
