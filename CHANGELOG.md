@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- The public and packaged BASV0 description and register-observation fixtures
+  now equal the vendored public native pair byte for byte and match its two
+  pinned SHA-256 digests. The observation file marks `native_headers` and
+  `response_payloads` as `omitted`; the description file carries the separate
+  `api_version_raw`/`api_revision_raw` identity, the neutral `DATE_DMY_U8X3` and
+  `TIME_HMS_U8X3` codec names, no `validation_scope` and the instance nonclaim.
+  `scripts/check_shared_b524_fixtures.py` also checks both copies and, with
+  `--publish-copies`, copies the validated vendored pair to them. Tests run the
+  shared schema and semantic checks over both copies. Agreement between the two
+  files is not proof of a request that was never retained. Scanner behaviour is
+  unchanged.
+
 - The B524 scan now runs as five phase functions (plan, discovery, availability,
   scan and completion) over one typed scan context, and `run_b524_scan` only calls
   them in order. `run_b524_scan` and every phase function fit the readability

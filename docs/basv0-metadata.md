@@ -68,7 +68,22 @@ register values:
 The scalar fixture distinguishes 5,335 echoed payloads, including FLAGS `00`,
 from 1,155 status-only replies and 95 transport failures. It contains no current
 scalar values, raw value payloads, endpoint, serial, contributor identity,
-acquisition timestamp, or installation topology claim.
+acquisition timestamp, or installation topology claim. It marks
+`current_values`, `native_headers` and `response_payloads` explicitly as
+`omitted`.
+
+Both files and their packaged copies under `src/helianthus_vrc_explorer/fixtures/`
+are byte-identical to the vendored [public native pair](../fixtures/b524_shared/README.md).
+The two SHA-256 pins cited by the public profile page authenticate the complete
+file bytes. `python3 scripts/check_shared_b524_fixtures.py` checks the pins, the
+native schemas, the shared semantic invariants and the identity of every copy.
+With `--publish-copies` it first validates the vendored pair, then copies it to
+both locations; a failed validation leaves every copy unchanged.
+
+Agreement between the two files, such as a linked selector, access FLAGS, width
+or name, corroborates the retained files with each other only. It is not proof
+of a request that was never retained, and it cannot show which instance a
+description answers.
 
 HTML reports reserve “Description mismatch” for differing descriptions compared
 within a compatible profile. Cached descriptions belonging to a different or
@@ -120,6 +135,6 @@ display-only. Application baselines may keep scope as application policy.
 Application behavior follows the [AGPL reuse contract](https://github.com/Project-Helianthus/helianthus-docs-ebus/blob/main/development/ebus-vaillant-b524-basv0-profile-reuse.md).
 Publication uses family-level statements. BASV0/BASV2 native identity strings
 identify evidence contexts; they do not prove model-wide support. The exporter
-uses Explorer's retained source pair and independent manifest, not the docs
-fixtures as generation inputs. #299 owns the committed native fixture refresh
-and overlay packaging/licensing decision; no BASV2 raw evidence is invented.
+reads the committed fixture pair and the independent identity manifest, and
+reproduces the committed native bytes exactly. Packaging and licensing of the
+application overlay remain open; no BASV0 or BASV2 raw evidence is invented.

@@ -262,7 +262,20 @@ def test_sanitized_observation_retains_unknowns_without_private_capture_fields()
         .read_text(encoding="utf-8")
     )
     assert fixture["observation_id"] == "basv0_sw0217_hw8803_api1"
+    assert fixture["local_profile"] == {
+        "eid": "BASV0",
+        "software_raw": "0217",
+        "hardware_raw": "8803",
+        "api_version_raw": "1",
+        "api_revision_raw": "1",
+    }
     assert len(fixture["records"]) == 2093
+    # Native descriptions carry no application policy and only neutral codec names.
+    assert all("validation_scope" not in record for record in fixture["records"])
+    codecs = {(record["decoded"] or {}).get("codec") for record in fixture["records"]}
+    assert {"DATE_DMY_U8X3", "TIME_HMS_U8X3"} <= codecs
+    assert not {"HDA:3", "HTI"} & codecs
+    assert any("no request is retained" in nonclaim for nonclaim in fixture["nonclaims"])
     forbidden = {"scan_timestamp", "serial", "contributor", "destination_address", "value"}
     assert not forbidden.intersection(fixture)
     assert all(not forbidden.intersection(record) for record in fixture["records"])
@@ -286,6 +299,8 @@ def test_sanitized_scalar_catalog_retains_unknown_and_wire_states_without_values
         .read_text(encoding="utf-8")
     )
     assert fixture["current_values"] == "omitted"
+    assert fixture["native_headers"] == "omitted"
+    assert fixture["response_payloads"] == "omitted"
     assert len(fixture["records"]) == 6585
     assert all("value" not in record and "raw_hex" not in record for record in fixture["records"])
 

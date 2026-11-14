@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Check the isolated public native pair, or refresh from an explicit docs root."""
+"""Check the isolated public native pair and its published copies.
+
+Refresh the vendored pair from an explicit docs root, or publish the vendored
+pair to the public and packaged fixture copies.
+"""
 
 from __future__ import annotations
 
@@ -22,7 +26,10 @@ from pathlib import Path
 
 from jsonschema import Draft202012Validator
 
-DEFAULT_ROOT = Path(__file__).resolve().parents[1] / "fixtures/b524_shared"
+REPOSITORY = Path(__file__).resolve().parents[1]
+DEFAULT_ROOT = REPOSITORY / "fixtures/b524_shared"
+# Public and packaged copies are byte-identical to the vendored, page-pinned pair.
+PUBLISHED_COPIES = (REPOSITORY / "fixtures", REPOSITORY / "src/helianthus_vrc_explorer/fixtures")
 DESCRIPTION = "b524-basv0-description-profile-v1.json"
 OBSERVATIONS = "b524-basv0-register-observations-v1.json"
 NATIVE = Path("protocols/vaillant/fixtures")
@@ -76,6 +83,46 @@ def validate_bundle(root):
     manifest = json.loads((root / "manifest.json").read_text())
     validate_digests(root, manifest)
     validate_documents(root, *load_documents(root))
+
+
+def validate_published_copies(root=DEFAULT_ROOT, copies=PUBLISHED_COPIES):
+    """Require every published copy to carry exactly the authenticated vendored bytes."""
+    manifest = json.loads((root / "manifest.json").read_text())
+    for directory in copies:
+        for name in (DESCRIPTION, OBSERVATIONS):
+            data = (directory / name).read_bytes()
+            actual = base64.b64encode(sha256(data).digest()).decode()
+            if actual != manifest["digests_base64"][name]:
+                raise ValueError(f"published copy digest mismatch: {directory / name}")
+            if data != (root / NATIVE / name).read_bytes():
+                raise ValueError(
+                    f"published copy differs from the vendored pair: {directory / name}"
+                )
+
+
+def publish_copies(root=DEFAULT_ROOT, copies=PUBLISHED_COPIES):
+    """Copy the validated vendored pair to every published location.
+
+    The vendored bundle is validated first, so a failing bundle leaves every copy
+    untouched. Each file is replaced atomically from a sibling temporary file.
+    """
+    validate_bundle(root)
+    for directory in copies:
+        for name in (DESCRIPTION, OBSERVATIONS):
+            handle, staged = tempfile.mkstemp(prefix=f".{name}-", dir=directory)
+            os.close(handle)
+            try:
+                shutil.copyfile(root / NATIVE / name, staged)
+                # Keep the published file's permissions rather than the private temp mode.
+                if (directory / name).exists():
+                    shutil.copymode(directory / name, staged)
+                else:
+                    os.chmod(staged, 0o644)
+                os.replace(staged, directory / name)
+            finally:
+                if os.path.exists(staged):
+                    os.unlink(staged)
+    validate_published_copies(root, copies)
 
 
 def refresh(source, target=DEFAULT_ROOT):
@@ -197,14 +244,22 @@ def main():
     parser.add_argument(
         "--source-root", type=Path, help="explicit read-only docs-ebus refresh source"
     )
+    parser.add_argument(
+        "--publish-copies",
+        action="store_true",
+        help="copy the validated vendored pair to the public and packaged fixtures",
+    )
     args = parser.parse_args()
     try:
         if args.source_root is not None:
             refresh(args.source_root)
+        if args.publish_copies:
+            publish_copies()
         validate_bundle(DEFAULT_ROOT)
+        validate_published_copies()
     except (OSError, ValueError, KeyError, TypeError) as exc:
         parser.exit(1, f"shared B524 fixture check failed: {exc}\n")
-    print("Shared public B524 fixtures: syntax, digests and semantics PASS")
+    print("Shared public B524 fixtures: syntax, digests, semantics and published copies PASS")
     return 0
 
 
