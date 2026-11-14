@@ -101,27 +101,49 @@ def validate_published_copies(root=DEFAULT_ROOT, copies=PUBLISHED_COPIES):
 
 
 def publish_copies(root=DEFAULT_ROOT, copies=PUBLISHED_COPIES):
-    """Copy the validated vendored pair to every published location.
+    """Copy the validated vendored pair to every published location as one transaction.
 
     The vendored bundle is validated first, so a failing bundle leaves every copy
-    untouched. Each file is replaced atomically from a sibling temporary file.
+    untouched. Every output is staged beside its target before any is committed;
+    if a later replacement fails, the earlier ones are restored.
     """
     validate_bundle(root)
-    for directory in copies:
-        for name in (DESCRIPTION, OBSERVATIONS):
-            handle, staged = tempfile.mkstemp(prefix=f".{name}-", dir=directory)
+    targets = [directory / name for directory in copies for name in (DESCRIPTION, OBSERVATIONS)]
+    staged = {}
+    previous = {}
+    committed = []
+    try:
+        for target in targets:
+            name = target.name
+            handle, path = tempfile.mkstemp(prefix=f".{name}-", dir=target.parent)
             os.close(handle)
-            try:
-                shutil.copyfile(root / NATIVE / name, staged)
-                # Keep the published file's permissions rather than the private temp mode.
-                if (directory / name).exists():
-                    shutil.copymode(directory / name, staged)
-                else:
-                    os.chmod(staged, 0o644)
-                os.replace(staged, directory / name)
-            finally:
-                if os.path.exists(staged):
-                    os.unlink(staged)
+            staged[target] = Path(path)
+            shutil.copyfile(root / NATIVE / name, path)
+            # Keep the published file's permissions rather than the private temp mode.
+            if target.exists():
+                shutil.copymode(target, path)
+                previous[target] = target.read_bytes(), target.stat().st_mode
+            else:
+                os.chmod(path, 0o644)
+        for target in targets:
+            os.replace(staged[target], target)
+            committed.append(target)
+    except BaseException:
+        for target in committed:
+            if target in previous:
+                data, mode = previous[target]
+                handle, path = tempfile.mkstemp(prefix=f".{target.name}-", dir=target.parent)
+                with os.fdopen(handle, "wb") as out:
+                    out.write(data)
+                os.chmod(path, mode & 0o7777)
+                os.replace(path, target)
+            else:
+                target.unlink(missing_ok=True)
+        raise
+    finally:
+        for path in staged.values():
+            if path.exists():
+                path.unlink()
     validate_published_copies(root, copies)
 
 
@@ -253,7 +275,8 @@ def main():
     try:
         if args.source_root is not None:
             refresh(args.source_root)
-        if args.publish_copies:
+        # A refreshed vendored pair must reach the copies in the same run.
+        if args.publish_copies or args.source_root is not None:
             publish_copies()
         validate_bundle(DEFAULT_ROOT)
         validate_published_copies()

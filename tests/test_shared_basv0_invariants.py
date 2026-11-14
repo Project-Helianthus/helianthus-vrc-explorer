@@ -141,6 +141,46 @@ def test_publish_copies_writes_pinned_bytes_and_fails_closed(tmp_path):
         assert sorted(path.name for path in directory.iterdir()) == sorted(NAMES)
 
 
+def test_publish_copies_mid_publication_failure_restores_every_copy(tmp_path, monkeypatch):
+    root = tmp_path / "bundle"
+    shutil.copytree(checker.DEFAULT_ROOT, root)
+    copies = [tmp_path / "public", tmp_path / "packaged"]
+    for directory in copies:
+        directory.mkdir()
+        for name in NAMES:
+            (directory / name).write_text("last-known-good")
+    real_replace = checker.os.replace
+    calls = []
+
+    def failing_replace(source, destination):
+        # Fail the third commit, after two copies already carry the new bytes.
+        if Path(destination).name in NAMES and "last-known" not in str(source):
+            calls.append(destination)
+            if len(calls) == 3:
+                raise OSError("simulated copy failure")
+        return real_replace(source, destination)
+
+    monkeypatch.setattr(checker.os, "replace", failing_replace)
+    with pytest.raises(OSError, match="simulated"):
+        checker.publish_copies(root, copies)
+    monkeypatch.setattr(checker.os, "replace", real_replace)
+    for directory in copies:
+        for name in NAMES:
+            assert (directory / name).read_text() == "last-known-good"
+        assert sorted(path.name for path in directory.iterdir()) == sorted(NAMES)
+
+
+def test_source_root_refresh_also_publishes_the_copies(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(checker, "refresh", lambda source: calls.append("refresh"))
+    monkeypatch.setattr(checker, "publish_copies", lambda: calls.append("publish"))
+    monkeypatch.setattr(checker, "validate_bundle", lambda root: calls.append("bundle"))
+    monkeypatch.setattr(checker, "validate_published_copies", lambda: calls.append("copies"))
+    monkeypatch.setattr(checker.sys, "argv", ["check", "--source-root", str(tmp_path)])
+    assert checker.main() == 0
+    assert calls == ["refresh", "publish", "bundle", "copies"]
+
+
 @pytest.mark.parametrize(
     "marker", ["current_values", "native_headers", "response_payloads", "nonclaims"]
 )
