@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- The B524 scan now runs as five phase functions (plan, discovery, availability,
+  scan and completion) over one typed scan context, and `run_b524_scan` only calls
+  them in order. `run_b524_scan` and every phase function fit the readability
+  budget, so their readability baseline records are removed. Scan artifacts, the
+  HTML report, the command line and operator output are unchanged.
+
 - Rows without a canonical name show the register key (31 rows at this change).
   The map-leaf display fallback is removed; map leaves remain in their own
   correspondence columns and never supply `register_name`.

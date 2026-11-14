@@ -731,3 +731,187 @@ def test_discovery_phase_keeps_resolved_fields_when_stopped(tmp_path: Path) -> N
     assert ctx.planner_mode == "disabled"
     assert ctx.resolved_group_opcodes == {}
     assert ctx.artifact["operations"] == {}
+
+
+def _discovered(tmp_path: Path, **options: Any):
+    from helianthus_vrc_explorer.scanner.b524_phases import discover_b524_scope
+    from helianthus_vrc_explorer.scanner.director import discover_groups
+
+    ctx = _plan(DummyTransport(_write_fixture(tmp_path)), **options)
+    discover_b524_scope(
+        ctx,
+        discover_groups_fn=discover_groups,
+        resolve_planner_mode=lambda: "disabled",
+        fallback_bounds=_fallback_bounds(),
+    )
+    return ctx
+
+
+def _present(ctx: Any, opcode: str, group: str) -> list[str]:
+    instances = ctx.artifact["operations"][opcode]["groups"][group]["instances"]
+    return sorted(key for key, value in instances.items() if value.get("present"))
+
+
+def test_availability_phase_records_presence_without_reading_registers(tmp_path: Path) -> None:
+    from helianthus_vrc_explorer.scanner.b524_phases import probe_b524_availability
+    from helianthus_vrc_explorer.scanner.register import probe_instance_availability
+
+    output = OperatorOutput()
+    ctx = _discovered(tmp_path, observer=output)
+    discovery_events = len(output.events)
+    sent_before = ctx.transport.counters.send_calls
+
+    probe_b524_availability(ctx, probe_instance_availability_fn=probe_instance_availability)
+
+    assert ctx.instance_discovery_requests == ctx.transport.counters.send_calls - sent_before
+    assert ctx.instance_discovery_requests > 0
+    assert ctx.native_dhw_admitted == {(0x02, 0x01): False}
+    assert _present(ctx, "0x02", "0x02") == ["0x01", "0x02"]
+    assert _present(ctx, "0x06", "0x01") == ["0x01"]
+    meta = ctx.artifact["meta"]
+    assert meta["scan_coverage"]["discovery_completed"] is True
+    assert meta["instance_counts"]["0x02:0x02"]["observed"] == 2
+    assert meta["device_count"]["observed"] == 1
+    assert meta["b524_event_acquisition"]["status"] == "not_scheduled_unknown_identity"
+    assert "scan_plan" not in meta
+    phase_events = output.events[discovery_events:]
+    assert [event for event in phase_events if event[0].startswith("phase_s")] == [
+        ("phase_start", "instance_discovery", 158)
+    ]
+    assert phase_events[-1] == ("phase_finish", "instance_discovery")
+    assert [
+        (event[1], event[2]) for event in phase_events if event[0] == "log"
+    ] == _namespace_summary_logs(_NAMESPACE_SUMMARY)
+
+
+def test_scan_phase_uses_its_collaborators_once(tmp_path: Path) -> None:
+    from contextlib import nullcontext
+
+    from helianthus_vrc_explorer.scanner.b524_phases import (
+        B524ScanCollaborators,
+        probe_b524_availability,
+        scan_b524_registers,
+    )
+    from helianthus_vrc_explorer.scanner.register import probe_instance_availability
+
+    ctx = _discovered(tmp_path)
+    probe_b524_availability(ctx, probe_instance_availability_fn=probe_instance_availability)
+    calls: list[tuple[Any, ...]] = []
+
+    class Hotkeys:
+        def poll(self) -> bool:
+            raise AssertionError("hotkeys are not polled without a planner")
+
+        def suspend(self):
+            return nullcontext()
+
+    def hotkey_reader(*, enabled: bool):
+        calls.append(("hotkeys", enabled))
+        return nullcontext(Hotkeys())
+
+    def select(artifact, candidates, entries, /, *, policy):
+        calls.append(("select", artifact is ctx.artifact, len(candidates), len(entries)))
+        return [], {}, []
+
+    def annotate(artifact, /) -> None:
+        calls.append(("annotate", artifact is ctx.artifact))
+
+    scan_b524_registers(
+        ctx,
+        B524ScanCollaborators(
+            console=None,
+            planners=None,
+            planner_ui="auto",
+            hotkey_reader_cls=hotkey_reader,
+            ebusd_schema=None,
+            myvaillant_map=None,
+            select_description_candidates=select,
+            annotate_artifact=annotate,
+        ),
+    )
+
+    writable = len(ctx.observed_description_candidates)
+    assert writable == len(ctx.observed_description_entries) == 1
+    assert calls == [("hotkeys", False), ("select", True, writable, writable), ("annotate", True)]
+    assert ctx.description_candidates_prepared is True
+    meta = ctx.artifact["meta"]
+    assert meta["scan_plan"]["estimated_register_requests"] == 418
+    assert meta["constraint_dictionary"] == {}
+    assert _present(ctx, "0x02", "0x02") == ["0x01", "0x02"]
+    assert "registers" in ctx.artifact["operations"]["0x02"]["groups"]["0x02"]["instances"]["0x09"]
+
+
+def test_completion_selects_descriptions_late_after_an_interrupt(tmp_path: Path) -> None:
+    from helianthus_vrc_explorer.scanner.b524_phases import (
+        complete_b524_scan,
+        record_operator_interrupt,
+    )
+
+    ctx = _discovered(tmp_path)
+    selected: list[int] = []
+
+    def select(artifact, candidates, entries, /, *, policy):
+        selected.append(len(candidates))
+        return [], {}, [{"group": "0x0a", "instance": "0x01", "status": "unknown"}]
+
+    reason = record_operator_interrupt(ctx)
+    complete_b524_scan(ctx, incomplete_reason=reason, select_description_candidates=select)
+
+    meta = ctx.artifact["meta"]
+    assert selected == [0]
+    assert meta["description_remote_profile_statuses"] == [
+        {"group": "0x0a", "instance": "0x01", "status": "unknown"}
+    ]
+    assert meta["incomplete"] is True
+    assert meta["incomplete_reason"] == "user_interrupt"
+    assert meta["scan_coverage"]["completed"] is False
+    assert meta["scan_coverage"]["actual_requests"] == ctx.transport.counters.send_calls
+    assert meta["parameter_description_requests"] == 0
+    assert list(meta)[-3:] == [
+        "parameter_description_coverage",
+        "parameter_description_requests",
+        "incomplete_reason",
+    ]
+
+
+def test_completion_keeps_the_pending_register_of_an_exhausted_recovery(tmp_path: Path) -> None:
+    from helianthus_vrc_explorer.scanner.b524_phases import (
+        complete_b524_scan,
+        record_transport_recovery_exhausted,
+    )
+    from helianthus_vrc_explorer.transport.base import TransportRecoveryExhausted
+
+    output = OperatorOutput()
+    ctx = _plan(DummyTransport(_write_fixture(tmp_path)), observer=output)
+    exc = TransportRecoveryExhausted(
+        cause="timeout", phase="receive", request_attempts=3, reconnect_attempts=1
+    )
+    # Every selector field differs, so a swapped or dropped field lands elsewhere.
+    exc.selector = {
+        "read_opcode": "0x06",
+        "group": "0x0a",
+        "instance": "0x03",
+        "register": "0x0012",
+    }
+    exc.entry = {"response_state": "timeout", "raw_hex": None}
+    exc.system_information = [(0x0000, 2.0, "00000040")]
+
+    def no_description_policy_yet(*_args: Any, **_options: Any):
+        raise AssertionError("no candidates are selected before discovery")
+
+    reason = record_transport_recovery_exhausted(ctx, exc)
+    complete_b524_scan(
+        ctx, incomplete_reason=reason, select_description_candidates=no_description_policy_yet
+    )
+
+    meta = ctx.artifact["meta"]
+    assert reason == "transport_recovery_exhausted"
+    assert meta["incomplete_reason"] == "transport_recovery_exhausted"
+    assert meta["transport_recovery"]["pending_selector"] == exc.selector
+    assert meta["transport_recovery"]["retry_count"] == 2
+    assert meta["system_information"][0]["value"] == 2.0
+    assert list(ctx.artifact["operations"]) == ["0x06"]
+    assert list(ctx.artifact["operations"]["0x06"]["groups"]) == ["0x0a"]
+    instances = ctx.artifact["operations"]["0x06"]["groups"]["0x0a"]["instances"]
+    assert instances == {"0x03": {"present": False, "registers": {"0x0012": exc.entry}}}
+    assert output.logs()[-1] == ("warn", str(exc))
