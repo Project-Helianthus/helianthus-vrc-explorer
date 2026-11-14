@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- `fixtures/b524-basv2-observation-inventory-v1.json` publishes the BASV2
+  selector inventory and decoded description observations (1,570 selectors,
+  VRC720 family only) as the observation exporter's output over committed data.
+  Every observation is Hypothesis and every raw description Unknown; it is not a
+  native description profile. `docs/basv2-observations.md` states its limits.
+  Scanner behaviour is unchanged.
+
 - The public and packaged BASV0 description and register-observation fixtures
   now equal the vendored public native pair byte for byte and match its two
   pinned SHA-256 digests. The observation file marks `native_headers` and

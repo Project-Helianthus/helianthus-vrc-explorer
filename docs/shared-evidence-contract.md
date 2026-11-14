@@ -94,6 +94,11 @@ their SW/HW/API strings are allowed as controller identity strings, not as
 evidence of broader support. Keep omitted context explicit; shared evidence
 does not establish current values, installation topology or write safety.
 
+The [BASV2 observations](basv2-observations.md) are an observation-only
+inventory graded Hypothesis, with every raw description Unknown. They are not
+native evidence in the shared shape and cannot seed a BASV2 description profile
+until raw descriptions with request provenance exist.
+
 ## Release coupling
 
 Explorer 0.7 ships with add-on 0.7 and gateway 0.7 in the same bill of
