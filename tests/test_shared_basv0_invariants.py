@@ -181,6 +181,27 @@ def test_source_root_refresh_also_publishes_the_copies(tmp_path, monkeypatch):
     assert calls == ["refresh", "publish", "bundle", "copies"]
 
 
+def test_failed_copy_publication_restores_the_vendored_bundle(tmp_path, monkeypatch):
+    root = tmp_path / "bundle"
+    shutil.copytree(checker.DEFAULT_ROOT, root)
+    original = (root / checker.NATIVE / checker.OBSERVATIONS).read_bytes()
+
+    def refresh_then_change(source):
+        (root / checker.NATIVE / checker.OBSERVATIONS).write_bytes(b"newer generation")
+
+    def failing_publication():
+        raise OSError("simulated read-only copy")
+
+    monkeypatch.setattr(checker, "DEFAULT_ROOT", root)
+    monkeypatch.setattr(checker, "refresh", refresh_then_change)
+    monkeypatch.setattr(checker, "publish_copies", failing_publication)
+    monkeypatch.setattr(checker.sys, "argv", ["check", "--source-root", str(tmp_path)])
+    with pytest.raises(SystemExit) as exit_info:
+        checker.main()
+    assert exit_info.value.code == 1
+    assert (root / checker.NATIVE / checker.OBSERVATIONS).read_bytes() == original
+
+
 @pytest.mark.parametrize(
     "marker", ["current_values", "native_headers", "response_payloads", "nonclaims"]
 )

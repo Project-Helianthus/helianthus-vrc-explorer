@@ -261,6 +261,24 @@ def publish(staged, target):
         shutil.rmtree(fresh, ignore_errors=True)
 
 
+def snapshot_tree(root):
+    """Capture every file of the vendored bundle so it can be restored byte for byte."""
+    if not root.exists():
+        return {}
+    return {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()}
+
+
+def restore_tree(root, snapshot):
+    """Put the captured bundle back through the same atomic publication."""
+    with tempfile.TemporaryDirectory(prefix="b524-restore-") as directory:
+        staged = Path(directory)
+        for relative, data in snapshot.items():
+            destination = staged / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(data)
+        publish(staged, root)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -272,12 +290,19 @@ def main():
         help="copy the validated vendored pair to the public and packaged fixtures",
     )
     args = parser.parse_args()
+    # Keep the last-known-good vendored bundle so a failed run never splits generations.
+    previous = snapshot_tree(DEFAULT_ROOT) if args.source_root is not None else None
     try:
-        if args.source_root is not None:
-            refresh(args.source_root)
-        # A refreshed vendored pair must reach the copies in the same run.
-        if args.publish_copies or args.source_root is not None:
-            publish_copies()
+        try:
+            if args.source_root is not None:
+                refresh(args.source_root)
+            # A refreshed vendored pair must reach the copies in the same run.
+            if args.publish_copies or args.source_root is not None:
+                publish_copies()
+        except BaseException:
+            if previous is not None:
+                restore_tree(DEFAULT_ROOT, previous)
+            raise
         validate_bundle(DEFAULT_ROOT)
         validate_published_copies()
     except (OSError, ValueError, KeyError, TypeError) as exc:
