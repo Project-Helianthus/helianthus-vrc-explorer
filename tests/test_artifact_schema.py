@@ -721,3 +721,42 @@ def test_status_only_probe_without_connection_state_does_not_gain_one():
     migrated, _ = migrate_artifact_schema(source)
     result = migrated["operations"]["0x02"]["groups"]["0x02"]["availability_probes"]["0x00"]
     assert result["present"] is None and "connection_state" not in result
+
+
+def test_status_only_probe_migration_invalidates_the_group_instance_count():
+    status_probe = {
+        "present": True,
+        "connection_state": "connected",
+        "response_state": "active",
+        "reply_hex": "ff",
+        "error": None,
+    }
+    active_probe = {"present": True, "response_state": "active", "reply_hex": "0101"}
+    source = _legacy_presence_artifact(
+        "2.3", "0x02", "0x03", {"0x00": status_probe, "0x01": active_probe}
+    )
+    source["meta"] = {
+        "instance_counts": {
+            "0x02:0x03": {
+                "identifier": "0x0001",
+                "expected": 2,
+                "semantics": "expected_population",
+                "capacity": None,
+                "observed": 2,
+                "mismatch": False,
+                "capacity_exceeded": False,
+                "probed_instances": 2,
+                "discovery_complete": True,
+            },
+            "0x02:0x04": {"observed": 5, "discovery_complete": True},
+        }
+    }
+    migrated, _ = migrate_artifact_schema(source)
+    row = migrated["meta"]["instance_counts"]["0x02:0x03"]
+    assert row["observed"] == 1 and row["mismatch"] is True
+    assert row["discovery_complete"] is False
+    assert migrated["meta"]["instance_counts"]["0x02:0x04"] == {
+        "observed": 5,
+        "discovery_complete": True,
+    }
+    assert migrate_artifact_schema(migrated)[0] == migrated

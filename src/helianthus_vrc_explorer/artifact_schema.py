@@ -253,16 +253,16 @@ def _migrate_entry(entry: dict[str, Any]) -> bool:
 
 def _iter_probe_groups(
     artifact: dict[str, Any],
-) -> Iterator[tuple[dict[str, Any], dict[str, Any]]]:
-    """Yield (probes, instances) for every group that records availability probes."""
+) -> Iterator[tuple[str, str, dict[str, Any], dict[str, Any]]]:
+    """Yield (opcode, group, probes, instances) for groups that record availability probes."""
     operations = artifact.get("operations")
-    for op_obj in operations.values() if isinstance(operations, dict) else ():
+    for opcode, op_obj in operations.items() if isinstance(operations, dict) else ():
         groups = op_obj.get("groups") if isinstance(op_obj, dict) else None
-        for group_obj in groups.values() if isinstance(groups, dict) else ():
+        for group, group_obj in groups.items() if isinstance(groups, dict) else ():
             probes = group_obj.get("availability_probes") if isinstance(group_obj, dict) else None
             if isinstance(probes, dict):
                 instances = group_obj.get("instances")
-                yield probes, instances if isinstance(instances, dict) else {}
+                yield opcode, group, probes, instances if isinstance(instances, dict) else {}
 
 
 def _mark_probe_presence_unknown(probe: dict[str, Any], instance: object) -> bool:
@@ -280,6 +280,38 @@ def _mark_probe_presence_unknown(probe: dict[str, Any], instance: object) -> boo
     return changed
 
 
+def _invalidate_instance_count(
+    artifact: dict[str, Any], opcode: str, group: str, withdrawn: list[str]
+) -> bool:
+    """Turn the stored count of a group into a lower bound after presence was withdrawn."""
+    meta = artifact.get("meta")
+    counts = meta.get("instance_counts") if isinstance(meta, dict) else None
+    row = counts.get(f"{opcode}:{group}") if isinstance(counts, dict) else None
+    if not isinstance(row, dict):
+        return False
+    changed = False
+    observed = row.get("observed")
+    if isinstance(observed, int) and not isinstance(observed, bool):
+        # The virtual water circuit is not part of the circuit count.
+        lost = [
+            ii for ii in withdrawn if not (opcode == "0x02" and group == "0x02" and ii == "0x09")
+        ]
+        if lost:
+            observed = max(0, observed - len(lost))
+            row["observed"] = observed
+            expected = row.get("expected")
+            if isinstance(expected, int) and not isinstance(expected, bool):
+                row["mismatch"] = expected != observed
+            capacity = row.get("capacity")
+            if isinstance(capacity, int) and not isinstance(capacity, bool):
+                row["capacity_exceeded"] = observed > capacity
+            changed = True
+    if row.get("discovery_complete") is not False:
+        row["discovery_complete"] = False
+        changed = True
+    return changed
+
+
 def _migrate_status_only_probes(artifact: dict[str, Any]) -> bool:
     """Leave presence unknown where the only availability evidence is a status reply.
 
@@ -289,11 +321,19 @@ def _migrate_status_only_probes(artifact: dict[str, Any]) -> bool:
     Probes with active evidence are not touched.
     """
     changed = False
-    for probes, instances in _iter_probe_groups(artifact):
+    for opcode, group, probes, instances in _iter_probe_groups(artifact):
+        withdrawn: list[str] = []
+        touched = False
         for instance_key, probe in probes.items():
             if isinstance(probe, dict) and _derive_response_state(probe) == "status_only":
                 instance = instances.get(instance_key)
-                changed = _mark_probe_presence_unknown(probe, instance) or changed
+                if isinstance(instance, dict) and instance.get("present") is True:
+                    withdrawn.append(instance_key)
+                if _mark_probe_presence_unknown(probe, instance):
+                    touched = True
+        if touched:
+            changed = _invalidate_instance_count(artifact, opcode, group, withdrawn) or changed
+            changed = True
     return changed
 
 
