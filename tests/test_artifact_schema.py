@@ -635,3 +635,89 @@ def test_status_only_native_description_scope_is_unknown(monkeypatch, state, sta
     )
     selector = {"read_opcode": "0x02", "group": "0x02", "instance": "0x00", "register": "0x1234"}
     assert descriptions._native_current_scope(artifact, selector, {}) == "unknown"
+
+
+def _legacy_presence_artifact(
+    version: str, opcode: str, group: str, probes: dict[str, Any]
+) -> dict[str, Any]:
+    instances = {
+        ii: {"present": True, "registers": {"0x0001": {"read_opcode": opcode, "reply_hex": "01"}}}
+        for ii in probes
+    }
+    body = {"availability_probes": probes, "instances": instances}
+    if version == LEGACY_UNVERSIONED_SCHEMA:
+        return {"groups": {group: body}}
+    if version == "2.2":
+        namespaces = {opcode: body}
+        return {
+            "schema_version": "2.2",
+            "groups": {group: {"dual_namespace": True, "namespaces": namespaces}},
+        }
+    return {"schema_version": version, "operations": {opcode: {"groups": {group: body}}}}
+
+
+@pytest.mark.parametrize("version", [LEGACY_UNVERSIONED_SCHEMA, "2.2", "2.3"])
+@pytest.mark.parametrize(
+    "opcode,group,status_instance,active_instance",
+    [
+        ("0x02", "0x01", "0x00", "0x01"),
+        ("0x02", "0x03", "0x01", "0x00"),
+        ("0x06", "0x09", "0x02", "0x01"),
+        ("0x06", "0x0a", "0x01", "0x02"),
+    ],
+)
+@pytest.mark.parametrize("status", ["ff", "00"])
+def test_legacy_status_only_probe_migrates_with_unknown_presence(
+    version, opcode, group, status_instance, active_instance, status
+):
+    status_probe = {
+        "present": True,
+        "source": "probe_register",
+        "connection_state": "connected",
+        "response_state": "active",
+        "reply_hex": status,
+        "flags_access": "read_only_visible",
+        "reply_kind": "value",
+        "error": None,
+    }
+    active_probe = {
+        "present": True,
+        "source": "probe_register",
+        "connection_state": "connected",
+        "response_state": "active",
+        "reply_hex": "0101",
+        "raw_hex": "01",
+        "error": None,
+    }
+    source = _legacy_presence_artifact(
+        version,
+        opcode,
+        group,
+        {status_instance: status_probe, active_instance: active_probe},
+    )
+    before = deepcopy(source)
+    migrated, report = migrate_artifact_schema(source)
+    group_obj = migrated["operations"][opcode]["groups"][group]
+
+    probe = group_obj["availability_probes"][status_instance]
+    assert probe["response_state"] == "status_only"
+    assert probe["reply_hex"] == status and probe["flags"] == int(status, 16)
+    assert probe["flags_access"] is None and probe["reply_kind"] is None
+    assert probe["present"] is None
+    assert probe["availability_qualification"] == "unknown"
+    assert probe["connection_state"] == "unknown"
+    assert group_obj["instances"][status_instance]["present"] is None
+
+    assert group_obj["availability_probes"][active_instance] == active_probe
+    assert group_obj["instances"][active_instance]["present"] is True
+    assert report.changed and report.register_count_after == 2
+    assert source == before
+    assert migrate_artifact_schema(migrated)[0] == migrated
+
+
+def test_status_only_probe_without_connection_state_does_not_gain_one():
+    probe = {"present": True, "response_state": "status_only", "reply_hex": "ff", "error": None}
+    source = _legacy_presence_artifact("2.3", "0x02", "0x02", {"0x00": probe})
+    migrated, _ = migrate_artifact_schema(source)
+    result = migrated["operations"]["0x02"]["groups"]["0x02"]["availability_probes"]["0x00"]
+    assert result["present"] is None and "connection_state" not in result

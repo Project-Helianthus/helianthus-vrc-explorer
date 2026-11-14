@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
@@ -250,6 +251,52 @@ def _migrate_entry(entry: dict[str, Any]) -> bool:
     return changed
 
 
+def _iter_probe_groups(
+    artifact: dict[str, Any],
+) -> Iterator[tuple[dict[str, Any], dict[str, Any]]]:
+    """Yield (probes, instances) for every group that records availability probes."""
+    operations = artifact.get("operations")
+    for op_obj in operations.values() if isinstance(operations, dict) else ():
+        groups = op_obj.get("groups") if isinstance(op_obj, dict) else None
+        for group_obj in groups.values() if isinstance(groups, dict) else ():
+            probes = group_obj.get("availability_probes") if isinstance(group_obj, dict) else None
+            if isinstance(probes, dict):
+                instances = group_obj.get("instances")
+                yield probes, instances if isinstance(instances, dict) else {}
+
+
+def _mark_probe_presence_unknown(probe: dict[str, Any], instance: object) -> bool:
+    changed = _migrate_entry(probe)
+    updates: dict[str, Any] = {"availability_qualification": "unknown", "present": None}
+    if "connection_state" in probe:
+        updates["connection_state"] = "unknown"
+    for key, value in updates.items():
+        if key not in probe or probe[key] != value:
+            probe[key] = value
+            changed = True
+    if isinstance(instance, dict) and instance.get("present") is True:
+        instance["present"] = None
+        changed = True
+    return changed
+
+
+def _migrate_status_only_probes(artifact: dict[str, Any]) -> bool:
+    """Leave presence unknown where the only availability evidence is a status reply.
+
+    A one-byte status carries no register value, so it cannot establish presence.
+    A probe whose recorded evidence is status-only keeps that record, while its
+    presence, its connection state and the presence of its instance become unknown.
+    Probes with active evidence are not touched.
+    """
+    changed = False
+    for probes, instances in _iter_probe_groups(artifact):
+        for instance_key, probe in probes.items():
+            if isinstance(probe, dict) and _derive_response_state(probe) == "status_only":
+                instance = instances.get(instance_key)
+                changed = _mark_probe_presence_unknown(probe, instance) or changed
+    return changed
+
+
 def _migrate_v22_to_v23(artifact: dict[str, Any]) -> bool:
     """Restructure groups-first (v2.2) to operations-first (v2.3).
 
@@ -465,6 +512,7 @@ def migrate_artifact_schema(
     for *_path, entry in iter_register_entries(migrated):
         if isinstance(entry, dict):
             changed = _migrate_entry(entry) or changed
+    changed = _migrate_status_only_probes(migrated) or changed
 
     register_count_after = count_register_entries(migrated)
     if register_count_before != register_count_after:
