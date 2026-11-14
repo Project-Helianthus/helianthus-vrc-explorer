@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Check the isolated public native pair, or refresh from an explicit docs root."""
+"""Check the isolated public native pair and its published copies.
+
+Refresh the vendored pair from an explicit docs root, or publish the vendored
+pair to the public and packaged fixture copies.
+"""
 
 from __future__ import annotations
 
@@ -22,7 +26,10 @@ from pathlib import Path
 
 from jsonschema import Draft202012Validator
 
-DEFAULT_ROOT = Path(__file__).resolve().parents[1] / "fixtures/b524_shared"
+REPOSITORY = Path(__file__).resolve().parents[1]
+DEFAULT_ROOT = REPOSITORY / "fixtures/b524_shared"
+# Public and packaged copies are byte-identical to the vendored, page-pinned pair.
+PUBLISHED_COPIES = (REPOSITORY / "fixtures", REPOSITORY / "src/helianthus_vrc_explorer/fixtures")
 DESCRIPTION = "b524-basv0-description-profile-v1.json"
 OBSERVATIONS = "b524-basv0-register-observations-v1.json"
 NATIVE = Path("protocols/vaillant/fixtures")
@@ -76,6 +83,68 @@ def validate_bundle(root):
     manifest = json.loads((root / "manifest.json").read_text())
     validate_digests(root, manifest)
     validate_documents(root, *load_documents(root))
+
+
+def validate_published_copies(root=DEFAULT_ROOT, copies=PUBLISHED_COPIES):
+    """Require every published copy to carry exactly the authenticated vendored bytes."""
+    manifest = json.loads((root / "manifest.json").read_text())
+    for directory in copies:
+        for name in (DESCRIPTION, OBSERVATIONS):
+            data = (directory / name).read_bytes()
+            actual = base64.b64encode(sha256(data).digest()).decode()
+            if actual != manifest["digests_base64"][name]:
+                raise ValueError(f"published copy digest mismatch: {directory / name}")
+            if data != (root / NATIVE / name).read_bytes():
+                raise ValueError(
+                    f"published copy differs from the vendored pair: {directory / name}"
+                )
+
+
+def publish_copies(root=DEFAULT_ROOT, copies=PUBLISHED_COPIES):
+    """Copy the validated vendored pair to every published location as one transaction.
+
+    The vendored bundle is validated first, so a failing bundle leaves every copy
+    untouched. Every output is staged beside its target before any is committed;
+    if a later replacement fails, the earlier ones are restored.
+    """
+    validate_bundle(root)
+    targets = [directory / name for directory in copies for name in (DESCRIPTION, OBSERVATIONS)]
+    staged = {}
+    previous = {}
+    committed = []
+    try:
+        for target in targets:
+            name = target.name
+            handle, path = tempfile.mkstemp(prefix=f".{name}-", dir=target.parent)
+            os.close(handle)
+            staged[target] = Path(path)
+            shutil.copyfile(root / NATIVE / name, path)
+            # Keep the published file's permissions rather than the private temp mode.
+            if target.exists():
+                shutil.copymode(target, path)
+                previous[target] = target.read_bytes(), target.stat().st_mode
+            else:
+                os.chmod(path, 0o644)
+        for target in targets:
+            os.replace(staged[target], target)
+            committed.append(target)
+    except BaseException:
+        for target in committed:
+            if target in previous:
+                data, mode = previous[target]
+                handle, path = tempfile.mkstemp(prefix=f".{target.name}-", dir=target.parent)
+                with os.fdopen(handle, "wb") as out:
+                    out.write(data)
+                os.chmod(path, mode & 0o7777)
+                os.replace(path, target)
+            else:
+                target.unlink(missing_ok=True)
+        raise
+    finally:
+        for path in staged.values():
+            if path.exists():
+                path.unlink()
+    validate_published_copies(root, copies)
 
 
 def refresh(source, target=DEFAULT_ROOT):
@@ -192,19 +261,53 @@ def publish(staged, target):
         shutil.rmtree(fresh, ignore_errors=True)
 
 
+def snapshot_tree(root):
+    """Capture every file of the vendored bundle so it can be restored byte for byte."""
+    if not root.exists():
+        return {}
+    return {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()}
+
+
+def restore_tree(root, snapshot):
+    """Put the captured bundle back through the same atomic publication."""
+    with tempfile.TemporaryDirectory(prefix="b524-restore-") as directory:
+        staged = Path(directory)
+        for relative, data in snapshot.items():
+            destination = staged / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(data)
+        publish(staged, root)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--source-root", type=Path, help="explicit read-only docs-ebus refresh source"
     )
+    parser.add_argument(
+        "--publish-copies",
+        action="store_true",
+        help="copy the validated vendored pair to the public and packaged fixtures",
+    )
     args = parser.parse_args()
+    # Keep the last-known-good vendored bundle so a failed run never splits generations.
+    previous = snapshot_tree(DEFAULT_ROOT) if args.source_root is not None else None
     try:
-        if args.source_root is not None:
-            refresh(args.source_root)
+        try:
+            if args.source_root is not None:
+                refresh(args.source_root)
+            # A refreshed vendored pair must reach the copies in the same run.
+            if args.publish_copies or args.source_root is not None:
+                publish_copies()
+        except BaseException:
+            if previous is not None:
+                restore_tree(DEFAULT_ROOT, previous)
+            raise
         validate_bundle(DEFAULT_ROOT)
+        validate_published_copies()
     except (OSError, ValueError, KeyError, TypeError) as exc:
         parser.exit(1, f"shared B524 fixture check failed: {exc}\n")
-    print("Shared public B524 fixtures: syntax, digests and semantics PASS")
+    print("Shared public B524 fixtures: syntax, digests, semantics and published copies PASS")
     return 0
 
 

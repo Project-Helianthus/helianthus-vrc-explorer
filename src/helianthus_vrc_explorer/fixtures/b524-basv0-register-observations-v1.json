@@ -3,6 +3,8 @@
   "evidence_class": "sanitized_read_only_register_observation",
   "observation_id": "basv0_sw0217_hw8803_api1",
   "current_values": "omitted",
+  "native_headers": "omitted",
+  "response_payloads": "omitted",
   "description_catalog": "b524-basv0-description-profile-v1.json",
   "records": [
     {

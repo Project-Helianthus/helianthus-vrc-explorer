@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DESCRIPTION = "b524-basv0-description-profile-v1.json"
 OBSERVATIONS = "b524-basv0-register-observations-v1.json"
 OVERLAY = "b524-basv0-validation-scope-v1.json"
-# Native /v1 byte parity; fixture refresh itself belongs to #299.
+# Native /v1 byte parity of the committed source pair.
 DIGESTS = {
     DESCRIPTION: "23f8f3a95315920b4746b7d7e70b648e73c1da8bb2734450e9ac34e77b6ae1cb",
     OBSERVATIONS: "70a9194788779a7d1e47ef05a83e1d583b83b72cc8643b744b44ee5f5570db86",
@@ -70,10 +70,30 @@ def test_export_matches_pinned_native_bytes_without_changing_inputs():
     )
 
 
+def legacy_variants(description):
+    """Derive one legacy description per legacy marker from the committed native pair."""
+    for native_codec, legacy_codec in (("DATE_DMY_U8X3", "HDA:3"), ("TIME_HMS_U8X3", "HTI")):
+        variant = deepcopy(description)
+        row = next(
+            row
+            for row in variant["records"]
+            if isinstance(row.get("decoded"), dict) and row["decoded"]["codec"] == native_codec
+        )
+        row["decoded"]["codec"] = legacy_codec
+        yield variant
+    variant = deepcopy(description)
+    variant["local_profile"]["api_revision"] = "API1"
+    yield variant
+
+
 def test_legacy_native_export_needs_opt_in_and_independent_identity():
     description, observations, manifest = inputs()
-    with pytest.raises(ValueError, match="explicit opt-in"):
-        build_native_evidence(description, observations, manifest)
+    # The committed pair is native and needs no opt-in.
+    build_native_evidence(description, observations, manifest)
+    for legacy in legacy_variants(description):
+        with pytest.raises(ValueError, match="explicit opt-in"):
+            build_native_evidence(legacy, observations, manifest)
+        build_native_evidence(legacy, observations, manifest, allow_legacy_interpretation=True)
     for field in ("api_version_raw", "api_revision_raw"):
         broken = deepcopy(manifest)
         broken["profiles"][0]["controller"].pop(field)
