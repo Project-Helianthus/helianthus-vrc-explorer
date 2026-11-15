@@ -312,6 +312,15 @@ def _invalidate_instance_count(
     return changed
 
 
+def _withdraw_discovery_qualification(artifact: dict[str, Any]) -> None:
+    """Mark aggregate device discovery as unqualified, as the scanner does for an unknown probe."""
+    meta = artifact.get("meta")
+    coverage = meta.get("scan_coverage") if isinstance(meta, dict) else None
+    if isinstance(coverage, dict):
+        coverage["device_discovery_complete"] = False
+        coverage["qualification_incomplete"] = True
+
+
 def _migrate_status_only_probes(artifact: dict[str, Any]) -> bool:
     """Leave presence unknown where the only availability evidence is a status reply.
 
@@ -333,6 +342,7 @@ def _migrate_status_only_probes(artifact: dict[str, Any]) -> bool:
                     touched = True
         if touched:
             changed = _invalidate_instance_count(artifact, opcode, group, withdrawn) or changed
+            _withdraw_discovery_qualification(artifact)
             changed = True
     return changed
 

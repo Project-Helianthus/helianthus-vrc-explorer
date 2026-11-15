@@ -760,3 +760,16 @@ def test_status_only_probe_migration_invalidates_the_group_instance_count():
         "discovery_complete": True,
     }
     assert migrate_artifact_schema(migrated)[0] == migrated
+
+
+def test_status_only_probe_migration_withdraws_aggregate_discovery_qualification():
+    status_probe = {"present": True, "response_state": "active", "reply_hex": "ff", "error": None}
+    source = _legacy_presence_artifact("2.3", "0x02", "0x03", {"0x00": status_probe})
+    source["meta"] = {
+        "scan_coverage": {"device_discovery_complete": True, "qualification_incomplete": False}
+    }
+    migrated, _ = migrate_artifact_schema(source)
+    coverage = migrated["meta"]["scan_coverage"]
+    assert coverage["device_discovery_complete"] is False
+    assert coverage["qualification_incomplete"] is True
+    assert migrate_artifact_schema(migrated)[0] == migrated
