@@ -315,13 +315,38 @@ def _invalidate_instance_count(
     return changed
 
 
-def _withdraw_discovery_qualification(artifact: dict[str, Any]) -> None:
-    """Mark aggregate device discovery as unqualified, as the scanner does for an unknown probe."""
+def _withdraw_discovery_qualification(
+    artifact: dict[str, Any], opcode: str, group: str, unknown: list[str]
+) -> None:
+    """Record unknown probes in the scan coverage, as the scanner does for an undecided probe.
+
+    Instance discovery loses its completion for every unknown probe; device discovery
+    only for probes of the remote device groups that the scanner's device discovery covers.
+    """
     meta = artifact.get("meta")
     coverage = meta.get("scan_coverage") if isinstance(meta, dict) else None
-    if isinstance(coverage, dict):
+    if not isinstance(coverage, dict):
+        return
+    coverage["qualification_incomplete"] = True
+    coverage["instance_discovery_complete"] = False
+    recorded = coverage.get("unknown_instance_probes")
+    slots = recorded if isinstance(recorded, list) else []
+    for instance in unknown:
+        slot = {"read_opcode": opcode, "group": group, "instance": instance}
+        if slot not in slots:
+            slots.append(slot)
+    coverage["unknown_instance_probes"] = slots
+    if _is_device_discovery_group(opcode, group):
         coverage["device_discovery_complete"] = False
-        coverage["qualification_incomplete"] = True
+
+
+def _is_device_discovery_group(opcode: str, group: str) -> bool:
+    """Whether the scanner runs remote device discovery for this group."""
+    try:
+        group_id = int(group, 0)
+    except ValueError:
+        return False
+    return opcode == "0x06" and group_id in _CONNECTED_DEVICE_GROUPS
 
 
 def _is_int(value: object) -> TypeGuard[int]:
@@ -330,13 +355,8 @@ def _is_int(value: object) -> TypeGuard[int]:
 
 def _is_counted_device(opcode: str, group: str, probe: dict[str, Any]) -> bool:
     """Whether the scanner's aggregate device count includes this probe."""
-    try:
-        group_id = int(group, 0)
-    except ValueError:
-        return False
     return (
-        opcode == "0x06"
-        and group_id in _CONNECTED_DEVICE_GROUPS
+        _is_device_discovery_group(opcode, group)
         and probe.get("present") is True
         and probe.get("connection_state") == "connected"
     )
@@ -400,9 +420,9 @@ def _migrate_status_only_probes(artifact: dict[str, Any]) -> bool:
                     touched = True
         if touched:
             changed = _invalidate_instance_count(artifact, opcode, group, withdrawn) or changed
-            if opcode == "0x06":
+            if _is_device_discovery_group(opcode, group):
                 _withdraw_device_discovery(artifact, group, probes, unknown)
-            _withdraw_discovery_qualification(artifact)
+            _withdraw_discovery_qualification(artifact, opcode, group, unknown)
             changed = True
     if withdrawn_devices:
         _withdraw_device_count(artifact, withdrawn_devices)

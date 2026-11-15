@@ -789,16 +789,52 @@ def test_status_only_probe_migration_invalidates_the_group_instance_count():
     assert migrate_artifact_schema(migrated)[0] == migrated
 
 
-def test_status_only_probe_migration_withdraws_aggregate_discovery_qualification():
+@pytest.mark.parametrize(
+    "opcode,group,instance,device_discovery_complete",
+    [
+        ("0x02", "0x03", "0x00", True),
+        ("0x02", "0x01", "0x00", True),
+        ("0x06", "0x0a", "0x01", False),
+        ("0x06", "0x04", "0x01", True),
+    ],
+)
+def test_status_only_probe_migration_withdraws_discovery_qualification(
+    opcode, group, instance, device_discovery_complete
+):
     status_probe = {"present": True, "response_state": "active", "reply_hex": "ff", "error": None}
-    source = _legacy_presence_artifact("2.3", "0x02", "0x03", {"0x00": status_probe})
+    source = _legacy_presence_artifact("2.3", opcode, group, {instance: status_probe})
+    recorded = {"read_opcode": "0x06", "group": "0x09", "instance": "0x03"}
     source["meta"] = {
-        "scan_coverage": {"device_discovery_complete": True, "qualification_incomplete": False}
+        "scan_coverage": {
+            "device_discovery_complete": True,
+            "instance_discovery_complete": True,
+            "qualification_incomplete": False,
+            "unknown_instance_probes": [recorded],
+        }
     }
     migrated, _ = migrate_artifact_schema(source)
     coverage = migrated["meta"]["scan_coverage"]
-    assert coverage["device_discovery_complete"] is False
+    assert coverage["instance_discovery_complete"] is False
     assert coverage["qualification_incomplete"] is True
+    assert coverage["unknown_instance_probes"] == [
+        recorded,
+        {"read_opcode": opcode, "group": group, "instance": instance},
+    ]
+    assert coverage["device_discovery_complete"] is device_discovery_complete
+    assert migrate_artifact_schema(migrated)[0] == migrated
+
+
+def test_status_only_probe_migration_records_coverage_without_prior_unknown_probes():
+    status_probe = {"present": True, "response_state": "active", "reply_hex": "00", "error": None}
+    source = _legacy_presence_artifact("2.3", "0x02", "0x02", {"0x01": status_probe})
+    source["meta"] = {"scan_coverage": {"device_discovery_complete": True}}
+    migrated, _ = migrate_artifact_schema(source)
+    assert migrated["meta"]["scan_coverage"] == {
+        "device_discovery_complete": True,
+        "qualification_incomplete": True,
+        "instance_discovery_complete": False,
+        "unknown_instance_probes": [{"read_opcode": "0x02", "group": "0x02", "instance": "0x01"}],
+    }
     assert migrate_artifact_schema(migrated)[0] == migrated
 
 

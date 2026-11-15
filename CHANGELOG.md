@@ -8,7 +8,10 @@
   `availability_qualification: unknown`, a recorded `connection_state` becomes
   `unknown`, and the instance is no longer marked present. The derived instance
   count, aggregate device count and remote device discovery rows no longer count
-  that slot as confirmed. Probes with an active reply are unchanged.
+  that slot as confirmed. As in a fresh scan, the scan coverage lists the slot
+  among its unknown instance probes and no longer reports instance discovery as
+  complete; device discovery loses its completion only for remote device groups.
+  Probes with an active reply are unchanged.
 
 - `fixtures/b524-basv2-observation-inventory-v1.json` publishes the BASV2
   selector inventory and decoded description observations (1,570 selectors,
