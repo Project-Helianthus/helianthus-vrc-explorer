@@ -723,6 +723,33 @@ def test_status_only_probe_without_connection_state_does_not_gain_one():
     assert result["present"] is None and "connection_state" not in result
 
 
+def test_scanner_recorded_unknown_status_only_probe_is_left_unchanged():
+    probe = {
+        "present": None,
+        "source": "probe_register",
+        "connection_state": None,
+        "response_state": "status_only",
+        "reply_hex": "ff",
+        "flags": 0xFF,
+        "flags_access": None,
+        "reply_kind": None,
+        "error": None,
+        "availability_qualification": "unknown",
+    }
+    source = _legacy_presence_artifact("2.3", "0x02", "0x0a", {"0x00": probe})
+    source["schema_version"] = "2.5"
+    instance = source["operations"]["0x02"]["groups"]["0x0a"]["instances"]["0x00"]
+    instance["present"] = None
+    instance["registers"]["0x0001"]["response_state"] = "active"
+    source["meta"] = {
+        "instance_counts": {"0x02:0x0a": {"observed": 0, "discovery_complete": True}},
+        "scan_coverage": {"device_discovery_complete": True, "qualification_incomplete": False},
+    }
+    migrated, report = migrate_artifact_schema(source)
+    assert migrated == source
+    assert not report.changed
+
+
 def test_status_only_probe_migration_invalidates_the_group_instance_count():
     status_probe = {
         "present": True,

@@ -270,7 +270,8 @@ def _iter_probe_groups(
 def _mark_probe_presence_unknown(probe: dict[str, Any], instance: object) -> bool:
     changed = _migrate_entry(probe)
     updates: dict[str, Any] = {"availability_qualification": "unknown", "present": None}
-    if "connection_state" in probe:
+    # A null state is the scanner's record for a probe without one; keep it null.
+    if probe.get("connection_state") is not None:
         updates["connection_state"] = "unknown"
     for key, value in updates.items():
         if key not in probe or probe[key] != value:
