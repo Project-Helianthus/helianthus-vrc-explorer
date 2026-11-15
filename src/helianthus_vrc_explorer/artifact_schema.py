@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypeGuard
 
 from .evidence_compat import has_explorer_provenance, interpret_legacy_codecs
 
@@ -11,6 +11,8 @@ from .evidence_compat import has_explorer_provenance, interpret_legacy_codecs
 CURRENT_ARTIFACT_SCHEMA_VERSION = "2.5"
 LEGACY_UNVERSIONED_SCHEMA = "legacy-unversioned"
 LEGACY_VERSIONED_SCHEMAS = frozenset({"2.0", "2.1", "2.2", "2.3"})
+# Remote groups whose connected probes the scanner counts as devices.
+_CONNECTED_DEVICE_GROUPS = frozenset({1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15})
 
 
 class ArtifactSchemaError(ValueError):
@@ -321,6 +323,56 @@ def _withdraw_discovery_qualification(artifact: dict[str, Any]) -> None:
         coverage["qualification_incomplete"] = True
 
 
+def _is_int(value: object) -> TypeGuard[int]:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _is_counted_device(opcode: str, group: str, probe: dict[str, Any]) -> bool:
+    """Whether the scanner's aggregate device count includes this probe."""
+    try:
+        group_id = int(group, 0)
+    except ValueError:
+        return False
+    return (
+        opcode == "0x06"
+        and group_id in _CONNECTED_DEVICE_GROUPS
+        and probe.get("present") is True
+        and probe.get("connection_state") == "connected"
+    )
+
+
+def _withdraw_device_count(artifact: dict[str, Any], withdrawn: int) -> None:
+    """Lower the aggregate observed device count by devices whose presence was withdrawn."""
+    meta = artifact.get("meta")
+    row = meta.get("device_count") if isinstance(meta, dict) else None
+    if not isinstance(row, dict) or not _is_int(row.get("observed")):
+        return
+    observed = max(0, row["observed"] - withdrawn)
+    row["observed"] = observed
+    expected = row.get("expected")
+    row["mismatch"] = _is_int(expected) and expected != observed
+
+
+def _withdraw_device_discovery(
+    artifact: dict[str, Any], group: str, probes: dict[str, Any], unknown: list[str]
+) -> None:
+    """Record unknown slots in a group's device discovery and drop its completion."""
+    meta = artifact.get("meta")
+    discovery = meta.get("device_discovery") if isinstance(meta, dict) else None
+    row = discovery.get(group) if isinstance(discovery, dict) else None
+    if not isinstance(row, dict):
+        return
+    recorded = row.get("unknown_instances")
+    recorded_keys = recorded if isinstance(recorded, list) else []
+    known_unknown = {ii for ii in recorded_keys if isinstance(ii, str)}
+    row["unknown_instances"] = sorted(known_unknown | set(unknown))
+    row["complete"] = False
+    expected = row.get("count_guided_expected")
+    if row.get("count_guided_complete") is True and _is_int(expected):
+        confirmed = [p for p in probes.values() if isinstance(p, dict) and p.get("present") is True]
+        row["count_guided_complete"] = len(confirmed) >= expected
+
+
 def _migrate_status_only_probes(artifact: dict[str, Any]) -> bool:
     """Leave presence unknown where the only availability evidence is a status reply.
 
@@ -330,20 +382,29 @@ def _migrate_status_only_probes(artifact: dict[str, Any]) -> bool:
     Probes with active evidence are not touched.
     """
     changed = False
+    withdrawn_devices = 0
     for opcode, group, probes, instances in _iter_probe_groups(artifact):
         withdrawn: list[str] = []
+        unknown: list[str] = []
         touched = False
         for instance_key, probe in probes.items():
             if isinstance(probe, dict) and _derive_response_state(probe) == "status_only":
                 instance = instances.get(instance_key)
                 if isinstance(instance, dict) and instance.get("present") is True:
                     withdrawn.append(instance_key)
+                if _is_counted_device(opcode, group, probe):
+                    withdrawn_devices += 1
+                unknown.append(instance_key)
                 if _mark_probe_presence_unknown(probe, instance):
                     touched = True
         if touched:
             changed = _invalidate_instance_count(artifact, opcode, group, withdrawn) or changed
+            if opcode == "0x06":
+                _withdraw_device_discovery(artifact, group, probes, unknown)
             _withdraw_discovery_qualification(artifact)
             changed = True
+    if withdrawn_devices:
+        _withdraw_device_count(artifact, withdrawn_devices)
     return changed
 
 

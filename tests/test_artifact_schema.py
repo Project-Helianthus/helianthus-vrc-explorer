@@ -773,3 +773,62 @@ def test_status_only_probe_migration_withdraws_aggregate_discovery_qualification
     assert coverage["device_discovery_complete"] is False
     assert coverage["qualification_incomplete"] is True
     assert migrate_artifact_schema(migrated)[0] == migrated
+
+
+def test_status_only_probe_migration_recomputes_remote_device_metadata():
+    status_probe = {
+        "present": True,
+        "connection_state": "connected",
+        "response_state": "active",
+        "reply_hex": "ff",
+        "error": None,
+    }
+    active_probe = {
+        "present": True,
+        "connection_state": "connected",
+        "response_state": "active",
+        "reply_hex": "0101",
+    }
+    source = _legacy_presence_artifact(
+        "2.3", "0x06", "0x0a", {"0x01": active_probe, "0x02": status_probe}
+    )
+    source["meta"] = {
+        "device_count": {"identifier": "0x0004", "expected": 2, "observed": 2, "mismatch": False},
+        "device_discovery": {
+            "0x0a": {
+                "read_opcode": "0x06",
+                "policy": "count_guided",
+                "count_guided_expected": 2,
+                "count_guided_complete": True,
+                "probed_instances": ["0x01", "0x02"],
+                "unknown_instances": [],
+                "complete": True,
+            },
+            "0x0b": {"unknown_instances": [], "complete": True},
+        },
+    }
+    migrated, _ = migrate_artifact_schema(source)
+    meta = migrated["meta"]
+    assert meta["device_count"]["observed"] == 1
+    assert meta["device_count"]["mismatch"] is True
+    row = meta["device_discovery"]["0x0a"]
+    assert row["unknown_instances"] == ["0x02"]
+    assert row["complete"] is False
+    assert row["count_guided_complete"] is False
+    assert meta["device_discovery"]["0x0b"] == {"unknown_instances": [], "complete": True}
+    assert migrate_artifact_schema(migrated)[0] == migrated
+
+
+def test_status_only_probe_outside_connected_device_groups_keeps_device_count():
+    status_probe = {"present": True, "connection_state": "connected", "reply_hex": "ff"}
+    source = _legacy_presence_artifact("2.3", "0x02", "0x02", {"0x00": status_probe})
+    source["meta"] = {"device_count": {"expected": 1, "observed": 1, "mismatch": False}}
+    migrated, _ = migrate_artifact_schema(source)
+    assert migrated["meta"]["device_count"] == {"expected": 1, "observed": 1, "mismatch": False}
+
+
+def test_migration_device_groups_match_the_scanner_device_groups():
+    from helianthus_vrc_explorer import artifact_schema
+    from helianthus_vrc_explorer.scanner.register import CONNECTED_DEVICE_GROUPS
+
+    assert artifact_schema._CONNECTED_DEVICE_GROUPS == CONNECTED_DEVICE_GROUPS
