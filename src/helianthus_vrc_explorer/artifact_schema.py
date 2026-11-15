@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypeGuard
 
 from .evidence_compat import has_explorer_provenance, interpret_legacy_codecs
 
@@ -10,6 +11,8 @@ from .evidence_compat import has_explorer_provenance, interpret_legacy_codecs
 CURRENT_ARTIFACT_SCHEMA_VERSION = "2.5"
 LEGACY_UNVERSIONED_SCHEMA = "legacy-unversioned"
 LEGACY_VERSIONED_SCHEMAS = frozenset({"2.0", "2.1", "2.2", "2.3"})
+# Remote groups whose connected probes the scanner counts as devices.
+_CONNECTED_DEVICE_GROUPS = frozenset({1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15})
 
 
 class ArtifactSchemaError(ValueError):
@@ -250,6 +253,182 @@ def _migrate_entry(entry: dict[str, Any]) -> bool:
     return changed
 
 
+def _iter_probe_groups(
+    artifact: dict[str, Any],
+) -> Iterator[tuple[str, str, dict[str, Any], dict[str, Any]]]:
+    """Yield (opcode, group, probes, instances) for groups that record availability probes."""
+    operations = artifact.get("operations")
+    for opcode, op_obj in operations.items() if isinstance(operations, dict) else ():
+        groups = op_obj.get("groups") if isinstance(op_obj, dict) else None
+        for group, group_obj in groups.items() if isinstance(groups, dict) else ():
+            probes = group_obj.get("availability_probes") if isinstance(group_obj, dict) else None
+            if isinstance(probes, dict):
+                instances = group_obj.get("instances")
+                yield opcode, group, probes, instances if isinstance(instances, dict) else {}
+
+
+def _mark_probe_presence_unknown(probe: dict[str, Any], instance: object) -> bool:
+    changed = _migrate_entry(probe)
+    updates: dict[str, Any] = {"availability_qualification": "unknown", "present": None}
+    # A null state is the scanner's record for a probe without one; keep it null.
+    if probe.get("connection_state") is not None:
+        updates["connection_state"] = "unknown"
+    for key, value in updates.items():
+        if key not in probe or probe[key] != value:
+            probe[key] = value
+            changed = True
+    if isinstance(instance, dict) and instance.get("present") is True:
+        instance["present"] = None
+        changed = True
+    return changed
+
+
+def _invalidate_instance_count(
+    artifact: dict[str, Any], opcode: str, group: str, withdrawn: list[str]
+) -> bool:
+    """Turn the stored count of a group into a lower bound after presence was withdrawn."""
+    meta = artifact.get("meta")
+    counts = meta.get("instance_counts") if isinstance(meta, dict) else None
+    row = counts.get(f"{opcode}:{group}") if isinstance(counts, dict) else None
+    if not isinstance(row, dict):
+        return False
+    changed = False
+    observed = row.get("observed")
+    if isinstance(observed, int) and not isinstance(observed, bool):
+        # The virtual water circuit is not part of the circuit count.
+        lost = [
+            ii for ii in withdrawn if not (opcode == "0x02" and group == "0x02" and ii == "0x09")
+        ]
+        if lost:
+            observed = max(0, observed - len(lost))
+            row["observed"] = observed
+            expected = row.get("expected")
+            if isinstance(expected, int) and not isinstance(expected, bool):
+                row["mismatch"] = expected != observed
+            capacity = row.get("capacity")
+            if isinstance(capacity, int) and not isinstance(capacity, bool):
+                row["capacity_exceeded"] = observed > capacity
+            changed = True
+    if row.get("discovery_complete") is not False:
+        row["discovery_complete"] = False
+        changed = True
+    return changed
+
+
+def _withdraw_discovery_qualification(
+    artifact: dict[str, Any], opcode: str, group: str, unknown: list[str]
+) -> None:
+    """Record unknown probes in the scan coverage, as the scanner does for an undecided probe.
+
+    Instance discovery loses its completion for every unknown probe; device discovery
+    only for probes of the remote device groups that the scanner's device discovery covers.
+    """
+    meta = artifact.get("meta")
+    coverage = meta.get("scan_coverage") if isinstance(meta, dict) else None
+    if not isinstance(coverage, dict):
+        return
+    coverage["qualification_incomplete"] = True
+    coverage["instance_discovery_complete"] = False
+    recorded = coverage.get("unknown_instance_probes")
+    slots = recorded if isinstance(recorded, list) else []
+    for instance in unknown:
+        slot = {"read_opcode": opcode, "group": group, "instance": instance}
+        if slot not in slots:
+            slots.append(slot)
+    coverage["unknown_instance_probes"] = slots
+    if _is_device_discovery_group(opcode, group):
+        coverage["device_discovery_complete"] = False
+
+
+def _is_device_discovery_group(opcode: str, group: str) -> bool:
+    """Whether the scanner runs remote device discovery for this group."""
+    try:
+        group_id = int(group, 0)
+    except ValueError:
+        return False
+    return opcode == "0x06" and group_id in _CONNECTED_DEVICE_GROUPS
+
+
+def _is_int(value: object) -> TypeGuard[int]:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _is_counted_device(opcode: str, group: str, probe: dict[str, Any]) -> bool:
+    """Whether the scanner's aggregate device count includes this probe."""
+    return (
+        _is_device_discovery_group(opcode, group)
+        and probe.get("present") is True
+        and probe.get("connection_state") == "connected"
+    )
+
+
+def _withdraw_device_count(artifact: dict[str, Any], withdrawn: int) -> None:
+    """Lower the aggregate observed device count by devices whose presence was withdrawn."""
+    meta = artifact.get("meta")
+    row = meta.get("device_count") if isinstance(meta, dict) else None
+    if not isinstance(row, dict) or not _is_int(row.get("observed")):
+        return
+    observed = max(0, row["observed"] - withdrawn)
+    row["observed"] = observed
+    expected = row.get("expected")
+    row["mismatch"] = _is_int(expected) and expected != observed
+
+
+def _withdraw_device_discovery(
+    artifact: dict[str, Any], group: str, probes: dict[str, Any], unknown: list[str]
+) -> None:
+    """Record unknown slots in a group's device discovery and drop its completion."""
+    meta = artifact.get("meta")
+    discovery = meta.get("device_discovery") if isinstance(meta, dict) else None
+    row = discovery.get(group) if isinstance(discovery, dict) else None
+    if not isinstance(row, dict):
+        return
+    recorded = row.get("unknown_instances")
+    recorded_keys = recorded if isinstance(recorded, list) else []
+    known_unknown = {ii for ii in recorded_keys if isinstance(ii, str)}
+    row["unknown_instances"] = sorted(known_unknown | set(unknown))
+    row["complete"] = False
+    expected = row.get("count_guided_expected")
+    if row.get("count_guided_complete") is True and _is_int(expected):
+        confirmed = [p for p in probes.values() if isinstance(p, dict) and p.get("present") is True]
+        row["count_guided_complete"] = len(confirmed) >= expected
+
+
+def _migrate_status_only_probes(artifact: dict[str, Any]) -> bool:
+    """Leave presence unknown where the only availability evidence is a status reply.
+
+    A one-byte status carries no register value, so it cannot establish presence.
+    A probe whose recorded evidence is status-only keeps that record, while its
+    presence, its connection state and the presence of its instance become unknown.
+    Probes with active evidence are not touched.
+    """
+    changed = False
+    withdrawn_devices = 0
+    for opcode, group, probes, instances in _iter_probe_groups(artifact):
+        withdrawn: list[str] = []
+        unknown: list[str] = []
+        touched = False
+        for instance_key, probe in probes.items():
+            if isinstance(probe, dict) and _derive_response_state(probe) == "status_only":
+                instance = instances.get(instance_key)
+                if isinstance(instance, dict) and instance.get("present") is True:
+                    withdrawn.append(instance_key)
+                if _is_counted_device(opcode, group, probe):
+                    withdrawn_devices += 1
+                unknown.append(instance_key)
+                if _mark_probe_presence_unknown(probe, instance):
+                    touched = True
+        if touched:
+            changed = _invalidate_instance_count(artifact, opcode, group, withdrawn) or changed
+            if _is_device_discovery_group(opcode, group):
+                _withdraw_device_discovery(artifact, group, probes, unknown)
+            _withdraw_discovery_qualification(artifact, opcode, group, unknown)
+            changed = True
+    if withdrawn_devices:
+        _withdraw_device_count(artifact, withdrawn_devices)
+    return changed
+
+
 def _migrate_v22_to_v23(artifact: dict[str, Any]) -> bool:
     """Restructure groups-first (v2.2) to operations-first (v2.3).
 
@@ -465,6 +644,7 @@ def migrate_artifact_schema(
     for *_path, entry in iter_register_entries(migrated):
         if isinstance(entry, dict):
             changed = _migrate_entry(entry) or changed
+    changed = _migrate_status_only_probes(migrated) or changed
 
     register_count_after = count_register_entries(migrated)
     if register_count_before != register_count_after:
