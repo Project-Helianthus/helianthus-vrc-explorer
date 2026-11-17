@@ -76,6 +76,7 @@ _SENTENCES = (
         "If these hex lines would not use the supplied initiator, "
         "record the executable rows as blocked."
     ),
+    "Set `$ADAPTERMUX_RAW_LOG` to the raw session log path before the scan.",
     "Sanitize the raw session log before retention.",
     "Drop the non-interactive preface and the scan status lines from the retained log.",
     "Drop any other retained-log line that contains a model, a serial, or a controller address.",
@@ -101,6 +102,7 @@ _SCAN_COMMAND = re.compile(
     r"```bash\n(python -m helianthus_vrc_explorer scan\b.*?)\n```",
     re.DOTALL,
 )
+_REDIRECT = '  </dev/null >"$ADAPTERMUX_RAW_LOG" 2>&1'
 _FORBIDDEN = (
     ("Leave the session output in place.", "raw session output retained"),
     ("Keep that artifact for local inspection.", "unsanitized artifact retained"),
@@ -151,6 +153,8 @@ def _scan_command_errors(text: str) -> list[str]:
         return ["tcp scan transport"]
     if "--source-address" in body or "ADAPTERMUX_INITIATOR" in body:
         return ["tcp scan passes --source-address"]
+    if body.splitlines()[-1] != _REDIRECT:
+        return ["scan output not redirected"]
     return []
 
 
@@ -290,6 +294,20 @@ class AdapterMuxCertificationRunTests(unittest.TestCase):
         self.assertIn(needle, text)
         errors = certification_errors(text.replace(needle, insert, 1))
         self.assertIn("tcp scan passes --source-address", errors)
+
+    def test_scan_without_redirection_is_rejected(self) -> None:
+        text = _PROCEDURE.read_text(encoding="utf-8")
+        needle = "  --preset recommended \\\n" + _REDIRECT + "\n"
+        self.assertIn(needle, text)
+        cases = (
+            "  --preset recommended\n",
+            "  --preset recommended \\\n" + '  </dev/null >"$ADAPTERMUX_RAW_LOG"\n',
+            "  --preset recommended \\\n" + '  >"$ADAPTERMUX_RAW_LOG" 2>&1\n',
+        )
+        for replacement in cases:
+            with self.subTest(replacement=replacement):
+                errors = certification_errors(text.replace(needle, replacement, 1))
+                self.assertIn("scan output not redirected", errors)
 
     def test_retained_raw_session_output_is_rejected(self) -> None:
         text = _PROCEDURE.read_text(encoding="utf-8")

@@ -33,17 +33,20 @@ Session, candidate, and hardware-setup labels stay opaque: no endpoint and no se
 
 Run the scan while the gateway smoke for that coexistence cell is inside its
 measurement window, and only after the smoke has taken its first reading.
-Redirect standard output and standard error to a raw session log so no terminal
-is attached; the preset then stays the one in the command. One scan serves
-the coexistence cell on that southbound. The START/SEND row of the same
-southbound uses that scan. Do not start a second Explorer.
+Set `$ADAPTERMUX_RAW_LOG` to the raw session log path before the scan.
+The command itself redirects standard input from `/dev/null` and standard output
+and standard error to that log, so no terminal is attached: the visual setup and
+the post-scan browser do not start, and the preset stays the one in the command.
+One scan serves the coexistence cell on that southbound. The START/SEND row of
+the same southbound uses that scan. Do not start a second Explorer.
 
 ```bash
 python -m helianthus_vrc_explorer scan \
   --transport tcp \
   --host "$ADAPTERMUX_RELAY_HOST" \
   --port "$ADAPTERMUX_RELAY_PORT" \
-  --preset recommended
+  --preset recommended \
+  </dev/null >"$ADAPTERMUX_RAW_LOG" 2>&1
 ```
 
 Transport `tcp` is the guarded relay's command dialogue. A non-interactive
