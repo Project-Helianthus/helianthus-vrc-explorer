@@ -8,7 +8,8 @@
   evidence grades separate from qualification, and records UDP, TCP, and
   UART-direct rows as not run. The tcp scan passes no initiator flag; its hex
   lines use the supplied initiator. The retained session log is
-  sanitized before retention. It authorizes no device write. See
+  sanitized before retention. The JSON artifact and the HTML report are not
+  retained. It authorizes no device write. See
   [the certification run](docs/adaptermux-certification-run.md).
 
 - Reading an artifact whose availability probe recorded only a one-byte status

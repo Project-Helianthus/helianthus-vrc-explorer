@@ -39,9 +39,30 @@ _SENTENCES = (
     "The scan is read-only.",
     "This procedure has no device write.",
     "The direct adapter path is outside this procedure.",
-    "Grade Proven is a fact inside the retained artifact.",
-    "Grade Hypothesis is an interpretation supported by that artifact.",
+    "Grade Proven is the retained scan exit status.",
+    (
+        "Use it only when that exit status is retained, and only for the fact "
+        "that the scan completed."
+    ),
+    "Grade Hypothesis is an interpretation of that completed scan.",
     "Grade Unknown is missing context, including any wire symbol the relay did not retain.",
+    "The JSON artifact and the HTML report contain the scan timestamp and the destination address.",
+    "The JSON artifact and the HTML report contain the relay host and port.",
+    (
+        "The JSON artifact and the HTML report contain the probed model and serial "
+        "in `identity` and `resolved_identity`."
+    ),
+    "The file names contain the destination address and the scan timestamp.",
+    "The HTML report also embeds that JSON.",
+    "Do not retain the JSON artifact.",
+    "Do not retain the HTML report.",
+    "Do not retain a redacted copy of either file.",
+    "Delete both files after the scan exit status is recorded.",
+    "The published row omits the artifact body.",
+    "No scan artifact is retained.",
+    "Retaining the JSON artifact or the HTML report is not a pass.",
+    "A retained scan artifact returns to this repository.",
+    "Confirm the JSON artifact and the HTML report are gone.",
     "Qualification is a separate record and does not set the grade.",
     "The grade does not set qualification.",
     "Record the controller protocol family only.",
@@ -80,7 +101,15 @@ _SCAN_COMMAND = re.compile(
     r"```bash\n(python -m helianthus_vrc_explorer scan\b.*?)\n```",
     re.DOTALL,
 )
-_FORBIDDEN = (("Leave the session output in place.", "raw session output retained"),)
+_FORBIDDEN = (
+    ("Leave the session output in place.", "raw session output retained"),
+    ("Keep that artifact for local inspection.", "unsanitized artifact retained"),
+    ("Grade Proven is a fact inside the retained artifact.", "unsanitized artifact retained"),
+    (
+        "Grade Hypothesis is an interpretation supported by that artifact.",
+        "unsanitized artifact retained",
+    ),
+)
 _OFFLINE_LINK = "](adaptermux-certification-run.md)"
 _CHANGELOG_LINK = "docs/adaptermux-certification-run.md"
 
@@ -271,6 +300,28 @@ class AdapterMuxCertificationRunTests(unittest.TestCase):
         )
         errors = certification_errors(mutated)
         self.assertIn("raw session output retained", errors)
+
+    def test_retained_scan_artifact_is_rejected(self) -> None:
+        text = _PROCEDURE.read_text(encoding="utf-8")
+        needle = "Do not retain the JSON artifact."
+        self.assertIn(needle, text)
+        mutated = text.replace(needle, "Keep that artifact for local inspection.", 1)
+        errors = certification_errors(mutated)
+        self.assertIn("missing sentence: Do not retain the JSON artifact.", errors)
+        self.assertIn("unsanitized artifact retained", errors)
+
+    def test_grade_tied_to_unsanitized_artifact_is_rejected(self) -> None:
+        text = _PROCEDURE.read_text(encoding="utf-8")
+        needle = "Grade Proven is the retained scan exit status."
+        self.assertIn(needle, text)
+        mutated = text.replace(
+            needle,
+            "Grade Proven is a fact inside the retained artifact.",
+            1,
+        )
+        errors = certification_errors(mutated)
+        self.assertIn("missing sentence: Grade Proven is the retained scan exit status.", errors)
+        self.assertIn("unsanitized artifact retained", errors)
 
     def test_cell_field_mutation_is_rejected(self) -> None:
         text = _PROCEDURE.read_text(encoding="utf-8")

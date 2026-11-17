@@ -47,8 +47,18 @@ python -m helianthus_vrc_explorer scan \
 ```
 
 Transport `tcp` is the guarded relay's command dialogue. A non-interactive
-scan writes its artifact under `results` in the working directory. Keep that
-artifact for local inspection. The published row omits the artifact body.
+scan writes a JSON artifact and an HTML report under `results`.
+The JSON artifact and the HTML report contain the scan timestamp and the destination address.
+The JSON artifact and the HTML report contain the relay host and port.
+The JSON artifact and the HTML report contain the probed model and serial in `identity` and `resolved_identity`.
+The file names contain the destination address and the scan timestamp.
+The HTML report also embeds that JSON.
+Do not retain the JSON artifact.
+Do not retain the HTML report.
+Do not retain a redacted copy of either file.
+Delete both files after the scan exit status is recorded.
+The published row omits the artifact body.
+No scan artifact is retained.
 Sanitize the raw session log before retention.
 Drop the non-interactive preface and the scan status lines from the retained log.
 Drop any other retained-log line that contains a model, a serial, or a controller address.
@@ -118,9 +128,9 @@ client. They record Explorer evidence only.
 ## What is recorded
 
 For every row, record the cell, southbound, invariant, disposition, command, evidence grade, and qualification.
-Grade Proven is a fact inside the retained artifact.
-Use it only when the scan exit status and the artifact file are both retained, and only for the fact that the scan completed.
-Grade Hypothesis is an interpretation supported by that artifact.
+Grade Proven is the retained scan exit status.
+Use it only when that exit status is retained, and only for the fact that the scan completed.
+Grade Hypothesis is an interpretation of that completed scan.
 A completed read through the relay supports Hypothesis for START/SEND.
 Grade Unknown is missing context, including any wire symbol the relay did not retain.
 Broadcast reception, per-symbol echo, and raw escape pairs stay Unknown on every row.
@@ -129,15 +139,18 @@ Qualification is a separate record and does not set the grade.
 The grade does not set qualification.
 A selector-qualified decoded row stays in its own qualification field.
 
-An `execute` row passes only when the scan exits 0, the artifact exists, the
-relay refused nothing, and these hex lines use the supplied initiator.
+An `execute` row passes only when the scan exits 0, both artifact files were
+written and then deleted, the relay refused nothing, and these hex lines use
+the supplied initiator.
 Anything else is fail, or blocked when the endpoint was not supplied or these
 hex lines would not use the supplied initiator.
+Retaining the JSON artifact or the HTML report is not a pass.
 
 ## Restore
 
 Restore stops Explorer and sends no further bus command. Confirm no Explorer
 process is still attached to the relay. Leave the sanitized session log in place.
+Confirm the JSON artifact and the HTML report are gone.
 Do not retain the raw redirect.
 The gateway process is restored by the session owner. The next cell starts
 only after Explorer has stopped.
@@ -150,8 +163,10 @@ An unexpected pass includes a pass on a `not-run` row and includes `xpass`.
 Do not rewrite the row to match the expectation.
 
 A scan that does not finish, a relay refusal of this read-only scan, or a
-missing artifact returns to this repository. A gateway smoke failure, a mux
-framing failure, or a reserved-row outcome returns to the gateway repository.
+scan that writes no artifact returns to this repository.
+A retained scan artifact returns to this repository.
+A gateway smoke failure, a mux framing failure, or a reserved-row outcome
+returns to the gateway repository.
 Blocked cells stay visible. Not-run cells stay visible.
 
 ## Out of scope
