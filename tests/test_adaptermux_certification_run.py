@@ -47,6 +47,20 @@ _SENTENCES = (
     "Record the controller protocol family only.",
     "Do not record a model name, serial, address, or time.",
     "If the relay endpoint is not supplied, record the executable rows as blocked.",
+    "Set `$ADAPTERMUX_INITIATOR` as the initiator these hex lines use before the scan.",
+    "This scan does not pass `--source-address`.",
+    "The scan applies that option only for enhanced transport.",
+    "These hex lines carry no source override.",
+    (
+        "If these hex lines would not use the supplied initiator, "
+        "record the executable rows as blocked."
+    ),
+    "Sanitize the raw session log before retention.",
+    "Drop the non-interactive preface and the scan status lines from the retained log.",
+    "Drop any other retained-log line that contains a model, a serial, or a controller address.",
+    "Drop any other retained-log line that contains the relay endpoint or a start time.",
+    "Do not retain the raw redirect.",
+    "Leave the sanitized session log in place.",
     "Restore stops Explorer and sends no further bus command.",
     "An unexpected fail returns to the owning repository.",
     "An unexpected pass returns to the owning repository.",
@@ -60,9 +74,13 @@ _FLAGS = (
     "--transport tcp",
     "--host",
     "--port",
-    "--source-address",
     "--preset recommended",
 )
+_SCAN_COMMAND = re.compile(
+    r"```bash\n(python -m helianthus_vrc_explorer scan\b.*?)\n```",
+    re.DOTALL,
+)
+_FORBIDDEN = (("Leave the session output in place.", "raw session output retained"),)
 _OFFLINE_LINK = "](adaptermux-certification-run.md)"
 _CHANGELOG_LINK = "docs/adaptermux-certification-run.md"
 
@@ -93,6 +111,28 @@ def _flag_errors(text: str) -> list[str]:
         if text.count(flag) != 1:
             errors.append(f"missing flag: {flag}")
     return errors
+
+
+def _scan_command_errors(text: str) -> list[str]:
+    found = _SCAN_COMMAND.findall(text)
+    if len(found) != 1:
+        return ["missing scan command"]
+    body = found[0]
+    if "--transport tcp" not in body:
+        return ["tcp scan transport"]
+    if "--source-address" in body or "ADAPTERMUX_INITIATOR" in body:
+        return ["tcp scan passes --source-address"]
+    return []
+
+
+def _initiator_errors(text: str) -> list[str]:
+    if text.count("$ADAPTERMUX_INITIATOR") != 1:
+        return ["missing initiator binding"]
+    return []
+
+
+def _forbidden_errors(text: str) -> list[str]:
+    return [label for phrase, label in _FORBIDDEN if phrase in text]
 
 
 def _parse_cells(text: str) -> tuple[dict[str, tuple[str, str, str, str]], list[str]]:
@@ -152,6 +192,9 @@ def _cell_errors(
 def certification_errors(text: str) -> list[str]:
     errors = _sentence_errors(text)
     errors.extend(_flag_errors(text))
+    errors.extend(_scan_command_errors(text))
+    errors.extend(_initiator_errors(text))
+    errors.extend(_forbidden_errors(text))
     rows, parse_errors = _parse_cells(text)
     errors.extend(parse_errors)
     if parse_errors:
@@ -210,6 +253,24 @@ class AdapterMuxCertificationRunTests(unittest.TestCase):
                 mutated = text.replace(flag, "", 1)
                 errors = certification_errors(mutated)
                 self.assertIn(f"missing flag: {flag}", errors)
+
+    def test_source_address_on_tcp_scan_is_rejected(self) -> None:
+        text = _PROCEDURE.read_text(encoding="utf-8")
+        needle = '--port "$ADAPTERMUX_RELAY_PORT" \\\n'
+        insert = needle + '  --source-address "$ADAPTERMUX_INITIATOR" \\\n'
+        self.assertIn(needle, text)
+        errors = certification_errors(text.replace(needle, insert, 1))
+        self.assertIn("tcp scan passes --source-address", errors)
+
+    def test_retained_raw_session_output_is_rejected(self) -> None:
+        text = _PROCEDURE.read_text(encoding="utf-8")
+        mutated = text.replace(
+            "Leave the sanitized session log in place.",
+            "Leave the session output in place.",
+            1,
+        )
+        errors = certification_errors(mutated)
+        self.assertIn("raw session output retained", errors)
 
     def test_cell_field_mutation_is_rejected(self) -> None:
         text = _PROCEDURE.read_text(encoding="utf-8")

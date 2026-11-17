@@ -18,7 +18,12 @@ This procedure has no device write.
 A write needs its own operator authorization at action time.
 The direct adapter path is outside this procedure.
 
-Supply the relay endpoint and the initiator in the command's environment at action time.
+Supply the relay endpoint in the command environment at action time.
+Set `$ADAPTERMUX_INITIATOR` as the initiator these hex lines use before the scan.
+This scan does not pass `--source-address`.
+The scan applies that option only for enhanced transport.
+These hex lines carry no source override.
+If these hex lines would not use the supplied initiator, record the executable rows as blocked.
 If the relay endpoint is not supplied, record the executable rows as blocked.
 Do not record a model name, serial, address, or time.
 Record the controller protocol family only.
@@ -28,7 +33,7 @@ Session, candidate, and hardware-setup labels stay opaque: no endpoint and no se
 
 Run the scan while the gateway smoke for that coexistence cell is inside its
 measurement window, and only after the smoke has taken its first reading.
-Redirect standard output and standard error to the session log so no terminal
+Redirect standard output and standard error to a raw session log so no terminal
 is attached; the preset then stays the one in the command. One scan serves
 the coexistence cell on that southbound. The START/SEND row of the same
 southbound uses that scan. Do not start a second Explorer.
@@ -38,14 +43,18 @@ python -m helianthus_vrc_explorer scan \
   --transport tcp \
   --host "$ADAPTERMUX_RELAY_HOST" \
   --port "$ADAPTERMUX_RELAY_PORT" \
-  --source-address "$ADAPTERMUX_INITIATOR" \
   --preset recommended
 ```
 
-The initiator flag in that command is the only address flag this scan accepts.
 Transport `tcp` is the guarded relay's command dialogue. A non-interactive
 scan writes its artifact under `results` in the working directory. Keep that
 artifact for local inspection. The published row omits the artifact body.
+Sanitize the raw session log before retention.
+Drop the non-interactive preface and the scan status lines from the retained log.
+Drop any other retained-log line that contains a model, a serial, or a controller address.
+Drop any other retained-log line that contains the relay endpoint or a start time.
+Retain the scan exit status.
+The retained session log is the sanitized log only.
 
 ## Cells
 
@@ -120,14 +129,16 @@ Qualification is a separate record and does not set the grade.
 The grade does not set qualification.
 A selector-qualified decoded row stays in its own qualification field.
 
-An `execute` row passes only when the scan exits 0, the artifact exists, and
-the relay refused nothing. Anything else is fail, or blocked when the endpoint
-was not supplied.
+An `execute` row passes only when the scan exits 0, the artifact exists, the
+relay refused nothing, and these hex lines use the supplied initiator.
+Anything else is fail, or blocked when the endpoint was not supplied or these
+hex lines would not use the supplied initiator.
 
 ## Restore
 
 Restore stops Explorer and sends no further bus command. Confirm no Explorer
-process is still attached to the relay. Leave the session output in place.
+process is still attached to the relay. Leave the sanitized session log in place.
+Do not retain the raw redirect.
 The gateway process is restored by the session owner. The next cell starts
 only after Explorer has stopped.
 
