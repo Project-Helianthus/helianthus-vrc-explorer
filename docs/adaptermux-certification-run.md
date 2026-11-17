@@ -76,48 +76,54 @@ The retained session log is the sanitized log only.
 ## Cells
 
 The table is the whole Explorer record. A missing row is not a pass.
-`execute` runs the command above, once per southbound. `same-scan` copies the
-START/SEND or per-symbol echo claim from the coexistence scan of the same
-southbound and starts no process. `not-run` starts nothing.
+`execute` runs the command above, once per southbound.
+`recorded-from-coexistence-scan` with command `same-scan` copies the START/SEND
+or per-symbol echo claim from the coexistence scan of the same southbound and
+starts no process. `not-run` starts nothing.
+The Grade, Qualification, and Outcome columns are the record fields of each row.
+Before the run they hold `pending` on every row the run fills.
+Replace each `pending` with the recorded value in the published record.
+A row that still holds `pending` is not a pass.
+A `not-run` row keeps grade `Unknown`, qualification `none`, and outcome `not-run`.
 
 <!-- certification-cells: start -->
-| Cell | Southbound | Invariant | Disposition | Command |
-| --- | --- | --- | --- | --- |
-| `ENS-AD05` | `ENS` | `AD05` | `not-run` | `not-run` |
-| `ENS-AD06` | `ENS` | `AD06` | `recorded-from-coexistence-scan` | `same-scan` |
-| `ENS-AD08` | `ENS` | `AD08` | `recorded-from-coexistence-scan` | `same-scan` |
-| `ENS-AD12` | `ENS` | `AD12` | `not-run` | `not-run` |
-| `ENS-CX01` | `ENS` | `CX01` | `execute` | `scan` |
-| `ENH-AD05` | `ENH` | `AD05` | `not-run` | `not-run` |
-| `ENH-AD06` | `ENH` | `AD06` | `recorded-from-coexistence-scan` | `same-scan` |
-| `ENH-AD08` | `ENH` | `AD08` | `recorded-from-coexistence-scan` | `same-scan` |
-| `ENH-AD12` | `ENH` | `AD12` | `not-run` | `not-run` |
-| `ENH-CX01` | `ENH` | `CX01` | `execute` | `scan` |
-| `UDP-AD05` | `UDP` | `AD05` | `not-run` | `not-run` |
-| `UDP-AD06` | `UDP` | `AD06` | `not-run` | `not-run` |
-| `UDP-AD08` | `UDP` | `AD08` | `not-run` | `not-run` |
-| `UDP-AD12` | `UDP` | `AD12` | `not-run` | `not-run` |
-| `UDP-CX01` | `UDP` | `CX01` | `not-run` | `not-run` |
-| `TCP-AD05` | `TCP` | `AD05` | `not-run` | `not-run` |
-| `TCP-AD06` | `TCP` | `AD06` | `not-run` | `not-run` |
-| `TCP-AD08` | `TCP` | `AD08` | `not-run` | `not-run` |
-| `TCP-AD12` | `TCP` | `AD12` | `not-run` | `not-run` |
-| `TCP-CX01` | `TCP` | `CX01` | `not-run` | `not-run` |
-| `UARTENS-AD05` | `UARTENS` | `AD05` | `not-run` | `not-run` |
-| `UARTENS-AD06` | `UARTENS` | `AD06` | `not-run` | `not-run` |
-| `UARTENS-AD08` | `UARTENS` | `AD08` | `not-run` | `not-run` |
-| `UARTENS-AD12` | `UARTENS` | `AD12` | `not-run` | `not-run` |
-| `UARTENS-CX01` | `UARTENS` | `CX01` | `not-run` | `not-run` |
-| `UARTENH-AD05` | `UARTENH` | `AD05` | `not-run` | `not-run` |
-| `UARTENH-AD06` | `UARTENH` | `AD06` | `not-run` | `not-run` |
-| `UARTENH-AD08` | `UARTENH` | `AD08` | `not-run` | `not-run` |
-| `UARTENH-AD12` | `UARTENH` | `AD12` | `not-run` | `not-run` |
-| `UARTENH-CX01` | `UARTENH` | `CX01` | `not-run` | `not-run` |
-| `UARTRAW-AD05` | `UARTRAW` | `AD05` | `not-run` | `not-run` |
-| `UARTRAW-AD06` | `UARTRAW` | `AD06` | `not-run` | `not-run` |
-| `UARTRAW-AD08` | `UARTRAW` | `AD08` | `not-run` | `not-run` |
-| `UARTRAW-AD12` | `UARTRAW` | `AD12` | `not-run` | `not-run` |
-| `UARTRAW-CX01` | `UARTRAW` | `CX01` | `not-run` | `not-run` |
+| Cell | Southbound | Invariant | Disposition | Command | Grade | Qualification | Outcome |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `ENS-AD05` | `ENS` | `AD05` | `not-run` | `not-run` | `Unknown` | `none` | `not-run` |
+| `ENS-AD06` | `ENS` | `AD06` | `recorded-from-coexistence-scan` | `same-scan` | `pending` | `pending` | `pending` |
+| `ENS-AD08` | `ENS` | `AD08` | `recorded-from-coexistence-scan` | `same-scan` | `pending` | `pending` | `pending` |
+| `ENS-AD12` | `ENS` | `AD12` | `not-run` | `not-run` | `Unknown` | `none` | `not-run` |
+| `ENS-CX01` | `ENS` | `CX01` | `execute` | `scan` | `pending` | `pending` | `pending` |
+| `ENH-AD05` | `ENH` | `AD05` | `not-run` | `not-run` | `Unknown` | `none` | `not-run` |
+| `ENH-AD06` | `ENH` | `AD06` | `recorded-from-coexistence-scan` | `same-scan` | `pending` | `pending` | `pending` |
+| `ENH-AD08` | `ENH` | `AD08` | `recorded-from-coexistence-scan` | `same-scan` | `pending` | `pending` | `pending` |
+| `ENH-AD12` | `ENH` | `AD12` | `not-run` | `not-run` | `Unknown` | `none` | `not-run` |
+| `ENH-CX01` | `ENH` | `CX01` | `execute` | `scan` | `pending` | `pending` | `pending` |
+| `UDP-AD05` | `UDP` | `AD05` | `not-run` | `not-run` | `Unknown` | `none` | `not-run` |
+| `UDP-AD06` | `UDP` | `AD06` | `not-run` | `not-run` | `Unknown` | `none` | `not-run` |
+| `UDP-AD08` | `UDP` | `AD08` | `not-run` | `not-run` | `Unknown` | `none` | `not-run` |
+| `UDP-AD12` | `UDP` | `AD12` | `not-run` | `not-run` | `Unknown` | `none` | `not-run` |
+| `UDP-CX01` | `UDP` | `CX01` | `not-run` | `not-run` | `Unknown` | `none` | `not-run` |
+| `TCP-AD05` | `TCP` | `AD05` | `not-run` | `not-run` | `Unknown` | `none` | `not-run` |
+| `TCP-AD06` | `TCP` | `AD06` | `not-run` | `not-run` | `Unknown` | `none` | `not-run` |
+| `TCP-AD08` | `TCP` | `AD08` | `not-run` | `not-run` | `Unknown` | `none` | `not-run` |
+| `TCP-AD12` | `TCP` | `AD12` | `not-run` | `not-run` | `Unknown` | `none` | `not-run` |
+| `TCP-CX01` | `TCP` | `CX01` | `not-run` | `not-run` | `Unknown` | `none` | `not-run` |
+| `UARTENS-AD05` | `UARTENS` | `AD05` | `not-run` | `not-run` | `Unknown` | `none` | `not-run` |
+| `UARTENS-AD06` | `UARTENS` | `AD06` | `not-run` | `not-run` | `Unknown` | `none` | `not-run` |
+| `UARTENS-AD08` | `UARTENS` | `AD08` | `not-run` | `not-run` | `Unknown` | `none` | `not-run` |
+| `UARTENS-AD12` | `UARTENS` | `AD12` | `not-run` | `not-run` | `Unknown` | `none` | `not-run` |
+| `UARTENS-CX01` | `UARTENS` | `CX01` | `not-run` | `not-run` | `Unknown` | `none` | `not-run` |
+| `UARTENH-AD05` | `UARTENH` | `AD05` | `not-run` | `not-run` | `Unknown` | `none` | `not-run` |
+| `UARTENH-AD06` | `UARTENH` | `AD06` | `not-run` | `not-run` | `Unknown` | `none` | `not-run` |
+| `UARTENH-AD08` | `UARTENH` | `AD08` | `not-run` | `not-run` | `Unknown` | `none` | `not-run` |
+| `UARTENH-AD12` | `UARTENH` | `AD12` | `not-run` | `not-run` | `Unknown` | `none` | `not-run` |
+| `UARTENH-CX01` | `UARTENH` | `CX01` | `not-run` | `not-run` | `Unknown` | `none` | `not-run` |
+| `UARTRAW-AD05` | `UARTRAW` | `AD05` | `not-run` | `not-run` | `Unknown` | `none` | `not-run` |
+| `UARTRAW-AD06` | `UARTRAW` | `AD06` | `not-run` | `not-run` | `Unknown` | `none` | `not-run` |
+| `UARTRAW-AD08` | `UARTRAW` | `AD08` | `not-run` | `not-run` | `Unknown` | `none` | `not-run` |
+| `UARTRAW-AD12` | `UARTRAW` | `AD12` | `not-run` | `not-run` | `Unknown` | `none` | `not-run` |
+| `UARTRAW-CX01` | `UARTRAW` | `CX01` | `not-run` | `not-run` | `Unknown` | `none` | `not-run` |
 <!-- certification-cells: end -->
 
 UDP rows are not run. TCP rows are not run. UART-direct rows are not run.
@@ -137,7 +143,10 @@ not change the gateway cell's client. They record Explorer evidence only.
 
 ## What is recorded
 
-For every row, record the cell, southbound, invariant, disposition, command, evidence grade, and qualification.
+For every row, record the cell, southbound, invariant, disposition, command, evidence grade, qualification, and outcome.
+The Grade column holds `Proven`, `Hypothesis`, or `Unknown`.
+The Qualification column holds the selector qualification in family wording, or `none`.
+The Outcome column holds `pass`, `fail`, `blocked`, or `not-run`.
 Grade Proven is the retained scan exit status.
 Use it only when that exit status is retained, and only for the fact that the scan completed.
 Grade Hypothesis is an interpretation of that completed scan.
@@ -155,6 +164,8 @@ written and then deleted, the listener refused nothing, and the command passed
 the supplied initiator.
 Anything else is fail, or blocked when the endpoint or the initiator was not
 supplied or the controller did not answer at the default destination.
+A `recorded-from-coexistence-scan` row takes the outcome of the `execute` row of the same southbound.
+Its grade is at most Hypothesis.
 Retaining the JSON artifact or the HTML report is not a pass.
 
 ## Restore

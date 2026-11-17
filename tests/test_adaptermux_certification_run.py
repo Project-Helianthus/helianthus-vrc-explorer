@@ -15,8 +15,17 @@ _TABLE_END = "<!-- certification-cells: end -->"
 _CELL_ROW = re.compile(
     r"^\| `(?P<cell>[A-Z0-9-]+)` \| `(?P<southbound>[A-Z0-9]+)` \| "
     r"`(?P<invariant>[A-Z0-9]+)` \| `(?P<disposition>[a-z-]+)` \| "
-    r"`(?P<command>[a-z-]+)` \|$"
+    r"`(?P<command>[a-z-]+)` \| `(?P<grade>[A-Za-z]+)` \| "
+    r"`(?P<qualification>[a-z-]+)` \| `(?P<outcome>[a-z-]+)` \|$"
 )
+_HEADER = (
+    "| Cell | Southbound | Invariant | Disposition | Command | Grade | Qualification | Outcome |"
+)
+_RECORD_FOR = {
+    "execute": ("pending", "pending", "pending"),
+    "recorded-from-coexistence-scan": ("pending", "pending", "pending"),
+    "not-run": ("Unknown", "none", "not-run"),
+}
 _COMMAND_FOR = {
     "execute": "scan",
     "recorded-from-coexistence-scan": "same-scan",
@@ -32,7 +41,16 @@ _EXECUTED = {
 }
 _SOUTHBOUNDS = ("ENS", "ENH", "UDP", "TCP", "UARTENS", "UARTENH", "UARTRAW")
 _INVARIANTS = ("AD05", "AD06", "AD08", "AD12", "CX01")
-_FIELDS = ("southbound", "invariant", "disposition", "command")
+_FIELDS = (
+    "southbound",
+    "invariant",
+    "disposition",
+    "command",
+    "grade",
+    "qualification",
+    "outcome",
+)
+_Row = tuple[str, str, str, str, str, str, str]
 _SENTENCES = (
     "The candidate build is the Explorer build the session is qualifying.",
     "The gateway AdapterMux listener is already running for the southbound under test.",
@@ -43,6 +61,23 @@ _SENTENCES = (
     "This procedure has no device write.",
     "The direct adapter path is outside this procedure.",
     "Grade Proven is the retained scan exit status.",
+    (
+        "For every row, record the cell, southbound, invariant, disposition, "
+        "command, evidence grade, qualification, and outcome."
+    ),
+    "The Grade, Qualification, and Outcome columns are the record fields of each row.",
+    "Before the run they hold `pending` on every row the run fills.",
+    "Replace each `pending` with the recorded value in the published record.",
+    "A row that still holds `pending` is not a pass.",
+    "A `not-run` row keeps grade `Unknown`, qualification `none`, and outcome `not-run`.",
+    "The Grade column holds `Proven`, `Hypothesis`, or `Unknown`.",
+    "The Qualification column holds the selector qualification in family wording, or `none`.",
+    "The Outcome column holds `pass`, `fail`, `blocked`, or `not-run`.",
+    (
+        "A `recorded-from-coexistence-scan` row takes the outcome of the `execute` "
+        "row of the same southbound."
+    ),
+    "Its grade is at most Hypothesis.",
     (
         "Use it only when that exit status is retained, and only for the fact "
         "that the scan completed."
@@ -128,13 +163,22 @@ _OFFLINE_LINK = "](adaptermux-certification-run.md)"
 _CHANGELOG_LINK = "docs/adaptermux-certification-run.md"
 
 
-def _expected_rows() -> dict[str, tuple[str, str, str, str]]:
-    rows: dict[str, tuple[str, str, str, str]] = {}
+def _expected_rows() -> dict[str, _Row]:
+    rows: dict[str, _Row] = {}
     for southbound in _SOUTHBOUNDS:
         for invariant in _INVARIANTS:
             cell = f"{southbound}-{invariant}"
-            rows[cell] = _EXECUTED.get((southbound, invariant), ("not-run", "not-run"))
-            rows[cell] = (southbound, invariant, *rows[cell])
+            disposition, command = _EXECUTED.get((southbound, invariant), ("not-run", "not-run"))
+            grade, qualification, outcome = _RECORD_FOR[disposition]
+            rows[cell] = (
+                southbound,
+                invariant,
+                disposition,
+                command,
+                grade,
+                qualification,
+                outcome,
+            )
     return rows
 
 
@@ -190,12 +234,14 @@ def _relay_errors(text: str) -> list[str]:
     return []
 
 
-def _parse_cells(text: str) -> tuple[dict[str, tuple[str, str, str, str]], list[str]]:
+def _parse_cells(text: str) -> tuple[dict[str, _Row], list[str]]:
     errors: list[str] = []
     if text.count(_TABLE_START) != 1 or text.count(_TABLE_END) != 1:
         return {}, ["missing certification cell table"]
     body = text.split(_TABLE_START, 1)[1].split(_TABLE_END, 1)[0]
-    rows: dict[str, tuple[str, str, str, str]] = {}
+    if _HEADER not in body.splitlines():
+        errors.append("cell table lacks the grade, qualification and outcome columns")
+    rows: dict[str, _Row] = {}
     for line in body.splitlines():
         if not line.startswith("| `"):
             continue
@@ -211,11 +257,14 @@ def _parse_cells(text: str) -> tuple[dict[str, tuple[str, str, str, str]], list[
             match.group("invariant"),
             match.group("disposition"),
             match.group("command"),
+            match.group("grade"),
+            match.group("qualification"),
+            match.group("outcome"),
         )
     return rows, errors
 
 
-def _inventory_errors(rows: dict[str, tuple[str, str, str, str]]) -> list[str]:
+def _inventory_errors(rows: dict[str, _Row]) -> list[str]:
     errors: list[str] = []
     expected = _expected_rows()
     for cell in sorted(set(rows) - set(expected)):
@@ -229,11 +278,11 @@ def _inventory_errors(rows: dict[str, tuple[str, str, str, str]]) -> list[str]:
 
 def _cell_errors(
     cell: str,
-    got: tuple[str, str, str, str],
-    want: tuple[str, str, str, str],
+    got: _Row,
+    want: _Row,
 ) -> list[str]:
     errors: list[str] = []
-    southbound, invariant, disposition, command = got
+    southbound, invariant, disposition, command = got[:4]
     if cell != f"{southbound}-{invariant}":
         errors.append(f"{cell} cell")
     if _COMMAND_FOR.get(disposition) != command:
@@ -411,9 +460,44 @@ class AdapterMuxCertificationRunTests(unittest.TestCase):
                 errors = certification_errors(mutated)
                 self.assertIn(expected, errors)
 
+    def test_record_field_mutation_is_rejected(self) -> None:
+        text = _PROCEDURE.read_text(encoding="utf-8")
+        cases = (
+            ("ENS-CX01", 5, "Proven", "ENS-CX01 grade"),
+            ("ENS-CX01", 6, "none", "ENS-CX01 qualification"),
+            ("ENS-CX01", 7, "pass", "ENS-CX01 outcome"),
+            ("ENH-AD06", 5, "Proven", "ENH-AD06 grade"),
+            ("UDP-CX01", 5, "Proven", "UDP-CX01 grade"),
+            ("UDP-CX01", 6, "pending", "UDP-CX01 qualification"),
+            ("ENS-AD05", 7, "pass", "ENS-AD05 outcome"),
+        )
+        for cell, column, value, expected in cases:
+            with self.subTest(cell=cell, column=column):
+                mutated = _mutate_column(text, cell, column, value)
+                errors = certification_errors(mutated)
+                self.assertIn(expected, errors)
+
+    def test_table_without_record_fields_is_rejected(self) -> None:
+        text = _PROCEDURE.read_text(encoding="utf-8")
+        self.assertIn(_HEADER + "\n", text)
+        lines: list[str] = []
+        for line in text.splitlines():
+            if line.startswith("| "):
+                line = "| " + " | ".join(line[2:-2].split(" | ")[:5]) + " |"
+            lines.append(line)
+        errors = certification_errors("\n".join(lines) + "\n")
+        self.assertIn("cell table lacks the grade, qualification and outcome columns", errors)
+        self.assertIn(
+            "unreadable cell row: | `ENS-CX01` | `ENS` | `CX01` | `execute` | `scan` |",
+            errors,
+        )
+
     def test_dropped_not_run_row_is_rejected(self) -> None:
         text = _PROCEDURE.read_text(encoding="utf-8")
-        row = "| `UARTENS-AD12` | `UARTENS` | `AD12` | `not-run` | `not-run` |\n"
+        row = (
+            "| `UARTENS-AD12` | `UARTENS` | `AD12` | `not-run` | `not-run` "
+            "| `Unknown` | `none` | `not-run` |\n"
+        )
         self.assertIn(row, text)
         errors = certification_errors(text.replace(row, "", 1))
         self.assertIn("UARTENS-AD12 missing", errors)
