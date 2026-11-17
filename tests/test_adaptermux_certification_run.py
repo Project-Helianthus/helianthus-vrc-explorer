@@ -27,6 +27,8 @@ _EXECUTED = {
     ("ENH", "CX01"): ("execute", "scan"),
     ("ENS", "AD06"): ("recorded-from-coexistence-scan", "same-scan"),
     ("ENH", "AD06"): ("recorded-from-coexistence-scan", "same-scan"),
+    ("ENS", "AD08"): ("recorded-from-coexistence-scan", "same-scan"),
+    ("ENH", "AD08"): ("recorded-from-coexistence-scan", "same-scan"),
 }
 _SOUTHBOUNDS = ("ENS", "ENH", "UDP", "TCP", "UARTENS", "UARTENH", "UARTRAW")
 _INVARIANTS = ("AD05", "AD06", "AD08", "AD12", "CX01")
@@ -34,6 +36,7 @@ _FIELDS = ("southbound", "invariant", "disposition", "command")
 _SENTENCES = (
     "The candidate build is the Explorer build the session is qualifying.",
     "The gateway AdapterMux listener is already running for the southbound under test.",
+    "Explorer connects to that listener as an ENH client and uses no other endpoint.",
     "Record the Explorer version line and do not raise a version.",
     "The coexistence rows name northbound client `vrc-explorer`.",
     "The scan is read-only.",
@@ -45,9 +48,15 @@ _SENTENCES = (
         "that the scan completed."
     ),
     "Grade Hypothesis is an interpretation of that completed scan.",
-    "Grade Unknown is missing context, including any wire symbol the relay did not retain.",
+    "Grade Unknown is missing context, including any wire symbol the scan did not retain.",
+    "A completed enhanced scan through the listener supports Hypothesis for START/SEND.",
+    (
+        "It supports Hypothesis for the echo of each raw symbol Explorer sent "
+        "in a completed transaction."
+    ),
+    "Broadcast reception and raw escape pairs stay Unknown on every row.",
     "The JSON artifact and the HTML report contain the scan timestamp and the destination address.",
-    "The JSON artifact and the HTML report contain the relay host and port.",
+    "The JSON artifact and the HTML report contain the listener host and port.",
     (
         "The JSON artifact and the HTML report contain the probed model and serial "
         "in `identity` and `resolved_identity`."
@@ -67,20 +76,22 @@ _SENTENCES = (
     "The grade does not set qualification.",
     "Record the controller protocol family only.",
     "Do not record a model name, serial, address, or time.",
-    "If the relay endpoint is not supplied, record the executable rows as blocked.",
-    "Set `$ADAPTERMUX_INITIATOR` as the initiator these hex lines use before the scan.",
-    "This scan does not pass `--source-address`.",
-    "The scan applies that option only for enhanced transport.",
-    "These hex lines carry no source override.",
     (
-        "If these hex lines would not use the supplied initiator, "
+        "If the listener endpoint or the initiator is not supplied, "
         "record the executable rows as blocked."
     ),
+    "Set `$ADAPTERMUX_INITIATOR` to the initiator the session assigns to Explorer.",
+    "That initiator differs from the initiator of every other client of the listener.",
+    (
+        "The scan passes it with `--source-address`, and its enhanced transport "
+        "arbitrates with it."
+    ),
+    "If the controller does not answer at that destination, record the executable rows as blocked.",
     "Set `$ADAPTERMUX_RAW_LOG` to the raw session log path before the scan.",
     "Sanitize the raw session log before retention.",
     "Drop the non-interactive preface and the scan status lines from the retained log.",
     "Drop any other retained-log line that contains a model, a serial, or a controller address.",
-    "Drop any other retained-log line that contains the relay endpoint or a start time.",
+    "Drop any other retained-log line that contains the listener endpoint or a start time.",
     "Do not retain the raw redirect.",
     "Leave the sanitized session log in place.",
     "Restore stops Explorer and sends no further bus command.",
@@ -93,9 +104,10 @@ _SENTENCES = (
     "UART-direct rows are not run.",
 )
 _FLAGS = (
-    "--transport tcp",
-    "--host",
-    "--port",
+    "--transport enh",
+    '--host "$ADAPTERMUX_LISTENER_HOST"',
+    '--port "$ADAPTERMUX_LISTENER_PORT"',
+    '--source-address "$ADAPTERMUX_INITIATOR"',
     "--preset recommended",
 )
 _SCAN_COMMAND = re.compile(
@@ -149,23 +161,33 @@ def _scan_command_errors(text: str) -> list[str]:
     if len(found) != 1:
         return ["missing scan command"]
     body = found[0]
-    if "--transport tcp" not in body:
-        return ["tcp scan transport"]
-    if "--source-address" in body or "ADAPTERMUX_INITIATOR" in body:
-        return ["tcp scan passes --source-address"]
+    if "--transport enh" not in body or "--transport tcp" in body:
+        return ["scan does not use the enhanced transport"]
+    if '--host "$ADAPTERMUX_LISTENER_HOST"' not in body:
+        return ["scan does not target the AdapterMux listener"]
+    if '--port "$ADAPTERMUX_LISTENER_PORT"' not in body:
+        return ["scan does not target the AdapterMux listener"]
+    if '--source-address "$ADAPTERMUX_INITIATOR"' not in body:
+        return ["scan does not pass the supplied initiator"]
     if body.splitlines()[-1] != _REDIRECT:
         return ["scan output not redirected"]
     return []
 
 
 def _initiator_errors(text: str) -> list[str]:
-    if text.count("$ADAPTERMUX_INITIATOR") != 1:
+    if text.count("$ADAPTERMUX_INITIATOR") != 2:
         return ["missing initiator binding"]
     return []
 
 
 def _forbidden_errors(text: str) -> list[str]:
     return [label for phrase, label in _FORBIDDEN if phrase in text]
+
+
+def _relay_errors(text: str) -> list[str]:
+    if "relay" in text.lower():
+        return ["scan routed through a relay instead of the listener"]
+    return []
 
 
 def _parse_cells(text: str) -> tuple[dict[str, tuple[str, str, str, str]], list[str]]:
@@ -228,6 +250,7 @@ def certification_errors(text: str) -> list[str]:
     errors.extend(_scan_command_errors(text))
     errors.extend(_initiator_errors(text))
     errors.extend(_forbidden_errors(text))
+    errors.extend(_relay_errors(text))
     rows, parse_errors = _parse_cells(text)
     errors.extend(parse_errors)
     if parse_errors:
@@ -287,13 +310,41 @@ class AdapterMuxCertificationRunTests(unittest.TestCase):
                 errors = certification_errors(mutated)
                 self.assertIn(f"missing flag: {flag}", errors)
 
-    def test_source_address_on_tcp_scan_is_rejected(self) -> None:
+    def test_tcp_scan_is_rejected(self) -> None:
         text = _PROCEDURE.read_text(encoding="utf-8")
-        needle = '--port "$ADAPTERMUX_RELAY_PORT" \\\n'
-        insert = needle + '  --source-address "$ADAPTERMUX_INITIATOR" \\\n'
+        needle = "  --transport enh \\\n"
         self.assertIn(needle, text)
-        errors = certification_errors(text.replace(needle, insert, 1))
-        self.assertIn("tcp scan passes --source-address", errors)
+        for replacement in ("  --transport tcp \\\n", "  --transport enh --transport tcp \\\n"):
+            with self.subTest(replacement=replacement):
+                errors = certification_errors(text.replace(needle, replacement, 1))
+                self.assertIn("scan does not use the enhanced transport", errors)
+
+    def test_scan_off_the_listener_is_rejected(self) -> None:
+        text = _PROCEDURE.read_text(encoding="utf-8")
+        for name in ("HOST", "PORT"):
+            needle = f'"$ADAPTERMUX_LISTENER_{name}" \\\n'
+            self.assertIn(needle, text)
+            with self.subTest(name=name):
+                mutated = text.replace(needle, f'"$ADAPTERMUX_RELAY_{name}" \\\n', 1)
+                errors = certification_errors(mutated)
+                self.assertIn("scan does not target the AdapterMux listener", errors)
+                self.assertIn("scan routed through a relay instead of the listener", errors)
+
+    def test_relay_endpoint_in_prose_is_rejected(self) -> None:
+        text = _PROCEDURE.read_text(encoding="utf-8")
+        needle = "Explorer connects to that listener as an ENH client and uses no other endpoint."
+        self.assertIn(needle, text)
+        mutated = text.replace(needle, "Explorer's only endpoint is the guarded command relay.", 1)
+        errors = certification_errors(mutated)
+        self.assertIn("scan routed through a relay instead of the listener", errors)
+
+    def test_scan_without_initiator_is_rejected(self) -> None:
+        text = _PROCEDURE.read_text(encoding="utf-8")
+        needle = '  --source-address "$ADAPTERMUX_INITIATOR" \\\n'
+        self.assertIn(needle, text)
+        errors = certification_errors(text.replace(needle, "", 1))
+        self.assertIn("scan does not pass the supplied initiator", errors)
+        self.assertIn("missing initiator binding", errors)
 
     def test_scan_without_redirection_is_rejected(self) -> None:
         text = _PROCEDURE.read_text(encoding="utf-8")
@@ -350,6 +401,9 @@ class AdapterMuxCertificationRunTests(unittest.TestCase):
             ("ENS-CX01", 3, "not-run", "ENS-CX01 disposition"),
             ("ENS-CX01", 4, "not-run", "ENS-CX01 command"),
             ("UDP-CX01", 3, "execute", "UDP-CX01 disposition"),
+            ("ENS-AD08", 3, "not-run", "ENS-AD08 disposition"),
+            ("ENH-AD08", 3, "not-run", "ENH-AD08 disposition"),
+            ("ENH-AD05", 3, "execute", "ENH-AD05 disposition"),
         )
         for cell, column, value, expected in cases:
             with self.subTest(cell=cell, column=column):
