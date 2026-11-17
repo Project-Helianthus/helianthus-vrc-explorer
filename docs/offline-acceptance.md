@@ -143,4 +143,7 @@ regression test before changing behavior.
 
 This acceptance card does not validate live discovery, transport timing, controller behavior, or
 device writes. Those require an explicit operator-approved hardware procedure; do not use these
-commands as authorization to contact a live system.
+commands as authorization to contact a live system. The
+[AdapterMux certification run](adaptermux-certification-run.md) is the operator procedure for
+Explorer as the external client of the gateway AdapterMux coexistence cells. It is separate from
+this offline card.

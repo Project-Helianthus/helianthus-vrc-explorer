@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Document the AdapterMux certification run for Explorer as the external client
+  of the coexistence cells. The procedure records workload evidence for
+  broadcast reception, START/SEND, per-symbol echo, and raw escape pairs, keeps
+  evidence grades separate from qualification, and records UDP, TCP, and
+  UART-direct rows as not run. It authorizes no device write. See
+  [the certification run](docs/adaptermux-certification-run.md).
+
 - Reading an artifact whose availability probe recorded only a one-byte status
   reply (`00` or `ff`) now keeps that probe status-only and leaves presence
   unknown: the probe's `present` becomes `null` with
