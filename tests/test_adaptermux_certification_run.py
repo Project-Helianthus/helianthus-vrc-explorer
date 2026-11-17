@@ -12,6 +12,14 @@ _OFFLINE = _ROOT / "docs" / "offline-acceptance.md"
 _CHANGELOG = _ROOT / "CHANGELOG.md"
 _TABLE_START = "<!-- certification-cells: start -->"
 _TABLE_END = "<!-- certification-cells: end -->"
+_SESSION_START = "<!-- certification-session: start -->"
+_SESSION_END = "<!-- certification-session: end -->"
+_SESSION_HEADER = "| Field | `ENS` | `ENH` |"
+_SESSION_FIELDS = ("protocol-family", "transport-refusal")
+_SESSION_ROW = re.compile(
+    r"^\| `(?P<field>protocol-family|transport-refusal)` \| "
+    r"`(?P<ens>[A-Za-z0-9-]+)` \| `(?P<enh>[A-Za-z0-9-]+)` \|$"
+)
 _CELL_ROW = re.compile(
     r"^\| `(?P<cell>[A-Z0-9-]+)` \| `(?P<southbound>[A-Z0-9]+)` \| "
     r"`(?P<invariant>[A-Z0-9]+)` \| `(?P<disposition>[a-z-]+)` \| "
@@ -110,6 +118,39 @@ _SENTENCES = (
     "Qualification is a separate record and does not set the grade.",
     "The grade does not set qualification.",
     "Record the controller protocol family only.",
+    "Read the protocol family from `identity` before deleting the artifact.",
+    "The protocol family field holds the catalog protocol family, or `Unknown`.",
+    "The protocol family field is `Unknown` when the exact EID/SPN pair is unmatched.",
+    "Do not record the EID or the SPN.",
+    "The protocol family is not an evidence grade.",
+    "The published record is the cell table and the session fields.",
+    "For the session, record the protocol family and the transport refusal.",
+    "A missing session field is not a pass.",
+    "A session field that still holds `pending` is not a pass.",
+    "When the executable rows are blocked, the protocol family field is `Unknown`.",
+    ("When the executable rows are blocked, the transport-refusal indicator is `blocked`."),
+    "A redirected scan still exits 0 after a caught transport error.",
+    "With no terminal attached, discovery failures are not written to the raw log.",
+    "The summary does not count those discovery failures.",
+    "A transport error is a register `error` value that begins with `transport_error`.",
+    "A transport diagnostic is a `transport_diagnostic` object in the artifact.",
+    (
+        "A transport recovery is `transport_recovery` or the incomplete reason "
+        "`transport_recovery_exhausted`."
+    ),
+    "Before deleting either artifact, check the JSON artifact for a transport refusal.",
+    (
+        "Do not copy an error string, a raw value, an address, an endpoint, a model, "
+        "a serial, or a time into that indicator."
+    ),
+    "The indicator is `refused` when the artifact holds a transport error.",
+    "The indicator is `refused` when the artifact holds a transport diagnostic.",
+    "The indicator is `refused` when the artifact holds a transport recovery.",
+    "The indicator is `none` only when that check finds none of those.",
+    "Record the sanitized transport-refusal indicator before deletion.",
+    "A scan exit status of 0 does not show that the listener refused nothing.",
+    "The summary error count is not the transport-refusal check.",
+    "An `execute` row passes only when that indicator is `none`.",
     "Do not record a model name, serial, address, or time.",
     (
         "If the listener endpoint or the initiator is not supplied, "
@@ -117,10 +158,7 @@ _SENTENCES = (
     ),
     "Set `$ADAPTERMUX_INITIATOR` to the initiator the session assigns to Explorer.",
     "That initiator differs from the initiator of every other client of the listener.",
-    (
-        "The scan passes it with `--source-address`, and its enhanced transport "
-        "arbitrates with it."
-    ),
+    ("The scan passes it with `--source-address`, and its enhanced transport arbitrates with it."),
     "If the controller does not answer at that destination, record the executable rows as blocked.",
     "Set `$ADAPTERMUX_RAW_LOG` to the raw session log path before the scan.",
     "Sanitize the raw session log before retention.",
@@ -157,6 +195,10 @@ _FORBIDDEN = (
     (
         "Grade Hypothesis is an interpretation supported by that artifact.",
         "unsanitized artifact retained",
+    ),
+    (
+        "A scan exit status of 0 shows that the listener refused nothing.",
+        "exit status treated as a refusal check",
     ),
 )
 _OFFLINE_LINK = "](adaptermux-certification-run.md)"
@@ -234,6 +276,59 @@ def _relay_errors(text: str) -> list[str]:
     return []
 
 
+def _session_body(text: str) -> tuple[str, list[str]]:
+    if text.count(_SESSION_START) != 1 or text.count(_SESSION_END) != 1:
+        return "", ["missing certification session fields"]
+    body = text.split(_SESSION_START, 1)[1].split(_SESSION_END, 1)[0]
+    return body, []
+
+
+def _parse_session_line(line: str) -> tuple[tuple[str, tuple[str, str]] | None, list[str]]:
+    if not line.startswith("| `"):
+        return None, []
+    match = _SESSION_ROW.fullmatch(line)
+    if match is None:
+        return None, [f"unreadable session field: {line}"]
+    values = (match.group("ens"), match.group("enh"))
+    return (match.group("field"), values), []
+
+
+def _session_rows(body: str) -> tuple[dict[str, tuple[str, str]], list[str]]:
+    errors: list[str] = []
+    found: dict[str, tuple[str, str]] = {}
+    if _SESSION_HEADER not in body.splitlines():
+        errors.append("session fields lack the ENS and ENH columns")
+    for line in body.splitlines():
+        parsed, row_errors = _parse_session_line(line)
+        errors.extend(row_errors)
+        if parsed is None:
+            continue
+        field, values = parsed
+        if field in found:
+            errors.append(f"{field} duplicate")
+        found[field] = values
+    return found, errors
+
+
+def _session_value_errors(found: dict[str, tuple[str, str]]) -> list[str]:
+    errors: list[str] = []
+    for field in _SESSION_FIELDS:
+        if field not in found:
+            errors.append(f"{field} missing")
+            continue
+        if found[field] != ("pending", "pending"):
+            errors.append(f"{field} value")
+    return errors
+
+
+def _session_errors(text: str) -> list[str]:
+    body, errors = _session_body(text)
+    if errors:
+        return errors
+    found, row_errors = _session_rows(body)
+    return [*row_errors, *_session_value_errors(found)]
+
+
 def _parse_cells(text: str) -> tuple[dict[str, _Row], list[str]]:
     errors: list[str] = []
     if text.count(_TABLE_START) != 1 or text.count(_TABLE_END) != 1:
@@ -300,6 +395,7 @@ def certification_errors(text: str) -> list[str]:
     errors.extend(_initiator_errors(text))
     errors.extend(_forbidden_errors(text))
     errors.extend(_relay_errors(text))
+    errors.extend(_session_errors(text))
     rows, parse_errors = _parse_cells(text)
     errors.extend(parse_errors)
     if parse_errors:
@@ -491,6 +587,34 @@ class AdapterMuxCertificationRunTests(unittest.TestCase):
             "unreadable cell row: | `ENS-CX01` | `ENS` | `CX01` | `execute` | `scan` |",
             errors,
         )
+
+    def test_dropped_session_field_is_rejected(self) -> None:
+        text = _PROCEDURE.read_text(encoding="utf-8")
+        row = "| `protocol-family` | `pending` | `pending` |\n"
+        self.assertIn(row, text)
+        errors = certification_errors(text.replace(row, "", 1))
+        self.assertIn("protocol-family missing", errors)
+
+    def test_filled_session_field_is_rejected(self) -> None:
+        text = _PROCEDURE.read_text(encoding="utf-8")
+        row = "| `transport-refusal` | `pending` | `pending` |"
+        self.assertIn(row, text)
+        filled = "| `transport-refusal` | `none` | `none` |"
+        errors = certification_errors(text.replace(row, filled, 1))
+        self.assertIn("transport-refusal value", errors)
+
+    def test_exit_status_alone_is_rejected(self) -> None:
+        text = _PROCEDURE.read_text(encoding="utf-8")
+        needle = "A scan exit status of 0 does not show that the listener refused nothing."
+        self.assertIn(needle, text)
+        mutated = text.replace(
+            needle,
+            "A scan exit status of 0 shows that the listener refused nothing.",
+            1,
+        )
+        errors = certification_errors(mutated)
+        self.assertIn(f"missing sentence: {needle}", errors)
+        self.assertIn("exit status treated as a refusal check", errors)
 
     def test_dropped_not_run_row_is_rejected(self) -> None:
         text = _PROCEDURE.read_text(encoding="utf-8")

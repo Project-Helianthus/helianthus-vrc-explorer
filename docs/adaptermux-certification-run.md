@@ -27,6 +27,11 @@ The non-interactive enhanced scan uses the scan setup's default controller desti
 If the controller does not answer at that destination, record the executable rows as blocked.
 Do not record a model name, serial, address, or time.
 Record the controller protocol family only.
+Read the protocol family from `identity` before deleting the artifact.
+The protocol family field holds the catalog protocol family, or `Unknown`.
+The protocol family field is `Unknown` when the exact EID/SPN pair is unmatched.
+Do not record the EID or the SPN.
+The protocol family is not an evidence grade.
 Session, candidate, and hardware-setup labels stay opaque: no endpoint and no serial.
 
 ## Command
@@ -63,6 +68,19 @@ The HTML report also embeds that JSON.
 Do not retain the JSON artifact.
 Do not retain the HTML report.
 Do not retain a redacted copy of either file.
+A redirected scan still exits 0 after a caught transport error.
+With no terminal attached, discovery failures are not written to the raw log.
+The summary does not count those discovery failures.
+A transport error is a register `error` value that begins with `transport_error`.
+A transport diagnostic is a `transport_diagnostic` object in the artifact.
+A transport recovery is `transport_recovery` or the incomplete reason `transport_recovery_exhausted`.
+Before deleting either artifact, check the JSON artifact for a transport refusal.
+The indicator is `refused` when the artifact holds a transport error.
+The indicator is `refused` when the artifact holds a transport diagnostic.
+The indicator is `refused` when the artifact holds a transport recovery.
+The indicator is `none` only when that check finds none of those.
+Record the sanitized transport-refusal indicator before deletion.
+Do not copy an error string, a raw value, an address, an endpoint, a model, a serial, or a time into that indicator.
 Delete both files after the scan exit status is recorded.
 The published row omits the artifact body.
 No scan artifact is retained.
@@ -75,7 +93,11 @@ The retained session log is the sanitized log only.
 
 ## Cells
 
-The table is the whole Explorer record. A missing row is not a pass.
+The published record is the cell table and the session fields.
+For the session, record the protocol family and the transport refusal.
+A missing row is not a pass.
+A missing session field is not a pass.
+A session field that still holds `pending` is not a pass.
 `execute` runs the command above, once per southbound.
 `recorded-from-coexistence-scan` with command `same-scan` copies the START/SEND
 or per-symbol echo claim from the coexistence scan of the same southbound and
@@ -126,6 +148,15 @@ A `not-run` row keeps grade `Unknown`, qualification `none`, and outcome `not-ru
 | `UARTRAW-CX01` | `UARTRAW` | `CX01` | `not-run` | `not-run` | `Unknown` | `none` | `not-run` |
 <!-- certification-cells: end -->
 
+<!-- certification-session: start -->
+| Field | `ENS` | `ENH` |
+| --- | --- | --- |
+| `protocol-family` | `pending` | `pending` |
+| `transport-refusal` | `pending` | `pending` |
+<!-- certification-session: end -->
+
+When the executable rows are blocked, the protocol family field is `Unknown`.
+When the executable rows are blocked, the transport-refusal indicator is `blocked`.
 UDP rows are not run. TCP rows are not run. UART-direct rows are not run.
 The UART-direct row tokens are `UARTENS`, `UARTENH`, and `UARTRAW`. Plain UDP
 and TCP stay planned on the gateway inventory, and UART-direct stays reserved.
@@ -160,8 +191,11 @@ The grade does not set qualification.
 A selector-qualified decoded row stays in its own qualification field.
 
 An `execute` row passes only when the scan exits 0, both artifact files were
-written and then deleted, the listener refused nothing, and the command passed
-the supplied initiator.
+written, the transport-refusal indicator is `none`, both files were then
+deleted, and the command passed the supplied initiator.
+An `execute` row passes only when that indicator is `none`.
+A scan exit status of 0 does not show that the listener refused nothing.
+The summary error count is not the transport-refusal check.
 Anything else is fail, or blocked when the endpoint or the initiator was not
 supplied or the controller did not answer at the default destination.
 A `recorded-from-coexistence-scan` row takes the outcome of the `execute` row of the same southbound.
