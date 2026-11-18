@@ -110,6 +110,9 @@ _SENTENCES = (
     "Do not retain the HTML report.",
     "Do not retain a redacted copy of either file.",
     "Delete both files after the scan exit status is recorded.",
+    "Save the scan exit status in `ADAPTERMUX_SCAN_STATUS` immediately after the scan.",
+    "That assignment runs before any artifact inspection or deletion.",
+    "The retained scan exit status is `ADAPTERMUX_SCAN_STATUS`.",
     "The published row omits the artifact body.",
     "No scan artifact is retained.",
     "Retaining the JSON artifact or the HTML report is not a pass.",
@@ -188,6 +191,7 @@ _SCAN_COMMAND = re.compile(
     re.DOTALL,
 )
 _REDIRECT = '  </dev/null >"$ADAPTERMUX_RAW_LOG" 2>&1'
+_STATUS_CAPTURE = "ADAPTERMUX_SCAN_STATUS=$?"
 _FORBIDDEN = (
     ("Leave the session output in place.", "raw session output retained"),
     ("Keep that artifact for local inspection.", "unsanitized artifact retained"),
@@ -255,8 +259,16 @@ def _scan_command_errors(text: str) -> list[str]:
         return ["scan does not target the AdapterMux listener"]
     if '--source-address "$ADAPTERMUX_INITIATOR"' not in body:
         return ["scan does not pass the supplied initiator"]
-    if body.splitlines()[-1] != _REDIRECT:
+    return _status_capture_errors(body)
+
+
+def _status_capture_errors(body: str) -> list[str]:
+    lines = body.splitlines()
+    if _REDIRECT not in lines:
         return ["scan output not redirected"]
+    redirect_at = lines.index(_REDIRECT)
+    if redirect_at + 1 >= len(lines) or lines[redirect_at + 1] != _STATUS_CAPTURE:
+        return ["scan exit status not captured before post-processing"]
     return []
 
 
@@ -490,6 +502,20 @@ class AdapterMuxCertificationRunTests(unittest.TestCase):
         errors = certification_errors(text.replace(needle, "", 1))
         self.assertIn("scan does not pass the supplied initiator", errors)
         self.assertIn("missing initiator binding", errors)
+
+    def test_late_exit_status_capture_is_rejected(self) -> None:
+        text = _PROCEDURE.read_text(encoding="utf-8")
+        needle = _REDIRECT + "\n" + _STATUS_CAPTURE + "\n"
+        self.assertIn(needle, text)
+        cases = (
+            _REDIRECT + "\n",
+            _REDIRECT + "\nrm -- results/scan.json\n" + _STATUS_CAPTURE + "\n",
+            _STATUS_CAPTURE + "\n" + _REDIRECT + "\n",
+        )
+        for replacement in cases:
+            with self.subTest(replacement=replacement):
+                errors = certification_errors(text.replace(needle, replacement, 1))
+                self.assertIn("scan exit status not captured before post-processing", errors)
 
     def test_scan_without_redirection_is_rejected(self) -> None:
         text = _PROCEDURE.read_text(encoding="utf-8")

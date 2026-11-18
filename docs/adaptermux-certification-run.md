@@ -54,8 +54,11 @@ python -m helianthus_vrc_explorer scan \
   --source-address "$ADAPTERMUX_INITIATOR" \
   --preset recommended \
   </dev/null >"$ADAPTERMUX_RAW_LOG" 2>&1
+ADAPTERMUX_SCAN_STATUS=$?
 ```
 
+Save the scan exit status in `ADAPTERMUX_SCAN_STATUS` immediately after the scan.
+That assignment runs before any artifact inspection or deletion.
 Transport `enh` is Explorer's enhanced transport: it sends START and SEND to the
 listener and checks the echo of every raw symbol it sends. Explorer speaks ENH to
 the listener on both the `ENS` and the `ENH` southbound. A non-interactive
@@ -89,6 +92,7 @@ Drop the non-interactive preface and the scan status lines from the retained log
 Drop any other retained-log line that contains a model, a serial, or a controller address.
 Drop any other retained-log line that contains the listener endpoint or a start time.
 Retain the scan exit status.
+The retained scan exit status is `ADAPTERMUX_SCAN_STATUS`.
 The retained session log is the sanitized log only.
 
 ## Cells
