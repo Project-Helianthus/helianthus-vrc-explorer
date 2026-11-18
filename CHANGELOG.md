@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Document the AdapterMux certification run for Explorer as the external client
+  of the coexistence cells. The procedure records a row for broadcast
+  reception, START/SEND, per-symbol echo, and raw escape pairs, keeps evidence
+  grades separate from qualification, and records UDP, TCP, and UART-direct
+  rows as not run. The published record includes the controller protocol
+  family, or Unknown when the exact EID/SPN pair is unmatched, and a sanitized
+  transport-refusal indicator taken from the scan artifact before that artifact
+  is deleted. Explorer runs its enhanced transport against the AdapterMux
+  listener with the initiator the session assigns to it. The retained session
+  log is sanitized before retention. The JSON artifact and the HTML report are
+  not retained. It authorizes no device write. See
+  [the certification run](docs/adaptermux-certification-run.md).
+
 - Reading an artifact whose availability probe recorded only a one-byte status
   reply (`00` or `ff`) now keeps that probe status-only and leaves presence
   unknown: the probe's `present` becomes `null` with
