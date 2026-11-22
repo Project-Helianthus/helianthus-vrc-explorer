@@ -349,7 +349,7 @@ python3 scripts/generate_b524_docs_catalog_names.py /path/to/docs-ebus
 ```
 
 The source is `protocols/vaillant/fixtures/b524-op02-register-names.csv`,
-under docs-ebus `architecture/naming.md`. The initial bridge uses docs-ebus
+under helianthus-docs `architecture/naming.md`. The initial bridge uses docs-ebus
 `e32ad6761bbee990f7ff7ae2f4c12e055b425927`.
 
 ## Data Enrichment Sources (Optional)
